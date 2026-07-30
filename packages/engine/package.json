@@ -1,0 +1,36 @@
+{
+    "name": "@platform/engine",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Public @platform/engine entry point. Re-exports the creator API.",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc -b",
+        "typecheck": "tsc -p tsconfig.test.json",
+        "test": "vitest run --passWithNoTests",
+        "clean": "rm -rf dist .turbo"
+    },
+    "dependencies": {
+        "@platform/core": "workspace:*",
+        "@platform/movement": "workspace:*",
+        "@platform/renderer": "workspace:*",
+        "@platform/transport": "workspace:*",
+        "@platform/server": "workspace:*",
+        "@platform/client": "workspace:*"
+    },
+    "devDependencies": {
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    }
+}

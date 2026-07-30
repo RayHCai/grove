@@ -1,0 +1,75 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+    workflow_dispatch:
+
+concurrency:
+    group: ci-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+    TURBO_TELEMETRY_DISABLED: 1
+    DO_NOT_TRACK: 1
+
+jobs:
+    ci:
+        name: ${{ matrix.task.name }}
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        strategy:
+            fail-fast: false
+            matrix:
+                task:
+                    - name: lint
+                      run: pnpm run lint
+                    - name: format
+                      run: pnpm run format:check
+                    - name: typecheck
+                      run: pnpm run typecheck
+                    - name: build
+                      run: pnpm run build
+                    - name: test
+                      run: pnpm run test
+        steps:
+            - uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            - uses: pnpm/action-setup@v4
+
+            - uses: actions/setup-node@v6
+              with:
+                  node-version-file: .node-version
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Cache turbo
+              uses: actions/cache@v4
+              with:
+                  path: .turbo
+                  key: turbo-${{ matrix.task.name }}-${{ runner.os }}-${{ github.sha }}
+                  restore-keys: |
+                      turbo-${{ matrix.task.name }}-${{ runner.os }}-
+
+            - name: ${{ matrix.task.name }}
+              run: ${{ matrix.task.run }}
+
+    # Single required status check, so branch protection needs only one entry.
+    ci-ok:
+        name: CI passed
+        if: always()
+        needs: [ci]
+        runs-on: ubuntu-latest
+        steps:
+            - name: Verify all matrix jobs succeeded
+              run: |
+                  if [ "${{ needs.ci.result }}" != "success" ]; then
+                    echo "CI matrix result: ${{ needs.ci.result }}"
+                    exit 1
+                  fi
+                  echo "All CI jobs passed."

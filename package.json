@@ -1,0 +1,30 @@
+{
+    "name": "grove",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "packageManager": "pnpm@11.1.2",
+    "engines": {
+        "node": ">=24"
+    },
+    "scripts": {
+        "build": "turbo run build",
+        "test": "turbo run test",
+        "typecheck": "turbo run typecheck",
+        "lint": "oxlint",
+        "lint:fix": "oxlint --fix",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "clean": "turbo run clean && rm -rf node_modules/.cache .turbo",
+        "prepare": "lefthook install"
+    },
+    "devDependencies": {
+        "@types/node": "^26.1.2",
+        "lefthook": "^2.1.10",
+        "oxlint": "^1.76.0",
+        "prettier": "^3.9.6",
+        "turbo": "^2.10.7",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    }
+}
