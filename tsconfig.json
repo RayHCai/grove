@@ -1,0 +1,41 @@
+{
+    "files": [],
+    "references": [
+        {
+            "path": "./packages/core"
+        },
+        {
+            "path": "./packages/movement"
+        },
+        {
+            "path": "./packages/renderer"
+        },
+        {
+            "path": "./packages/transport"
+        },
+        {
+            "path": "./packages/server"
+        },
+        {
+            "path": "./packages/client"
+        },
+        {
+            "path": "./packages/platform"
+        },
+        {
+            "path": "./packages/engine"
+        },
+        {
+            "path": "./apps/playground"
+        },
+        {
+            "path": "./apps/platform"
+        },
+        {
+            "path": "./apps/editor"
+        },
+        {
+            "path": "./examples"
+        }
+    ]
+}

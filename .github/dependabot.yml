@@ -1,0 +1,22 @@
+version: 2
+updates:
+    - package-ecosystem: npm
+      directory: /
+      schedule:
+          interval: weekly
+      open-pull-requests-limit: 5
+      groups:
+          dev-toolchain:
+              patterns:
+                  - typescript
+                  - turbo
+                  - oxlint
+                  - prettier
+                  - vitest
+                  - lefthook
+                  - '@types/*'
+
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: weekly
