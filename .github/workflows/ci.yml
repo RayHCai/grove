@@ -49,7 +49,7 @@ jobs:
               run: pnpm install --frozen-lockfile
 
             - name: Cache turbo
-              uses: actions/cache@v4
+              uses: actions/cache@v6
               with:
                   path: .turbo
                   key: turbo-${{ matrix.task.name }}-${{ runner.os }}-${{ github.sha }}
