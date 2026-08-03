@@ -3,12 +3,32 @@
     "compilerOptions": {
         "rootDir": "src",
         "outDir": "dist",
-        "tsBuildInfoFile": "dist/.tsbuildinfo"
+        "tsBuildInfoFile": "dist/.tsbuildinfo",
+
+        // Vite emits the bundle; `tsc` here is only ever a type check. `composite` is therefore
+        // OFF — a composite project may not disable declaration emit (TS6304) — which is also why
+        // the root solution tsconfig does not reference this project. See its comment.
+        "noEmit": true,
+        "composite": false,
+        "declaration": false,
+        "declarationMap": false,
+
+        // An app, so it owns a document: `lib` gains DOM, and resolution becomes `bundler`
+        // because Vite — not Node — resolves these specifiers, which is also what lets the
+        // extensionless `./App` imports below typecheck.
+        "lib": ["ES2023", "DOM", "DOM.Iterable"],
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "jsx": "react-jsx",
+        "types": ["vite/client"]
     },
-    "include": ["src/**/*.ts"],
+    "include": ["src/**/*.ts", "src/**/*.tsx"],
     "references": [
         {
-            "path": "../../packages/engine"
+            "path": "../../packages/math"
+        },
+        {
+            "path": "../../packages/renderer"
         }
     ]
 }

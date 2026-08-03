@@ -1,3 +1,3 @@
 # @platform/core
 
-Entities, scene, behaviors, decorators, dispatcher. No rendering, no network.
+Entities, world, behaviors, decorators, dispatcher. No rendering, no network.

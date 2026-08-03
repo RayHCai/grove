@@ -3,12 +3,19 @@
     "compilerOptions": {
         "rootDir": "src",
         "outDir": "dist",
-        "tsBuildInfoFile": "dist/.tsbuildinfo"
+        "tsBuildInfoFile": "dist/.tsbuildinfo",
+
+        // Per-package override, NOT a base change: only this package touches the DOM.
+        // HTMLElement, ResizeObserver, WebGLContextEvent and OffscreenCanvas all need it.
+        "lib": ["ES2023", "DOM", "DOM.Iterable"]
     },
     "include": ["src/**/*.ts"],
     "references": [
         {
             "path": "../../packages/core"
+        },
+        {
+            "path": "../../packages/math"
         }
     ]
 }

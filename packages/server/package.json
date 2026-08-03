@@ -23,7 +23,7 @@
     },
     "dependencies": {
         "@platform/core": "workspace:*",
-        "@platform/movement": "workspace:*",
+        "@platform/math": "workspace:*",
         "@platform/transport": "workspace:*"
     },
     "devDependencies": {

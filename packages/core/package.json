@@ -3,7 +3,7 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Entities, scene, behaviors, decorators, dispatcher. No rendering, no network.",
+    "description": "Entities, world, behaviors, decorators, dispatcher. No rendering, no network.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
@@ -20,6 +20,9 @@
         "typecheck": "tsc -p tsconfig.test.json",
         "test": "vitest run --passWithNoTests",
         "clean": "rm -rf dist .turbo"
+    },
+    "dependencies": {
+        "@platform/math": "workspace:*"
     },
     "devDependencies": {
         "typescript": "^7.0.2",
