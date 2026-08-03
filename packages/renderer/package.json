@@ -8,6 +8,14 @@
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./pixi": {
+            "types": "./dist/pixi/index.d.ts",
+            "import": "./dist/pixi/index.js"
+        },
+        "./null": {
+            "types": "./dist/null/index.d.ts",
+            "import": "./dist/null/index.js"
         }
     },
     "main": "./dist/index.js",
@@ -22,7 +30,9 @@
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
-        "@platform/core": "workspace:*"
+        "@platform/core": "workspace:*",
+        "@platform/math": "workspace:*",
+        "pixi.js": "^8.19.0"
     },
     "devDependencies": {
         "typescript": "^7.0.2",

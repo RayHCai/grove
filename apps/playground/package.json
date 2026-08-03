@@ -4,28 +4,26 @@
     "private": true,
     "type": "module",
     "description": "Multi-pane test harness.",
-    "exports": {
-        ".": {
-            "types": "./dist/index.d.ts",
-            "import": "./dist/index.js"
-        }
-    },
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts",
-    "files": [
-        "dist"
-    ],
     "scripts": {
-        "build": "tsc -b",
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview",
         "typecheck": "tsc -p tsconfig.test.json",
         "test": "vitest run --passWithNoTests",
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
-        "@platform/engine": "workspace:*"
+        "@platform/math": "workspace:*",
+        "@platform/renderer": "workspace:*",
+        "react": "^19.2.8",
+        "react-dom": "^19.2.8"
     },
     "devDependencies": {
+        "@types/react": "^19.2.18",
+        "@types/react-dom": "^19.2.4",
+        "@vitejs/plugin-react": "^6.0.5",
         "typescript": "^7.0.2",
+        "vite": "^8.2.0",
         "vitest": "^4.1.10"
     }
 }

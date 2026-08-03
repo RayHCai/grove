@@ -1,11 +1,15 @@
 {
+    // Solution file for `tsc -b`. `apps/playground` is deliberately ABSENT: it is a Vite app that
+    // emits no declarations and is imported by nothing, and a composite project may not disable
+    // declaration emit (TS6304). Its types are checked by its own `typecheck` script, which turbo
+    // runs alongside every package's.
     "files": [],
     "references": [
         {
-            "path": "./packages/core"
+            "path": "./packages/math"
         },
         {
-            "path": "./packages/movement"
+            "path": "./packages/core"
         },
         {
             "path": "./packages/renderer"
@@ -24,9 +28,6 @@
         },
         {
             "path": "./packages/engine"
-        },
-        {
-            "path": "./apps/playground"
         },
         {
             "path": "./apps/platform"
