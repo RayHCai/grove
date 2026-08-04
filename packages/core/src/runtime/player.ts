@@ -1,8 +1,18 @@
+// Player is identity and outlives the avatar (DESIGN §7, api_spec.ts:352). `index` is
+// assigned by the roster and stable for the session. @serverState declared on a
+// Player-hosted script hoists onto the player's host record, so `player.credits` reads
+// through the same record `this.credits` writes (§6.1) — the PlayerManager exposes the
+// record for the wiring step and for the read-side cast the samples use.
+
 import type { Vec3 } from '@platform/math';
+import { vec3 } from '@platform/math';
 import type { BaseScript } from '../script/bases.js';
-import type { Camera } from './camera.js';
+import type { Runtime } from './runtime.js';
 import type { Entity } from './entity.js';
+import type { Camera } from './camera.js';
 import type { Storage } from './wrappers.js';
+import type { BaseMovement } from './movement.js';
+import { playerKey } from './hosts.js';
 
 export interface Cursor {
     readonly position: Vec3;
@@ -30,26 +40,147 @@ export interface ActionState {
     axis(action: string): number;
 }
 
-export class Player {
-    readonly id!: string;
-    readonly name!: string;
-    readonly index!: number;
-    readonly avatar!: Entity;
-    readonly camera!: Camera;
-    readonly cursor!: Cursor;
-    readonly input!: InputBindings;
-    readonly storage!: Storage;
-
-    spawn(): void {}
-    spectate(): void {}
-    respawn(): void {}
-    teleportTo(_x: number, _y: number): void {}
-
-    movement?: BaseMovement;
-    setMovement(_movement: new () => BaseMovement): this { return this; }
-
-    addScript(_script: new () => BaseScript<Player>): this { return this; }
+/** Presentation-only cursor stub (tier C — needs a client). */
+class NullCursor implements Cursor {
+    get position(): Vec3 { return vec3(); }
+    get screenPosition(): Vec3 { return vec3(); }
+    get over(): Entity | null { return null; }
+    get isDown(): boolean { return false; }
+    visible = true;
+    setIcon(): void {}
+    lock(): void {}
+    unlock(): void {}
 }
 
-// Resolve the circular reference
-import type { BaseMovement } from './movement.js';
+/** Panel-authored, per-player bindings stub — an in-memory map is enough for core. */
+class MemoryBindings implements InputBindings {
+    readonly #b = new Map<string, string[]>();
+    rebind(action: string, bindings: string[]): void { this.#b.set(action, [...bindings]); }
+    addBinding(action: string, binding: string): void {
+        this.#b.set(action, [...(this.#b.get(action) ?? []), binding]);
+    }
+    getBindings(action: string): string[] { return [...(this.#b.get(action) ?? [])]; }
+    resetBindings(action?: string): void {
+        if (action === undefined) this.#b.clear();
+        else this.#b.delete(action);
+    }
+    setContext(): void {}
+}
+
+export class Player {
+    readonly #rt: Runtime;
+    readonly id: string;
+    readonly index: number;
+    name: string;
+
+    readonly cursor: Cursor = new NullCursor();
+    readonly input: InputBindings = new MemoryBindings();
+
+    #avatar: Entity | null = null;
+    #camera: Camera | null = null;
+    #storage: Storage | null = null;
+    movement?: BaseMovement;
+
+    /** @internal — the roster sets the attached movement instance (or clears it). */
+    setMovementInstance(movement: BaseMovement | undefined): void {
+        if (movement === undefined) delete this.movement;
+        else this.movement = movement;
+    }
+
+    /** @internal — clears the movement accessor for a spectating/bodiless player. */
+    clearMovement(): void {
+        delete this.movement;
+    }
+
+    constructor(rt: Runtime, id: string, index: number, name: string) {
+        this.#rt = rt;
+        this.id = id;
+        this.index = index;
+        this.name = name;
+    }
+
+    get avatar(): Entity {
+        if (!this.#avatar) throw new Error(`player ${this.id} has no avatar (spectating or bodiless)`);
+        return this.#avatar;
+    }
+
+    /** @internal — set by spawn/roster wiring. */
+    setAvatar(entity: Entity | null): void {
+        this.#avatar = entity;
+    }
+
+    get camera(): Camera {
+        if (!this.#camera) this.#camera = this.#rt.makeCamera!(this);
+        return this.#camera;
+    }
+
+    get storage(): Storage {
+        if (!this.#storage) this.#storage = this.#rt.makeStorage!(this);
+        return this.#storage;
+    }
+
+    spawn(): void {
+        this.#rt.roster?.spawnAvatar(this);
+    }
+
+    spectate(): void {
+        this.#rt.roster?.spectate(this);
+    }
+
+    respawn(): void {
+        this.#rt.roster?.respawn(this);
+    }
+
+    teleportTo(x: number, y: number): void {
+        if (this.#avatar) this.#avatar.setPosition(x, y);
+        // The prediction-reset flag the client reads (§3.2) is a replication concern; the
+        // structural mark carries it.
+    }
+
+    setMovement(movement: new () => BaseMovement): this {
+        this.#rt.roster?.setMovement(this, movement);
+        return this;
+    }
+
+    addScript(script: new () => BaseScript<Player>): this {
+        this.#rt.wiring?.attachToPlayer(this, script);
+        return this;
+    }
+}
+
+/** Owns the roster and the player host records. */
+export class PlayerManager {
+    readonly #rt: Runtime;
+    readonly #byId = new Map<string, Player>();
+    readonly #order: Player[] = [];
+    #nextIndex = 0;
+
+    constructor(rt: Runtime) {
+        this.#rt = rt;
+    }
+
+    create(id: string, name: string): Player {
+        const player = new Player(this.#rt, id, this.#nextIndex++, name);
+        this.#byId.set(id, player);
+        this.#order.push(player);
+        this.#rt.hosts.ensure(playerKey(id));
+        return player;
+    }
+
+    byId(id: string): Player | null {
+        return this.#byId.get(id) ?? null;
+    }
+
+    remove(id: string): void {
+        const player = this.#byId.get(id);
+        if (!player) return;
+        this.#byId.delete(id);
+        const at = this.#order.indexOf(player);
+        if (at >= 0) this.#order.splice(at, 1);
+        this.#rt.hosts.remove(playerKey(id));
+    }
+
+    get players(): Player[] {
+        return [...this.#order];
+    }
+}

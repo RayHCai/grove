@@ -9,10 +9,13 @@ export * from './errors.js';
 export * from './ids.js';
 
 // ─── loop / snapshot ─────────────────────────────────────────────────────────────
-export * from './loop/store-registry.js';
+export * from './loop/index.js';
 
 // ─── world ───────────────────────────────────────────────────────────────────────
 export * from './world/index.js';
+
+// ─── state ───────────────────────────────────────────────────────────────────────
+export * from './state/index.js';
 
 // ─── script model ────────────────────────────────────────────────────────────────
 export * from './script/index.js';

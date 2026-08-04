@@ -18,6 +18,8 @@ export interface HostRecord {
     readonly tags: Map<string, TypeTag>;
     /** Field names that are bound wrappers rather than decorated fields. */
     readonly wrappers: Set<string>;
+    /** Marks a field on the state channel; installed by wiring so a wrapper can mark. */
+    markDirty?: (field: string) => void;
 }
 
 export function createHostRecord(hostId: string): HostRecord {
