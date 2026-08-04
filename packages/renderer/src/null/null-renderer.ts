@@ -9,7 +9,7 @@
 // records nothing, and sizes come from the manifest or a deterministic text formula because a
 // headless backend can neither decode a PNG nor measure a font.
 
-import type { Bounds, Size, Vec3, Vec3Like } from '@platform/math';
+import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import type {
     AssetInfo,
     AssetLoadResult,
@@ -396,15 +396,15 @@ export class NullRenderer implements IRenderer {
         return this.#core?.screenBoundsOf(id) ?? null;
     }
 
-    screenPositionOf(id: NodeId, out?: Vec3): Vec3 | null {
+    screenPositionOf(id: NodeId, out?: MutableVec3): MutableVec3 | null {
         return this.#core?.screenPositionOf(id, out) ?? null;
     }
 
-    worldToScreen(point: Vec3Like, out?: Vec3): Vec3 {
+    worldToScreen(point: Vec3Like, out?: MutableVec3): MutableVec3 {
         return this.#core?.worldToScreen(point, out) ?? { x: 0, y: 0, z: 0 };
     }
 
-    screenToWorld(point: Vec3Like, out?: Vec3): Vec3 {
+    screenToWorld(point: Vec3Like, out?: MutableVec3): MutableVec3 {
         return this.#core?.screenToWorld(point, out) ?? { x: 0, y: 0, z: 0 };
     }
 

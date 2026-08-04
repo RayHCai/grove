@@ -1,7 +1,7 @@
 // The backend-neutral renderer contract (§11). Nothing here names a Pixi type, so a
 // second backend is a new folder under src/ rather than a rewrite.
 
-import type { Vec3, Vec3Like, Bounds, Size } from '@platform/math';
+import type { MutableVec3, Vec3Like, Bounds, Size } from '@platform/math';
 import type { NodeId } from './node-id.js';
 
 // ─── surfaces, modes ────────────────────────────────────────────────
@@ -198,9 +198,9 @@ export interface NodePatch {
  * scale and alpha do not inherit (§6.1).
  */
 export interface Transform {
-    position: Vec3;
+    position: MutableVec3;
     rotation: number;
-    scale: Vec3;
+    scale: MutableVec3;
     alpha: number;
     visible: boolean;
 }
@@ -369,9 +369,9 @@ export interface IRenderer {
     worldBoundsOf(id: NodeId): Bounds | null;
     /** Screen space, for UI hit-testing (§12.4). */
     screenBoundsOf(id: NodeId): Bounds | null;
-    screenPositionOf(id: NodeId, out?: Vec3): Vec3 | null;
-    worldToScreen(point: Vec3Like, out?: Vec3): Vec3;
-    screenToWorld(point: Vec3Like, out?: Vec3): Vec3;
+    screenPositionOf(id: NodeId, out?: MutableVec3): MutableVec3 | null;
+    worldToScreen(point: Vec3Like, out?: MutableVec3): MutableVec3;
+    screenToWorld(point: Vec3Like, out?: MutableVec3): MutableVec3;
 
     /**
      * A snapshot of the whole scene, for a debugger, an inspector panel, or editor selection UI.

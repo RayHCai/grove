@@ -3,7 +3,12 @@
     "compilerOptions": {
         "rootDir": "src",
         "outDir": "dist",
-        "tsBuildInfoFile": "dist/.tsbuildinfo"
+        "tsBuildInfoFile": "dist/.tsbuildinfo",
+
+        // Standard (Stage 3) decorators need `Symbol.metadata`'s type; no
+        // `experimentalDecorators` anywhere (DESIGN §3.3, §11 config note 1). The runtime
+        // polyfill for the symbol lives in script/decorators.ts.
+        "lib": ["ES2023", "ESNext.Decorators"]
     },
     "include": ["src/**/*.ts"],
     "references": [
