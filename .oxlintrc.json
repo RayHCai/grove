@@ -12,6 +12,7 @@
     },
     "rules": {
         "no-console": "warn",
+        "no-underscore-dangle": ["error", { "allow": ["__location"] }],
         "eqeqeq": ["error", "smart"],
         "typescript/consistent-type-imports": "error",
         "typescript/no-explicit-any": "warn",
