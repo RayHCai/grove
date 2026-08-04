@@ -92,7 +92,7 @@ export class Wiring {
             if (localPlayer && location === 'client') {
                 (instance as { localPlayer?: Player }).localPlayer = localPlayer;
             }
-            this.#hoistState(instance, entry.record);
+            this.#hoistState(instance, host, entry.record);
             this.#bindWrappers(instance, entry.record);
         } catch (err) {
             // Wire is fatal — the host record is half-mutated (§4.4).
@@ -109,10 +109,12 @@ export class Wiring {
         return instance;
     }
 
-    /** Seeds the host record for each @serverState field and redirects the accessor pair. */
-    #hoistState(instance: object, record: HostRecord): void {
+    /** Seeds the host record for each @serverState field, redirects the accessor pair, and
+     * hoists the field onto the host so `player.credits` reads the same record (§5.2 step 4). */
+    #hoistState(instance: object, host: object, record: HostRecord): void {
         const backing = (instance as Record<symbol, Map<string, unknown> | undefined>)[STATE_BACKING];
         if (!backing) return;
+        const mark = (field: string): void => this.#rt.channels.markState(record, field);
         for (const field of backing.keys()) {
             if (record.values.has(field) && !record.wrappers.has(field)) {
                 // Two scripts on one host declaring one name is a load-time error (§3.4).
@@ -128,8 +130,25 @@ export class Wiring {
                     : authored;
             record.values.set(field, seed);
             record.tags.set(field, declaredTag);
+            this.#hoistOntoHost(host, field, record, mark);
         }
-        redirectState(instance, record.values, field => this.#rt.channels.markState(record, field));
+        redirectState(instance, record.values, mark);
+    }
+
+    /** Installs an accessor for `field` on the host object, reading/writing the record. */
+    #hoistOntoHost(host: object, field: string, record: HostRecord, mark: (field: string) => void): void {
+        if (Object.prototype.hasOwnProperty.call(host, field)) return; // already hoisted
+        Object.defineProperty(host, field, {
+            configurable: true,
+            enumerable: true,
+            get() {
+                return record.values.get(field);
+            },
+            set(value: unknown) {
+                record.values.set(field, value);
+                mark(field);
+            },
+        });
     }
 
     /** Binds every StatefulWrapper field to the host record (§5.2). */

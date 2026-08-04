@@ -5,7 +5,7 @@
 // Not part of the public surface — exported only so the test suite can reach it.
 
 import { ServerScript, SyncedScript } from '../script/bases.js';
-import { onCollide, onEvent, onStart, serverState } from '../script/decorators.js';
+import { onCollide, onEvent, onRequest, onStart, serverState } from '../script/decorators.js';
 import type { Entity } from '../runtime/entity.js';
 import type { Ctx } from '../runtime/ctx.js';
 
@@ -115,5 +115,31 @@ export class Faulty extends SyncedScript<Entity> {
     @onEvent('boom')
     boom(): void {
         throw new Error('handler always throws');
+    }
+}
+
+// A Game-hosted ServerScript, for the load-order / @onStart / @onRequest / roster tests.
+// It carries global @serverState and an @onRequest handler (legal only on a ServerScript).
+export class Rules extends ServerScript {
+    @serverState started = false;
+    @serverState credits = 0;
+
+    @onStart
+    begin(): void {
+        this.started = true;
+    }
+
+    @onRequest('grant')
+    grant(ctx: Ctx): void {
+        this.credits += (ctx.data.amount as number) ?? 0;
+    }
+}
+
+// @onRequest on a non-ServerScript is a wire-time error (§5.9). This SyncedScript declares
+// one so the wiring-rejection test can attach it and expect a throw.
+export class SyncedWithRequest extends SyncedScript<Entity> {
+    @onRequest('illegal')
+    handle(): void {
+        /* the location, not the body, is what wire time rejects */
     }
 }
