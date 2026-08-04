@@ -25,3 +25,21 @@ export function clamp(value: number, min: number, max: number): number {
 export function lerp(a: number, b: number, t: number): number {
     return a + (b - a) * t;
 }
+
+/**
+ * Frame-rate-independent move-toward-a-number: the primitive under every acceleration
+ * and friction curve. Protected on BaseMovement (api_spec.ts:747), tested in math
+ * against dt sequences rather than through an avatar.
+ *
+ * Moves `current` toward `target` by at most `maxDelta`. Stops exactly at `target`
+ * rather than oscillating past it.
+ */
+export function approach(current: number, target: number, maxDelta: number): number {
+    if (current < target) {
+        return Math.min(current + maxDelta, target);
+    }
+    if (current > target) {
+        return Math.max(current - maxDelta, target);
+    }
+    return target;
+}

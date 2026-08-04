@@ -13,7 +13,7 @@
 // WHAT DOES NOT: anything touching a display object or a GPU resource. That goes through
 // `SceneSink`, and a backend is the only place a Pixi type may appear.
 
-import type { Bounds, Size, Vec3, Vec3Like } from '@platform/math';
+import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import { bounds, boundsCopy, boundsSet, vec3, vec3Set } from '@platform/math';
 import type {
     CameraState,
@@ -560,7 +560,7 @@ export class RendererCore {
         return boundsSet(bounds(), topLeft.x, bottomRight.x, topLeft.y, bottomRight.y);
     }
 
-    screenPositionOf(id: NodeId, out: Vec3 = vec3()): Vec3 | null {
+    screenPositionOf(id: NodeId, out: MutableVec3 = vec3()): MutableVec3 | null {
         const index = this.nodes.indexOf(id);
         if (index < 0) return null;
         const record = this.nodes.recordAt(index);
@@ -580,12 +580,12 @@ export class RendererCore {
         );
     }
 
-    worldToScreen(point: Vec3Like, out: Vec3 = vec3()): Vec3 {
+    worldToScreen(point: Vec3Like, out: MutableVec3 = vec3()): MutableVec3 {
         const { scaleMode, canvas, design } = this.#config;
         return worldToScreen(point, this.#camera, scaleMode, canvas, design, out);
     }
 
-    screenToWorld(point: Vec3Like, out: Vec3 = vec3()): Vec3 {
+    screenToWorld(point: Vec3Like, out: MutableVec3 = vec3()): MutableVec3 {
         const { scaleMode, canvas, design } = this.#config;
         return screenToWorld(point, this.#camera, scaleMode, canvas, design, out);
     }
@@ -873,7 +873,7 @@ export class RendererCore {
         return parentIndex;
     }
 
-    #uiScreenPosition(index: number, anchor: UiAnchor | undefined, out: Vec3): Vec3 {
+    #uiScreenPosition(index: number, anchor: UiAnchor | undefined, out: MutableVec3): MutableVec3 {
         return uiToScreen(
             {
                 x: this.xf.resolvedX(index),

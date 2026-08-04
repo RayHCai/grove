@@ -19,7 +19,7 @@
 // `z` passes through every function unchanged: present-but-reserved for a 3D backend (§17).
 
 import { DEG2RAD, vec3, vec3Set } from '@platform/math';
-import type { Bounds, Size, Vec3, Vec3Like } from '@platform/math';
+import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import type { CameraState, ScaleMode, UiAnchor } from './renderer.js';
 // Aliased so `uiToScreen`'s `fitScale` PARAMETER — the name the caller sees — does not
 // shadow this import.
@@ -107,8 +107,8 @@ export function worldToScreen(
     scaleMode: ScaleMode,
     canvas: Size,
     design: Size,
-    out: Vec3 = vec3(),
-): Vec3 {
+    out: MutableVec3 = vec3(),
+): MutableVec3 {
     const s = cameraScale(camera, scaleMode, canvas, design);
     const cx = finiteOr(camera.position.x, 0);
     const cy = finiteOr(camera.position.y, 0);
@@ -130,8 +130,8 @@ export function screenToWorld(
     scaleMode: ScaleMode,
     canvas: Size,
     design: Size,
-    out: Vec3 = vec3(),
-): Vec3 {
+    out: MutableVec3 = vec3(),
+): MutableVec3 {
     const s = cameraScale(camera, scaleMode, canvas, design);
     const cx = finiteOr(camera.position.x, 0);
     const cy = finiteOr(camera.position.y, 0);
@@ -152,7 +152,7 @@ export function screenToWorld(
  * `stage` is screen space, so `bottom > top` — which makes `'top-left'` the rect's
  * numerically SMALLEST corner and `'bottom-right'` its largest.
  */
-export function uiAnchorOrigin(anchor: UiAnchor, stage: Bounds, out: Vec3 = vec3()): Vec3 {
+export function uiAnchorOrigin(anchor: UiAnchor, stage: Bounds, out: MutableVec3 = vec3()): MutableVec3 {
     const fraction = UI_ANCHOR_FRACTION[anchor];
     return vec3Set(
         out,
@@ -176,8 +176,8 @@ export function uiToScreen(
     anchor: UiAnchor,
     stage: Bounds,
     fitScale: number,
-    out: Vec3 = vec3(),
-): Vec3 {
+    out: MutableVec3 = vec3(),
+): MutableVec3 {
     // `offset` is read into locals BEFORE `out` is written, so `out` may safely be the same
     // object as `offset` — the pooled-scratch call `uiToScreen(p, anchor, stage, s, p)`.
     // Writing the anchor origin into `out` first would clobber the offset in that case.
