@@ -21,6 +21,8 @@ import { Roster } from './roster.js';
 import { Storage, setPlayerLookup } from './wrappers.js';
 import { Camera } from './camera.js';
 import { Entity } from './entity.js';
+import { Asset, AssetRegistry, setAssetRegistry } from './assets.js';
+import type { AssetKind } from './assets.js';
 import { Wiring, activeLocationsFor } from './wiring.js';
 import { createRuntime } from './runtime.js';
 import type { Runtime, TickPasses } from './runtime.js';
@@ -32,6 +34,8 @@ export interface GameManifest {
     simRate?: number;
     bounds?: Bounds;
     regions?: Array<{ name: string; bounds: Bounds }>;
+    /** Panel-loaded assets, referenced by key (§3.5). */
+    assets?: Array<{ key: string; kind: AssetKind; meta?: { width?: number; height?: number; duration?: number } }>;
     /** Panel-authored Game-hosted script classes. */
     gameScripts?: Array<new () => object>;
 }
@@ -59,18 +63,93 @@ export function loadGame(manifest: GameManifest = {}): Runtime {
     rt.wiring = new Wiring(rt, activeLocationsFor(role));
     rt.gameInstance = new RuntimeGame(rt);
 
+    const registry = new AssetRegistry();
+    for (const a of manifest.assets ?? []) registry.define(new Asset(a.key, a.kind, a.meta));
+    setAssetRegistry(() => registry);
+
     setPlayerLookup((id: string) => rt.playerManager?.byId(id) ?? null);
     rt.makeCamera = (player: Player) => new Camera(rt, player);
     rt.makeStorage = (player: Player) => new Storage(rt.kv, `player:${player.id}`);
     rt.send = (id, event, payload) => dispatchTo(rt, id, event, payload);
+    rt.requestSink = (name, payload) => deliverRequest(rt, name, payload);
     rt.passes = makePasses(rt);
 
-    // 3: attach Game scripts — wire + hoist; @onStart runs in step 5 of the load order.
+    // 2: restore @serverState from the game record — the wiring seed reads rt.persisted.
+    // 3: attach Game scripts — wire + hoist; @onStart runs in startGame (§8.3 step 5).
     for (const klass of manifest.gameScripts ?? []) {
         rt.wiring.attachToGame(rt.gameInstance, klass as never);
     }
 
     return rt;
+}
+
+/**
+ * Runs Game-hosted @onStart to its first await, then returns (§8.3 steps 4-5). Joins
+ * release afterward — a player's @onStart may run before the Game's has finished, which is
+ * why world construction belongs before the first await in a Game @onStart (§3.6).
+ */
+export function startGame(rt: Runtime): Promise<void> {
+    return dispatchLifecycle(rt, 'onStart', '@start');
+}
+
+/** Releases a join: player record + avatar + camera + Player scripts, then their @onStart. */
+export function joinPlayer(rt: Runtime, id: string, name: string): Player {
+    const player = rt.playerManager!.create(id, name);
+    // @onPlayerJoin on the Game-hosted ServerScript (§5.2); the handler decides spawn/spectate.
+    void dispatchToHost(rt, 'game', 'onPlayerJoin', '@playerJoin', { player });
+    return player;
+}
+
+/** Fires a lifecycle kind at every attached instance (Game @onStart, etc.). */
+function dispatchLifecycle(rt: Runtime, kind: 'onStart' | 'onEnd', event: string): Promise<void> {
+    const pending: Promise<void>[] = [];
+    for (const si of rt.instances.all()) {
+        pending.push(
+            rt.dispatcher.dispatch(
+                [si],
+                kind,
+                event,
+                '',
+                { data: {}, dt: 1 / rt.simRate, alive: true },
+                { activeLocations: activeLocationsFor(rt.isServer ? 'server' : 'client'), tick: rt.tick },
+            ),
+        );
+    }
+    return Promise.all(pending).then(() => undefined);
+}
+
+function dispatchToHost(
+    rt: Runtime,
+    hostKey: string,
+    kind: 'onPlayerJoin' | 'onPlayerLeave',
+    event: string,
+    ctx: { player: Player },
+): Promise<void> {
+    return rt.dispatcher.dispatch(
+        rt.instances.forHost(hostKey),
+        kind,
+        event,
+        hostKey,
+        { data: {}, dt: 1 / rt.simRate, alive: true, player: ctx.player },
+        { activeLocations: activeLocationsFor(rt.isServer ? 'server' : 'client'), tick: rt.tick },
+    );
+}
+
+/** Loopback request delivery: dispatch to @onRequest handlers on Game/Player/Entity hosts. */
+function deliverRequest(rt: Runtime, name: string, payload: Record<string, unknown> | undefined): void {
+    // ctx.player is engine-supplied and unforgeable (§5.9); the local player in loopback.
+    const player = rt.localPlayer ?? rt.playerManager?.players[0] ?? undefined;
+    for (const si of rt.instances.all()) {
+        if (si.location !== 'server') continue;
+        void rt.dispatcher.dispatch(
+            [si],
+            'onRequest',
+            name,
+            '',
+            { data: payload ?? {}, dt: 1 / rt.simRate, alive: true, player, from: null, viewTick: rt.tick },
+            { activeLocations: activeLocationsFor('server'), tick: rt.tick },
+        );
+    }
 }
 
 /** Fires an event at one entity's handlers via the dispatcher (Entity.send, §5.8). */

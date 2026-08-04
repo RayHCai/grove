@@ -124,6 +124,8 @@ export class Runtime {
     localPlayer?: Player | null;
     /** Persisted @serverState from a previous session, keyed by (hostId, field) (§5.3). */
     persisted?: { get(hostId: string, field: string): unknown };
+    /** Client→server request delivery; set by wiring in loopback, by transport over a network. */
+    requestSink?: (name: string, payload?: Record<string, unknown>) => void;
     /** The seeded random facade (§8.4). */
     random?: Random;
     /** The one Game instance (§7). */

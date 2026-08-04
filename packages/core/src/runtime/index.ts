@@ -1,6 +1,6 @@
 export type { Ctx } from './ctx.js';
 
-export { Asset, assets } from './assets.js';
+export { Asset, AssetRegistry, assets, setAssetRegistry } from './assets.js';
 export type { AssetKind, AssetRef, Assets } from './assets.js';
 
 export { sound, music } from './audio.js';
@@ -52,7 +52,7 @@ export {
 } from './runtime.js';
 export type { EngineLog, TickPasses } from './runtime.js';
 
-export { loadGame } from './load-game.js';
+export { loadGame, startGame, joinPlayer } from './load-game.js';
 export type { GameManifest } from './load-game.js';
 
 export { Roster } from './roster.js';
