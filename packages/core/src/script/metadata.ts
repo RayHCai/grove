@@ -39,15 +39,34 @@ export interface ScriptMetadata {
     state: Set<string>;
 }
 
+// Symbol.for so a metadata record survives the src/dist dual-module split the tests use.
 const METADATA_KEY = Symbol.for('@platform/core:metadata');
 
+/**
+ * The class's OWN metadata record, cloning the inherited declarations on first write —
+ * copy-on-write at the record level (§3.2). A subclass declaring its first decorator forks
+ * the parent's tables so a sibling's push never reaches the base. A class with no own
+ * decorator has no own record and resolves its parent's through the prototype chain, which
+ * is how an override that re-declares nothing inherits the parent's registration.
+ */
 export function getOrCreateMetadata(metadata: DecoratorMetadataObject): ScriptMetadata {
-    let existing = (metadata as Record<symbol, ScriptMetadata | undefined>)[METADATA_KEY];
-    if (!existing) {
-        existing = { handlers: [], state: new Set() };
-        (metadata as Record<symbol, ScriptMetadata>)[METADATA_KEY] = existing;
+    const holder = metadata as Record<symbol, ScriptMetadata | undefined>;
+    if (Object.hasOwn(metadata, METADATA_KEY)) {
+        return holder[METADATA_KEY]!;
     }
-    return existing;
+    // Fork the inherited record (reached via the metadata object's prototype), or start fresh.
+    const inherited = holder[METADATA_KEY];
+    const own: ScriptMetadata = {
+        handlers: inherited ? [...inherited.handlers] : [],
+        state: inherited ? new Set(inherited.state) : new Set(),
+    };
+    Object.defineProperty(metadata, METADATA_KEY, {
+        value: own,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+    });
+    return own;
 }
 
 export function getMetadata(klass: abstract new (...args: never[]) => object): ScriptMetadata | undefined {
@@ -55,20 +74,12 @@ export function getMetadata(klass: abstract new (...args: never[]) => object): S
     return meta?.[METADATA_KEY];
 }
 
-export function ensureOwnHandlers(md: ScriptMetadata, metadata: DecoratorMetadataObject): HandlerDecl[] {
-    const proto = Object.getPrototypeOf(metadata) as Record<symbol, ScriptMetadata> | null;
-    const inherited = proto?.[METADATA_KEY]?.handlers;
-    if (md.handlers === inherited) {
-        md.handlers = inherited ? [...inherited] : [];
-    }
+/** The class's own handlers table (already forked by getOrCreateMetadata). */
+export function ensureOwnHandlers(md: ScriptMetadata, _metadata: DecoratorMetadataObject): HandlerDecl[] {
     return md.handlers;
 }
 
-export function ensureOwnState(md: ScriptMetadata, metadata: DecoratorMetadataObject): Set<string> {
-    const proto = Object.getPrototypeOf(metadata) as Record<symbol, ScriptMetadata> | null;
-    const inherited = proto?.[METADATA_KEY]?.state;
-    if (md.state === inherited) {
-        md.state = inherited ? new Set(inherited) : new Set();
-    }
+/** The class's own state set (already forked by getOrCreateMetadata). */
+export function ensureOwnState(md: ScriptMetadata, _metadata: DecoratorMetadataObject): Set<string> {
     return md.state;
 }

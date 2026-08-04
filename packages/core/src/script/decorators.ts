@@ -8,6 +8,7 @@
 import type { HandlerKind } from './metadata.js';
 import { getOrCreateMetadata, ensureOwnHandlers, ensureOwnState } from './metadata.js';
 import type { HandlerOptions, Concurrency } from './types.js';
+import { installStateAccessor } from '../state/backing.js';
 
 // ─── polyfill ────────────────────────────────────────────────────────────────────
 (Symbol as { metadata?: symbol }).metadata ??= Symbol('Symbol.metadata');
@@ -76,7 +77,17 @@ export function onRequest(name: string, opts?: HandlerOptions): MethodDecorator_
 export const serverState: FieldDecorator_ = (_value, context) => {
     const md = getOrCreateMetadata(context.metadata);
     const state = ensureOwnState(md, context.metadata);
-    state.add(String(context.name));
+    const field = String(context.name);
+    state.add(field);
+
+    // addInitializer runs AFTER the field is defined (§5.2), so the authored value is an
+    // own data property when installStateAccessor swaps it for the accessor pair.
+    context.addInitializer(function (this: unknown) {
+        installStateAccessor(this as object, field);
+    });
+
+    // The initializer passes the authored value through untouched — one evaluation, no
+    // marking; installStateAccessor reads it off the instance afterward.
     return (initial) => initial;
 };
 
