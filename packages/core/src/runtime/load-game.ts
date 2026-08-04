@@ -218,7 +218,13 @@ function makePasses(rt: Runtime): TickPasses {
             // Countdowns advance via their own registration; the loop already ticks timers.
         },
         update(dispatch, _dt) {
-            dispatchKind(dispatch, 'onUpdate', '@update');
+            // @onUpdate at simRate fires on SyncedScript and ServerScript only; a
+            // ClientScript's @onUpdate is display-rate via frame(), never step (§8.1).
+            const simUpdate: DispatchOptions = {
+                ...dispatch,
+                activeLocations: new Set(['server', 'synced'] as const),
+            };
+            dispatchKind(simUpdate, 'onUpdate', '@update');
         },
     };
 }
