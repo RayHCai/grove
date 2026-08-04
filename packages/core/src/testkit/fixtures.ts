@@ -65,15 +65,55 @@ export class Target extends SyncedScript<Entity> {
     }
 }
 
-// A handler that awaits, for the cancellation / concurrency tests.
+// A handler that awaits, for the cancellation / concurrency tests. The pending promise is
+// exposed so a test can settle it deterministically.
 export class Cooldown extends SyncedScript<Entity> {
     fires = 0;
+    completions = 0;
+    #release: (() => void) | null = null;
 
     @onEvent('attack', { concurrency: 'ignore' })
     async attack(): Promise<void> {
         this.fires += 1;
-        await new Promise<void>(() => {
-            /* never resolves — models a cooldown held open */
+        await new Promise<void>(resolve => {
+            this.#release = resolve;
         });
+        this.completions += 1;
+    }
+
+    release(): void {
+        const r = this.#release;
+        this.#release = null;
+        r?.();
+    }
+}
+
+// A restart-mode handler: the newest invocation wins, the previous is cancelled at its await.
+export class Aimer extends SyncedScript<Entity> {
+    starts = 0;
+    finishes = 0;
+    #release: (() => void) | null = null;
+
+    @onEvent('aim', { concurrency: 'restart' })
+    async aim(): Promise<void> {
+        this.starts += 1;
+        await new Promise<void>(resolve => {
+            this.#release = resolve;
+        });
+        this.finishes += 1;
+    }
+
+    release(): void {
+        const r = this.#release;
+        this.#release = null;
+        r?.();
+    }
+}
+
+// A handler that always throws, for the error-boundary / breaker tests.
+export class Faulty extends SyncedScript<Entity> {
+    @onEvent('boom')
+    boom(): void {
+        throw new Error('handler always throws');
     }
 }
