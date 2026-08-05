@@ -1,6 +1,13 @@
 # `@platform/core` — MVP design
 
-Status: **proposed.** Nothing below is built yet.
+Status: **implemented.** The tier A/B surface below is built and tested against this
+document and [`api_spec.ts`](../../docs/api_spec.ts); tier C members remain the documented
+shells §2 describes. The build order in §11 was followed. Highlights the test suite pins:
+the `@serverState` accessor pair (§5.2), decorator metadata inheritance and copy-on-write
+(§3.2), the dispatcher's per-instance concurrency and error boundary (§4), snapshot/restore
+with the parked-invocation sweep and the determinism round-trip (§8.1), the server lag ring
+(§8.1, `asSeen`), and the wrappers (§5.2). Two toolchain notes settled during
+implementation are recorded in §12.
 
 The runtime every line of creator code runs against: entities, the world, scripts, decorators, the
 dispatcher, the loop. No rendering, no network, no DOM. Section references like §3.4 point at
@@ -1053,9 +1060,10 @@ would violate. Paired with two load-time tests, one per rejection: `asSeen` on a
 
 ## 12. Open questions
 
-Thirteen items: four findings, two deferred TODOs, seven spec gaps. **Decorator flavour is not among
-them** — the spec declares standard decorators (api_spec.ts:847) and legacy cannot implement
-`@serverState` at all (§3.3), so it is settled on correctness grounds rather than deferred.
+Fifteen items: four findings, two deferred TODOs, seven spec gaps, two toolchain findings from
+implementation. **Decorator flavour is not among them** — the spec declares standard decorators
+(api_spec.ts:847) and legacy cannot implement `@serverState` at all (§3.3), so it is settled on
+correctness grounds rather than deferred.
 
 **Findings — already wrong in the tree or the prose:**
 
@@ -1124,3 +1132,18 @@ them** — the spec declares standard decorators (api_spec.ts:847) and legacy ca
 13. **`find({ near })` distance metric** (api_spec.ts:478). Recommendation: Euclidean over x/y, ignoring z
     while z is reserved — and say so in the doc comment, since a creator reading "within 200" will assume
     it.
+
+**Toolchain findings — settled during implementation, recorded so they aren't rediscovered:**
+
+14. **The test runner's transform does not lower TC39 standard decorators.** Vitest 4 on Rolldown-Vite
+    transforms with oxc, which passes standard decorators through untransformed (node then cannot parse
+    them), and TS 7.0.2 exposes no `transpileModule` for a custom transform. So decorator-bearing test
+    fixtures live in `src/testkit/` — lowered by the build's `tsc` — and the tests import the compiled
+    output; test files themselves carry no decorator syntax, and `test` runs `tsc -b` first. The `@platform
+    /core` **build** (`tsc`) lowers decorators correctly; only the runner's on-the-fly transform does not.
+15. **Engine symbols use `Symbol.for`, not `Symbol()`.** The decorator metadata key (§3.2) and the
+    `@serverState` backing/target/mark symbols (§5.2) are read from two module copies at once — the tests
+    import the runtime plumbing from `src` while the decorated fixtures are compiled to `dist`, so a plain
+    `Symbol()` would differ between the copies and break metadata collection and accessor redirection. The
+    global registry (`Symbol.for`) keeps them identical. A non-issue in a single-copy production build, but
+    the cheap guard costs nothing and documents the invariant.

@@ -19,11 +19,14 @@ export interface StateMark {
     field: string;
 }
 
+// The TRANSFORM channel is not here: it is the SimTransformStore's own dense per-entity
+// bitset, with two independent drains — the server's ReplicationSink and the client's
+// SceneSink, each clearing what it consumes (§5.1). Keeping it on the store is what lets
+// those two drains be independent; a shared set here would have one steal the other's
+// marks. So ReplicationChannels owns only the structural journal and the state set.
 export class ReplicationChannels {
     /** Append-only journal; order is meaning (§5.1). */
     readonly #structural: StructuralOp[] = [];
-    /** Dense per-entity bitset; lossy is correct — a superseded position is worthless. */
-    readonly #transform = new Set<EntityId>();
     /** Set of (record, field) pairs, keyed for dedup. */
     readonly #state = new Map<string, StateMark>();
     #stateKeySeq = new WeakMap<object, number>();
@@ -31,10 +34,6 @@ export class ReplicationChannels {
 
     markStructural(op: StructuralOp): void {
         this.#structural.push(op);
-    }
-
-    markTransform(id: EntityId): void {
-        this.#transform.add(id);
     }
 
     markState(record: object, field: string): void {
@@ -54,13 +53,6 @@ export class ReplicationChannels {
         return out;
     }
 
-    drainTransform(out: EntityId[] = []): EntityId[] {
-        out.length = 0;
-        for (const id of this.#transform) out.push(id);
-        this.#transform.clear();
-        return out;
-    }
-
     drainState(): StateMark[] {
         const out = [...this.#state.values()];
         this.#state.clear();
@@ -72,16 +64,12 @@ export class ReplicationChannels {
     get structuralCount(): number {
         return this.#structural.length;
     }
-    get transformCount(): number {
-        return this.#transform.size;
-    }
     get stateCount(): number {
         return this.#state.size;
     }
 
     clear(): void {
         this.#structural.length = 0;
-        this.#transform.clear();
         this.#state.clear();
     }
 }

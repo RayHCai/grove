@@ -50,12 +50,13 @@ describe('lag ring (§8.1)', () => {
         rt.gameInstance!.spawn('crate', 0, 0);
         loop.step(1);
         rt.channels.drainStructural(); // clear the spawn mark
-        rt.channels.drainTransform();
+        rt.transforms.consumeDirty(); // clear the spawn-time transform mark
 
         rt.lagRing!.broadphaseAt(1, () => 0)?.near(0, 0, 100);
 
+        // A historical query reads a buffer and marks nothing (§8.1).
         expect(rt.channels.structuralCount).toBe(0);
-        expect(rt.channels.transformCount).toBe(0);
         expect(rt.channels.stateCount).toBe(0);
+        expect(rt.transforms.consumeDirty()).toHaveLength(0);
     });
 });
