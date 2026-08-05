@@ -18,7 +18,7 @@
     "scripts": {
         "build": "tsc -b",
         "typecheck": "tsc -p tsconfig.test.json",
-        "test": "vitest run --passWithNoTests",
+        "test": "tsc -b && vitest run --passWithNoTests",
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
