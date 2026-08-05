@@ -6,7 +6,7 @@
 // even when it has to overwrite a stale non-zero `z` already sitting in `out`.
 
 import { describe, it, expect } from 'vitest';
-import type { Vec3, Vec3Like } from '../src/vec3.js';
+import type { MutableVec3, Vec3Like } from '../src/vec3.js';
 import { vec3, vec3Set, vec3Copy, vec3Z } from '../src/vec3.js';
 import * as math from '../src/index.js';
 
@@ -86,7 +86,7 @@ describe('vec3Copy', () => {
     });
 
     it('does not alias src', () => {
-        const src: Vec3 = vec3(1, 2, 3);
+        const src: MutableVec3 = vec3(1, 2, 3);
         const out = vec3();
         vec3Copy(out, src);
         expect(out).not.toBe(src);

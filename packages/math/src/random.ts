@@ -1,0 +1,75 @@
+// Seeded PRNG. Client and server draw the same numbers in the same order (§1.2).
+// Uses a 128-bit xoshiro128** — deterministic, fast, period 2^128-1. The state is
+// four 32-bit words, advanced with exact integer arithmetic only.
+
+function rotl(x: number, k: number): number {
+    return ((x << k) | (x >>> (32 - k))) >>> 0;
+}
+
+function splitmix32(seed: number): number {
+    seed = (seed + 0x9e3779b9) | 0;
+    let z = seed;
+    z = Math.imul(z ^ (z >>> 16), 0x85ebca6b);
+    z = Math.imul(z ^ (z >>> 13), 0xc2b2ae35);
+    return (z ^ (z >>> 16)) >>> 0;
+}
+
+export class SeededRandom {
+    #s0 = 0;
+    #s1 = 0;
+    #s2 = 0;
+    #s3 = 0;
+
+    constructor(seed = 1) {
+        this.seed(seed);
+    }
+
+    seed(n: number): void {
+        let s = n | 0;
+        this.#s0 = splitmix32(s);
+        s = (s + 0x9e3779b9) | 0;
+        this.#s1 = splitmix32(s);
+        s = (s + 0x9e3779b9) | 0;
+        this.#s2 = splitmix32(s);
+        s = (s + 0x9e3779b9) | 0;
+        this.#s3 = splitmix32(s);
+    }
+
+    /** Returns a float in [0, 1). */
+    next(): number {
+        const result = rotl(Math.imul(this.#s1, 5), 7);
+        const t = (this.#s1 << 9) >>> 0;
+
+        this.#s2 ^= this.#s0;
+        this.#s3 ^= this.#s1;
+        this.#s1 ^= this.#s2;
+        this.#s0 ^= this.#s3;
+
+        this.#s2 ^= t;
+        this.#s3 = rotl(this.#s3, 11);
+
+        return (result >>> 0) / 0x1_0000_0000;
+    }
+
+    between(min: number, max: number): number {
+        return min + this.next() * (max - min);
+    }
+
+    pick<T>(list: readonly T[]): T {
+        return list[Math.floor(this.next() * list.length)]!;
+    }
+
+    chance(probability: number): boolean {
+        return this.next() < probability;
+    }
+
+    /** Captures the full state for snapshot/restore. */
+    capture(): [number, number, number, number] {
+        return [this.#s0, this.#s1, this.#s2, this.#s3];
+    }
+
+    /** Restores from a captured state. */
+    restore(state: [number, number, number, number]): void {
+        [this.#s0, this.#s1, this.#s2, this.#s3] = state;
+    }
+}

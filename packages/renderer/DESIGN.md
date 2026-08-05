@@ -6,8 +6,8 @@ underspecified were settled during implementation — see [§18](#18-open-questi
 
 A backend-neutral `IRenderer` interface with a PixiJS v8 implementation behind it. The interface names no
 Pixi type, so a Three.js backend would be a new folder under `src/`, not a rewrite. Section references
-like §3.3 point at [`api_design.md`](../../api_design.md); line references point at
-[`api_spec.ts`](../../api_spec.ts).
+like §3.3 point at [`api_design.md`](../../docs/api_design.md); line references point at
+[`api_spec.ts`](../../docs/api_spec.ts).
 
 ---
 

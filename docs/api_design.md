@@ -170,6 +170,7 @@ Reconciliation is engine-owned and invisible: the server sends state plus the la
 
 - Fixed timestep only — never derive behavior from wall-clock time or frame count.
 - Seeded `random` only. `Math.random` is a load-time error.
+- No `Math.sin`, `Math.pow`, `**`, or any other implementation-approximated function — the spec permits two engines to differ in the last bits, so `@platform/math` supplies deterministic replacements. The full list and the safe set are §11.2.
 - Consistent entity iteration order, engine-guaranteed.
 - No storage reads, no leaderboard reads, no access to state the client does not hold.
 - No client-local display values — `camera.viewport` depends on window size and aspect ratio, so every client holds a _different_ one. This is the mirror of the bullet above: the client does hold it, which is exactly the problem.
@@ -236,6 +237,9 @@ The base world object: transform, identity, lifecycle, tags. A **Sprite** is an 
 
 ```ts
 entity.setPosition(x, y)           // instant position (chainable setter)
+entity.setRotation(degrees)        // instant, absolute
+entity.rotateBy(degrees)           // instant, relative
+entity.setScale(scale)
 entity.moveBy(dx, dy)              // instant, relative
 entity.moveToward(target, speed)
 entity.faceToward(target)
@@ -248,7 +252,8 @@ entity.say(text) / entity.think(text)   // speech bubble; see §3.7
 entity.playEffect(name, { loop })  // cosmetic, client-side, fire-and-forget
 entity.destroy()                   // cascades to attached children
 entity.owner                       // Player | null
-entity.position / .rotation / .scale / .opacity
+entity.position / .rotation / .scale   // readonly — written by the setters above
+entity.opacity / .layer                // plain fields
 entity.getTouching(tag?)           // Entity[] — who I overlap right now; see §5.4
 entity.isTouching(tag?)            // boolean — the block-tier spelling
 entity.send(event, payload?)       // fire an event at this entity; see §5.8
@@ -268,6 +273,10 @@ await entity.spinTo(90, 1); // absolute
 **Naming convention (mechanical, so it can be guessed):** a `-To` suffix means an absolute target; the bare verb means a relative delta. `setPosition`/`moveBy` are instant; every timed verb names its duration.
 
 Chained setters are **eager**: `spawn()` returns a live entity, `.setPosition()` and `.tag()` are ordinary setters returning `this`. There is no builder type.
+
+**The transform is readonly, and `Vec3` is readonly component-wise.** `position`, `rotation` and `scale` are reads; every write is a named setter. The engine sees each one as a call, which is what lets it mark the transform dirty for the renderer, invalidate client prediction on a synced avatar, and replicate — none of which a bare `entity.position.x = 5` could trigger, and that assignment is the one a creator would reach for first. Sealing the field alone would not have been enough: `position` would still hand out a mutable vector, so the guarantee has to reach the vector type. `Vec3` becomes a value rather than a handle, which also means a position read stays valid after the body moves instead of aliasing live engine state. Object literals still satisfy it, so `moveToward({ x, y, z })` is unaffected.
+
+`opacity` and `layer` stay plain fields. They are render settings rather than motion: nothing derives from them, they are not predicted, and `layer` is an ordinal that snaps (§3.1). The same line divides `camera.position` from `camera.zoom` (§3.3) and `velocity` from `maxSpeed` (§4.1).
 
 ### 3.2 Player
 
@@ -337,6 +346,7 @@ camera.zoom = 2;
 camera.shake(strength, duration);
 camera.bounds = zone; // constraint — where it may travel
 camera.viewport; // observation — what it sees right now (readonly)
+camera.position; // readonly — written by moveTo/glideTo/follow
 camera.moveTo(x, y); // instant
 await camera.glideTo(x, y, 1); // smooth pan
 await camera.zoomTo(1.5, 0.5);
@@ -446,7 +456,11 @@ Consequences, all normative:
 
 - **A Game-hosted `@onStart` must not assume any player exists.** Anything player-dependent belongs in `@onPlayerJoin`, or in a Player-hosted script's own `@onStart`.
 - **`@onPlayerJoin` is optional.** The panel-configured Player template spawns the avatar, attaches its camera, and attaches its scripts automatically. A solo platformer needs no join handler at all.
-- **Game `@onStart` is awaited before any join is released**, so when join handlers run, the world exists.
+- **Joins release once Game `@onStart` reaches its first `await`**, not once it finishes. So the synchronous part of world setup is guaranteed to have run before anyone arrives, and anything after an `await` is not.
+
+**That last rule replaces "awaited to completion", which could not work.** Waiting for the whole handler deadlocks the obvious code: `await sleep(1)` inside `@onStart` needs ticks to elapse, the loop supplies those ticks, and the loop had not started because it was waiting on `@onStart`. The engine therefore starts the tick counter and the loop at the _beginning_ of `@onStart` and proceeds at the first `await` — which is §5.8's existing dispatch rule ("every handler runs to its first `await`") applied to a lifecycle handler rather than a new mechanism.
+
+The consequence a creator can hit, stated plainly: **a player's `@onStart` may run before the Game's has finished.** So world construction — spawning the level, seeding `@serverState`, registering timers — belongs _before_ the first `await` in a Game-hosted `@onStart`, and only sequencing belongs after it. A handler with no `await` in it, which is the common case and the only one the block tier can express, has fully finished before any join and is unaffected.
 
 Once the player limit is reached, when the next player joins the instance, we'll create a new server instance + game, calling the Game-hosted `@onStart` handlers.
 
@@ -546,20 +560,20 @@ Post-MVP: circle/polygon colliders, joints, pathfinding.
 
 **It is for players and nothing else.** A movement class is the input-to-locomotion pipeline, and every part of it says so: `intent` is filled from the panel-mapped move axes, discrete moves arrive as bound actions through `@onEvent`, and prediction and reconciliation exist at all because a person is holding the keys and must see the result this frame. A patrolling guard has no bindings to read and nothing to predict, so the machinery is inert weight on it. Attachment is therefore legal only on a player's avatar, and attaching to an unowned entity is a load-time error pointing at the motion verbs instead.
 
-**Non-player bodies move from an ordinary script.** A chaser calls `moveToward` in `@onUpdate`; a platform `glideTo`s between two points; a projectile writes `position`. That is a `SyncedScript<Entity>` of a few lines, using §3.1's verbs, and it needs no `intent` and no reconciliation. What such a body gives up is real: gravity, `maxSpeed` clamping, and collision sliding with `blocked`. Falling crates and physics puzzles are the case this hurts, and MVP's answer is that they write `velocity.y -= gravity * dt` themselves. If that recurs often enough to matter, the fix is a prebuilt `Falling` script in the drawer (§13) — not re-opening `BaseMovement` to every entity to serve it.
+**Non-player bodies move from an ordinary script.** A chaser calls `moveToward` in `@onUpdate`; a platform `glideTo`s between two points; a projectile calls `setPosition`/`moveBy`. That is a `SyncedScript<Entity>` of a few lines, using §3.1's verbs, and it needs no `intent` and no reconciliation. What such a body gives up is real: gravity, `maxSpeed` clamping, and collision sliding with `blocked`. Falling crates and physics puzzles are the case this hurts, and MVP's answer is that they integrate a fall speed of their own and `moveBy` it each tick — a plain script field, since an entity without movement has no `velocity` to write. If that recurs often enough to matter, the fix is a prebuilt `Falling` script in the drawer (§13) — not re-opening `BaseMovement` to every entity to serve it.
 
 **It is a `SyncedScript<Entity>` with a sealed tick, and nothing more.** That is the framing this revision fixes. `entity` and `host` are inherited from `BaseScript`, `@onEvent('jump')` works because a movement class is an event target like any other script, `@serverState coyoteTime` scopes per entity because the host is `Entity`, and the determinism rules apply because the location is synced. Previously each of those had to be asserted separately for movement, with a paragraph explaining that a movement type behaves "exactly as it does on a `Script`" — five such assertions collapse into one `extends`.
 
 **Player-only did not change the host, only the accessor.** The host is still the avatar, because everything in the tick is about a body: `@serverState` scopes per entity, `blocked` comes from that body's collision resolution, and the animation config reads that body's `velocity` (§4.2). What moved is the name a creator types — `player.movement`, not `entity.movement` — and `this.player` inside a movement class is never null, since the host always has an owner. `BaseMovement` is the one place that still declares a `player` member for exactly that reason (§1.1). Rehosting on `Player` was the alternative and is worse: it would make `coyoteTime` per-player state about a body, and leave the animation config reaching across `host.avatar` for every condition it reads.
 
-**One write channel.** Velocity is the only representation of motion — px/sec, mutable, the single thing position is derived from. Earlier drafts had three channels in three unit systems (`move()` in px/tick, `setVelocity()` in px/sec, `impulse` in mass-dependent units) with no stated precedence, which made `move(300, 0)` and `setVelocity(300, 0)` differ by 60× behind identically-shaped signatures. Everything a subclass does is now a write to `velocity` or a write to `intent`.
+**One write channel.** Velocity is the only representation of motion — px/sec, the single thing position is derived from, and written through `setVelocity`. Earlier drafts had three channels in three unit systems (`move()` in px/tick, `setVelocity()` in px/sec, `impulse` in mass-dependent units) with no stated precedence, which made `move(300, 0)` and `setVelocity(300, 0)` differ by 60× behind identically-shaped signatures. Everything a subclass does is now `setVelocity`, `setIntent`, `impulse`, or `addForce`.
 
 ```ts
 abstract class BaseMovement extends SyncedScript<Entity> {
     // host (the avatar) inherited from BaseScript; player declared here, non-null
 
-    velocity; // px/sec, post-collision; mutable, replicated
-    intent; // -1..1 per axis; direction, not speed; replicated
+    velocity; // px/sec, post-collision; readonly, replicated
+    intent; // -1..1 per axis; direction, not speed; readonly, replicated
     enabled; // suppresses intent only — see below
 
     speed; // READ-ONLY: velocity.length(), px/sec
@@ -574,6 +588,7 @@ abstract class BaseMovement extends SyncedScript<Entity> {
         this.move(dt); // engine: sweep, slide, write position,
     } // correct velocity, set blocked
 
+    setVelocity(x, y, z?); // the one write behind every velocity change
     setIntent(x, y, z?); // (B) override the player's own steering
     impulse(x, y, z?); // discrete Δvelocity, px/sec, never dt-scaled
     addForce(x, y, z?); // continuous, px/sec², accumulates; drained per tick
@@ -595,8 +610,8 @@ class TopDownMovement extends BaseMovement {
     walkSpeed = 300; // its own knob — `speed` is a reading
 
     accelerate(intent, dt) {
-        this.velocity.x = intent.x * this.walkSpeed; // instant, no inertia
-        this.velocity.y = intent.y * this.walkSpeed;
+        // instant, no inertia
+        this.setVelocity(intent.x * this.walkSpeed, intent.y * this.walkSpeed);
     }
 }
 ```
@@ -616,17 +631,19 @@ class PlatformerMovement extends BaseMovement {
     accelerate(intent, dt) {
         const target = intent.x * this.walkSpeed;
         const rate = intent.x !== 0 ? this.acceleration : this.friction;
-        this.velocity.x = this.approach(this.velocity.x, target, rate * dt);
+        const vx = this.approach(this.velocity.x, target, rate * dt);
+        this.setVelocity(vx, this.velocity.y); // y is gravity's, not ours
     }
 
     applyForces(dt) {
-        super.applyForces(dt); // drain wind, conveyors
-        if (!this.grounded) this.velocity.y -= this.gravity * dt;
+        if (!this.grounded) this.addForce(0, -this.gravity); // px/sec², dt-scaled
+        super.applyForces(dt); // drains gravity, wind, conveyors
     }
 
     @onEvent('jump')
     jump() {
-        if (this.grounded) this.velocity.y = this.jumpStrength; // assign, don't add
+        // assign, don't add — a held jump never compounds
+        if (this.grounded) this.setVelocity(this.velocity.x, this.jumpStrength);
     }
 }
 ```
@@ -637,6 +654,10 @@ Four things that shape is buying:
 - **`speed` is a reading, not a knob.** `velocity.length()` is what an animation config compares against and what a creator means by "how fast is it going." Locomotion speed is the subclass's own field, because a platformer's walk speed, a car's top gear, and a fish's swim rate are not the same quantity and the base cannot define one. See §3.2 for what this changes.
 - **`impulse` and `addForce` are different physics, so they are different methods.** A jump is a discrete Δvelocity and must never be dt-scaled or it varies with `simRate`; wind is a continuous acceleration that must be. Collapsing them into one additive call is the bug where a bounce pad feels different at 30 Hz than at 60. `addForce` accumulates, so two overlapping wind zones sum rather than fighting over the last write.
 - **`grounded` is a getter over `blocked.down`**, not tracked state. Nothing can forget to update it, and there is no `@serverState` to replicate — `blocked` already arrives with velocity.
+
+**`velocity` is readonly, so a subclass writes it through `setVelocity`.** This is §3.1's rule reaching the one place that writes motion most often, and here it pays for itself twice. Velocity is replicated and predicted: the engine has to know it changed to send it and to reconcile against it, and a component assignment inside `accelerate` is invisible. It also forces the axis a hook is _not_ responsible for to be written out — `accelerate` passing `this.velocity.y` through says on the page that vertical motion belongs to gravity, which is exactly the confusion behind a platformer whose jump gets eaten by its own horizontal acceleration. The cost is that a one-axis change names both; `setVelocity` is decomposed rather than vector-taking for the same reason `setIntent` and `impulse` are, so it stays one block with x/y slots and no vector literal.
+
+That is also why `PlatformerMovement` applies gravity with `addForce(0, -gravity)` instead of touching `velocity.y`: the force channel already exists for continuous acceleration, it is dt-scaled once in the drain rather than at each call site, and two sources of downward pull (gravity plus a magnet) sum instead of overwriting each other. `addForce` must precede `super.applyForces(dt)`, which is what drains the accumulator.
 
 **`intent` is a Vec3, not a return value, because two writers need it.** The engine fills it from the panel-mapped move axes each tick, so a movement type reads continuous input without naming an action. A script writes it when something other than the player should be steering — a cutscene walk, a tractor beam, an ice slide that ignores held keys — via `movement.setIntent(x, y)`, and the same subclass drives it unchanged. That second writer is why it is state rather than a return value; it is a narrower case now that the AI chaser and the conveyor have moved out to their own scripts, but it is the case that made `enabled` a soft freeze and a scripted path possible at all. Overriding `readIntent` is for non-axis input sources: a cursor angle, a modal control scheme.
 
@@ -682,7 +703,7 @@ class DoubleJump extends PlatformerMovement {
 
     jump() {
         if (this.jumpsLeft === 0) return;
-        this.velocity.y = this.jumpStrength;
+        this.setVelocity(this.velocity.x, this.jumpStrength);
         this.jumpsLeft--;
     }
 }
@@ -696,7 +717,7 @@ No `super.tick()` to sequence, no double-firing from a shared `pressed('jump')` 
 
 **Determinism applies**, and now by inheritance rather than by assertion: `BaseMovement` is a `SyncedScript`, so every stage obeys §1.2's rules — fixed timestep, seeded `random` only, no storage reads. Reading input is safe by construction, since input is tick-indexed and a replay during reconciliation sees the same values. `intent` is replicated for the same reason: a server-set standing order has to survive the client's replay.
 
-**3D.** `velocity`, `intent`, and `impulse` are already `Vec3` with an optional `z`; the stage list, `speed`, and `approach` are dimension-free. `blocked` gains forward/back. What stays 2D is the cardinal sugar — `pushUp`/`pushLeft` blocks over `impulse()` — which reads well as a block and is a prebuilt class's business, not the base's.
+**3D.** `velocity` and `intent` are already `Vec3`, and `setVelocity`, `setIntent` and `impulse` already take an optional `z`; the stage list, `speed`, and `approach` are dimension-free. `blocked` gains forward/back. What stays 2D is the cardinal sugar — `pushUp`/`pushLeft` blocks over `impulse()` — which reads well as a block and is a prebuilt class's business, not the base's.
 
 ### 4.2 Animation
 
@@ -747,13 +768,13 @@ entity.animation.clip; // READ: what is on screen now, '' if nothing
 
 **`@onStart` and `@onEnd` mean "my host came into existence / stopped existing."** One rule, five hosts — which is the same rule as before, now with the host named in the class header instead of inferred from which base class was extended:
 
-| Host        | `@onStart`                                                                                | `@onEnd`                   |
-| ----------- | ----------------------------------------------------------------------------------------- | -------------------------- |
-| `Entity`    | entity created                                                                            | entity destroyed           |
-| `Player`    | this player joined                                                                        | this player left           |
-| `Game`      | world setup — awaited before any join is released; must not assume a player exists (§3.6) | session ended              |
-| `Camera`    | session start                                                                             | session end                |
-| `HUDScreen` | `hud.open(name)` — screen opened                                                          | `hud.close(name)` — closed |
+| Host        | `@onStart`                                                                               | `@onEnd`                   |
+| ----------- | ---------------------------------------------------------------------------------------- | -------------------------- |
+| `Entity`    | entity created                                                                           | entity destroyed           |
+| `Player`    | this player joined                                                                       | this player left           |
+| `Game`      | world setup — joins release at its first `await`; must not assume a player exists (§3.6) | session ended              |
+| `Camera`    | session start                                                                            | session end                |
+| `HUDScreen` | `hud.open(name)` — screen opened                                                         | `hud.close(name)` — closed |
 
 ```ts
 @onUpdate         // every simulation tick (default 60 Hz); ctx.dt in seconds
@@ -831,6 +852,22 @@ The cases the event form serves badly are ordinary ones: _am I still standing on
 **Relationship to `blocked`.** They answer different questions and both are needed. `blocked` is directional and about _resolution_ — which side stopped me. `getTouching` is identity-bearing and about _overlap_ — who is there. A platformer's `grounded` stays `blocked.down`; _what_ am I standing on is `getTouching()`.
 
 **Blocks:** one block — `isTouching(tag)`, a boolean reporter matching Scratch's "touching ⟨ ⟩?" exactly. `getTouching()` returns an array, which the block tier has no vocabulary for (§13 forbids array indexing), so it stays text-tier only.
+
+**Historical spatial queries: `asSeen`.** A shot fired at what the client saw a send interval ago must be judged against the world as it stood then, not as it stands now — otherwise a target who was under the crosshair when the trigger was pulled is missed because they moved 50ms later, and no amount of prediction fixes it. The spatial queries that resolve against other entities — `find({ near })`, `getTouching`, a future raycast — take an optional `asSeen` flag:
+
+```ts
+@onRequest('shoot')
+resolve(ctx) {
+    const hits = game.find({ near: ctx.data.aim as Vec3, within: 5, asSeen: true });
+    for (const e of hits) e.send('damage', { amount: 10 });
+}
+```
+
+Present-tense is the default and covers every non-shot case. The flag pulls the view tick from the dispatch context, clamps to an engine constant `maxRewindMs` (~250ms), and validates the client's reported tick against the server's own latency estimate for that connection — so no tick arithmetic reaches creator code, and a client cannot claim it saw the world an hour ago. The name is a placeholder; the block tier likely renders this as a panel toggle on the hat rather than a visible argument, matching design rule 5.
+
+**Load-time errors.** `asSeen` on any query in a `SyncedScript` — the ring is server-only, and reading from it in synced code would desync (§1.2). `asSeen` from a handler with no view tick — a `@onUpdate`, a `@onCollide`, a `@onStart` — because "as seen" needs a viewing client, and defaulting to "now" would silently produce a present-tense answer under a name that promised otherwise. Both point at `@onRequest`, which is the input-originated handler that carries a usable tick.
+
+**Reads happen in the past; writes always happen in the present.** The mechanism is one-directional: a query reads a captured buffer and leaves the live simulation running. Nothing can write into a capture, and the flag exists only on the read verbs. See core DESIGN §8.1 for the invariant and the ring implementation.
 
 ### 5.5 Pointer
 
@@ -1041,9 +1078,13 @@ Each wrapper hides a data structure **and** its platform plumbing. MVP set is ca
 ```ts
 new Leaderboard({ order, persist }); // sorted, persistent across sessions
 new Storage(player); // key/value, persistent
-new Countdown(seconds); // server-ticked, replicated, fires @onEnd
+new Countdown(seconds, onZero?); // server-ticked, replicated; onZero fires at 0
 new Team(name); // player grouping; scores, spawns
 ```
+
+**The four stateful wrappers — `Scoreboard`, `Leaderboard`, `Inventory`, `Team` — share an exported base, `StatefulWrapper`.** A field holding one is authoritative _without_ a `@serverState` decorator, because the wrapper's own methods mark the replication channel; the base is what makes "is this field replicated state" an `instanceof` rather than a class-name list, and what a creator subclass inherits its marking from. The base declares three engine-only members — `bind(record, fieldName)` (called by wiring, throws if bound twice), `serialize`, and `restore` — which supply the identity a wrapper lacks when it is constructed as a field initializer, before any host exists. `Countdown` and `Storage` stay outside it: a countdown is derived from its clock, and `Storage` is the key-value escape hatch rather than replicated state. Creator code never calls the three engine members; it only sees the domain methods. See core DESIGN §5.2 and §12.10.
+
+**`Countdown` takes an optional `onZero` callback** rather than firing `@onEnd`. `@onEnd` is a _host_ lifecycle decorator ("my host stopped existing"), and a `Countdown` is not a host, so `new Countdown(s, onZero)` is how a creator reacts to it reaching zero (core DESIGN §12.11).
 
 ```ts
 scores.add(1); // defaults to the acting player in a player-context handler
@@ -1305,6 +1346,33 @@ Three reasons this is worth a package boundary rather than a `math.ts` in `core`
 
 **Blocks are unaffected.** `clamp` and `lerp` are already in the palette (`clamp` at beginner tier) and stay there; a block does not know which package generated its slot, and the palette budget in §13 counts the same either way.
 
+### 11.2 `Math` is not deterministic, so math replaces it
+
+§1.2 makes determinism a hard requirement for `SyncedScript` and then names one violation: `Math.random`. That list was too short. **ECMA-262 leaves the transcendental functions implementation-approximated**, so two V8 versions — or the same version on two architectures — may return results differing in the last bits. That is not a hypothetical: a client and server disagreeing by one ULP on a bullet's angle diverges visibly within a second of compounding, and it surfaces as rubber-banding a creator cannot debug and we cannot reproduce.
+
+`Math.random` is a different failure and the easier one. It is not approximated; it is genuinely unseeded, so the two machines were never going to agree. The seeded stream (§8.4) already replaces it.
+
+**The approximated set, all of which `@platform/math` must implement:**
+
+| Group         | Members                                        |
+| ------------- | ---------------------------------------------- |
+| Trigonometric | `sin` `cos` `tan` `asin` `acos` `atan` `atan2` |
+| Hyperbolic    | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh`   |
+| Exp / log     | `exp` `expm1` `log` `log1p` `log2` `log10`     |
+| Power / other | `pow` `cbrt` `hypot`                           |
+
+**What stays safe, so the ban is narrow rather than a blanket.** The arithmetic operators and every function that reduces to an exact IEEE-754 operation agree bit-for-bit on every target: `abs`, `sign`, `min`, `max`, `floor`, `ceil`, `round`, `trunc`, `fround`, and `sqrt` — which is correctly rounded and a hardware instruction everywhere we run. So the seed-sprint and battle-royale samples reaching for `Math.max`, `Math.min`, `Math.floor` and `Math.ceil` are fine as written; the two `Math.cos`/`Math.sin` calls in `shot.ts` are the kind of line this section exists to catch.
+
+**Three notes that decide whether the rule actually holds:**
+
+- **`**` is `Math.pow`.** Banning the method while `x ** 2` compiles catches nothing, and the operator is the spelling a creator reaches for. Both are linted.
+- **`hypot` is approximated even though `sqrt` is not**, which is the one entry that looks like it should be safe. Implement it as `sqrt(x*x + y*y)` — deterministic, and faster than the built-in. The honest cost: the built-in scales its inputs to avoid intermediate overflow, and this does not. For world coordinates in pixels the squares are nowhere near the exponent limits, so the trade is free at our magnitudes and would not be for a physics engine in SI units.
+- **Only a handful are load-bearing.** `sin`, `cos`, `atan2`, `pow`, `exp` and `log` cover what games ask for. The rest are either derivable from those (`tan`, `log2`, `log10`, the hyperbolics) or absent from the palette entirely — so "implement 22 functions" is really "implement six carefully and derive the others", and an unused entry may simply be missing until something needs it.
+
+**Enforcement is the same two-tier story as the rest of §1.2.** The load-time pass rejects an approximated call inside a `SyncedScript`; the linter flags it project-wide with the `@platform/math` replacement in the message, since a `ServerScript` calling `Math.sin` is legal but is usually a creator who did not mean to opt out of the shared implementation. A `ClientScript` is exempt like it is for `Math.random` (§1.2) — nothing it computes leaves the machine.
+
+**Blocks never meet this.** No palette block emits a transcendental call; `oscillate` and `orbit` (§11) exist precisely so a beginner never writes `Math.sin`, which is design rule 3 having already answered this question for the block tier.
+
 ---
 
 ## 12. HUD & UI
@@ -1526,4 +1594,45 @@ Kids never construct a player reference. Player-context handlers default their t
 
 We will also have a drawer of prebuilt classes. These are features like the wrapper objects (`Inventory`, `Leaderboard`, etc) and the movement classes (`TopDownMovement`, `PlatformerMovement`) that subclass `BaseMovement` (§4.1). A creator picks one from the drawer and configures it in the panel; the class is only visible if they open it to extend it. New genres ship here, not as API surface.
 
-The full TS spec is in `@api_design.md`
+The full TS spec is in `api_spec.ts`, alongside this file.
+
+---
+
+## 14. Errors and the dev console
+
+**Status: specified, not implemented.** TODO — the runtime behavior below is a contract `@platform/core` owes; today a creator exception has no defined outcome at all.
+
+Several sections already promise a "creator-visible error" — the tick watchdog and the `send` depth limit (§5.7, §5.8), an unhandled request name logged to the dev console (§5.9), a load-time rejection (§1.2). Each was stated where it came up, and none said what actually happens to a game when creator code throws. That gap matters more here than in a professional engine: the person who wrote the handler is twelve, the exception is probably a typo'd property on `ctx.data`, and the wrong answer is a silently dead game or a wall of red text.
+
+### 14.1 A throw is caught at the invocation boundary, never at the tick
+
+**One handler invocation is the unit of failure.** An exception escaping a handler is caught where that handler was invoked, logged, and the rest of the tick proceeds — the other handlers on the event, the other entities, the loop itself. A coin whose `@onCollide` throws must not stop the world; the ninety-nine other coins are unaffected, and the player keeps moving.
+
+The tick is deliberately _not_ the boundary. Wrapping the tick would mean one bad handler takes down input, movement, contacts and every timer for that tick, which converts a local bug into a global stutter and makes the cause much harder to see.
+
+**What is logged**, and it is fixed rather than a format string a creator composes: the script class, the method, the host id, the tick number, the event name, and the stack. Those six answer "which of my scripts, on what, when" — the questions a creator actually has, and the ones a stack trace alone does not answer once decorators and dispatch sit between the throw and the source.
+
+**Repeats are deduplicated.** A handler that throws on `@onUpdate` throws sixty times a second, and an un-deduplicated console is unreadable within a second and hides every _other_ error behind it. Identical errors — same class, method and message — collapse to one entry with a count.
+
+**A handler that throws ~100 consecutive times is disabled**, and the disabling is itself logged as a distinct, prominent message naming the handler. Consecutive is the operative word: any successful invocation resets the counter, so a handler that throws only on a rare input is never disabled. This is a circuit breaker, and the reasoning is that a handler failing every single invocation is broken rather than flaky — it is producing no gameplay and a great deal of overhead, and saying so once loudly beats saying it forever quietly. The threshold is an engine constant, not a creator knob.
+
+### 14.2 Wire and teardown are fatal, because the world is half-built
+
+Two phases are the exception, and the line between them and §14.1 is **whether the engine can describe the state it is left in.**
+
+A handler is a leaf: it either ran or it did not, and the world is coherent either way. **Wiring a script and draining a destroy are not.** A script whose `@serverState` hoisted three of five fields before throwing has a host record that matches no declaration; an entity half-removed from the tag index, the contact set and the renderer is a dangling reference the next tick will read. There is no honest way to continue from either, and continuing anyway produces a second failure somewhere unrelated — which is the failure the creator will report.
+
+So an exception during wire (including a constructor and the `@onStart` that runs inside `addScript`, §8.1) or during the destroy drain (§6 of the core design) **fails the load or aborts the run** with the same six fields plus the phase. In the editor that is a red banner on the affected template; in a published game it is a session that does not start rather than one that corrupts.
+
+The asymmetry is worth stating as a rule, since it generalizes: **catch where the failure is local and the state is coherent; abort where the failure leaves a structure half-mutated.**
+
+### 14.3 The console is a creator surface
+
+The dev console is part of the product, not a debug affordance — for most creators it is the only debugger they will use. Consequences:
+
+- **Messages name creator concepts.** "`Coin.collect` threw on entity 41 at tick 903", never an internal frame or a packed handle.
+- **A message is one line with the stack collapsed**, expandable. Sixty collapsed repeats of one error still read as one problem.
+- **Load-time errors, runtime throws, and engine warnings are visually distinct**, because they need different reactions: fix before you can run, fix when you can, probably fine.
+- **`console.log` from creator code goes to the same place**, with the calling script attributed. A creator's own printf debugging is the most-used feature of any console and should not be second-class.
+
+**Not in MVP:** breakpoints, a stepping debugger, error reporting off the machine, and creator-defined error types. `try`/`catch` is ordinary TypeScript and works; it is text-tier only, since the block tier has no vocabulary for it.

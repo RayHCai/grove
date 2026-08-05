@@ -13,6 +13,7 @@
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
+        "@platform/core": "workspace:*",
         "@platform/math": "workspace:*",
         "@platform/renderer": "workspace:*",
         "react": "^19.2.8",

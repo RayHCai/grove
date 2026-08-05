@@ -64,6 +64,9 @@ importers:
 
   apps/playground:
     dependencies:
+      '@platform/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@platform/math':
         specifier: workspace:*
         version: link:../../packages/math
