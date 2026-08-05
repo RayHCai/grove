@@ -36,13 +36,15 @@ declare module '@platform/engine' {
 
     interface Vec3 {
         // (M)
-        x: number;
-        y: number;
-        z: number;
+        readonly x: number;
+        readonly y: number;
+        readonly z: number;
     }
 
     // (M) camera.viewport arithmetic is why math owns geometry, not just scalars.
-    // TODO: world or entity space? How are bounds defined?
+    // WORLD-SPACE, y-up (top > bottom), recomputed per tick — matching the renderer's
+    // worldBoundsOf (renderer DESIGN §18, core DESIGN §12.12). Collider.bounds is the
+    // rotated world-space AABB of that entity this tick.
     interface Bounds {
         left: number;
         right: number;
@@ -175,15 +177,18 @@ declare module '@platform/engine' {
         readonly id: string;
         readonly owner: Player | null; // null for non-player entities
 
-        position: Vec3;
-        rotation: number; // degrees
-        scale: number;
+        readonly position: Vec3;
+        readonly rotation: number; // degrees
+        readonly scale: number;
         opacity: number; // 0..1
         // TODO: generalize for 3D. position.z would work but affects math/distance.
         layer: number; // draw order in 2D; position.z is reserved for the 3D backend
 
         // instant motion
         setPosition(x: number, y: number): this; // (B) chainable eager setter
+        setRotation(degrees: number): this; // (B)
+        rotateBy(degrees: number): this; // (B)
+        setScale(scale: number): this; // (B)
         moveBy(dx: number, dy: number): this; // (B)
         moveToward(target: Entity | Vec3, speed: number): this; // (B)
         faceToward(target: Entity | Vec3): this; // (B)
@@ -223,8 +228,11 @@ declare module '@platform/engine' {
         // stopped, not whether you are touching. Excludes self and own parent/children,
         // engine-stable order, empty array / false without a collider, never null. Static
         // entities are reported individually despite merged geometry.
-        getTouching(tag?: string): Entity[]; // real array
-        isTouching(tag?: string): boolean; // (B) block-tier spelling
+        //
+        // opts.asSeen resolves against the world as the acting client saw it — same rules
+        // and same load-time rejections as FindQuery.asSeen above.
+        getTouching(tag?: string, opts?: { asSeen?: boolean }): Entity[]; // real array
+        isTouching(tag?: string, opts?: { asSeen?: boolean }): boolean; // (B) block-tier spelling
 
         // visibility and effects
         show(): this; // (B)
@@ -293,7 +301,7 @@ declare module '@platform/engine' {
         readonly player: Player; // whose view this is
 
         zoom: number;
-        position: Vec3;
+        readonly position: Vec3;
 
         // Constraint, not observation: where the camera MAY travel. Creator-written,
         // null = unconstrained.
@@ -472,8 +480,22 @@ declare module '@platform/engine' {
     interface FindQuery {
         tag?: string;
         in?: string; // panel-authored region name
-        // TODO: which distance metric
+        // Euclidean distance over x/y, ignoring z while z is reserved (core DESIGN §12.13).
         near?: { of: Entity | Vec3; within: number };
+
+        // Resolve against the world as the acting client saw it, not the live present. Only
+        // legal in a server-side, input-originated handler (@onRequest, and later @onEvent on
+        // a ServerScript that carries a view tick); the engine pulls the view tick from the
+        // dispatch context, clamps to maxRewindMs (~250ms), and validates against its own
+        // latency estimate for that connection — no tick arithmetic reaches creator code.
+        //
+        // Load-time errors: asSeen on any query in a SyncedScript (the ring is server-only,
+        // and reading it would desync); asSeen from a handler with no view tick (no key for
+        // the read). Present-tense is the default and covers every non-shot case.
+        //
+        // Placeholder name — likely rendered as a panel toggle on the hat rather than a
+        // visible flag in the block tier (core DESIGN §8.1).
+        asSeen?: boolean;
     }
 
     // The session AND the world — one object, because a game has exactly one of each and a
@@ -640,11 +662,11 @@ declare module '@platform/engine' {
     // (gravity, jump, facing, dash) belongs to the subclass — only what no subclass could
     // compute for itself lives here.
     //
-    // ONE write channel: velocity (px/sec, world units, mutable) is the only representation
-    // of motion and the only thing position derives from, so "set it" and "add to it" cannot
-    // disagree by a factor of simRate. A subclass writes velocity or intent; discrete input
-    // arrives via @onEvent and continuous input as intent, which is why there is no actions
-    // parameter.
+    // ONE write channel: velocity (px/sec, world units, setVelocity) is the only
+    // representation of motion and the only thing position derives from, so "set it" and "add
+    // to it" cannot disagree by a factor of simRate. A subclass writes velocity or intent;
+    // discrete input arrives via @onEvent and continuous input as intent, which is why there
+    // is no actions parameter.
     abstract class BaseMovement extends SyncedScript<Entity> {
         // `host` is the avatar being driven, inherited from BaseScript.
 
@@ -653,11 +675,11 @@ declare module '@platform/engine' {
         // write `this.host.owner!`.
         readonly player: Player;
 
-        // Live, mutable, both replicated: velocity so clients can animate and interpolate,
-        // intent so a server-set standing order (a cutscene walk, a conveyor) survives the
-        // client's replay.
-        velocity: Vec3; // px/sec, post-collision
-        intent: Vec3; // -1..1 per axis; direction, not speed
+        // Live, setter-written, both replicated: velocity so clients can animate and
+        // interpolate, intent so a server-set standing order (a cutscene walk, a conveyor)
+        // survives the client's replay.
+        readonly velocity: Vec3; // px/sec, post-collision; write with setVelocity
+        readonly intent: Vec3; // -1..1 per axis; direction, not speed
 
         enabled: boolean; // (B) see "enabled" below — not a freeze
 
@@ -692,6 +714,10 @@ declare module '@platform/engine' {
         tick(dt: number): void;
 
         // ── public writes ───────────────────────────────────────────
+
+        // The one write behind every velocity change. Decomposed like setIntent and impulse,
+        // so a single-axis edit passes this.velocity.x through.
+        setVelocity(x: number, y: number, z?: number): void;
 
         // Override the player's own steering — a cutscene walk, a tractor beam, an ice slide
         // that ignores held keys. The engine refills intent from the move axes every tick, so
@@ -823,6 +849,32 @@ declare module '@platform/engine' {
     // Decorator arguments must be static: tags, action names, template keys. Handlers are
     // async by default and re-enter unless given a concurrency mode.
 
+    // These are STANDARD (TC39 Stage 3) decorators, not the legacy `experimentalDecorators`
+    // kind: one uniform `(value, context) => replacement | void` shape, where the context
+    // object carries what legacy passed positionally. Creator-facing syntax is identical
+    // under both — `@onEvent('hit')`, `@serverState credits = 0` — so nothing in a game
+    // script changes. What differs is that a field decorator returns an INITIALIZER, which
+    // is what makes per-instance @serverState implementable at all; a legacy
+    // `(target, key)` property decorator only ever sees the prototype, and under
+    // `useDefineForClassFields` (the ES2023 default this repo builds with) the class field
+    // shadows anything it installs there.
+    //
+    // Two named shapes, so the ~15 declarations below stay readable.
+
+    // Every handler decorator. Generic over the method it wraps so a decorated method keeps
+    // its exact signature; returns void because handlers are registered, never replaced.
+    type HandlerDecorator = <This, Args extends unknown[], Return>(
+        value: (this: This, ...args: Args) => Return,
+        context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Return>,
+    ) => void;
+
+    // Field decorators. `value` is ALWAYS undefined — a field has no value at decoration
+    // time — and the returned function runs per instance with the authored initial value.
+    type StateDecorator = <This, Value>(
+        value: undefined,
+        context: ClassFieldDecoratorContext<This, Value>,
+    ) => (this: This, initial: Value) => Value;
+
     // ONE event decorator. The argument says WHAT to listen for, opts.on says WHICH EDGE.
     // Phase is never a separate decorator: a bare @onRelease would be a no-op alone and
     // ambiguous when stacked on two @onEvents.
@@ -861,30 +913,30 @@ declare module '@platform/engine' {
     //   Entity = created / destroyed        Camera    = session start / end
     //   Player = joined / left              HUDScreen = opened / closed
     //   Game   = world created / ended
-    function onStart(target: unknown, key: string): void;
-    function onUpdate(target: unknown, key: string): void; // simRate; display rate on a ClientScript
-    function onEnd(target: unknown, key: string): void;
+    const onStart: HandlerDecorator;
+    const onUpdate: HandlerDecorator; // simRate; display rate on a ClientScript
+    const onEnd: HandlerDecorator;
 
     // Roster changes, not per-player setup. Game-hosted ServerScript only.
-    function onPlayerJoin(target: unknown, key: string): void; // optional — avatar spawns without it
-    function onPlayerLeave(target: unknown, key: string): void; // best-effort; not a save path
+    const onPlayerJoin: HandlerDecorator; // optional — avatar spawns without it
+    const onPlayerLeave: HandlerDecorator; // best-effort; not a save path
 
-    function onEvent(event: string, opts?: HandlerOptions): MethodDecorator;
+    function onEvent(event: string, opts?: HandlerOptions): HandlerDecorator;
 
     // Sugar over onEvent — each sets opts.on and nothing else. Text tier only; the block tier
     // renders one hat with action and phase dropdowns, so these cost no palette slots.
     // Canonical spelling is @onEvent(action, { on: ... }); these exist because release/hold
     // handlers read better with the phase in the name.
-    function onEventRelease(event: string, opts?: HandlerOptions): MethodDecorator;
-    function onEventHold(event: string, opts?: HandlerOptions): MethodDecorator; // per tick; ctx.value
+    function onEventRelease(event: string, opts?: HandlerOptions): HandlerDecorator;
+    function onEventHold(event: string, opts?: HandlerOptions): HandlerDecorator; // per tick; ctx.value
 
-    function onCollide(tag: string, opts?: HandlerOptions): MethodDecorator; // ctx.other
-    function onEnter(region: string): MethodDecorator;
-    function onExit(region: string): MethodDecorator;
+    function onCollide(tag: string, opts?: HandlerOptions): HandlerDecorator; // ctx.other
+    function onEnter(region: string): HandlerDecorator;
+    function onExit(region: string): HandlerDecorator;
 
-    function onClick(target: unknown, key: string): void; // ctx.player = who clicked
-    function onHoverEnter(target: unknown, key: string): void; // never fires on touch
-    function onHoverExit(target: unknown, key: string): void;
+    const onClick: HandlerDecorator; // ctx.player = who clicked
+    const onHoverEnter: HandlerDecorator; // never fires on touch
+    const onHoverExit: HandlerDecorator;
 
     // ─── state ─────────────────────────────────────────────────────
 
@@ -910,7 +962,9 @@ declare module '@platform/engine' {
     // writing @serverState the sender reads" contract working, but only the panel knows which
     // scripts are attached to which host, so the hoisted property is untyped on a plain
     // `Player` reference today. Same question as the Movement cast above.
-    function serverState(target: unknown, key: string): void; // replicated AND persisted
+    // A standard field decorator: its returned initializer is what captures the authored
+    // value per instance, which the wire step then moves onto the host record.
+    const serverState: StateDecorator; // replicated AND persisted
 
     // ─── data wrappers ─────────────────────────────────────────────
 
@@ -919,12 +973,14 @@ declare module '@platform/engine' {
     // the rest are keyed by Player.
 
     class Countdown {
-        constructor(seconds: number);
+        // onZero fires once when `remaining` reaches 0. A Countdown is not a host, so it
+        // cannot own an @onEnd (that decorator means "my host stopped existing"); the
+        // callback is how a creator reacts to it (core DESIGN §12.11).
+        constructor(seconds: number, onZero?: () => void);
         readonly remaining: number;
         start(): void; // (B)
         pause(): void; // (B)
         reset(seconds?: number): void; // (B)
-        // fires @onEnd on reaching zero
     }
 
     class Storage {
@@ -934,7 +990,31 @@ declare module '@platform/engine' {
         delete(key: string): Promise<void>;
     }
 
-    class Scoreboard {
+    // The shared base of the four stateful wrappers. A field holding one is authoritative
+    // WITHOUT a @serverState decorator — the wrapper's own methods mark the replication
+    // channel — so "is this field replicated state" is an `instanceof StatefulWrapper`
+    // rather than a class-name list to keep in sync, and a creator subclass inherits the
+    // marking (core DESIGN §5.2, §12.10).
+    //
+    // The three engine members answer the four questions a wrapper cannot when it is
+    // constructed as a field initializer, before any host, host record or field name
+    // exists. They are called by wiring, never by creator code — a creator only ever sees
+    // the domain methods on the subclasses below.
+    abstract class StatefulWrapper {
+        // Supplies the identity a field initializer lacks: which host record to mark and
+        // under which field name. Throws if the same instance is bound twice, so sharing
+        // one wrapper between two hosts is a load-time error naming both sites rather than
+        // a silent mis-marking.
+        bind(record: object, fieldName: string): void;
+
+        // The wrapper's own wire form and its restoration. Persistence and type-tagging go
+        // through this one interface, so §5.3's checkpoint walk handles a wrapper without
+        // knowing what a Team is, and the type tag becomes class identity.
+        serialize(): unknown;
+        restore(data: unknown): void;
+    }
+
+    class Scoreboard extends StatefulWrapper {
         constructor();
         add(amount: number, player?: Player): void; // (B) defaults to acting player
         set(amount: number, player?: Player): void; // (B)
@@ -943,7 +1023,7 @@ declare module '@platform/engine' {
         reset(): void; // (B) manual — the engine never resets it for you
     }
 
-    class Leaderboard {
+    class Leaderboard extends StatefulWrapper {
         constructor(opts?: { order?: 'high' | 'low'; persist?: boolean });
         submit(score: number, player?: Player): void; // (B)
         of(player: Player): number; // (B)
@@ -951,7 +1031,7 @@ declare module '@platform/engine' {
         rankOf(player: Player): number; // (B)
     }
 
-    class Inventory {
+    class Inventory extends StatefulWrapper {
         constructor(player: Player);
         add(item: string, count?: number): void; // (B)
         remove(item: string, count?: number): void; // (B)
@@ -960,7 +1040,7 @@ declare module '@platform/engine' {
         clear(): void;
     }
 
-    class Team {
+    class Team extends StatefulWrapper {
         constructor(name: string);
         readonly name: string;
         readonly players: Player[];
@@ -1024,7 +1104,7 @@ declare module '@platform/engine' {
     // On a ClientScript<HUDScreen> only presses on THIS screen's buttons fire, which keeps
     // two menus with a `back` button from colliding. On any other client host the widget is
     // resolved across the whole HUD.
-    function onPress(widget: string): MethodDecorator; // ctx.player = the local player
+    function onPress(widget: string): HandlerDecorator; // ctx.player = the local player
 
     // ─── requests ──────────────────────────────────────────────────
 
@@ -1061,5 +1141,5 @@ declare module '@platform/engine' {
     // Unhandled names are dropped and logged to the dev console. Concurrency defaults to
     // 'ignore' per instance — note a Game-hosted script has ONE instance, so that serializes
     // across all players (§5.9).
-    function onRequest(name: string, opts?: HandlerOptions): MethodDecorator;
+    function onRequest(name: string, opts?: HandlerOptions): HandlerDecorator;
 }

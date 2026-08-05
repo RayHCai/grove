@@ -12,18 +12,59 @@
     },
     "rules": {
         "no-console": "warn",
+        "no-underscore-dangle": ["error", { "allow": ["__location"] }],
         "eqeqeq": ["error", "smart"],
         "typescript/consistent-type-imports": "error",
         "typescript/no-explicit-any": "warn",
-        "import/no-cycle": "error"
+        "import/no-cycle": "error",
+        "no-restricted-properties": ["error",
+            { "object": "Math", "property": "sin", "message": "Use `sin` from @platform/math — Math.sin is not deterministic across engines." },
+            { "object": "Math", "property": "cos", "message": "Use `cos` from @platform/math — Math.cos is not deterministic across engines." },
+            { "object": "Math", "property": "tan", "message": "Use `tan` from @platform/math — Math.tan is not deterministic across engines." },
+            { "object": "Math", "property": "asin", "message": "Use `asin` from @platform/math — Math.asin is not deterministic across engines." },
+            { "object": "Math", "property": "acos", "message": "Use `acos` from @platform/math — Math.acos is not deterministic across engines." },
+            { "object": "Math", "property": "atan", "message": "Use `atan` from @platform/math — Math.atan is not deterministic across engines." },
+            { "object": "Math", "property": "atan2", "message": "Use `atan2` from @platform/math — Math.atan2 is not deterministic across engines." },
+            { "object": "Math", "property": "sinh", "message": "Use `sinh` from @platform/math — Math.sinh is not deterministic across engines." },
+            { "object": "Math", "property": "cosh", "message": "Use `cosh` from @platform/math — Math.cosh is not deterministic across engines." },
+            { "object": "Math", "property": "tanh", "message": "Use `tanh` from @platform/math — Math.tanh is not deterministic across engines." },
+            { "object": "Math", "property": "asinh", "message": "Use `asinh` from @platform/math — Math.asinh is not deterministic across engines." },
+            { "object": "Math", "property": "acosh", "message": "Use `acosh` from @platform/math — Math.acosh is not deterministic across engines." },
+            { "object": "Math", "property": "atanh", "message": "Use `atanh` from @platform/math — Math.atanh is not deterministic across engines." },
+            { "object": "Math", "property": "exp", "message": "Use `exp` from @platform/math — Math.exp is not deterministic across engines." },
+            { "object": "Math", "property": "expm1", "message": "Use `expm1` from @platform/math — Math.expm1 is not deterministic across engines." },
+            { "object": "Math", "property": "log", "message": "Use `log` from @platform/math — Math.log is not deterministic across engines." },
+            { "object": "Math", "property": "log1p", "message": "Use `log1p` from @platform/math — Math.log1p is not deterministic across engines." },
+            { "object": "Math", "property": "log2", "message": "Use `log2` from @platform/math — Math.log2 is not deterministic across engines." },
+            { "object": "Math", "property": "log10", "message": "Use `log10` from @platform/math — Math.log10 is not deterministic across engines." },
+            { "object": "Math", "property": "pow", "message": "Use `pow` from @platform/math — Math.pow is not deterministic across engines." },
+            { "object": "Math", "property": "cbrt", "message": "Use `cbrt` from @platform/math — Math.cbrt is not deterministic across engines." },
+            { "object": "Math", "property": "hypot", "message": "Use `hypot` from @platform/math — Math.hypot is not deterministic across engines." },
+            { "object": "Math", "property": "random", "message": "Use `SeededRandom` from @platform/math — Math.random is not deterministic." }
+        ]
     },
-    "ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/.turbo/**", "api_spec.ts"],
+    "ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/.turbo/**", "docs/api_spec.ts"],
     "overrides": [
         {
             "files": ["**/*.test.ts", "**/tests/**"],
             "rules": {
                 "no-console": "off",
-                "typescript/no-explicit-any": "off"
+                "typescript/no-explicit-any": "off",
+                "no-restricted-properties": "off"
+            }
+        },
+        {
+            "files": ["packages/math/src/deterministic-math.ts"],
+            "rules": {
+                "no-restricted-properties": "off",
+                "oxc/approx-constant": "off",
+                "no-loss-of-precision": "off"
+            }
+        },
+        {
+            "files": ["packages/renderer/**"],
+            "rules": {
+                "no-restricted-properties": "off"
             }
         }
     ]
