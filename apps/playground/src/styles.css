@@ -168,6 +168,31 @@ body {
     font-size: 12px;
 }
 
+.app__header code {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: #1b241e;
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+}
+
+/* ── panels: render tree beside the game loop ──────────────────────── */
+
+.stage__panels {
+    display: grid;
+    /* Tree gets the slack; the loop panel is a fixed sidebar so its numbers do not reflow. */
+    grid-template-columns: minmax(0, 1fr) 260px;
+    gap: 10px;
+    align-items: start;
+}
+
+@media (max-width: 820px) {
+    .stage__panels {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
 /* ── inspector ─────────────────────────────────────────────────────── */
 
 .inspector {
@@ -393,4 +418,127 @@ body {
     margin: 0;
     overflow-wrap: anywhere;
     font-variant-numeric: tabular-nums;
+}
+
+/* ── game loop panel ───────────────────────────────────────────────── */
+
+.loop {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+}
+
+.loop__bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.loop__bar strong {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.loop__mode {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Pushes the poll-rate select to the right edge, matching the inspector bar. */
+.loop__pause {
+    margin-left: auto;
+}
+
+.loop__bar select,
+.loop__bar button {
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #1b241e;
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.loop__bar button:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.loop__bar button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.loop__empty {
+    margin: 0;
+    padding: 12px;
+    color: var(--muted);
+}
+
+.loop__body {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.loop__grid {
+    margin: 0;
+    display: grid;
+    gap: 8px 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.loop__metric {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.loop__metric dt {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.loop__metric dd {
+    margin: 0;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    font-size: 15px;
+}
+
+.loop__heartbeat-label {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    color: var(--muted);
+}
+
+.loop__meter {
+    height: 8px;
+    border-radius: 999px;
+    background: #1b241e;
+    overflow: hidden;
+}
+
+.loop__meter-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+    /* The accumulator fills each frame and snaps back to 0 on a tick — a short transition
+       reads as a heartbeat rather than a jitter, without lagging behind the real value. */
+    transition: width 80ms linear;
+}
+
+.loop__meter-fill--paused {
+    background: var(--muted);
 }
