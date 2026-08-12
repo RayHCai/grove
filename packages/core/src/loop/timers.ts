@@ -1,12 +1,8 @@
-// Timers: sleep / every / after (DESIGN §9). The loop ticks them at step 7. Each is
-// owned by a scope (host or invocation) via §4.3's scope tree, so it auto-cancels when
-// its host dies. Time is counted in ticks internally; the public API is seconds.
-//
-// This is simulation state and registers with the snapshot (§8.1). `sleep` promises are
-// heap closures the snapshot cannot capture, so a rewind resolves them dead rather than
-// replaying them — see the parked-invocation sweep in the runtime.
+// Every timer is owned by a scope, so it auto-cancels when its host dies. Time is counted in
+// ticks internally and in seconds at the API, so a timer cannot drift with frame rate.
 
 import type { ScopeId } from '../dispatch/scope-tree.js';
+import { NO_SCOPE } from '../dispatch/scope-tree.js';
 import type { Scope, ScopeMode, SnapshotStore } from './store-registry.js';
 
 export type TimerKind = 'sleep' | 'every' | 'after';
@@ -15,9 +11,8 @@ interface Timer {
     id: number;
     kind: TimerKind;
     hostScopeId: ScopeId;
-    /** Ticks remaining until fire. */
     remaining: number;
-    /** Reload interval in ticks, for `every`. */
+    /** Reload interval, `every` only; zero for one-shots. */
     interval: number;
     fn: (() => void) | null;
     resolve: (() => void) | null;
@@ -37,7 +32,7 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
     #nextId = 1;
     #simRate = 60;
 
-    /** Maps a scope id to the entity id that owns it, for scoped snapshot filtering. */
+    /** Scope id → owning entity id; only a scoped capture needs it. */
     #scopeOwner: (scopeId: ScopeId) => number = () => -1;
 
     setSimRate(rate: number): void {
@@ -48,7 +43,6 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
         this.#scopeOwner = lookup;
     }
 
-    /** Schedules a one-shot `after`. Returns a cancel function. */
     after(seconds: number, hostScopeId: ScopeId, fn: () => void): () => void {
         const id = this.#nextId++;
         this.#timers.set(id, {
@@ -64,7 +58,6 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
         return () => this.cancel(id);
     }
 
-    /** Schedules a repeating `every`. Returns a cancel function. */
     every(seconds: number, hostScopeId: ScopeId, fn: () => void): () => void {
         const id = this.#nextId++;
         const ticks = this.#toTicks(seconds);
@@ -81,10 +74,9 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
         return () => this.cancel(id);
     }
 
-    /** Schedules a `sleep`; the returned promise resolves when it fires. */
     sleep(seconds: number, hostScopeId: ScopeId): Promise<void> {
         const id = this.#nextId++;
-        return new Promise<void>(resolve => {
+        return new Promise<void>((resolve) => {
             this.#timers.set(id, {
                 id,
                 kind: 'sleep',
@@ -102,12 +94,14 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
         const timer = this.#timers.get(id);
         if (!timer) return;
         timer.cancelled = true;
-        // A cancelled sleep never resolves — its continuation is unreachable (§4.3, §8.1).
+        // A cancelled sleep never resolves — its continuation is meant to be unreachable.
         this.#timers.delete(id);
     }
 
-    /** Cancels every timer owned by a scope — the host-destroy cascade (§4.3). */
+    /** Cancels every timer owned by a scope — the host-destroy cascade. */
     cancelScope(hostScopeId: ScopeId): void {
+        // NO_SCOPE is every hostless timer at once, never one host's, so no teardown may claim it.
+        if (hostScopeId === NO_SCOPE) return;
         for (const [id, timer] of this.#timers) {
             if (timer.hostScopeId === hostScopeId) {
                 timer.cancelled = true;
@@ -116,10 +110,7 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
         }
     }
 
-    /**
-     * Advances every timer by one tick and fires those that reach zero. Fire order is by
-     * ascending timer id — the engine-stable order determinism requires (§1.2).
-     */
+    /** Advances every timer a tick, firing in ascending id order because determinism needs one. */
     advance(): void {
         const due: Timer[] = [];
         for (const timer of this.#timers.values()) {
@@ -150,6 +141,13 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
     }
 
     #toTicks(seconds: number): number {
+        // A non-finite duration would make `remaining` NaN, and NaN <= 0 is false forever, so the
+        // timer would neither fire nor ever leave the heap.
+        if (!Number.isFinite(seconds)) {
+            throw new RangeError(
+                `timer duration must be a finite number of seconds, got ${seconds}`,
+            );
+        }
         return Math.max(1, Math.round(seconds * this.#simRate));
     }
 
@@ -168,7 +166,7 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
         for (const t of this.#timers.values()) {
             if (scope !== null) {
                 const owner = this.#scopeOwner(t.hostScopeId);
-                if (owner < 0 || ![...scope].some(id => (id as number) % 0x100_0000 === owner)) {
+                if (owner < 0 || ![...scope].some((id) => (id as number) % 0x100_0000 === owner)) {
                     continue;
                 }
             }

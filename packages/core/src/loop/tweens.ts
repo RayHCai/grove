@@ -1,15 +1,15 @@
-// The tween engine (DESIGN §6, §9.1): the shared implementation under every timed motion
-// verb, so cancellation, easing, awaitability and last-one-wins conflict resolution are
-// defined once. Ticks from the loop at step 7. A cancelled tween leaves the property at
-// its current value, not the target (§9.1).
+// The one implementation under every timed motion verb, so easing, cancellation,
+// awaitability and last-one-wins are defined once. A cancelled tween leaves the property
+// where it stopped, not at the target.
 
 import type { Easing } from '@platform/math';
 import { ease, lerp } from '@platform/math';
 import type { ScopeId } from '../dispatch/scope-tree.js';
+import { NO_SCOPE } from '../dispatch/scope-tree.js';
 
 /** How a tween reads and writes the value it animates. */
 export interface TweenTarget {
-    /** Stable key for last-one-wins conflict resolution: `${entityId}:${prop}`. */
+    /** Identifies the target alone; the engine appends the prop for last-one-wins. */
     readonly key: string;
     get(prop: string): number;
     set(prop: string, value: number): void;
@@ -31,7 +31,6 @@ interface Tween {
 
 export class TweenEngine {
     readonly #tweens = new Map<number, Tween>();
-    /** `${target.key}:${prop}` → active tween id, for last-one-wins. */
     readonly #byProp = new Map<string, number>();
     #nextId = 1;
     #simRate = 60;
@@ -40,11 +39,7 @@ export class TweenEngine {
         this.#simRate = rate;
     }
 
-    /**
-     * Starts a tween on one property. A second tween on the same (target, prop) cancels
-     * the first — last one wins (§9.1). Resolves on completion; a cancelled tween's
-     * promise resolves silently, leaving the property where it stopped.
-     */
+    /** Starts a tween, cancelling any other on the same (target, prop); a cancel resolves too. */
     start(
         target: TweenTarget,
         prop: string,
@@ -57,9 +52,16 @@ export class TweenEngine {
         const existing = this.#byProp.get(propKey);
         if (existing !== undefined) this.cancel(existing);
 
+        // A non-finite duration makes every interpolated value NaN and the tween never reaches
+        // t >= 1, so it holds its (target, prop) slot for the rest of the session.
+        if (!Number.isFinite(seconds)) {
+            throw new RangeError(
+                `tween duration must be a finite number of seconds, got ${seconds}`,
+            );
+        }
         const id = this.#nextId++;
         const durationTicks = Math.max(1, Math.round(seconds * this.#simRate));
-        return new Promise<void>(resolve => {
+        return new Promise<void>((resolve) => {
             const tween: Tween = {
                 id,
                 hostScopeId,
@@ -89,6 +91,8 @@ export class TweenEngine {
     }
 
     cancelScope(hostScopeId: ScopeId): void {
+        // NO_SCOPE is every hostless tween at once, never one host's, so no teardown may claim it.
+        if (hostScopeId === NO_SCOPE) return;
         const doomed: number[] = [];
         for (const [id, tween] of this.#tweens) {
             if (tween.hostScopeId === hostScopeId) doomed.push(id);
@@ -96,7 +100,7 @@ export class TweenEngine {
         for (const id of doomed) this.cancel(id);
     }
 
-    /** Advances every tween one tick, writing interpolated values. Order is by tween id. */
+    /** Advances every tween a tick, in ascending id order because determinism needs one. */
     advance(): void {
         const ids = [...this.#tweens.keys()].toSorted((a, b) => a - b);
         for (const id of ids) {
