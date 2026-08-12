@@ -18,6 +18,9 @@
             "path": "./packages/transport"
         },
         {
+            "path": "./packages/protocol"
+        },
+        {
             "path": "./packages/server"
         },
         {
