@@ -1,25 +1,21 @@
-// The data wrappers (DESIGN §5.2, §6.2, api_spec.ts:952). The four stateful wrappers share
-// StatefulWrapper: a field holding one is authoritative WITHOUT @serverState because the
-// wrapper's own methods mark the replication channel. `bind` supplies the identity a field
-// initializer lacks (which record to mark, under which name), throws if bound twice, and
-// `serialize`/`restore` give persistence one interface tagged by class identity.
-//
-// Countdown and Storage stay outside the base: a countdown is derived from its clock, and
-// Storage is the key-value escape hatch rather than replicated state (§5.2).
+// A field holding a StatefulWrapper is authoritative without @serverState: the wrapper's own
+// mutating methods mark the replication channel.
 
 import type { HostRecord } from '../state/host-record.js';
 import type { Player } from './player.js';
 import type { KVStore } from './seams.js';
+import { currentRuntime, hasRuntime } from './runtime.js';
+import { DEFAULT_SIM_RATE } from '../config.js';
 
 export abstract class StatefulWrapper {
     #record: HostRecord | null = null;
     #field = '';
 
-    /** Called by wiring. Throws if the same instance is bound twice (§5.2). */
+    /** Called by wiring; throws if the same instance is bound twice. */
     bind(record: object, fieldName: string): void {
         if (this.#record) {
             throw new Error(
-                `wrapper already bound to "${this.#field}" — sharing one instance between hosts is a load-time error (§5.2)`,
+                `wrapper already bound to "${this.#field}" — sharing one instance between hosts is a load-time error`,
             );
         }
         this.#record = record as HostRecord;
@@ -40,7 +36,9 @@ export abstract class StatefulWrapper {
 
     protected requireBound(): void {
         if (!this.#record) {
-            throw new Error('wrapper used before assignment to a field — nothing to mark or persist (§5.2)');
+            throw new Error(
+                'wrapper used before assignment to a field — nothing to mark or persist',
+            );
         }
     }
 }
@@ -56,18 +54,28 @@ export class Scoreboard extends StatefulWrapper {
 
     add(amount: number, player?: Player): void {
         this.requireBound();
-        const p = player ?? this.#actingPlayer;
-        if (!p) return;
+        const p = this.#require(player, 'add');
         this.#scores.set(p.id, (this.#scores.get(p.id) ?? 0) + amount);
         this.mark();
     }
 
     set(amount: number, player?: Player): void {
         this.requireBound();
-        const p = player ?? this.#actingPlayer;
-        if (!p) return;
+        const p = this.#require(player, 'set');
         this.#scores.set(p.id, amount);
         this.mark();
+    }
+
+    // Throwing, not returning: a silent no-op here loses a score the creator believed was
+    // recorded, and the acting-player default is only available inside a player-driven handler.
+    #require(player: Player | undefined, method: string): Player {
+        const p = player ?? this.#actingPlayer;
+        if (!p) {
+            throw new Error(
+                `Scoreboard.${method} needs a player — there is no acting player outside a handler driven by one`,
+            );
+        }
+        return p;
     }
 
     of(player: Player): number {
@@ -114,7 +122,8 @@ export class Leaderboard extends StatefulWrapper {
 
     submit(score: number, player?: Player): void {
         this.requireBound();
-        if (!player) return;
+        // Throwing rather than dropping the score: nothing here can infer whose it was.
+        if (!player) throw new Error('Leaderboard.submit needs the player whose score it is');
         const prev = this.#scores.get(player.id);
         const better = prev === undefined || (this.#order === 'high' ? score > prev : score < prev);
         if (better) {
@@ -222,7 +231,7 @@ export class Team extends StatefulWrapper {
 
     get players(): Player[] {
         const pm = playerLookup();
-        return [...this.#members].map(id => pm(id)).filter((p): p is Player => p !== null);
+        return [...this.#members].map((id) => pm(id)).filter((p): p is Player => p !== null);
     }
 
     add(player: Player): void {
@@ -253,22 +262,29 @@ export class Team extends StatefulWrapper {
     }
 }
 
-// Countdown: server-ticked, replicated; onZero fires once on reaching 0 (§12.11). The loop
-// ticks it (§8.2 step 7). Not a StatefulWrapper — derived from the clock.
+// Not a StatefulWrapper: it is advanced a tick at a time and no method here marks the state channel.
 export class Countdown {
     #remainingTicks: number;
     #running = false;
     #fired = false;
     readonly #onZero: (() => void) | undefined;
-    #simRate = 60;
+    #simRate: number;
 
     constructor(seconds: number, onZero?: () => void) {
+        // The live rate, not a hardcoded 60: a countdown built on a 30 Hz world would otherwise
+        // hold twice the ticks it was asked for and report twice the seconds.
+        this.#simRate = hasRuntime() ? currentRuntime().simRate : DEFAULT_SIM_RATE;
         this.#remainingTicks = Math.max(0, Math.round(seconds * this.#simRate));
         this.#onZero = onZero;
     }
 
-    /** @internal — the loop sets the rate and advances the countdown each tick. */
+    /** @internal — set by the loop; rescales so the remaining time survives a rate change. */
     setSimRate(rate: number): void {
+        if (rate <= 0 || rate === this.#simRate) return;
+        this.#remainingTicks = Math.max(
+            0,
+            Math.round((this.#remainingTicks / this.#simRate) * rate),
+        );
         this.#simRate = rate;
     }
 
@@ -285,11 +301,12 @@ export class Countdown {
     }
 
     reset(seconds?: number): void {
-        if (seconds !== undefined) this.#remainingTicks = Math.max(0, Math.round(seconds * this.#simRate));
+        if (seconds !== undefined)
+            this.#remainingTicks = Math.max(0, Math.round(seconds * this.#simRate));
         this.#fired = false;
     }
 
-    /** @internal — the loop advances a running countdown one tick and fires onZero once. */
+    /** @internal — driven by the loop, one tick per call. */
     advance(): void {
         if (!this.#running || this.#remainingTicks <= 0) return;
         this.#remainingTicks -= 1;
@@ -301,8 +318,6 @@ export class Countdown {
     }
 }
 
-// Storage: per-player or global key/value over the KVStore seam (§5.4). ServerScript-only
-// reads (enforced at runtime now, at load once the AST pass exists).
 export class Storage {
     readonly #kv: KVStore;
     readonly #scope: string;
@@ -325,15 +340,10 @@ export class Storage {
     }
 }
 
-// A wrapper marks its record's dirty set; the record carries the marking closure the
-// wiring step installs, so the wrapper needn't know the channels' shape.
-let resolvePlayer: (id: string) => Player | null = () => null;
-
-/** @internal — the runtime installs the player lookup so top()/players() resolve ids. */
-export function setPlayerLookup(fn: (id: string) => Player | null): void {
-    resolvePlayer = fn;
-}
-
+// Resolved per call off the runtime rather than through a module slot: with the lookup held in
+// this module, a second loadGame handed world A's scoreboard world B's Player objects.
 function playerLookup(): (id: string) => Player | null {
-    return resolvePlayer;
+    if (!hasRuntime()) return () => null;
+    const rt = currentRuntime();
+    return (id: string) => rt.playerManager?.byId(id) ?? null;
 }

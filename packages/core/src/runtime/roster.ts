@@ -1,7 +1,5 @@
-// The roster: spawn / spectate / respawn / setMovement for players (DESIGN §7). Spawning
-// an avatar mints an entity from the Player template, owned by the player, and attaches
-// the template's scripts (including the movement class). Checkpoint location is
-// engine-internal on the Player, defaulting to the template spawn point (§12 recommendation).
+// Spawning an avatar mints an entity from the Player template, owned by the player, and
+// attaches the template's scripts including the movement class.
 
 import type { Runtime } from './runtime.js';
 import type { Player } from './player.js';
@@ -16,7 +14,7 @@ interface Checkpoint {
 export class Roster {
     readonly #rt: Runtime;
     readonly #checkpoints = new Map<string, Checkpoint>();
-    /** The movement class the Player template carries, if any (§7 one slot, not a list). */
+    /** One slot, not a list: an avatar carries at most one movement class. */
     movementClass: (new () => BaseMovement) | null = null;
     /** Panel-authored default spawn point. */
     defaultSpawn: Checkpoint = { x: 0, y: 0 };
@@ -52,7 +50,8 @@ export class Roster {
     setMovement(player: Player, movement: new () => BaseMovement): void {
         const avatar = this.#tryAvatar(player);
         if (!avatar) return;
-        const instance = this.#rt.wiring?.attachMovement(avatar, movement) as BaseMovement | undefined;
+        const instance = this.#rt.wiring?.attachMovement(avatar, movement) as
+            BaseMovement | undefined;
         player.setMovementInstance(instance);
     }
 
@@ -61,10 +60,6 @@ export class Roster {
     }
 
     #tryAvatar(player: Player): Entity | null {
-        try {
-            return player.avatar;
-        } catch {
-            return null;
-        }
+        return player.hasAvatar ? player.avatar : null;
     }
 }

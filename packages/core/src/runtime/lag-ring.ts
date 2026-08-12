@@ -1,37 +1,37 @@
-// The server-side lag ring (DESIGN §8.1, api_spec.ts asSeen). The server retains a ring
-// of transform captures — roughly MAX_REWIND_MS long — so an authoritative resolution of
-// a shot judges it against the world as it stood a send interval ago, not as it stands
-// now. A historical query reads a captured buffer and leaves the simulation running: it
-// runs no step, sweeps no invocation, marks no channel (§8.1), so it is invisible to the
-// determinism test and to replication.
-//
-// `capture(into)` reuses buffers — the ring is a fixed set refilled in turn, not a
-// per-tick allocation. The Broadphase is constructible over a supplied buffer, which is
-// what lets a query build a throwaway index without touching the live one.
+// A ring of transform captures roughly MAX_REWIND_MS long, so the server can judge a shot
+// against the world the shooter saw. Reads a buffer and marks nothing, so it is invisible to
+// replication and to the determinism test. Slots are reused rather than allocated per tick.
 
 import { MAX_REWIND_MS } from '../config.js';
 import type { EntityId } from '../ids.js';
+import { entityIndex } from '../ids.js';
 import { Broadphase } from '../world/broadphase.js';
 import type { TransformView } from '../world/broadphase.js';
+import type { EntityTable } from '../world/entity-table.js';
 import type { SimTransformStore, TransformBuffer } from '../world/transform-store.js';
 
 interface RingSlot {
     tick: number;
     buffer: TransformBuffer;
+    /** Who was alive at that tick, generation and all; a transform buffer records neither. */
+    ids: EntityId[];
     filled: boolean;
 }
 
 export class LagRing {
     readonly #transforms: SimTransformStore;
+    readonly #entities: EntityTable;
     readonly #slots: RingSlot[];
     #head = 0;
 
-    constructor(transforms: SimTransformStore, simRate: number) {
+    constructor(transforms: SimTransformStore, entities: EntityTable, simRate: number) {
         this.#transforms = transforms;
+        this.#entities = entities;
         const depth = Math.max(1, Math.ceil((simRate * MAX_REWIND_MS) / 1000));
         this.#slots = Array.from({ length: depth }, () => ({
             tick: -1,
             buffer: transforms.createBuffer(),
+            ids: [] as EntityId[],
             filled: false,
         }));
     }
@@ -40,6 +40,7 @@ export class LagRing {
     capture(tick: number): void {
         const slot = this.#slots[this.#head]!;
         this.#transforms.capture(slot.buffer, null);
+        this.#entities.liveIds(slot.ids);
         slot.tick = tick;
         slot.filled = true;
         this.#head = (this.#head + 1) % this.#slots.length;
@@ -56,20 +57,25 @@ export class LagRing {
         return best;
     }
 
-    /** A throwaway Broadphase over the capture nearest `viewTick` (§8.1). */
-    broadphaseAt(viewTick: number, halfExtent: (id: EntityId, axis: 'w' | 'h') => number): Broadphase | null {
+    /** A throwaway Broadphase over the capture nearest `viewTick`. */
+    broadphaseAt(
+        viewTick: number,
+        halfExtent: (id: EntityId, axis: 'w' | 'h') => number,
+    ): Broadphase | null {
         const slot = this.#slotFor(viewTick);
         if (!slot) return null;
-        return new Broadphase(bufferView(slot.buffer, halfExtent));
+        return new Broadphase(bufferView(slot, halfExtent));
     }
 
     /** The most recent capture — used when a caller has no specific view tick. */
-    broadphaseAtLatest(halfExtent: (id: EntityId, axis: 'w' | 'h') => number = () => 0): Broadphase | null {
+    broadphaseAtLatest(
+        halfExtent: (id: EntityId, axis: 'w' | 'h') => number = () => 0,
+    ): Broadphase | null {
         let latest: RingSlot | undefined;
         for (const slot of this.#slots) {
             if (slot.filled && (!latest || slot.tick > latest.tick)) latest = slot;
         }
-        return latest ? new Broadphase(bufferView(latest.buffer, halfExtent)) : null;
+        return latest ? new Broadphase(bufferView(latest, halfExtent)) : null;
     }
 
     get depth(): number {
@@ -77,24 +83,23 @@ export class LagRing {
     }
 }
 
+// The view speaks real EntityIds: a bare slot index reads as (0, 0) against a caller's
+// generation-packed id, and still writes through, because the stores address by slot.
 function bufferView(
-    buffer: TransformBuffer,
+    slot: RingSlot,
     halfExtent: (id: EntityId, axis: 'w' | 'h') => number,
 ): TransformView {
-    const ids: EntityId[] = [];
-    for (let i = 0; i < buffer.count; i++) {
-        // A captured slot holds every slot index; treat a nonzero scale as a live entity.
-        if (buffer.scale[i] !== 0) ids.push(i as unknown as EntityId);
-    }
+    const buffer = slot.buffer;
+    const ids = slot.ids;
     return {
         liveIds: (o: EntityId[] = []) => {
             o.length = 0;
-            o.push(...ids);
+            for (const id of ids) o.push(id);
             return o;
         },
-        posX: id => buffer.posX[id as unknown as number] ?? 0,
-        posY: id => buffer.posY[id as unknown as number] ?? 0,
-        halfWidth: id => halfExtent(id, 'w'),
-        halfHeight: id => halfExtent(id, 'h'),
+        posX: (id) => buffer.posX[entityIndex(id)] ?? 0,
+        posY: (id) => buffer.posY[entityIndex(id)] ?? 0,
+        halfWidth: (id) => halfExtent(id, 'w'),
+        halfHeight: (id) => halfExtent(id, 'h'),
     };
 }

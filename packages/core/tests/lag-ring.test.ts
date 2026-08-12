@@ -1,6 +1,5 @@
-// The server-side lag ring / asSeen historical query (DESIGN §8.1, api_spec.ts asSeen).
-// A query reads a past capture and leaves the live simulation untouched: no step, no
-// invocation swept, no channel marked. The ring captures per tick on the server.
+// A historical query reads a past capture and leaves the live simulation untouched: no step,
+// no invocation swept, no channel marked.
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame } from '../src/runtime/load-game.js';
@@ -12,10 +11,22 @@ import { bounds } from '@platform/math';
 
 afterEach(() => clearRuntime());
 
-describe('lag ring (§8.1)', () => {
+describe('lag ring', () => {
     it('sizes to roughly MAX_REWIND_MS at the sim rate', () => {
-        const ring = new LagRing(loadGame({ simRate: 60 }).transforms, 60);
+        const rt = loadGame({ simRate: 60 });
+        const ring = new LagRing(rt.transforms, rt.entities, 60);
         expect(ring.depth).toBe(Math.ceil((60 * MAX_REWIND_MS) / 1000));
+    });
+
+    it('a capture answers in real EntityIds, so a historical hit resolves to the right entity', () => {
+        const rt = loadGame({ simRate: 60, bounds: bounds(-1000, 1000, 1000, -1000) });
+        const loop = new Loop(rt);
+        const crate = rt.gameInstance!.spawn('crate', 0, 0);
+        loop.step(1);
+
+        const hits = rt.lagRing!.broadphaseAt(1, () => 0)!.near(0, 0, 5);
+        expect(hits).toContain(crate.entityId);
+        expect(rt.entities.exists(hits[0]!)).toBe(true);
     });
 
     it('captures a past frame and answers overlaps against it, live world untouched', () => {
@@ -54,7 +65,7 @@ describe('lag ring (§8.1)', () => {
 
         rt.lagRing!.broadphaseAt(1, () => 0)?.near(0, 0, 100);
 
-        // A historical query reads a buffer and marks nothing (§8.1).
+        // A historical query reads a buffer and marks nothing.
         expect(rt.channels.structuralCount).toBe(0);
         expect(rt.channels.stateCount).toBe(0);
         expect(rt.transforms.consumeDirty()).toHaveLength(0);
