@@ -62,8 +62,27 @@ export class TransformStore {
     #nextSibling = new Int32Array(INITIAL_CAPACITY).fill(NONE);
     #depth = new Int32Array(INITIAL_CAPACITY);
 
-    /** Roots in insertion order. Needed because roots have no parent to hold a child list. */
-    readonly #rootOrder: number[] = [];
+    /**
+     * Roots in insertion order, with `NONE` for a slot that has left. Roots need this because they
+     * have no parent to hold a child list.
+     *
+     * Tombstoned rather than spliced: removal happens on every link, unlink and release, and an
+     * `indexOf` plus `splice` per call makes creating or destroying a node O(roots) — 20k flat
+     * sprites then cost more to tear down than to draw. `#rootAt` maps a slot to its position, and
+     * compaction runs once the tombstones outnumber the live entries.
+     */
+    #rootOrder: number[] = [];
+
+    /** Slot -> its index in `#rootOrder`. */
+    readonly #rootAt = new Map<number, number>();
+
+    /** Tombstones currently in `#rootOrder`. */
+    #rootHoles = 0;
+
+    // Reused by the resolve walk, which runs every frame and must not allocate.
+    readonly #pendingRoots: number[] = [];
+    readonly #stack: number[] = [];
+    readonly #depthStack: number[] = [];
 
     /** Nodes whose resolved position/visibility may be stale. Subtree scope. */
     readonly #resolveDirty = new Set<number>();
@@ -115,19 +134,20 @@ export class TransformStore {
         this.#reset(index);
         this.#flushDirty.add(index);
         this.#resolveDirty.add(index);
-        this.#rootOrder.push(index);
+        this.#addRoot(index);
     }
 
     /** Unlinks and resets the slot. Does NOT touch children — the caller cascades. */
     releaseSlot(index: number): void {
         if (!this.#has(index)) return;
-        this.unlink(index);
+        // Detached directly rather than through `unlink`, which would re-add it as a root only for
+        // the next line to take it back out.
+        this.#detach(index);
         this.#reset(index);
         this.#flushDirty.delete(index);
         this.#resolveDirty.delete(index);
         this.#resolvedChanged.delete(index);
-        const at = this.#rootOrder.indexOf(index);
-        if (at >= 0) this.#rootOrder.splice(at, 1);
+        this.#removeRoot(index);
     }
 
     /** Drops all state. */
@@ -135,6 +155,8 @@ export class TransformStore {
         for (let i = 0; i < this.#count; i++) this.#reset(i);
         this.#count = 0;
         this.#rootOrder.length = 0;
+        this.#rootAt.clear();
+        this.#rootHoles = 0;
         this.#resolveDirty.clear();
         this.#flushDirty.clear();
         this.#resolvedChanged.clear();
@@ -317,7 +339,7 @@ export class TransformStore {
 
         if (parent === NONE) {
             this.#parent[child] = NONE;
-            this.#rootOrder.push(child);
+            this.#addRoot(child);
         } else {
             this.#parent[child] = parent;
             const last = this.#lastChild[parent] as number;
@@ -368,29 +390,37 @@ export class TransformStore {
         return out;
     }
 
-    /** `index` and every descendant, parent before child. */
+    /**
+     * `index` and every descendant, parent before child.
+     *
+     * Breadth-first over `out` itself: the queue head walks the array being filled, so excluding the
+     * root costs one extra seeding pass rather than a second array — and never a spread, which
+     * throws once a node has more direct children than the engine's argument limit.
+     */
     subtree(index: number, out: number[] = [], includeRoot = true): number[] {
         out.length = 0;
         if (!this.#has(index)) return out;
-        if (includeRoot) out.push(index);
 
-        // Breadth-first over `out` itself when the root is included, else over a seeded queue.
-        const queue: number[] = includeRoot ? out : this.children(index, []);
-        if (!includeRoot) out.push(...queue);
+        if (includeRoot) {
+            out.push(index);
+        } else {
+            for (
+                let c = this.#firstChild[index] as number;
+                c !== NONE;
+                c = this.#nextSibling[c] as number
+            ) {
+                out.push(c);
+            }
+        }
 
-        for (let head = 0; head < queue.length; head++) {
-            const node = queue[head] as number;
+        for (let head = 0; head < out.length; head++) {
+            const node = out[head] as number;
             for (
                 let c = this.#firstChild[node] as number;
                 c !== NONE;
                 c = this.#nextSibling[c] as number
             ) {
-                if (includeRoot) {
-                    out.push(c);
-                } else {
-                    queue.push(c);
-                    out.push(c);
-                }
+                out.push(c);
             }
         }
         return out;
@@ -400,6 +430,7 @@ export class TransformStore {
     roots(out: number[] = []): number[] {
         out.length = 0;
         for (const index of this.#rootOrder) {
+            if (index === NONE) continue;
             if (this.#has(index) && (this.#parent[index] as number) === NONE) out.push(index);
         }
         return out;
@@ -415,16 +446,32 @@ export class TransformStore {
         this.#visits = 0;
         if (this.#resolveDirty.size === 0) return;
 
-        // Shallowest first, so an ancestor's walk absorbs its descendants' entries.
-        const pending = [...this.#resolveDirty].toSorted(
-            (a, b) => (this.#depth[a] as number) - (this.#depth[b] as number),
-        );
+        // Copied into a reused buffer, because `#resolveFrom` deletes from the set it walks and this
+        // runs every frame: sorting by depth would allocate two more arrays to reach the same place
+        // the ancestor check below reaches for nothing.
+        const pending = this.#pendingRoots;
+        pending.length = 0;
+        for (const index of this.#resolveDirty) pending.push(index);
 
         for (const index of pending) {
             if (!this.#resolveDirty.has(index)) continue;
+            // An entry whose ancestor is also dirty is reached by that ancestor's walk, so skipping
+            // it here is what keeps a subtree from being composed twice.
+            if (this.#hasDirtyAncestor(index)) continue;
             this.#resolveFrom(index);
         }
         this.#resolveDirty.clear();
+    }
+
+    /**
+     * Marks a node's local values as needing a push to the backend.
+     *
+     * For a change the store does not hold — a texture swap, a new string — whose SIZE still feeds
+     * bounds and culling.
+     */
+    markFlushDirty(index: number): void {
+        if (!this.#has(index)) return;
+        this.#flushDirty.add(index);
     }
 
     /** Drains the flush-dirty set: nodes whose local values changed. */
@@ -456,6 +503,18 @@ export class TransformStore {
         return index >= 0 && index < this.#count && Number.isInteger(index);
     }
 
+    /** `true` when any ancestor of `index` is itself waiting to be resolved. */
+    #hasDirtyAncestor(index: number): boolean {
+        for (
+            let walk = this.#parent[index] as number;
+            walk !== NONE;
+            walk = this.#parent[walk] as number
+        ) {
+            if (this.#resolveDirty.has(walk)) return true;
+        }
+        return false;
+    }
+
     /**
      * Composes `index` and its descendants from its parent's resolved values.
      *
@@ -463,7 +522,9 @@ export class TransformStore {
      * not risk the JS stack.
      */
     #resolveFrom(index: number): void {
-        const stack = [index];
+        const stack = this.#stack;
+        stack.length = 0;
+        stack.push(index);
         while (stack.length > 0) {
             const node = stack.pop() as number;
             this.#resolveDirty.delete(node);
@@ -516,8 +577,7 @@ export class TransformStore {
             if ((this.#firstChild[parent] as number) === child) this.#firstChild[parent] = next;
             if ((this.#lastChild[parent] as number) === child) this.#lastChild[parent] = prev;
         } else {
-            const at = this.#rootOrder.indexOf(child);
-            if (at >= 0) this.#rootOrder.splice(at, 1);
+            this.#removeRoot(child);
         }
 
         this.#prevSibling[child] = NONE;
@@ -527,7 +587,9 @@ export class TransformStore {
 
     /** Rewrites `depth` for `index` and everything under it, after a move. */
     #refreshDepth(index: number): void {
-        const stack = [index];
+        const stack = this.#depthStack;
+        stack.length = 0;
+        stack.push(index);
         while (stack.length > 0) {
             const node = stack.pop() as number;
             const parent = this.#parent[node] as number;
@@ -540,6 +602,35 @@ export class TransformStore {
                 stack.push(c);
             }
         }
+    }
+
+    /** Appends a slot to the root order. */
+    #addRoot(index: number): void {
+        if (this.#rootAt.has(index)) return;
+        this.#rootAt.set(index, this.#rootOrder.length);
+        this.#rootOrder.push(index);
+    }
+
+    /** Tombstones a slot's entry in the root order, compacting once the holes dominate. */
+    #removeRoot(index: number): void {
+        const at = this.#rootAt.get(index);
+        if (at === undefined) return;
+        this.#rootOrder[at] = NONE;
+        this.#rootAt.delete(index);
+        this.#rootHoles++;
+        if (this.#rootHoles > this.#rootAt.size) this.#compactRoots();
+    }
+
+    /** Drops the tombstones, preserving insertion order. */
+    #compactRoots(): void {
+        const live: number[] = [];
+        for (const index of this.#rootOrder) {
+            if (index === NONE) continue;
+            this.#rootAt.set(index, live.length);
+            live.push(index);
+        }
+        this.#rootOrder = live;
+        this.#rootHoles = 0;
     }
 
     /** Restores one slot to its defaults. */

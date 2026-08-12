@@ -51,6 +51,9 @@ renderer.render();
 - **A child inherits position and visibility. Nothing else, ever.** Rotation, scale, alpha and
   tint stop at the node that declares them, so a nameplate follows its parent without inheriting
   its spin or fade. There is no opt-in mode.
+- **UI is anchored and design-scaled, world is not.** A `ui` node sits at its surface root's
+  `uiAnchor` plus its offset in design px, y-down and scaled by `fitScale`; a world node is in world
+  px, y-up. The two take different paths through the same sink.
 - **World text goes through `createTextAsset` first**, then becomes a sprite node.
   `kind: 'text'` is UI-surface only, and `setNodeText` is therefore UI-only too.
 - **A context loss needs no caller rebuild path.** Store mutations apply immediately, GPU
@@ -75,7 +78,7 @@ src/
 ├── transform-store.ts  PURE: SoA graph, position/visible resolve, dirty
 ├── bounds.ts           PURE: local bounds, rotated AABB, cull test
 ├── node-store.ts       PURE: slot table, freelist, generations
-├── asset-queue.ts      PURE: per-name intent map, manifest merge
+├── asset-queue.ts      PURE: per-name intent map, manifest merge, entry validation
 ├── core/               PURE: everything both backends share
 │   ├── renderer-core.ts    stores, validation, hierarchy, resolve/cull, projection
 │   └── scene-sink.ts       the seam a backend implements
@@ -106,11 +109,13 @@ measures text with a real font, a headless one cannot.
 
 `tests/contract/renderer-contract.ts` is a reusable suite — `runRendererContract(() =>
 createNullRenderer())` — covering handle lifecycle, stale-handle no-ops, freelist reuse,
-position-only inheritance, destroy cascade, layer reordering, camera/viewport math and transform
-round-trips. It runs against `NullRenderer` today; when a browser-mode vitest target exists it
-runs unchanged against `PixiRenderer`, and it is the acceptance test for any future backend.
+position-only inheritance, destroy cascade, camera/viewport math, UI anchoring, invalid asset entries
+and transform round-trips. It runs against `NullRenderer` today; when a browser-mode vitest target
+exists it runs unchanged against `PixiRenderer`, and it is the acceptance test for any future
+backend.
 
-Pixi itself is not unit-tested — there is no WebGL in Node. The mitigation is
-architectural: every piece of arithmetic lives in a pure module, and `pixi-renderer.ts` stays
-thin delegation. Two things Pixi could get wrong silently are named browser-mode tests rather
-than assumptions: dual-composition agreement and `preventDefault()` on `webglcontextlost`.
+Pixi's GPU half is not unit-tested — there is no WebGL in Node — but everything below
+`Application` is: `Container`, `Sprite` and `Text` are plain objects, so `pixi-sink.test.ts` drives
+real placement through the real sink, and `asset-registry.test.ts` drives real texture release. What
+genuinely needs a browser is named rather than assumed: dual-composition agreement and
+`preventDefault()` on `webglcontextlost`.
