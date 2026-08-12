@@ -1,0 +1,32 @@
+{
+    "name": "@platform/protocol",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "The shared wire vocabulary: the envelope types both endpoints agree on. The binary codec and wire versioning land here later.",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc -b",
+        "typecheck": "tsc -p tsconfig.test.json",
+        "test": "vitest run --passWithNoTests",
+        "clean": "rm -rf dist .turbo"
+    },
+    "dependencies": {
+        "@platform/transport": "workspace:*"
+    },
+    "devDependencies": {
+        "@platform/core": "workspace:*",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    }
+}
