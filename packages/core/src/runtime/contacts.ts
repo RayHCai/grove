@@ -1,11 +1,4 @@
-// The ContactSource over the Broadphase (DESIGN §2, §5.4). getTouching / isTouching /
-// @onCollide / @onEnter / @onExit run against it. Cost is O(n²) per tick, no rotation, no
-// sub-AABB shapes — the one place core computes geometry it will later delegate. Both
-// collider kinds count; isTrigger decides whether you were stopped, not whether touching.
-// Excludes self and own parent/children; engine-stable order (ascending id).
-//
-// asSeen resolves against a captured past frame via a throwaway Broadphase over a ring
-// buffer (§8.1) — reads the past, never writes the present.
+// isTrigger decides whether a body was stopped, not whether it touches, so both kinds count here.
 
 import type { EntityId } from '../ids.js';
 import { Broadphase } from '../world/broadphase.js';
@@ -15,17 +8,22 @@ import type { Entity } from './entity.js';
 
 export class ContactSource {
     readonly #rt: Runtime;
+    readonly #view: TransformView;
     readonly #live: Broadphase;
+    readonly #ids: EntityId[] = [];
+    readonly #halfExtent = (id: EntityId, axis: 'w' | 'h'): number =>
+        halfExtent(this.#rt, id, axis);
 
     constructor(rt: Runtime) {
         this.#rt = rt;
-        this.#live = new Broadphase(this.#viewOverLive());
+        this.#view = viewOverLive(rt);
+        this.#live = new Broadphase(this.#view);
     }
 
-    /** Entities overlapping `id` this tick, optionally filtered by tag (§5.4 semantics). */
+    /** Entities overlapping `id` this tick, optionally filtered by tag. */
     touching(id: EntityId, tag: string | undefined, asSeen: boolean): Entity[] {
         if (!this.#rt.entityManager.facade(id).collider) {
-            return []; // no collider means an empty array, never null (§5.4)
+            return [];
         }
         const bp = asSeen ? this.#historicalBroadphase() : this.#live;
         const hits = bp.overlapping(id);
@@ -39,15 +37,18 @@ export class ContactSource {
         return out;
     }
 
-    /** Pairs overlapping this tick, for the tick's @onCollide dispatch (loop step 5). */
+    /** Overlapping pairs for this tick's @onCollide dispatch. */
     pairs(out: Array<[EntityId, EntityId]> = []): Array<[EntityId, EntityId]> {
         out.length = 0;
-        const ids = this.#rt.entities.liveIds();
+        // Both arrays are reused: this is O(n²) per tick, so allocating inside the loops put a
+        // view object and five closures per candidate pair on the GC.
+        const ids = this.#rt.entities.liveIds(this.#ids);
         for (let i = 0; i < ids.length; i++) {
             const a = ids[i]!;
+            const parent = this.#rt.entities.record(a)?.parent;
             for (let j = i + 1; j < ids.length; j++) {
                 const b = ids[j]!;
-                if (this.#isSelfOrKin(a, b, this.#rt.entities.record(a)?.parent)) continue;
+                if (this.#isSelfOrKin(a, b, parent)) continue;
                 if (this.#overlaps(a, b)) out.push([a, b]);
             }
         }
@@ -58,34 +59,31 @@ export class ContactSource {
         if (id === other) return true;
         if (parent !== undefined && parent === other) return true;
         const otherRec = this.#rt.entities.record(other);
-        return otherRec?.parent === id; // other is my child
+        return otherRec?.parent === id;
     }
 
     #overlaps(a: EntityId, b: EntityId): boolean {
-        const view = this.#viewOverLive();
+        const view = this.#view;
         return (
             Math.abs(view.posX(a) - view.posX(b)) <= view.halfWidth(a) + view.halfWidth(b) &&
             Math.abs(view.posY(a) - view.posY(b)) <= view.halfHeight(a) + view.halfHeight(b)
         );
     }
 
-    #viewOverLive(): TransformView {
-        const rt = this.#rt;
-        return {
-            liveIds: (o?: EntityId[]) => rt.entities.liveIds(o),
-            posX: id => rt.transforms.posX(id),
-            posY: id => rt.transforms.posY(id),
-            halfWidth: id => halfExtent(rt, id, 'w'),
-            halfHeight: id => halfExtent(rt, id, 'h'),
-        };
-    }
-
-    /** A throwaway index over the most recent ring capture (§8.1), or the live one if empty. */
+    /** Reads a past capture and marks nothing, so an `asSeen` query is invisible to replication. */
     #historicalBroadphase(): Broadphase {
-        return (
-            this.#rt.lagRing?.broadphaseAtLatest((id, axis) => halfExtent(this.#rt, id, axis)) ?? this.#live
-        );
+        return this.#rt.lagRing?.broadphaseAtLatest(this.#halfExtent) ?? this.#live;
     }
+}
+
+function viewOverLive(rt: Runtime): TransformView {
+    return {
+        liveIds: (o?: EntityId[]) => rt.entities.liveIds(o),
+        posX: (id) => rt.transforms.posX(id),
+        posY: (id) => rt.transforms.posY(id),
+        halfWidth: (id) => halfExtent(rt, id, 'w'),
+        halfHeight: (id) => halfExtent(rt, id, 'h'),
+    };
 }
 
 function halfExtent(rt: Runtime, id: EntityId, axis: 'w' | 'h'): number {
