@@ -1,10 +1,10 @@
-// Our `TextStyle` -> Pixi's. A mapping file, no policy.
+// Our `TextStyle` -> Pixi's, with the clamps that keep a caller-supplied style from reaching the
+// GPU as an unbounded raster or a colour pixi refuses.
 //
-// Built with conditional spread throughout: `exactOptionalPropertyTypes` makes
-// `{fontSize: undefined}` a compile error, so an absent field must be an ABSENT KEY rather than
-// an undefined value. That is why this reads as a pile of spreads instead of an object literal.
+// Conditional spread throughout, because `exactOptionalPropertyTypes` makes `{fontSize: undefined}`
+// a compile error: an absent field has to be an absent key.
 
-import { TextStyle as PixiTextStyle } from 'pixi.js';
+import type { TextStyle as PixiTextStyle } from 'pixi.js';
 import type { TextStyle } from '../renderer.js';
 
 /** Pixi's default when a style omits `font`. */
@@ -34,11 +34,6 @@ function color(value: number | undefined, fallback: number): number {
 function dimension(value: number, max: number): number {
     if (!Number.isFinite(value) || value <= 0) return 1;
     return Math.min(value, max);
-}
-
-/** Builds the Pixi style for one of our `TextStyle`s. */
-export function toPixiTextStyle(style: TextStyle | undefined): PixiTextStyle {
-    return new PixiTextStyle(toPixiTextStyleOptions(style));
 }
 
 /**

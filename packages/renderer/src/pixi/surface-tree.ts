@@ -18,6 +18,9 @@ export class SurfaceTree {
     readonly #roots = new Map<Surface, Container>();
     readonly #masks = new Map<Surface, Graphics>();
 
+    /** The mask geometry currently recorded, so an unchanged stage re-records nothing. */
+    #maskShape: string | null = null;
+
     /** The container every surface root is added to. */
     readonly stage: Container;
 
@@ -85,6 +88,14 @@ export class SurfaceTree {
     ): void {
         const active = isLetterboxed(camera.framing ?? 'stage', scaleMode, letterbox);
 
+        // `clear()` + `rect()` + `fill()` costs a re-triangulation and a buffer upload, and this
+        // runs off `setCamera` — every frame — for a rectangle that only changes on resize.
+        const shape = active
+            ? `${stageRect.left},${stageRect.top},${stageRect.right},${stageRect.bottom}`
+            : null;
+        if (shape === this.#maskShape) return;
+        this.#maskShape = shape;
+
         for (const [surface, root] of this.#roots) {
             if (!isClippedWhenLetterboxed(surface)) continue;
 
@@ -116,6 +127,7 @@ export class SurfaceTree {
 
     /** Destroys every root and mask. */
     destroy(): void {
+        this.#maskShape = null;
         for (const [surface, root] of this.#roots) {
             this.#clearMask(surface, root);
             root.destroy({ children: true });
