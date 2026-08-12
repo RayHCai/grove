@@ -3,11 +3,15 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Transport interface with loopback, worker, and websocket implementations.",
+    "description": "Per-connection message pipe: a leaf interface with a loopback implementation; websocket to come.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./testing": {
+            "types": "./dist/testing/index.d.ts",
+            "import": "./dist/testing/index.js"
         }
     },
     "main": "./dist/index.js",
@@ -21,8 +25,13 @@
         "test": "vitest run --passWithNoTests",
         "clean": "rm -rf dist .turbo"
     },
-    "dependencies": {
-        "@platform/core": "workspace:*"
+    "peerDependencies": {
+        "vitest": "^4.1.10"
+    },
+    "peerDependenciesMeta": {
+        "vitest": {
+            "optional": true
+        }
     },
     "devDependencies": {
         "typescript": "^7.0.2",
