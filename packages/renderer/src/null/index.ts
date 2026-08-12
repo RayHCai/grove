@@ -1,9 +1,6 @@
-// The headless backend's entry point — `@platform/renderer/null`.
-//
-// A FACTORY, not a class export (§11.1): callers hold the `IRenderer` type, not an inheritance
-// relationship. The class is exported too, because the contract suite needs its test-only
-// observability members (`isCulled`, `drawOrderOf`) which are deliberately absent from
-// `IRenderer`.
+// A factory, not a class export, so callers hold the `IRenderer` type rather than an inheritance
+// relationship. The class is exported too, for the test-only observability members the contract
+// suite needs and `IRenderer` deliberately lacks.
 
 import type { IRenderer } from '../renderer.js';
 import { NullRenderer } from './null-renderer.js';

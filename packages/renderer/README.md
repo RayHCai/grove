@@ -50,16 +50,16 @@ renderer.render();
   renderer owns no clock. Frame animation is the client picking a texture name per frame.
 - **A child inherits position and visibility. Nothing else, ever.** Rotation, scale, alpha and
   tint stop at the node that declares them, so a nameplate follows its parent without inheriting
-  its spin or fade. There is no opt-in mode (§5).
+  its spin or fade. There is no opt-in mode.
 - **World text goes through `createTextAsset` first**, then becomes a sprite node.
-  `kind: 'text'` is UI-surface only, and `setNodeText` is therefore UI-only too (§9.3).
+  `kind: 'text'` is UI-surface only, and `setNodeText` is therefore UI-only too.
 - **A context loss needs no caller rebuild path.** Store mutations apply immediately, GPU
-  operations queue, and node ids survive — so the frame loop needs no branch (§10).
+  operations queue, and node ids survive — so the frame loop needs no branch.
 - **`cullMargin` is world pixels**, not CSS pixels, so 64 means the same slack at every zoom.
 - **`inspect()` is the only method for tooling**, and the only one that allocates per call. It
   returns a copied `SceneSnapshot` — roots per surface in draw order, every live node, the view
   state — because enumeration is impossible through the per-node queries, which all walk down from a
-  handle you already hold. Dev only: never per frame, never branched on (§11.2).
+  handle you already hold. Dev only: never per frame, never branched on.
 
 ## Layout
 
@@ -110,8 +110,7 @@ position-only inheritance, destroy cascade, layer reordering, camera/viewport ma
 round-trips. It runs against `NullRenderer` today; when a browser-mode vitest target exists it
 runs unchanged against `PixiRenderer`, and it is the acceptance test for any future backend.
 
-Pixi itself is not unit-tested — there is no WebGL in Node (§15). The mitigation is
+Pixi itself is not unit-tested — there is no WebGL in Node. The mitigation is
 architectural: every piece of arithmetic lives in a pure module, and `pixi-renderer.ts` stays
 thin delegation. Two things Pixi could get wrong silently are named browser-mode tests rather
-than assumptions: dual-composition agreement (§6.5) and `preventDefault()` on
-`webglcontextlost` (§10).
+than assumptions: dual-composition agreement and `preventDefault()` on `webglcontextlost`.

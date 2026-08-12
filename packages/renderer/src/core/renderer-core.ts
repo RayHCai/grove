@@ -1,17 +1,11 @@
-// Everything both backends share, in ONE copy.
+// Everything both backends share, in one copy: the two stores, handle validation, the validation
+// order the contract asserts, hierarchy, the resolve/flush/cull pass, projection and bounds,
+// non-GPU asset bookkeeping, and the event emitter.
 //
-// This exists because the two backends were duplicating it: 15 methods byte-identical and a dozen
-// more at 72-98% similarity, including the whole of `createNode`'s validation — and the contract
-// suite only ran against one of them, so a divergence would have gone unnoticed. It already had:
-// the headless cull path ignored surface visibility while the Pixi one skipped hidden surfaces, so
-// the same scene could report different `culled` state per backend.
-//
-// WHAT LIVES HERE: the two stores, handle validation, the validation ORDER the contract asserts,
-// hierarchy with the attach/detach asymmetry (§11.1), the resolve/flush/cull pass, projection and
-// bounds, asset bookkeeping that is not GPU-specific, and the event emitter.
-//
-// WHAT DOES NOT: anything touching a display object or a GPU resource. That goes through
-// `SceneSink`, and a backend is the only place a Pixi type may appear.
+// Anything touching a display object or a GPU resource goes through `SceneSink` instead, and a
+// backend is the only place a Pixi type may appear. Before this class existed the two backends had
+// already drifted: the headless cull path ignored surface visibility while the Pixi one skipped
+// hidden surfaces, and only one backend was under test.
 
 import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import { bounds, boundsCopy, boundsSet, vec3, vec3Set } from '@platform/math';
@@ -33,7 +27,7 @@ import type {
 import type { NodeId } from '../node-id.js';
 import { NO_NODE } from '../node-id.js';
 import { rendererError } from '../errors.js';
-import { DEFAULT_SURFACES, isCameraTransformed, surfaceOrder } from '../surfaces.js';
+import { DEFAULT_SURFACES, isCameraTransformed, isSurface, surfaceOrder } from '../surfaces.js';
 import type { NodeKind, NodeRecord } from '../node-store.js';
 import { NodeStore } from '../node-store.js';
 import { TransformStore } from '../transform-store.js';
@@ -62,12 +56,7 @@ export interface CoreConfig {
     enabledSurfaces: Surface[];
 }
 
-/**
- * Validates raw init options and applies every default.
- *
- * Shared so both backends reject the same inputs with the same codes — the contract suite asserts
- * that, and it is the kind of thing that silently drifts when duplicated.
- */
+/** Validates raw init options and applies every default, so both backends reject the same inputs. */
 export function resolveInitOptions(
     options: RendererInitOptions,
     canvas: Size,
@@ -82,6 +71,14 @@ export function resolveInitOptions(
     if (options.cullMargin !== undefined && options.cullMargin < 0) {
         rendererError('invalid-option', 'cullMargin must not be negative');
     }
+    // Deduped and checked, because an unrecognised string would otherwise pass `isSurfaceEnabled`
+    // and let `createNode` place a node on a surface no backend built a root for.
+    const enabledSurfaces = [...new Set(options.enabledSurfaces ?? DEFAULT_SURFACES)];
+    for (const surface of enabledSurfaces) {
+        if (!isSurface(surface)) {
+            rendererError('invalid-option', `'${String(surface)}' is not a surface`);
+        }
+    }
 
     return {
         design: { width: options.design.width, height: options.design.height },
@@ -90,15 +87,11 @@ export function resolveInitOptions(
         letterbox: options.letterbox ?? true,
         cullMargin: options.cullMargin ?? DEFAULT_CULL_MARGIN,
         resolution,
-        enabledSurfaces: [...(options.enabledSurfaces ?? DEFAULT_SURFACES)],
+        enabledSurfaces,
     };
 }
 
-/**
- * The backend-independent renderer.
- *
- * A backend owns one of these plus a {@link SceneSink}, and forwards its `IRenderer` methods here.
- */
+/** A backend owns one of these plus a {@link SceneSink}, and forwards its `IRenderer` calls here. */
 export class RendererCore {
     readonly nodes = new NodeStore();
     readonly xf = new TransformStore();
@@ -124,8 +117,6 @@ export class RendererCore {
         this.recomputeRects();
     }
 
-    // ─── config ─────────────────────────────────────────────────────
-
     get config(): Readonly<CoreConfig> {
         return this.#config;
     }
@@ -138,12 +129,15 @@ export class RendererCore {
         return this.#config.resolution;
     }
 
+    // Copied, not the live rect: `recomputeRects` overwrites these in place every frame, so a
+    // caller holding one would watch it rewrite itself and could never detect a change.
+
     get stageRect(): Readonly<Bounds> {
-        return this.#stage;
+        return boundsCopy(bounds(), this.#stage);
     }
 
-    get viewport(): Bounds {
-        return this.#viewport;
+    get viewport(): Readonly<Bounds> {
+        return boundsCopy(bounds(), this.#viewport);
     }
 
     get camera(): Readonly<CameraState> {
@@ -157,15 +151,17 @@ export class RendererCore {
     }
 
     setCamera(camera: Readonly<CameraState>): void {
-        // Copied, not retained: a caller may reuse one camera object every frame. The renderer
-        // NEVER clamps a camera — `camera.bounds` is engine-enforced (§4.1).
+        // Copied, not retained, since a caller may reuse one camera object every frame. Never
+        // clamped to `camera.bounds`, which is engine-enforced — but non-finite values are
+        // rejected here, because a NaN reaching the backend blanks every camera-transformed
+        // surface with no trace of where it came from.
         this.#camera = {
             position: {
-                x: camera.position.x,
-                y: camera.position.y,
-                z: camera.position.z ?? 0,
+                x: finiteOr(camera.position.x, 0),
+                y: finiteOr(camera.position.y, 0),
+                z: finiteOr(camera.position.z ?? 0, 0),
             },
-            zoom: camera.zoom,
+            zoom: positiveOr(camera.zoom, 1),
             framing: camera.framing ?? 'stage',
         };
         this.recomputeRects();
@@ -198,14 +194,11 @@ export class RendererCore {
         return fitScale(this.#camera.framing ?? 'stage', scaleMode, canvas, design);
     }
 
-    // ─── nodes ──────────────────────────────────────────────────────
-
     /**
      * Validates and allocates a node.
      *
-     * VALIDATION ORDER IS PART OF THE CONTRACT — surface enabled, then text-on-camera-surface,
-     * then empty texture, then the parent checks. The suite asserts each throw, and a backend
-     * reordering them would change which error a caller sees.
+     * The order of the checks is part of the contract — surface, then text-on-camera-surface, then
+     * texture, then parent — because reordering them changes which error a caller sees.
      */
     createNode(desc: NodeDesc): NodeId {
         const surface = desc.surface ?? 'world';
@@ -219,7 +212,7 @@ export class RendererCore {
             rendererError(
                 'text-node-on-world-surface',
                 `kind: 'text' is UI-only; for world text call createTextAsset(name, text) and ` +
-                    `create a sprite node with that texture (§9.3)`,
+                    `create a sprite node with that texture`,
             );
         }
         if (desc.kind === 'sprite' && desc.texture === '') {
@@ -242,17 +235,13 @@ export class RendererCore {
         const index = this.nodes.indexOf(id);
         this.xf.initSlot(index);
 
-        if (desc.position !== undefined) {
-            this.xf.setPosition(index, desc.position.x, desc.position.y, desc.position.z ?? 0);
-        }
+        if (desc.position !== undefined) this.#writePosition(index, desc.position);
         if (desc.visible !== undefined) this.xf.setVisible(index, desc.visible);
-        if (desc.rotation !== undefined) this.xf.setRotation(index, desc.rotation);
-        if (desc.scale !== undefined) {
-            this.xf.setScale(index, desc.scale.x, desc.scale.y, desc.scale.z ?? 1);
-        }
-        if (desc.alpha !== undefined) this.xf.setAlpha(index, desc.alpha);
-        if (desc.anchor !== undefined) this.xf.setAnchor(index, desc.anchor.x, desc.anchor.y);
-        if (desc.tint !== undefined) this.xf.setTint(index, desc.tint);
+        if (desc.rotation !== undefined) this.xf.setRotation(index, finiteOr(desc.rotation, 0));
+        if (desc.scale !== undefined) this.#writeScale(index, desc.scale);
+        if (desc.alpha !== undefined) this.xf.setAlpha(index, finiteOr(desc.alpha, 1));
+        if (desc.anchor !== undefined) this.#writeAnchor(index, desc.anchor);
+        if (desc.tint !== undefined) this.xf.setTint(index, finiteOr(desc.tint, 0xffffff));
         if (desc.neverCull !== undefined) this.xf.setNeverCull(index, desc.neverCull);
         if (parentIndex >= 0) this.xf.link(index, parentIndex);
 
@@ -262,14 +251,11 @@ export class RendererCore {
 
     destroyNode(id: NodeId): void {
         const index = this.nodes.indexOf(id);
-        // A stale handle is a legitimate race — `entity.destroy()` mid-frame — so it is a no-op,
-        // not a throw (§7).
+        // A stale handle is a legitimate race — `entity.destroy()` mid-frame — so it no-ops.
         if (index < 0) return;
 
-        // Cascades, matching `Entity.destroy()` (api_spec.ts:256).
-        const subtree = this.xf.subtree(index, [], true);
-        const descendants = subtree.slice(1);
-        this.#sink.destroySubtree(index, descendants);
+        const subtree = this.xf.subtree(index, this.#subtreeOut, true);
+        this.#sink.destroySubtree(subtree);
 
         // Deepest first, so a released slot is never a live node's parent.
         for (let i = subtree.length - 1; i >= 0; i--) {
@@ -280,7 +266,7 @@ export class RendererCore {
     }
 
     updateNodes(patches: readonly NodePatch[]): void {
-        // Retains nothing past the call — not the array, not any patch object (§11.1).
+        // Retains nothing past the call — not the array, not any patch object.
         for (const patch of patches) {
             const index = this.nodes.indexOf(patch.id);
             if (index < 0) continue;
@@ -291,38 +277,7 @@ export class RendererCore {
                 if (patch.parent === NO_NODE) this.detachAt(index, true);
                 else this.attachAt(index, patch.parent, false);
             }
-            if (patch.position !== undefined) {
-                this.xf.setPosition(
-                    index,
-                    patch.position.x,
-                    patch.position.y,
-                    patch.position.z ?? 0,
-                );
-            }
-            if (patch.rotation !== undefined) this.xf.setRotation(index, patch.rotation);
-            if (patch.scale !== undefined) {
-                this.xf.setScale(index, patch.scale.x, patch.scale.y, patch.scale.z ?? 1);
-            }
-            if (patch.anchor !== undefined)
-                this.xf.setAnchor(index, patch.anchor.x, patch.anchor.y);
-            if (patch.alpha !== undefined) this.xf.setAlpha(index, patch.alpha);
-            if (patch.visible !== undefined) this.xf.setVisible(index, patch.visible);
-            if (patch.tint !== undefined) this.xf.setTint(index, patch.tint);
-            if (patch.layer !== undefined) {
-                record.layer = patch.layer;
-                this.#sink.setLayer(index, patch.layer);
-            }
-            // A `texture` on a non-sprite and a `text` on a non-UI-text node are IGNORED:
-            // wrong-shaped patches come from generic client code, not from a caller bug worth
-            // throwing over (§11.1).
-            if (patch.texture !== undefined && record.kind === 'sprite') {
-                record.texture = patch.texture;
-                this.#sink.setTexture(index, record);
-            }
-            if (patch.text !== undefined && record.kind === 'text') {
-                record.text = patch.text;
-                this.#sink.setText(index, patch.text);
-            }
+            this.#applyPatchAt(index, record, patch);
         }
     }
 
@@ -335,21 +290,77 @@ export class RendererCore {
         if (index < 0) return;
 
         const includeRoot = opts?.includeRoot ?? true;
-        // SET-ONLY, establishing no inheritance: a node attached later is unaffected (§5.1). The
-        // honest cost is that `{alpha: 0.5}` FLATTENS a subtree that had varied alphas.
+        // Set-only, establishing no inheritance, so a node attached later is unaffected — and
+        // `{alpha: 0.5}` flattens a subtree that had varied alphas.
+        //
+        // Applied by slot rather than through `updateNodes`, which would pack a handle per node
+        // only to unpack it again and allocate a patch object per node to carry it.
         for (const slot of this.xf.subtree(index, this.#subtreeOut, includeRoot)) {
-            const id = this.nodes.idAt(slot);
-            if (id === NO_NODE) continue;
-            this.updateNodes([{ ...patch, id }]);
+            const record = this.nodes.recordAt(slot);
+            if (record === null) continue;
+            this.#applyPatchAt(slot, record, patch);
         }
+    }
+
+    /** Applies every field a patch sets, for a slot whose record is already in hand. */
+    #applyPatchAt(
+        index: number,
+        record: NodeRecord,
+        patch: Omit<NodePatch, 'id' | 'parent'>,
+    ): void {
+        if (patch.position !== undefined) this.#writePosition(index, patch.position);
+        if (patch.rotation !== undefined) this.xf.setRotation(index, finiteOr(patch.rotation, 0));
+        if (patch.scale !== undefined) this.#writeScale(index, patch.scale);
+        if (patch.anchor !== undefined) this.#writeAnchor(index, patch.anchor);
+        if (patch.alpha !== undefined) this.xf.setAlpha(index, finiteOr(patch.alpha, 1));
+        if (patch.visible !== undefined) this.xf.setVisible(index, patch.visible);
+        if (patch.tint !== undefined) this.xf.setTint(index, finiteOr(patch.tint, 0xffffff));
+        if (patch.layer !== undefined) {
+            record.layer = finiteOr(patch.layer, 0);
+            this.#sink.setLayer(index, record.layer);
+        }
+        // A wrong-shaped patch comes from generic client code, not from a caller bug worth
+        // throwing over, so a `texture` on a non-sprite is ignored.
+        if (patch.texture !== undefined && record.kind === 'sprite') {
+            record.texture = patch.texture;
+            this.#sink.setTexture(index, record);
+        }
+        if (patch.text !== undefined && record.kind === 'text') {
+            record.text = patch.text;
+            this.#sink.setText(index, patch.text);
+        }
+    }
+
+    // A non-finite authored value would compose into every resolved position beneath it and reach
+    // the backend as a blank surface, so it is rejected at the boundary rather than in the store.
+
+    #writePosition(index: number, position: Vec3Like): void {
+        this.xf.setPosition(
+            index,
+            finiteOr(position.x, 0),
+            finiteOr(position.y, 0),
+            finiteOr(position.z ?? 0, 0),
+        );
+    }
+
+    #writeScale(index: number, scale: Vec3Like): void {
+        this.xf.setScale(
+            index,
+            finiteOr(scale.x, 1),
+            finiteOr(scale.y, 1),
+            finiteOr(scale.z ?? 1, 1),
+        );
+    }
+
+    #writeAnchor(index: number, anchor: Vec3Like): void {
+        this.xf.setAnchor(index, finiteOr(anchor.x, 0.5), finiteOr(anchor.y, 0.5));
     }
 
     setNodeText(id: NodeId, text: string): void {
         const index = this.nodes.indexOf(id);
         if (index < 0) return;
         const record = this.nodes.recordAt(index);
-        // UI-only: world text is an asset, so changing it means a new text asset and a texture
-        // swap (§9.3).
+        // World text is an asset, so changing it means a new text asset and a texture swap.
         if (record === null || record.kind !== 'text') return;
         record.text = text;
         this.#sink.setText(index, text);
@@ -371,33 +382,26 @@ export class RendererCore {
         }
     }
 
-    // ─── hierarchy ──────────────────────────────────────────────────
-
     /**
      * `attachNode`, handle lookup and default included.
      *
-     * `keepResolvedPosition` defaults to FALSE here and TRUE in {@link detachNode} — asymmetric on
-     * purpose, matching api_spec.ts:211-212 where `attachTo` says "position becomes local to
-     * parent" and `detach` says "keeps world position". Matching the creator API is worth more
-     * than internal symmetry (§11.1), and the pair lives here so neither backend can drift on it.
+     * `keepResolvedPosition` defaults to false here and true in {@link detachNode}: the asymmetry
+     * matches the creator API, where `attachTo` reinterprets and `detach` preserves.
      */
     attachNode(child: NodeId, parent: NodeId, opts?: { keepResolvedPosition?: boolean }): void {
         const index = this.nodes.indexOf(child);
-        // A stale handle is a race, so it is a no-op (§7).
         if (index < 0) return;
         this.attachAt(index, parent, opts?.keepResolvedPosition ?? false);
     }
 
-    /** `detachNode`, defaulting `keepResolvedPosition` to TRUE — "keeps world position". */
+    /** `detachNode`, defaulting `keepResolvedPosition` to true — it keeps world position. */
     detachNode(child: NodeId, opts?: { keepResolvedPosition?: boolean }): void {
         const index = this.nodes.indexOf(child);
         if (index < 0) return;
         this.detachAt(index, opts?.keepResolvedPosition ?? true);
     }
 
-    /**
-     * Creates a batch. No intra-batch parenting — a `parent` must already exist (§11.1).
-     */
+    /** Creates a batch. No intra-batch parenting — a `parent` must already exist. */
     createNodes(descs: readonly NodeDesc[], out: NodeId[] = []): NodeId[] {
         out.length = 0;
         for (const desc of descs) out.push(this.createNode(desc));
@@ -428,8 +432,7 @@ export class RendererCore {
             const wantZ = this.xf.resolvedZ(index);
             this.xf.link(index, parentIndex);
             this.xf.resolve();
-            // Only position inherits, so preserving a resolved position is plain subtraction of
-            // the new parent's resolved position — no matrix anywhere (§5).
+            // Only position inherits, so preserving one is subtraction, not a matrix.
             this.xf.setPosition(
                 index,
                 wantX - this.xf.resolvedX(parentIndex),
@@ -484,8 +487,6 @@ export class RendererCore {
         return this.nodes.recordAt(index)?.surface ?? null;
     }
 
-    // ─── transforms & bounds ────────────────────────────────────────
-
     localTransformOf(id: NodeId, out?: Transform): Transform | null {
         const index = this.nodes.indexOf(id);
         if (index < 0) return null;
@@ -501,7 +502,6 @@ export class RendererCore {
     resolvedTransformOf(id: NodeId, out?: Transform): Transform | null {
         const index = this.nodes.indexOf(id);
         if (index < 0) return null;
-        // Our store answers, never the backend (§6).
         this.xf.resolve();
         const t = out ?? blankTransform();
         vec3Set(
@@ -510,7 +510,7 @@ export class RendererCore {
             this.xf.resolvedY(index),
             this.xf.resolvedZ(index),
         );
-        // Rotation, scale and alpha are LOCAL here — for those, local IS resolved (§6.1).
+        // For rotation, scale and alpha local is resolved, since they do not inherit.
         t.rotation = this.xf.rotation(index);
         vec3Set(t.scale, this.xf.scaleX(index), this.xf.scaleY(index), this.xf.scaleZ(index));
         t.alpha = this.xf.alpha(index);
@@ -540,7 +540,7 @@ export class RendererCore {
 
         if (!isCameraTransformed(record.surface)) {
             // UI: the anchor origin plus the design-px offset, already in screen space (y-down).
-            const origin = this.#uiScreenPosition(index, record.uiAnchor, vec3());
+            const origin = this.#uiScreenPosition(index, vec3());
             const local = this.localBoundsAt(index, this.#scratchLocal);
             const scale = this.fitScale();
             return boundsSet(
@@ -568,7 +568,7 @@ export class RendererCore {
         this.xf.resolve();
 
         if (!isCameraTransformed(record.surface)) {
-            return this.#uiScreenPosition(index, record.uiAnchor, out);
+            return this.#uiScreenPosition(index, out);
         }
         return this.worldToScreen(
             {
@@ -592,7 +592,7 @@ export class RendererCore {
 
     localBoundsAt(index: number, out: Bounds): Bounds {
         const record = this.nodes.recordAt(index);
-        // Groups have zero extent, so they are never culled (§8).
+        // A group has no art, so it has no extent and is never culled.
         if (record === null || record.kind === 'group') return emptyLocalBounds(out);
 
         return spriteLocalBounds(
@@ -609,15 +609,13 @@ export class RendererCore {
         const local = this.localBoundsAt(index, this.#scratchLocal);
         return worldAabb(
             local,
-            // The node's OWN rotation: rotation does not inherit, so no ancestor walk (§8).
+            // Its own rotation: rotation does not inherit, so there is no ancestor walk.
             this.xf.rotation(index),
             this.xf.resolvedX(index),
             this.xf.resolvedY(index),
             out,
         );
     }
-
-    // ─── the frame ──────────────────────────────────────────────────
 
     /**
      * Resolves the store, pushes dirtied local values, then recomputes cull flags.
@@ -636,13 +634,12 @@ export class RendererCore {
         for (const index of this.nodes.liveIndices()) {
             const draw = this.#shouldDraw(index);
             this.xf.setCulled(index, !draw);
-            // Toggles the ART only. Children are siblings of art, so culling a parent cannot
-            // hide them (§8).
+            // The art only: children are siblings of art, so culling a parent cannot hide them.
             this.#sink.setRenderable(index, draw);
         }
     }
 
-    /** Recreates every display object from our records, then marks all dirty (§10). */
+    /** Recreates every display object from our records, then marks all dirty. */
     rebuildScene(): void {
         this.#sink.clearAll();
         // Parents before children, so a child always has somewhere to attach.
@@ -663,14 +660,7 @@ export class RendererCore {
         return index < 0 ? false : this.xf.culled(index);
     }
 
-    // ─── inspection ─────────────────────────────────────────────────
-
-    /**
-     * Root ids for one surface in DRAW ORDER — by `layer`, ties by insertion (§11.1).
-     *
-     * Lives here rather than on a backend because both need it and it is pure store reading. It
-     * was duplicated as a test-only member on the headless backend before `inspect` existed.
-     */
+    /** Root ids for one surface in draw order — by `layer`, ties by insertion. */
     drawOrderOf(surface: Surface): NodeId[] {
         return (
             this.xf
@@ -688,22 +678,18 @@ export class RendererCore {
     }
 
     /**
-     * The scene as a plain snapshot, for tooling (§11.2).
+     * The scene as a plain snapshot, for tooling.
      *
-     * ALLOCATES per node, deliberately: a debugger reading a live view of our SoA stores would see
-     * values change under it mid-walk and could mutate the scene through a leaked reference. Every
-     * field here is a copy.
-     *
-     * `assets` is supplied by the backend because asset residency is the one thing the core does
-     * not own — which is also why `missingTexture` takes a predicate rather than reading a map.
+     * Allocates per node deliberately: a debugger reading a live view of the SoA stores would see
+     * values change under it mid-walk and could mutate the scene through a leaked reference.
+     * `assets` arrives as an argument because residency is the one thing the core does not own.
      */
     inspect(
         opts: InspectOptions | undefined,
         assets: ReadonlyArray<{ name: string; size: Size }>,
         contextState: ContextState,
     ): SceneSnapshot {
-        // Resolve once up front: every node's `resolved` transform and world bounds depend on it,
-        // and re-resolving per node would be quadratic on a deep tree.
+        // Once up front, since re-resolving per node would be quadratic on a deep tree.
         this.xf.resolve();
 
         const resident = new Set(assets.map((asset) => asset.name));
@@ -731,7 +717,7 @@ export class RendererCore {
             const isCulled = this.xf.culled(slot);
             if (isCulled) culled++;
 
-            // A group has no art, so it has no extent to report (§8).
+            // A group has no art, so it has no extent to report.
             const hasBounds = !skipBounds && record.kind !== 'group';
 
             nodes.set(id, {
@@ -753,7 +739,7 @@ export class RendererCore {
                     ? boundsCopy(bounds(), this.worldBoundsAt(slot, this.#scratchWorld))
                     : null,
                 culled: isCulled,
-                // Only a sprite can miss a texture: group has none, and text carries its string.
+                // Only a sprite can miss a texture: a group has none, and text carries its string.
                 missingTexture: record.kind === 'sprite' && !resident.has(record.texture),
             });
         }
@@ -785,8 +771,8 @@ export class RendererCore {
     /**
      * A node's direct children in draw order.
      *
-     * Sibling order is `layer` then insertion, matching {@link drawOrderOf} for roots — a tree view
-     * that ordered roots one way and children another would misrepresent what draws on top.
+     * Same `layer`-then-insertion rule as {@link drawOrderOf} uses for roots: a tree view that
+     * ordered the two differently would misrepresent what draws on top.
      */
     #childrenInDrawOrder(index: number): NodeId[] {
         return this.xf
@@ -801,7 +787,7 @@ export class RendererCore {
             .filter((id) => id !== NO_NODE);
     }
 
-    /** How many live nodes reference an asset name — the `inUse` count of §9.2. */
+    /** How many live nodes reference an asset name — the `inUse` count. */
     referenceCount(name: string): number {
         let count = 0;
         for (const slot of this.nodes.liveIndices()) {
@@ -813,7 +799,7 @@ export class RendererCore {
         return count;
     }
 
-    /** Live slots whose sprite texture is `name` — used to repoint to the placeholder (§9.2). */
+    /** Live slots whose sprite texture is `name`, for repointing to the placeholder. */
     slotsUsingTexture(name: string, out: number[] = []): number[] {
         out.length = 0;
         for (const slot of this.nodes.liveIndices()) {
@@ -821,8 +807,6 @@ export class RendererCore {
         }
         return out;
     }
-
-    // ─── events ─────────────────────────────────────────────────────
 
     on<K extends EventName>(event: K, handler: (e: RendererEvents[K]) => void): () => void {
         let set = this.#listeners.get(event);
@@ -832,7 +816,6 @@ export class RendererCore {
         }
         const erased = handler as (e: never) => void;
         set.add(erased);
-        // Returns the unsubscribe function, matching api_spec.ts:264.
         return () => {
             set?.delete(erased);
         };
@@ -854,13 +837,11 @@ export class RendererCore {
         this.#listeners.clear();
     }
 
-    // ─── internals ──────────────────────────────────────────────────
-
     /** Validates a `parent` field and returns its slot index, or -1 when there is none. */
     #resolveParent(parent: NodeId | undefined, surface: Surface): number {
         if (parent === undefined || parent === NO_NODE) return NO_PARENT;
         const parentIndex = this.nodes.indexOf(parent);
-        // A dead parent is a race, so it degrades to "no parent" rather than throwing (§7).
+        // A dead parent is a race, so it degrades to "no parent" rather than throwing.
         if (parentIndex < 0) return NO_PARENT;
         const parentRecord = this.nodes.recordAt(parentIndex);
         if (parentRecord === null) return NO_PARENT;
@@ -873,32 +854,52 @@ export class RendererCore {
         return parentIndex;
     }
 
-    #uiScreenPosition(index: number, anchor: UiAnchor | undefined, out: MutableVec3): MutableVec3 {
+    /**
+     * A UI node's screen position: its anchoring ancestor's origin plus its resolved design-px
+     * offset, scaled by `fitScale`.
+     *
+     * The anchor comes from the node's surface ROOT, not from the node itself: `uiAnchor` is a
+     * root-only field, a child's resolved position already includes its ancestors' offsets, and
+     * taking a child's own anchor would add a second origin the backend never applies.
+     */
+    #uiScreenPosition(index: number, out: MutableVec3): MutableVec3 {
         return uiToScreen(
             {
                 x: this.xf.resolvedX(index),
                 y: this.xf.resolvedY(index),
                 z: this.xf.resolvedZ(index),
             },
-            anchor ?? 'top-left',
+            this.#anchorOf(index),
             this.#stage,
             this.fitScale(),
             out,
         );
     }
 
-    /** The §8 cull decision for one slot. */
+    /** The `uiAnchor` of a node's surface root, defaulting to `'top-left'`. */
+    #anchorOf(index: number): UiAnchor {
+        let root = index;
+        for (
+            let parent = this.xf.parent(root);
+            parent !== NO_PARENT;
+            parent = this.xf.parent(root)
+        ) {
+            root = parent;
+        }
+        return this.nodes.recordAt(root)?.uiAnchor ?? 'top-left';
+    }
+
+    /** The cull decision for one slot. */
     #shouldDraw(index: number): boolean {
         const record = this.nodes.recordAt(index);
         if (record === null) return false;
 
-        // Groups have no art, UI is never culled, and `neverCull` covers visuals that exceed
-        // their bounds — thick stroke, glow, emitter (§8).
+        // `neverCull` covers visuals that exceed their bounds: thick stroke, glow, emitter.
         if (record.kind === 'group') return true;
         if (!isCameraTransformed(record.surface)) return true;
         if (this.xf.neverCull(index)) return true;
-        // A hidden surface draws nothing anyway, so skip the arithmetic and leave the flag
-        // un-culled — the state a caller sees is then independent of surface visibility.
+        // A hidden surface draws nothing anyway, so the flag stays un-culled and the state a
+        // caller sees is independent of surface visibility.
         if (!this.#sink.surfaceVisible(record.surface)) return true;
 
         const world = this.worldBoundsAt(index, this.#scratchWorld);
@@ -909,8 +910,8 @@ export class RendererCore {
 /**
  * The snapshot for a renderer that is not live — before `init`, after `destroy`.
  *
- * Shared by both backends so `inspect()` never returns `null` and a consumer needs no guard: an
- * inspector panel mounting before init reads zero nodes rather than crashing.
+ * So `inspect()` never returns `null` and an inspector panel mounting before init reads zero nodes
+ * rather than crashing.
  */
 export function emptySnapshot(contextState: ContextState): SceneSnapshot {
     return {
@@ -926,6 +927,16 @@ export function emptySnapshot(contextState: ContextState): SceneSnapshot {
         assets: [],
         counts: { nodes: 0, culled: 0, surfaces: 0, assets: 0 },
     };
+}
+
+/** `value` when it is finite, else `fallback`. */
+function finiteOr(value: number, fallback: number): number {
+    return Number.isFinite(value) ? value : fallback;
+}
+
+/** `value` when it is finite and positive, else `fallback`. */
+function positiveOr(value: number, fallback: number): number {
+    return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 /** A zeroed `Transform`, for the `out`-less call path. */

@@ -1,31 +1,21 @@
-// PURE. The authoritative transform graph: structure-of-arrays over growable typed arrays,
-// indexed by the node id's slot index (§6.1).
+// Pure. The authoritative transform graph: structure-of-arrays over growable typed arrays,
+// indexed by slot index. The backend's tree mirrors this one, and nothing here asks it anything.
 //
-// WHY WE KEEP OUR OWN STORE AT ALL (§6): the backend's tree mirrors ours, but ours resolves
-// independently — for queries, for culling, and for the post-context-loss rebuild. Nothing
-// here asks the backend anything.
+// Only position and visibility inherit, which is why `resolved` holds three axes and one flag
+// rather than a full transform: for rotation, scale, alpha and tint, local IS resolved. Position
+// composition is therefore vector addition — no matrix, no decomposition.
 //
-// ONLY POSITION AND VISIBILITY INHERIT (§5). That is the whole reason `resolved` below holds
-// three axes and one flag rather than a full transform: for rotation, scale, alpha and tint,
-// LOCAL IS RESOLVED. Position composition is therefore plain vector addition — associative
-// and exact — and there is no matrix and no decomposition anywhere in the store.
+// Two distinct dirty sets, and conflating them is the easiest way to break this file:
 //
-// TWO DISTINCT DIRTY SETS, and conflating them is the easiest way to break this file:
+//   resolve-dirty   Subtree scope: a position/visibility write or a relink changes the resolved
+//                   values of that node and everything beneath it.
+//   flush-dirty     Single node: whose LOCAL values must reach the backend. The backend tree
+//                   composes for us, so moving a parent writes only the parent's local position,
+//                   and a rotation write resolve-dirties nothing at all.
 //
-//   resolve-dirty   SUBTREE scope. Writing position/visibility, or relinking, changes the
-//                   RESOLVED values of that node and everything beneath it. `resolve()`
-//                   recomposes those.
-//   flush-dirty     SINGLE NODE. Which nodes need their LOCAL values pushed to the backend.
-//                   Because the backend tree is nested and composes for us (§6.2), moving a
-//                   parent means writing only the PARENT's local position — the children's
-//                   locals did not change. So a position write flush-dirties ONE node while
-//                   resolve-dirtying a subtree, and a rotation write flush-dirties one node
-//                   and resolve-dirties NOTHING. 200 spinning enemies dirty 200 nodes (§5).
-//
-// `Float64Array` over `Float32Array` is deliberate: composed positions accumulate, and at
-// Grove's scale the memory difference is irrelevant while the drift is not (§6.1).
+// `Float64Array` because composed positions accumulate and the drift matters more than the bytes.
 
-/** Empty sentinel for the tree arrays. NOT 0 — slot 0 is a perfectly good node. */
+/** Empty sentinel for the tree arrays. Not 0 — slot 0 is a perfectly good node. */
 const NONE = -1;
 
 /** Slots the arrays start with. Growth doubles from here. */
@@ -37,13 +27,11 @@ const WHITE = 0xffffff;
 /**
  * The transform graph.
  *
- * Every method takes a SLOT INDEX, not a `NodeId` — handle validation happens in
- * `node-store.ts`, and this store is addressed by the index that validation yields. Callers
- * are expected to pass a live index; an out-of-range one is treated as absent rather than
- * throwing, so a race upstream degrades to a no-op here too (§7).
+ * Every method takes a slot index, not a `NodeId`: handle validation happens in `node-store.ts`.
+ * An out-of-range index is treated as absent rather than throwing, so a race upstream degrades
+ * to a no-op here too.
  */
 export class TransformStore {
-    // local — the authored values
     #posX = new Float64Array(INITIAL_CAPACITY);
     #posY = new Float64Array(INITIAL_CAPACITY);
     #posZ = new Float64Array(INITIAL_CAPACITY);
@@ -56,18 +44,17 @@ export class TransformStore {
     #anchorY = new Float64Array(INITIAL_CAPACITY);
     #tint = new Float64Array(INITIAL_CAPACITY);
 
-    // resolved — position and visibility ONLY (§6.1)
+    // Position and visibility are the only inherited values, so nothing else is resolved.
     #resolvedX = new Float64Array(INITIAL_CAPACITY);
     #resolvedY = new Float64Array(INITIAL_CAPACITY);
     #resolvedZ = new Float64Array(INITIAL_CAPACITY);
 
-    // flags
     #visible = new Uint8Array(INITIAL_CAPACITY);
     #resolvedVisible = new Uint8Array(INITIAL_CAPACITY);
     #neverCull = new Uint8Array(INITIAL_CAPACITY);
     #culled = new Uint8Array(INITIAL_CAPACITY);
 
-    // tree — intrusive sibling lists, so hierarchy costs no per-node allocation (§6.1)
+    // Intrusive sibling lists, so hierarchy costs no per-node allocation.
     #parent = new Int32Array(INITIAL_CAPACITY).fill(NONE);
     #firstChild = new Int32Array(INITIAL_CAPACITY).fill(NONE);
     #lastChild = new Int32Array(INITIAL_CAPACITY).fill(NONE);
@@ -84,20 +71,19 @@ export class TransformStore {
     /** Nodes whose LOCAL values must be pushed to the backend. Single-node scope. */
     readonly #flushDirty = new Set<number>();
 
-    /** Nodes whose resolved values actually changed in the last `resolve()`. */
+    /** Nodes whose resolved values changed since the last drain. */
     readonly #resolvedChanged = new Set<number>();
 
     #count = 0;
 
-    /** Nodes composed by the last `resolve()`. Observability, and the §6.1 perf contract. */
     #visits = 0;
 
     /**
      * How many nodes the last `resolve()` composed.
      *
-     * §6.1 promises resolve "skips clean subtrees", and that is a claim about WORK, not about
-     * output: an implementation that walks a nested dirty root twice still produces the right
-     * numbers. This counter is what makes the promise checkable.
+     * "Skips clean subtrees" is a claim about work, not output — an implementation that walks a
+     * nested dirty root twice still produces the right numbers — so this counter is what makes
+     * the claim checkable.
      */
     get lastResolveVisits(): number {
         return this.#visits;
@@ -109,13 +95,11 @@ export class TransformStore {
     }
 
     /**
-     * Roots of the pending resolve walk — the nodes whose subtrees `resolve()` would
-     * recompose.
+     * Roots of the pending resolve walk — the nodes whose subtrees `resolve()` would recompose.
      *
-     * Exposed because "did that write propagate further than it should have?" is otherwise
-     * unobservable: a rotation write that wrongly marked a subtree changes no resolved VALUE,
-     * so `consumeResolvedDirty` reports nothing either way and the bug is invisible. This is
-     * the only way a test can pin the §6.1 dirty scope.
+     * Exposed because a write that propagated further than it should have is otherwise
+     * unobservable: a rotation write that wrongly marked a subtree changes no resolved value, so
+     * `consumeResolvedDirty` reports nothing either way.
      */
     pendingResolveRoots(out: number[] = []): number[] {
         out.length = 0;
@@ -156,15 +140,12 @@ export class TransformStore {
         this.#resolvedChanged.clear();
     }
 
-    // ─── local writes ───────────────────────────────────────────────
-
     setPosition(index: number, x: number, y: number, z: number): void {
         if (!this.#has(index)) return;
         this.#posX[index] = x;
         this.#posY[index] = y;
         this.#posZ[index] = z;
-        // Position INHERITS, so the subtree's resolved values move with this node — but only
-        // this node's local values changed, so only it needs flushing (§6.2).
+        // The subtree's resolved values move with this node, but only this node's locals changed.
         this.#flushDirty.add(index);
         this.#resolveDirty.add(index);
     }
@@ -179,7 +160,7 @@ export class TransformStore {
     setRotation(index: number, degrees: number): void {
         if (!this.#has(index)) return;
         this.#rot[index] = degrees;
-        // Stops at this node (§5): nothing to re-resolve, anywhere.
+        // Rotation does not inherit, so there is nothing to re-resolve anywhere.
         this.#flushDirty.add(index);
     }
 
@@ -216,13 +197,11 @@ export class TransformStore {
         this.#flushDirty.add(index);
     }
 
-    /** Cull state is written by the flush pass, not by a caller patch — so it dirties nothing. */
+    /** Written by the flush pass, not by a caller patch, so it dirties nothing. */
     setCulled(index: number, culled: boolean): void {
         if (!this.#has(index)) return;
         this.#culled[index] = culled ? 1 : 0;
     }
-
-    // ─── local reads ────────────────────────────────────────────────
 
     posX(index: number): number {
         return this.#has(index) ? (this.#posX[index] as number) : 0;
@@ -280,8 +259,6 @@ export class TransformStore {
         return this.#has(index) ? this.#culled[index] === 1 : false;
     }
 
-    // ─── resolved reads — valid after resolve() ─────────────────────
-
     resolvedX(index: number): number {
         return this.#has(index) ? (this.#resolvedX[index] as number) : 0;
     }
@@ -297,8 +274,6 @@ export class TransformStore {
     resolvedVisible(index: number): boolean {
         return this.#has(index) ? this.#resolvedVisible[index] === 1 : false;
     }
-
-    // ─── tree ───────────────────────────────────────────────────────
 
     parent(index: number): number {
         return this.#has(index) ? (this.#parent[index] as number) : NONE;
@@ -325,18 +300,17 @@ export class TransformStore {
     }
 
     /**
-     * Appends `child` as `parent`'s LAST child; `parent === NONE` makes it a root.
+     * Appends `child` as `parent`'s last child; `parent === NONE` makes it a root.
      *
-     * Insertion-defined and stable, which is what makes "within a layer, order is
-     * insertion-defined" true (§11.1). Does NOT adjust local position — reinterpret vs.
-     * preserve is the caller's policy (§11.1).
+     * Stable, which is what makes "within a layer, order is insertion-defined" true. Does not
+     * adjust local position — reinterpret versus preserve is the caller's policy.
      */
     link(child: number, parent: number): void {
         if (!this.#has(child)) return;
         if (parent !== NONE && !this.#has(parent)) return;
         if (child === parent) return;
-        // A cycle is a caller bug and is rejected upstream; guard anyway so a slip cannot
-        // produce an unwalkable tree here.
+        // Rejected upstream as a caller bug; guarded again so a slip cannot leave an unwalkable
+        // tree behind.
         if (parent !== NONE && this.isAncestorOf(child, parent)) return;
 
         this.#detach(child);
@@ -368,12 +342,11 @@ export class TransformStore {
         this.link(child, NONE);
     }
 
-    /** `true` when `ancestor` IS `node` or is one of its ancestors — the §7 cycle check. */
+    /** `true` when `ancestor` is `node` or one of its ancestors — the cycle check. */
     isAncestorOf(ancestor: number, node: number): boolean {
         if (!this.#has(ancestor) || !this.#has(node)) return false;
         let walk = node;
-        // Bounded by the tree's depth; a malformed cycle would otherwise spin here, so the
-        // loop counts down from the slot count as a backstop.
+        // The slot-count countdown is a backstop: a malformed cycle would otherwise spin forever.
         for (let guard = this.#count; walk !== NONE && guard >= 0; guard--) {
             if (walk === ancestor) return true;
             walk = this.#parent[walk] as number;
@@ -395,14 +368,13 @@ export class TransformStore {
         return out;
     }
 
-    /** `index` and every descendant, PARENT BEFORE CHILD. */
+    /** `index` and every descendant, parent before child. */
     subtree(index: number, out: number[] = [], includeRoot = true): number[] {
         out.length = 0;
         if (!this.#has(index)) return out;
         if (includeRoot) out.push(index);
 
-        // Breadth-first: a queue over `out` itself when the root is included, else seeded
-        // with the root's children. Either way a parent is emitted before its children.
+        // Breadth-first over `out` itself when the root is included, else over a seeded queue.
         const queue: number[] = includeRoot ? out : this.children(index, []);
         if (!includeRoot) out.push(...queue);
 
@@ -433,14 +405,11 @@ export class TransformStore {
         return out;
     }
 
-    // ─── resolve ────────────────────────────────────────────────────
-
     /**
-     * Recomposes resolved position and visibility.
+     * Recomposes resolved position and visibility, skipping clean subtrees.
      *
-     * DFS from each dirty root, parent before child, skipping clean subtrees. A dirty node
-     * whose ancestor is also dirty is reached by the ancestor's walk and is dropped from the
-     * work list first, so no subtree is composed twice.
+     * A dirty node whose ancestor is also dirty is reached by the ancestor's walk and dropped from
+     * the work list first, so no subtree is composed twice.
      */
     resolve(): void {
         this.#visits = 0;
@@ -458,7 +427,7 @@ export class TransformStore {
         this.#resolveDirty.clear();
     }
 
-    /** Drains the flush-dirty set: nodes whose LOCAL values changed. */
+    /** Drains the flush-dirty set: nodes whose local values changed. */
     consumeFlushDirty(out: number[] = []): number[] {
         out.length = 0;
         for (const index of this.#flushDirty) out.push(index);
@@ -466,7 +435,7 @@ export class TransformStore {
         return out;
     }
 
-    /** Drains the set of nodes whose RESOLVED values changed in the last `resolve()`. */
+    /** Drains the set of nodes whose resolved values changed since the last drain. */
     consumeResolvedDirty(out: number[] = []): number[] {
         out.length = 0;
         for (const index of this.#resolvedChanged) out.push(index);
@@ -474,7 +443,7 @@ export class TransformStore {
         return out;
     }
 
-    /** Marks everything dirty — the post-context-loss full rebuild (§10). */
+    /** Marks everything dirty, for the post-context-loss rebuild. */
     markAllDirty(): void {
         for (let i = 0; i < this.#count; i++) {
             this.#flushDirty.add(i);
@@ -482,18 +451,16 @@ export class TransformStore {
         }
     }
 
-    // ─── internals ──────────────────────────────────────────────────
-
     /** `true` when `index` addresses an initialized slot. */
     #has(index: number): boolean {
         return index >= 0 && index < this.#count && Number.isInteger(index);
     }
 
     /**
-     * Composes `index` and its descendants from `index`'s parent's resolved values.
+     * Composes `index` and its descendants from its parent's resolved values.
      *
-     * Iterative rather than recursive: a deep chain of parented nodes is a legitimate
-     * authoring shape and must not risk the JS stack.
+     * Iterative because a deep chain of parented nodes is a legitimate authoring shape and must
+     * not risk the JS stack.
      */
     #resolveFrom(index: number): void {
         const stack = [index];
@@ -508,8 +475,7 @@ export class TransformStore {
             const baseZ = parent === NONE ? 0 : (this.#resolvedZ[parent] as number);
             const baseVisible = parent === NONE ? 1 : (this.#resolvedVisible[parent] as number);
 
-            // Position composition is ADDITION and nothing else — no matrix, no rotation of
-            // the offset. That is what §5 buys, and it is why this is exact.
+            // Addition and nothing else — no matrix, no rotation of the offset — so it is exact.
             const nx = baseX + (this.#posX[node] as number);
             const ny = baseY + (this.#posY[node] as number);
             const nz = baseZ + (this.#posZ[node] as number);
@@ -576,7 +542,7 @@ export class TransformStore {
         }
     }
 
-    /** Restores one slot to its documented defaults. */
+    /** Restores one slot to its defaults. */
     #reset(index: number): void {
         this.#posX[index] = 0;
         this.#posY[index] = 0;
@@ -586,7 +552,7 @@ export class TransformStore {
         this.#scaleY[index] = 1;
         this.#scaleZ[index] = 1;
         this.#alpha[index] = 1;
-        // Centered: a negative-x flip is the common case and must pivot in place (§5).
+        // Centered, so the common negative-x flip pivots in place.
         this.#anchorX[index] = 0.5;
         this.#anchorY[index] = 0.5;
         this.#tint[index] = WHITE;
@@ -646,9 +612,8 @@ export class TransformStore {
     }
 }
 
-// The `<ArrayBuffer>` argument is load-bearing: TypeScript's typed arrays are generic over
-// their buffer, and the unparameterized spelling widens to `ArrayBufferLike` — which includes
-// `SharedArrayBuffer` and so is not assignable back to the fields.
+// The `<ArrayBuffer>` argument is load-bearing: the unparameterized spelling widens to
+// `ArrayBufferLike`, which includes `SharedArrayBuffer` and is not assignable back to the fields.
 
 function growF64(src: Float64Array<ArrayBuffer>, capacity: number): Float64Array<ArrayBuffer> {
     const next = new Float64Array(capacity);
@@ -668,7 +633,7 @@ function growI32(
     fill: number,
 ): Int32Array<ArrayBuffer> {
     const next = new Int32Array(capacity);
-    // Only the NEW tail needs the sentinel; `set` overwrites the rest.
+    // Only the new tail needs the sentinel; `set` overwrites the rest.
     if (fill !== 0) next.fill(fill, src.length);
     next.set(src);
     return next;

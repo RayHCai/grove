@@ -1,12 +1,9 @@
-// The five surface roots, the camera application, and the letterbox mask (§4, §4.1, §6.4).
+// The surface roots, the camera application, and the letterbox mask.
 //
-// Only ENABLED surfaces get containers, so a shipped game allocates no editor objects at all
-// (§4). Draw order is `SURFACE_ORDER` and is not configurable — a UI node can never sort beneath
-// a world node regardless of `layer`, and `editorOverlay` sits above `ui` on purpose so a gizmo
-// stays grabbable over the widget it moves.
+// Only enabled surfaces get containers, so a shipped game allocates no editor objects at all.
 //
-// THE CAMERA LIVES HERE, on the surface root, never baked into node values — which is what makes
-// `setCamera` touch one container and zero nodes (§6.4).
+// The camera lives on the surface root, never baked into node values, which is what makes
+// `setCamera` touch one container and zero nodes.
 
 import { Container, Graphics } from 'pixi.js';
 import type { Bounds, Size } from '@platform/math';
@@ -27,7 +24,7 @@ export class SurfaceTree {
     constructor(stage: Container, enabled: readonly Surface[]) {
         this.stage = stage;
 
-        // Added in SURFACE_ORDER, so container order IS draw order and no zIndex is needed.
+        // Added in SURFACE_ORDER, so container order is draw order and no zIndex is needed.
         for (const surface of SURFACE_ORDER) {
             if (!enabled.includes(surface)) continue;
             const root = new Container();
@@ -52,18 +49,11 @@ export class SurfaceTree {
     }
 
     /**
-     * Applies the camera to the three camera-transformed roots (§6.4).
+     * Applies the camera to the camera-transformed roots.
      *
-     * ```
-     * s = fitScale * zoom
-     * root.scale    = s                                    // uniform, POSITIVE
-     * root.position = { x: cw/2 - cam.x * s, y: ch/2 + cam.y * s }
-     * ```
-     *
-     * The scale is POSITIVE and UNIFORM. A negative `scale.y` would be the tempting way to get
-     * y-up and is explicitly wrong — it mirrors every sprite and every glyph in the tree. The
-     * y-flip is arithmetic at the write boundary instead (§6.3), which is why the `+ cam.y * s`
-     * above reads as a plus while a world-to-screen y reads as a minus.
+     * The scale is positive and uniform: a negative `scale.y` would be the tempting way to get
+     * y-up and mirrors every sprite and glyph in the tree. The y-flip is arithmetic at the write
+     * boundary instead, which is why the y term below reads as a plus.
      */
     applyCamera(
         camera: Readonly<CameraState>,
@@ -85,9 +75,7 @@ export class SurfaceTree {
     /**
      * Masks the game surfaces to the stage rect when bars are actually drawn.
      *
-     * Editor chrome is never clipped — `editorOverlay` and `editorUi` must stay fully visible, and
-     * `'free'` framing (what the editor uses) forces letterboxing off anyway. `stage` is screen
-     * space, y-down.
+     * Editor chrome is never clipped, so a bar cannot cut off a gizmo. `stage` is screen space.
      */
     applyLetterbox(
         stageRect: Readonly<Bounds>,
@@ -110,8 +98,8 @@ export class SurfaceTree {
                 mask = new Graphics();
                 mask.label = `mask:${surface}`;
                 this.#masks.set(surface, mask);
-                // The mask is a sibling of the masked root, not a child: a child would be
-                // transformed by the camera and would stop matching the screen-space stage rect.
+                // A sibling of the masked root, not a child: a child would be transformed by the
+                // camera and would stop matching the screen-space stage rect.
                 this.stage.addChild(mask);
                 root.mask = mask;
             }
