@@ -109,7 +109,19 @@ export class RendererCore {
     readonly #scratchWorld: Bounds = bounds();
     readonly #scratchIndices: number[] = [];
     readonly #dirtyOut: number[] = [];
+    readonly #resolvedOut: number[] = [];
     readonly #subtreeOut: number[] = [];
+    readonly #liveOut: number[] = [];
+    readonly #rootsOut: number[] = [];
+
+    /** The viewport the last cull pass decided against, so a moved camera reconsiders everything. */
+    readonly #culledViewport: Bounds = bounds();
+
+    /** Set when something scene-wide changed and the next flush must reconsider every node. */
+    #cullAll = true;
+
+    /** Slots already re-culled this flush: a moved node lands in both dirty sets. */
+    readonly #culledThisFlush = new Set<number>();
 
     constructor(sink: SceneSink, config: CoreConfig) {
         this.#sink = sink;
@@ -176,6 +188,8 @@ export class RendererCore {
         // A disabled surface is a silent no-op; only `createNode` treats one as a caller bug.
         if (!this.isSurfaceEnabled(surface)) return;
         this.#sink.setSurfaceVisible(surface, visible);
+        // Visibility feeds the cull decision for every node on that surface.
+        this.#cullAll = true;
     }
 
     recomputeRects(): void {
@@ -324,10 +338,13 @@ export class RendererCore {
         if (patch.texture !== undefined && record.kind === 'sprite') {
             record.texture = patch.texture;
             this.#sink.setTexture(index, record);
+            // A different texture is a different size, so the cull answer has to be revisited.
+            this.xf.markFlushDirty(index);
         }
         if (patch.text !== undefined && record.kind === 'text') {
             record.text = patch.text;
             this.#sink.setText(index, patch.text);
+            this.xf.markFlushDirty(index);
         }
     }
 
@@ -364,6 +381,7 @@ export class RendererCore {
         if (record === null || record.kind !== 'text') return;
         record.text = text;
         this.#sink.setText(index, text);
+        this.xf.markFlushDirty(index);
     }
 
     clear(surface?: Surface): void {
@@ -621,36 +639,69 @@ export class RendererCore {
      * Resolves the store, pushes dirtied local values, then recomputes cull flags.
      *
      * Called by a backend's `render()`. Draws nothing itself — a backend presents afterwards.
+     *
+     * The cull pass is O(dirty), not O(scene): a node's cull answer can only change if its own
+     * values changed, if its resolved position moved, or if the viewport did. A full scan every
+     * frame re-decided an answer that had not changed for every node in the scene, allocating an
+     * index array as it went.
      */
     flush(): void {
         this.xf.resolve();
 
-        for (const index of this.xf.consumeFlushDirty(this.#dirtyOut)) {
+        const dirty = this.xf.consumeFlushDirty(this.#dirtyOut);
+        for (const index of dirty) {
             const record = this.nodes.recordAt(index);
             if (record === null) continue;
             this.#sink.write(index, record);
         }
 
-        for (const index of this.nodes.liveIndices()) {
-            const draw = this.#shouldDraw(index);
-            this.xf.setCulled(index, !draw);
-            // The art only: children are siblings of art, so culling a parent cannot hide them.
-            this.#sink.setRenderable(index, draw);
+        if (!sameRect(this.#culledViewport, this.#viewport)) {
+            boundsCopy(this.#culledViewport, this.#viewport);
+            this.#cullAll = true;
         }
+
+        if (this.#cullAll) {
+            this.#cullAll = false;
+            for (const index of this.nodes.liveIndices(this.#liveOut)) this.#cull(index);
+            this.xf.consumeResolvedDirty(this.#resolvedOut);
+            return;
+        }
+
+        this.#culledThisFlush.clear();
+        for (const index of dirty) this.#cullOnce(index);
+        for (const index of this.xf.consumeResolvedDirty(this.#resolvedOut)) {
+            this.#cullOnce(index);
+        }
+    }
+
+    /** {@link cull} for a node the current flush has not already decided. */
+    #cullOnce(index: number): void {
+        if (this.#culledThisFlush.has(index)) return;
+        this.#culledThisFlush.add(index);
+        this.#cull(index);
+    }
+
+    /** Recomputes one node's cull flag and pushes it to the backend. */
+    #cull(index: number): void {
+        const draw = this.#shouldDraw(index);
+        this.xf.setCulled(index, !draw);
+        // The art only: children are siblings of art, so culling a parent cannot hide them.
+        this.#sink.setRenderable(index, draw);
     }
 
     /** Recreates every display object from our records, then marks all dirty. */
     rebuildScene(): void {
         this.#sink.clearAll();
         // Parents before children, so a child always has somewhere to attach.
-        for (const root of this.xf.roots()) {
-            for (const slot of this.xf.subtree(root, [], true)) {
+        for (const root of this.xf.roots(this.#rootsOut)) {
+            for (const slot of this.xf.subtree(root, this.#subtreeOut, true)) {
                 const record = this.nodes.recordAt(slot);
                 if (record === null) continue;
                 this.#sink.create(slot, record, this.xf.parent(slot));
             }
         }
         this.xf.markAllDirty();
+        this.#cullAll = true;
         this.flush();
     }
 
@@ -927,6 +978,10 @@ export function emptySnapshot(contextState: ContextState): SceneSnapshot {
         assets: [],
         counts: { nodes: 0, culled: 0, surfaces: 0, assets: 0 },
     };
+}
+
+function sameRect(a: Readonly<Bounds>, b: Readonly<Bounds>): boolean {
+    return a.left === b.left && a.right === b.right && a.top === b.top && a.bottom === b.bottom;
 }
 
 /** `value` when it is finite, else `fallback`. */

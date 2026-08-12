@@ -120,6 +120,9 @@ importers:
       '@platform/math':
         specifier: workspace:*
         version: link:../math
+      '@platform/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@platform/renderer':
         specifier: workspace:*
         version: link:../renderer
@@ -197,11 +200,24 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.2)(vite@8.2.0(@types/node@26.1.2))
 
-  packages/renderer:
+  packages/protocol:
     dependencies:
+      '@platform/transport':
+        specifier: workspace:*
+        version: link:../transport
+    devDependencies:
       '@platform/core':
         specifier: workspace:*
         version: link:../core
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@26.1.2)(vite@8.2.0(@types/node@26.1.2))
+
+  packages/renderer:
+    dependencies:
       '@platform/math':
         specifier: workspace:*
         version: link:../math
@@ -224,6 +240,9 @@ importers:
       '@platform/math':
         specifier: workspace:*
         version: link:../math
+      '@platform/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@platform/transport':
         specifier: workspace:*
         version: link:../transport
@@ -236,10 +255,6 @@ importers:
         version: 4.1.10(@types/node@26.1.2)(vite@8.2.0(@types/node@26.1.2))
 
   packages/transport:
-    dependencies:
-      '@platform/core':
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
       typescript:
         specifier: ^7.0.2

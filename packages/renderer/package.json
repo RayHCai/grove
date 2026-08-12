@@ -30,7 +30,6 @@
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
-        "@platform/core": "workspace:*",
         "@platform/math": "workspace:*",
         "pixi.js": "^8.19.0"
     },
