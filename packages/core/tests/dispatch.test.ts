@@ -1,27 +1,25 @@
-// Dispatch: synchronous-to-first-await, per-instance concurrency, cancellation across an
-// await, destroy-during-dispatch, and the error boundary + breaker (DESIGN §4, §5.8, §11).
-
 import { describe, it, expect, afterEach } from 'vitest';
-import { Cooldown, Aimer, Faulty } from '../dist/testkit/fixtures.js';
+import { Cooldown, Aimer, Faulty, PhaseProbe } from '../dist/testkit/fixtures.js';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import { BREAKER_THRESHOLD } from '../src/config.js';
+import { activeLocationsFor } from '../src/runtime/wiring.js';
 
 afterEach(() => clearRuntime());
 
-describe('concurrency (§4.2, §5.8)', () => {
+describe('concurrency', () => {
     it('ignore drops a re-entry while the instance handler is running', async () => {
         const rt = loadGame();
         const e = rt.gameInstance!.spawn('crate', 0, 0);
         const inst = e.addScript(Cooldown as never) && instanceOf<Cooldown>(rt, e, 'Cooldown');
 
         void e.send('attack');
-        void e.send('attack'); // dropped — first still running
+        void e.send('attack');
         expect(inst.fires).toBe(1);
 
         inst.release();
         await tick();
-        void e.send('attack'); // now allowed
+        void e.send('attack');
         expect(inst.fires).toBe(2);
     });
 
@@ -32,12 +30,12 @@ describe('concurrency (§4.2, §5.8)', () => {
         const inst = instanceOf<Aimer>(rt, e, 'Aimer');
 
         void e.send('aim');
-        void e.send('aim'); // cancels the first, starts a second
+        void e.send('aim');
         expect(inst.starts).toBe(2);
 
         inst.release();
         await tick();
-        // Only the live (second) invocation can finish; the cancelled first is swept.
+        // Only the live invocation can finish; the cancelled one never resumes past its await.
         expect(inst.finishes).toBeLessThanOrEqual(1);
     });
 
@@ -54,7 +52,7 @@ describe('concurrency (§4.2, §5.8)', () => {
     });
 });
 
-describe('error boundary (§4.4)', () => {
+describe('error boundary', () => {
     it('a throwing handler is caught, logged, and the world continues', async () => {
         const rt = loadGame();
         const e = rt.gameInstance!.spawn('crate', 0, 0);
@@ -70,14 +68,47 @@ describe('error boundary (§4.4)', () => {
         const e = rt.gameInstance!.spawn('crate', 0, 0);
         e.addScript(Faulty as never);
         for (let i = 0; i < BREAKER_THRESHOLD + 5; i++) await e.send('boom');
-        const disabled = rt.log.records.some(r => r.disabled === true);
+        const disabled = rt.log.records.some((r) => r.disabled === true);
         expect(disabled).toBe(true);
     });
 });
 
-// ── helpers ──────────────────────────────────────────────────────────────────────
+describe('input phase matching', () => {
+    it('an onEvent dispatch naming a phase reaches only handlers declaring that phase', () => {
+        const rt = loadGame();
+        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        e.addScript(PhaseProbe as never);
+        const probe = instanceOf<PhaseProbe>(rt, e, 'PhaseProbe');
 
-function instanceOf<T>(rt: ReturnType<typeof loadGame>, e: { entityId: unknown }, className: string): T {
+        fire(rt, e, 'jump', 'press');
+        expect([probe.presses, probe.releases, probe.holds]).toStrictEqual([1, 0, 0]);
+
+        fire(rt, e, 'jump', 'hold');
+        fire(rt, e, 'jump', 'hold');
+        expect([probe.presses, probe.releases, probe.holds]).toStrictEqual([1, 0, 2]);
+
+        fire(rt, e, 'jump', 'release');
+        expect([probe.presses, probe.releases, probe.holds]).toStrictEqual([1, 1, 2]);
+    });
+
+    it('an UNPHASED dispatch still reaches every handler on the action — Entity.send', () => {
+        const rt = loadGame();
+        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        e.addScript(PhaseProbe as never);
+        const probe = instanceOf<PhaseProbe>(rt, e, 'PhaseProbe');
+
+        // `on` is meaningless on a creator-sent event, so a send that names no edge matches any
+        // declaration — which is also what keeps this change backwards-compatible.
+        void e.send('jump');
+        expect([probe.presses, probe.releases, probe.holds]).toStrictEqual([1, 1, 1]);
+    });
+});
+
+function instanceOf<T>(
+    rt: ReturnType<typeof loadGame>,
+    e: { entityId: unknown },
+    className: string,
+): T {
     for (const si of rt.instances.forHost(`entity:${e.entityId as number}`)) {
         if (si.className === className) return si.instance as T;
     }
@@ -85,5 +116,23 @@ function instanceOf<T>(rt: ReturnType<typeof loadGame>, e: { entityId: unknown }
 }
 
 function tick(): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, 0));
+    return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** One phased input dispatch at an entity host, the shape the server's input pass produces. */
+function fire(
+    rt: ReturnType<typeof loadGame>,
+    e: { entityId: unknown },
+    action: string,
+    phase: 'press' | 'release' | 'hold',
+): void {
+    const hostKey = `entity:${e.entityId as number}`;
+    void rt.dispatcher.dispatch(
+        rt.instances.forHost(hostKey),
+        'onEvent',
+        action,
+        hostKey,
+        { data: {}, dt: 1 / rt.simRate, alive: true },
+        { activeLocations: activeLocationsFor('server'), tick: rt.tick, phase },
+    );
 }

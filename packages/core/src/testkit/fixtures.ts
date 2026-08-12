@@ -1,11 +1,18 @@
-// Decorator-bearing fixtures compiled by the build (tsc lowers standard decorators; the
-// test runner's oxc transform does not — DESIGN §3.3). Tests import the compiled classes
-// from dist and assert behavior; test files themselves carry no decorator syntax.
-//
-// Not part of the public surface — exported only so the test suite can reach it.
+// tsc lowers standard decorators and the test runner's transform does not, so these fixtures
+// are compiled by the build and the tests import them from dist.
 
 import { ServerScript, SyncedScript } from '../script/bases.js';
-import { onCollide, onEvent, onRequest, onStart, serverState } from '../script/decorators.js';
+import {
+    onCollide,
+    onEvent,
+    onEventHold,
+    onEventRelease,
+    onPlayerJoin,
+    onPlayerLeave,
+    onRequest,
+    onStart,
+    serverState,
+} from '../script/decorators.js';
 import type { Entity } from '../runtime/entity.js';
 import type { Ctx } from '../runtime/ctx.js';
 
@@ -30,8 +37,7 @@ export class Movement extends SyncedScript {
 }
 
 export class DoubleJump extends Movement {
-    // Inherits the parent's @onEvent('jump') registration; overriding the body must NOT
-    // re-register (DESIGN §3.2). No decorator here on purpose.
+    // No decorator on purpose: overriding the body must not re-register the parent's handler.
     override jump(): void {
         this.jumps += 2;
     }
@@ -44,8 +50,7 @@ export class Sibling extends Movement {
     }
 }
 
-// An entity-hosted gameplay script: @serverState health, a damage event, a collide
-// handler, and a synchronous destroy — the §5.8 "crate.alive === false after send" contract.
+// The destroy is synchronous, which is what makes `alive === false` right after `send` testable.
 export class Target extends SyncedScript<Entity> {
     @serverState health = 3;
     @serverState downed = false;
@@ -65,8 +70,7 @@ export class Target extends SyncedScript<Entity> {
     }
 }
 
-// A handler that awaits, for the cancellation / concurrency tests. The pending promise is
-// exposed so a test can settle it deterministically.
+// The pending promise is exposed so a test can settle the await deterministically.
 export class Cooldown extends SyncedScript<Entity> {
     fires = 0;
     completions = 0;
@@ -75,7 +79,7 @@ export class Cooldown extends SyncedScript<Entity> {
     @onEvent('attack', { concurrency: 'ignore' })
     async attack(): Promise<void> {
         this.fires += 1;
-        await new Promise<void>(resolve => {
+        await new Promise<void>((resolve) => {
             this.#release = resolve;
         });
         this.completions += 1;
@@ -88,7 +92,6 @@ export class Cooldown extends SyncedScript<Entity> {
     }
 }
 
-// A restart-mode handler: the newest invocation wins, the previous is cancelled at its await.
 export class Aimer extends SyncedScript<Entity> {
     starts = 0;
     finishes = 0;
@@ -97,7 +100,7 @@ export class Aimer extends SyncedScript<Entity> {
     @onEvent('aim', { concurrency: 'restart' })
     async aim(): Promise<void> {
         this.starts += 1;
-        await new Promise<void>(resolve => {
+        await new Promise<void>((resolve) => {
             this.#release = resolve;
         });
         this.finishes += 1;
@@ -110,7 +113,32 @@ export class Aimer extends SyncedScript<Entity> {
     }
 }
 
-// A handler that always throws, for the error-boundary / breaker tests.
+export class AsyncFaulty extends SyncedScript<Entity> {
+    @onEvent('boom')
+    async boom(): Promise<void> {
+        await Promise.resolve();
+        throw new Error('async handler always throws');
+    }
+}
+
+export class Nester extends SyncedScript<Entity> {
+    nestedRuns = 0;
+
+    /** A callback, not a runtime read: dist fixtures and src tests hold different globals. */
+    afterNestedSend: (() => void) | null = null;
+
+    @onEvent('outer')
+    outer(): void {
+        (this.host as unknown as { send(event: string): unknown }).send('inner');
+        this.afterNestedSend?.();
+    }
+
+    @onEvent('inner')
+    inner(): void {
+        this.nestedRuns += 1;
+    }
+}
+
 export class Faulty extends SyncedScript<Entity> {
     @onEvent('boom')
     boom(): void {
@@ -118,8 +146,7 @@ export class Faulty extends SyncedScript<Entity> {
     }
 }
 
-// A Game-hosted ServerScript, for the load-order / @onStart / @onRequest / roster tests.
-// It carries global @serverState and an @onRequest handler (legal only on a ServerScript).
+// @onRequest is legal only on a ServerScript, which is why this fixture is one.
 export class Rules extends ServerScript {
     @serverState started = false;
     @serverState credits = 0;
@@ -135,8 +162,47 @@ export class Rules extends ServerScript {
     }
 }
 
-// @onRequest on a non-ServerScript is a wire-time error (§5.9). This SyncedScript declares
-// one so the wiring-rejection test can attach it and expect a throw.
+// Three phases on one action: without the dispatcher's phase filter one press fires all three.
+export class PhaseProbe extends SyncedScript<Entity> {
+    presses = 0;
+    releases = 0;
+    holds = 0;
+
+    @onEvent('jump')
+    press(): void {
+        this.presses += 1;
+    }
+
+    @onEventRelease('jump')
+    release(): void {
+        this.releases += 1;
+    }
+
+    @onEventHold('jump')
+    hold(): void {
+        this.holds += 1;
+    }
+}
+
+export class Roll extends ServerScript {
+    joined: string[] = [];
+    left: string[] = [];
+    /** A callback, not a runtime read: dist fixtures and src tests hold different globals. */
+    probe: (() => void) | null = null;
+
+    @onPlayerJoin
+    join(ctx: Ctx): void {
+        this.joined.push((ctx.player as { id: string }).id);
+    }
+
+    @onPlayerLeave
+    leave(ctx: Ctx): void {
+        this.left.push((ctx.player as { id: string }).id);
+        this.probe?.();
+    }
+}
+
+// @onRequest on a non-ServerScript is a wire-time error; this fixture is that rejection case.
 export class SyncedWithRequest extends SyncedScript<Entity> {
     @onRequest('illegal')
     handle(): void {
