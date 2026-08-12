@@ -1,16 +1,17 @@
-// The Entity facade (DESIGN §6, api_spec.ts:174). Holds an EntityId and delegates every
-// accessor to the current runtime's stores. The transform is readonly and reads return
-// COPIES, not aliases (§3.1) — a read stays valid after the body moves. Timed motion verbs
-// are all one tween (§9.1). destroy() is logical-now, teardown-at-end-of-tick (§6).
+// Transform reads return copies, not aliases, so a read stays valid after the body moves.
+// destroy() is logical-now, teardown-at-end-of-tick.
 
 import type { Vec3, Easing, Bounds } from '@platform/math';
 import { atan2, vec3, vec3Dist, RAD2DEG } from '@platform/math';
 import type { EntityId } from '../ids.js';
+import { NO_ENTITY } from '../ids.js';
 import type { BaseScript } from '../script/bases.js';
 import type { Runtime } from './runtime.js';
 import { entityKey } from './hosts.js';
 import type { TweenTarget } from '../loop/tweens.js';
 import type { AssetRef } from './assets.js';
+import type { Player } from './player.js';
+import { MAX_BUBBLE_LENGTH } from '../config.js';
 
 export interface Collider {
     enabled: boolean;
@@ -47,10 +48,12 @@ export class Entity {
         return this.#rt.playerManager?.byId(rec.ownerId) ?? null;
     }
 
-    // ─── transform — readonly, reads return copies (§3.1) ───────────────────────
-
     get position(): Vec3 {
-        return vec3(this.#rt.transforms.posX(this.#id), this.#rt.transforms.posY(this.#id), this.#rt.transforms.posZ(this.#id));
+        return vec3(
+            this.#rt.transforms.posX(this.#id),
+            this.#rt.transforms.posY(this.#id),
+            this.#rt.transforms.posZ(this.#id),
+        );
     }
 
     get rotation(): number {
@@ -76,8 +79,6 @@ export class Entity {
     set layer(value: number) {
         this.#rt.transforms.setLayer(this.#id, value);
     }
-
-    // ─── instant motion (chainable eager setters) ──────────────────────────────
 
     setPosition(x: number, y: number): this {
         this.#rt.transforms.setPosition(this.#id, x, y, this.#rt.transforms.posZ(this.#id));
@@ -118,7 +119,12 @@ export class Entity {
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist > 0) {
             const step = Math.min(speed, dist);
-            this.#rt.transforms.setPosition(this.#id, x + (dx / dist) * step, y + (dy / dist) * step, this.#rt.transforms.posZ(this.#id));
+            this.#rt.transforms.setPosition(
+                this.#id,
+                x + (dx / dist) * step,
+                y + (dy / dist) * step,
+                this.#rt.transforms.posZ(this.#id),
+            );
         }
         return this;
     }
@@ -135,8 +141,6 @@ export class Entity {
         return vec3Dist(this.position, resolvePoint(target));
     }
 
-    // ─── timed motion — all one tween (§9.1) ────────────────────────────────────
-
     glideTo(x: number, y: number, seconds: number, easing?: Easing): Promise<void> {
         const t = this.#tweenTarget();
         return Promise.all([
@@ -146,11 +150,22 @@ export class Entity {
     }
 
     glideBy(dx: number, dy: number, seconds: number, easing?: Easing): Promise<void> {
-        return this.glideTo(this.#rt.transforms.posX(this.#id) + dx, this.#rt.transforms.posY(this.#id) + dy, seconds, easing);
+        return this.glideTo(
+            this.#rt.transforms.posX(this.#id) + dx,
+            this.#rt.transforms.posY(this.#id) + dy,
+            seconds,
+            easing,
+        );
     }
 
     fadeTo(opacity: number, seconds: number): Promise<void> {
-        return this.#rt.tweens.start(this.#tweenTarget(), 'opacity', opacity, seconds, this.#hostScope());
+        return this.#rt.tweens.start(
+            this.#tweenTarget(),
+            'opacity',
+            opacity,
+            seconds,
+            this.#hostScope(),
+        );
     }
 
     fadeIn(seconds: number): Promise<void> {
@@ -162,24 +177,42 @@ export class Entity {
     }
 
     growTo(scale: number, seconds: number): Promise<void> {
-        return this.#rt.tweens.start(this.#tweenTarget(), 'scale', scale, seconds, this.#hostScope());
+        return this.#rt.tweens.start(
+            this.#tweenTarget(),
+            'scale',
+            scale,
+            seconds,
+            this.#hostScope(),
+        );
     }
 
     spin(degrees: number, seconds: number): Promise<void> {
-        return this.#rt.tweens.start(this.#tweenTarget(), 'rotation', this.#rt.transforms.rotation(this.#id) + degrees, seconds, this.#hostScope());
+        return this.#rt.tweens.start(
+            this.#tweenTarget(),
+            'rotation',
+            this.#rt.transforms.rotation(this.#id) + degrees,
+            seconds,
+            this.#hostScope(),
+        );
     }
 
     spinTo(degrees: number, seconds: number): Promise<void> {
-        return this.#rt.tweens.start(this.#tweenTarget(), 'rotation', degrees, seconds, this.#hostScope());
+        return this.#rt.tweens.start(
+            this.#tweenTarget(),
+            'rotation',
+            degrees,
+            seconds,
+            this.#hostScope(),
+        );
     }
-
-    // ─── hierarchy — position only (§6) ─────────────────────────────────────────
 
     attachTo(parent: Entity): this {
         const rec = this.#rt.entities.record(this.#id);
         const prec = this.#rt.entities.record(parent.#id);
-        if (!rec || !prec) return this;
-        this.detach();
+        // A destroy-pending parent already cascaded; a child linked under it dies with it.
+        if (!rec || !prec || !prec.alive) return this;
+        // #unlink rather than detach(), whose mark would put two ops on the wire for one move.
+        this.#unlink();
         rec.parent = parent.#id;
         prec.children.push(this.#id);
         this.#rt.channels.markStructural({ kind: 'reparent', id: this.#id, parent: parent.#id });
@@ -187,14 +220,14 @@ export class Entity {
     }
 
     detach(): this {
-        const rec = this.#rt.entities.record(this.#id);
-        if (!rec || rec.parent === (0 as EntityId)) return this;
-        const prec = this.#rt.entities.record(rec.parent);
-        if (prec) {
-            const at = prec.children.indexOf(this.#id);
-            if (at >= 0) prec.children.splice(at, 1);
+        // The transform channel carries no hierarchy, so an unmarked detach never reaches clients.
+        if (this.#unlink()) {
+            this.#rt.channels.markStructural({
+                kind: 'reparent',
+                id: this.#id,
+                parent: NO_ENTITY,
+            });
         }
-        rec.parent = 0 as EntityId;
         return this;
     }
 
@@ -207,10 +240,8 @@ export class Entity {
     get children(): Entity[] {
         const rec = this.#rt.entities.record(this.#id);
         if (!rec) return [];
-        return rec.children.map(c => this.#rt.entityManager.facade(c));
+        return rec.children.map((c) => this.#rt.entityManager.facade(c));
     }
-
-    // ─── tags — an index (§6) ───────────────────────────────────────────────────
 
     tag(name: string): this {
         this.#rt.tags.add(this.#id, name);
@@ -243,8 +274,6 @@ export class Entity {
         return this.getTouching(tag, opts).length > 0;
     }
 
-    // ─── visibility / effects (tier C — presentation) ──────────────────────────
-
     show(): this {
         this.#rt.transforms.setOpacity(this.#id, 1);
         return this;
@@ -269,12 +298,17 @@ export class Entity {
         return this;
     }
 
-    // ─── speech bubbles — replicated entity state (§3.7) ────────────────────────
-
     say(text: string): this;
     say(text: string, seconds: number): Promise<void>;
     say(text: string, seconds?: number): this | Promise<void> {
-        this.#rt.channels.markStructural({ kind: 'tag', id: this.#id, tag: `say:${text}`, added: true });
+        this.#rt.channels.markStructural({
+            kind: 'tag',
+            id: this.#id,
+            // Capped here rather than at the renderer: this string goes on the wire, so an
+            // unbounded one is a per-tick broadcast of whatever a client can talk the game into.
+            tag: `say:${text.slice(0, MAX_BUBBLE_LENGTH)}`,
+            added: true,
+        });
         if (seconds !== undefined) return this.#rt.timers.sleep(seconds, this.#hostScope());
         return this;
     }
@@ -290,8 +324,6 @@ export class Entity {
     clearSay(): this {
         return this;
     }
-
-    // ─── lifecycle ──────────────────────────────────────────────────────────────
 
     destroy(): void {
         this.#rt.entityManager.destroy(this.#id);
@@ -310,7 +342,18 @@ export class Entity {
         return this.#rt.send?.(this.#id, event, payload) ?? Promise.resolve();
     }
 
-    // ─── internals ──────────────────────────────────────────────────────────────
+    /** Unparents without marking; returns false if it had no parent. */
+    #unlink(): boolean {
+        const rec = this.#rt.entities.record(this.#id);
+        if (!rec || rec.parent === NO_ENTITY) return false;
+        const prec = this.#rt.entities.record(rec.parent);
+        if (prec) {
+            const at = prec.children.indexOf(this.#id);
+            if (at >= 0) prec.children.splice(at, 1);
+        }
+        rec.parent = NO_ENTITY;
+        return true;
+    }
 
     #hostScope(): number {
         return this.#rt.hosts.ensure(entityKey(this.#id as number)).scopeId;
@@ -323,21 +366,37 @@ export class Entity {
             key: `entity:${id as number}`,
             get(prop: string): number {
                 switch (prop) {
-                    case 'x': return store.posX(id);
-                    case 'y': return store.posY(id);
-                    case 'rotation': return store.rotation(id);
-                    case 'scale': return store.scale(id);
-                    case 'opacity': return store.opacity(id);
-                    default: return 0;
+                    case 'x':
+                        return store.posX(id);
+                    case 'y':
+                        return store.posY(id);
+                    case 'rotation':
+                        return store.rotation(id);
+                    case 'scale':
+                        return store.scale(id);
+                    case 'opacity':
+                        return store.opacity(id);
+                    default:
+                        return 0;
                 }
             },
             set(prop: string, value: number): void {
                 switch (prop) {
-                    case 'x': store.setPosition(id, value, store.posY(id), store.posZ(id)); break;
-                    case 'y': store.setPosition(id, store.posX(id), value, store.posZ(id)); break;
-                    case 'rotation': store.setRotation(id, value); break;
-                    case 'scale': store.setScale(id, value); break;
-                    case 'opacity': store.setOpacity(id, value); break;
+                    case 'x':
+                        store.setPosition(id, value, store.posY(id), store.posZ(id));
+                        break;
+                    case 'y':
+                        store.setPosition(id, store.posX(id), value, store.posZ(id));
+                        break;
+                    case 'rotation':
+                        store.setRotation(id, value);
+                        break;
+                    case 'scale':
+                        store.setScale(id, value);
+                        break;
+                    case 'opacity':
+                        store.setOpacity(id, value);
+                        break;
                 }
             },
         };
@@ -347,5 +406,3 @@ export class Entity {
 function resolvePoint(target: Entity | Vec3): Vec3 {
     return target instanceof Entity ? target.position : target;
 }
-
-import type { Player } from './player.js';
