@@ -1,13 +1,10 @@
-// The `name -> GPU resource` map, atlas expansion, and the RETAINED MANIFEST (§1, §9, §10).
+// The `name -> GPU resource` map, atlas expansion, and the retained manifest.
 //
-// Two jobs, and the second is easy to overlook. The obvious one is resolving a name to a texture.
-// The load-bearing one is RETAINING every successful manifest entry, because that retained map is
-// what a context restore merges against (§10) — without it, a restore has nothing to re-upload
-// from, and `unloadAssets` could not accept original entries (§9.2).
+// The second job is the easily overlooked one: every successful manifest entry is retained because
+// that map is what a context restore merges against, and what lets `unloadAssets` accept entries.
 //
-// NOTHING HERE REJECTS ON A FAILED LOAD. A missing texture yields a magenta placeholder and a
-// reported failure, so one 404 sprite cannot kill a level load (§9.1). That is a deliberate
-// difference from `Assets.load`, which throws.
+// Nothing here rejects on a failed load — unlike `Assets.load` — so one 404 sprite yields a
+// placeholder and a reported failure rather than killing a level load.
 
 import { Assets, Texture } from 'pixi.js';
 import type { Spritesheet } from 'pixi.js';
@@ -30,10 +27,10 @@ export interface LoadOutcome {
 }
 
 /**
- * A magenta 1x1, tinted at draw time by the sprite that references it.
+ * The stand-in for an unresolved texture name.
  *
- * Magenta because it is the traditional "missing texture" colour and appears nowhere in
- * kid-drawn art by accident — a silent fallback to transparent would read as a layout bug.
+ * Pixi's shared white 1x1, so it needs no upload and its `destroy` is already a no-op — but it also
+ * means a missing texture reads as a pale speck rather than as a loud failure.
  */
 function makePlaceholder(): Texture {
     return Texture.WHITE;
@@ -42,18 +39,18 @@ function makePlaceholder(): Texture {
 /**
  * name -> texture, plus the retained manifest.
  *
- * Owns no GPU context of its own: it is handed textures by `Assets` and hands them to the node
- * tree, so a context loss is the guard's concern, not this class's.
+ * Owns no GPU context: it is handed textures by `Assets` and hands them on, so a context loss is
+ * the guard's concern rather than this class's.
  */
 export class AssetRegistry {
     readonly #resident = new Map<string, ResidentAsset>();
 
-    /** The magenta stand-in every unresolved texture name maps to (§9.1). */
+    /** The stand-in every unresolved texture name maps to. */
     readonly placeholder: Texture = makePlaceholder();
 
     #defaultFilter: TextureFilter = 'nearest';
 
-    /** `'nearest'` by default — kid-drawn pixel art should not blur (§11). */
+    /** `'nearest'` by default — kid-drawn pixel art should not blur. */
     setDefaultFilter(filter: TextureFilter): void {
         this.#defaultFilter = filter;
     }
@@ -78,12 +75,7 @@ export class AssetRegistry {
         return this.#resident.get(name)?.entry.kind ?? null;
     }
 
-    /**
-     * The retained manifest, for `AssetQueue.merge` on restore (§10).
-     *
-     * A fresh Map rather than a live view: the caller must not be able to mutate our retention
-     * by holding this.
-     */
+    /** The retained manifest, copied rather than exposed, for `AssetQueue.merge` on restore. */
     retainedManifest(): ReadonlyMap<string, AssetManifestEntry> {
         const out = new Map<string, AssetManifestEntry>();
         for (const [name, resident] of this.#resident) out.set(name, resident.entry);
@@ -95,23 +87,16 @@ export class AssetRegistry {
         return [...this.#resident.keys()];
     }
 
-    /**
-     * Resident names with their sizes, for `inspect()` (§11.2).
-     *
-     * Sizes are copied rather than handed out by reference: a snapshot must not be a live view a
-     * consumer could mutate our bookkeeping through.
-     */
+    /** Resident names with copied sizes, so an `inspect()` snapshot is not a live view. */
     inspectEntries(): Array<{ name: string; size: Size }> {
         return [...this.#resident].map(([name, asset]) => ({ name, size: { ...asset.size } }));
     }
 
     /**
-     * Uploads one manifest entry.
+     * Uploads one manifest entry, resolving with a `failure` rather than rejecting.
      *
-     * Resolves with a `failure` rather than rejecting, so a caller can report a partial result
-     * (§9.1). A `text` entry is NOT handled here — it goes through `text-raster.ts`, which needs
-     * a 2D canvas rather than the loader (§9.3); pass its finished texture to
-     * {@link registerTexture} instead.
+     * A `text` entry is not handled here: it needs a 2D canvas rather than the loader, so pass its
+     * finished texture to {@link registerTexture} instead.
      */
     async load(entry: AssetManifestEntry): Promise<LoadOutcome> {
         try {
@@ -123,12 +108,12 @@ export class AssetRegistry {
                 case 'font':
                     return { info: await this.#loadFont(entry) };
                 case 'text':
-                    // A text asset's texture is rasterized, not fetched. Reaching here means a
-                    // caller bypassed `createTextAsset`.
+                    // Rasterized, not fetched: reaching here means a caller bypassed
+                    // `createTextAsset`.
                     return {
                         failure: {
                             name: entry.name,
-                            reason: "a kind:'text' entry must go through createTextAsset (§9.3)",
+                            reason: "a kind:'text' entry must go through createTextAsset",
                         },
                     };
             }
@@ -143,10 +128,10 @@ export class AssetRegistry {
     }
 
     /**
-     * Registers an already-built texture under a name — the text-raster path (§9.3).
+     * Registers an already-built texture under a name — the text-raster path.
      *
-     * Retains the entry too, so a rasterized text asset participates uniformly in retention,
-     * unloading, queueing and post-loss re-upload with no special case anywhere.
+     * The entry is retained too, so a rasterized text asset takes part in retention, unloading,
+     * queueing and post-loss re-upload with no special case anywhere.
      */
     registerTexture(entry: AssetManifestEntry, texture: Texture, size: Size): AssetInfo {
         this.#resident.set(entry.name, { texture, size, entry, frames: [] });
@@ -156,9 +141,8 @@ export class AssetRegistry {
     /**
      * Drops a name and its frames, returning `true` when it was resident.
      *
-     * Deliberately unconditional: an in-use texture unloads anyway, because a level transition
-     * genuinely wants to force it and refusing would make the caller destroy nodes in a
-     * particular order (§9.2). Affected nodes fall back to the placeholder; their ids stay valid.
+     * Unconditional: a level transition genuinely wants to force an in-use texture out, and
+     * refusing would make the caller destroy nodes in a particular order.
      */
     unload(name: string): boolean {
         const resident = this.#resident.get(name);
@@ -166,8 +150,8 @@ export class AssetRegistry {
 
         for (const frame of resident.frames) this.#resident.delete(frame);
         this.#resident.delete(name);
-        // Fire-and-forget: the GPU-side release is not something a caller waits on, and a
-        // rejection here would be an unhandled one.
+        // Fire-and-forget: no caller waits on the GPU-side release, and a rejection here would be
+        // an unhandled one.
         void Assets.unload(resident.entry.kind === 'image' ? resident.entry.url : name).catch(
             () => undefined,
         );
@@ -179,13 +163,10 @@ export class AssetRegistry {
         this.#resident.clear();
     }
 
-    // ─── internals ──────────────────────────────────────────────────
-
     async #loadImage(entry: Extract<AssetManifestEntry, { kind: 'image' }>): Promise<AssetInfo> {
         const texture = await Assets.load<Texture>(entry.url);
         this.#applyFilter(texture, entry.filter);
-        // A declared size wins over the decoded one: the panel knows the authored dimensions,
-        // and honouring it keeps a backend swap from changing layout.
+        // A declared size wins over the decoded one, so a backend swap cannot change layout.
         const size: Size = entry.size ?? { width: texture.width, height: texture.height };
         this.#resident.set(entry.name, { texture, size, entry, frames: [] });
         return { name: entry.name, size: { ...size } };
@@ -195,9 +176,8 @@ export class AssetRegistry {
         const sheet = await Assets.load<Spritesheet>(entry.url);
         const frames: string[] = [];
 
-        // BARE frame names, not `atlas/frame` — the panel authors the manifest and can guarantee
-        // cross-sheet uniqueness (§18.5). A collision is a real authoring bug, so it is reported
-        // rather than silently resolved.
+        // Bare frame names, not `atlas/frame`: the panel authors the manifest and can guarantee
+        // cross-sheet uniqueness, so a collision is an authoring bug worth reporting.
         for (const [frameName, frameTexture] of Object.entries(sheet.textures)) {
             if (this.#resident.has(frameName)) {
                 this.#collisions.push({ frame: frameName, atlas: entry.name });
@@ -207,8 +187,7 @@ export class AssetRegistry {
             this.#resident.set(frameName, {
                 texture: frameTexture,
                 size: { width: frameTexture.width, height: frameTexture.height },
-                // The frame's own entry points at the atlas, so a restore re-uploads the sheet
-                // once rather than each frame separately.
+                // The frame's entry points at the atlas, so a restore re-uploads the sheet once.
                 entry,
                 frames: [],
             });
@@ -225,7 +204,7 @@ export class AssetRegistry {
 
     async #loadFont(entry: Extract<AssetManifestEntry, { kind: 'font' }>): Promise<AssetInfo> {
         await Assets.load(entry.url);
-        // A font has no pixel size of its own; the uniform `AssetInfo` shape still wants one.
+        // A font has no pixel size of its own, but `AssetInfo` still wants one.
         const size: Size = { width: 0, height: 0 };
         this.#resident.set(entry.name, { texture: this.placeholder, size, entry, frames: [] });
         return { name: entry.name, size: { ...size } };
@@ -240,8 +219,8 @@ export class AssetRegistry {
     }
 
     #applyFilter(texture: Texture, filter: TextureFilter | undefined): void {
-        // `scaleMode` lives on the texture SOURCE in Pixi v8, and it is shared by every texture
-        // cut from that source — which is exactly right for an atlas.
+        // `scaleMode` lives on the texture source, shared by every texture cut from it — which is
+        // what an atlas wants.
         texture.source.scaleMode = filter ?? this.#defaultFilter;
     }
 }

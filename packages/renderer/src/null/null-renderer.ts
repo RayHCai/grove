@@ -1,13 +1,10 @@
-// The headless backend: a complete, correct `IRenderer` with no DOM and no GPU (§13).
+// A complete `IRenderer` with no DOM and no GPU, not a stub: everything backend-independent comes
+// from `RendererCore`, the same class the Pixi backend uses, so the contract suite exercises the
+// real code paths.
 //
-// NOT A STUB. Everything backend-independent comes from `RendererCore`, the same class the Pixi
-// backend uses, so the contract suite exercises the real code paths (§15). That shared core is
-// also what keeps the two backends from drifting — before it existed, 15 methods here were
-// byte-identical to their Pixi twins and a dozen more were 72-98% similar.
-//
-// What is genuinely different lives in `NullSink` below: there are no display objects, so the sink
-// records nothing, and sizes come from the manifest or a deterministic text formula because a
-// headless backend can neither decode a PNG nor measure a font.
+// What differs lives in `NullSink`: there are no display objects, and sizes come from the manifest
+// or a deterministic formula because a headless backend can neither decode a PNG nor measure a
+// font.
 
 import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import type {
@@ -50,10 +47,8 @@ const HEADLESS_CHAR_ADVANCE = 0.5;
 /**
  * Deterministic stand-in for text measurement.
  *
- * `width = longestLine * size * 0.5`, `height = lineCount * lineHeight`. These are NOT a real
- * font's metrics and are not meant to be — they are stable across runs and monotonic in both the
- * text length and the style size, which is all a test can legitimately depend on. A caller needing
- * true metrics needs a real backend.
+ * Not a real font's metrics and not meant to be: stable across runs and monotonic in the text
+ * length and the style size is all a test can legitimately depend on.
  */
 export function measureTextHeadless(text: string, style: TextStyle | undefined): Size {
     const size = style?.size ?? DEFAULT_TEXT_SIZE;
@@ -66,18 +61,13 @@ export function measureTextHeadless(text: string, style: TextStyle | undefined):
     };
 }
 
-/** A resident asset: the size we reported plus the manifest entry we retained (§10). */
+/** A resident asset: the size reported plus the manifest entry retained for a restore. */
 interface ResidentAsset {
     size: Size;
     entry: AssetManifestEntry;
 }
 
-/**
- * The headless sink: no display objects, so almost every method is intentionally empty.
- *
- * The two that do work are `sizeOf`, which the core needs for bounds and culling, and the surface
- * visibility pair, which is plain bookkeeping here.
- */
+/** No display objects, so every method but `sizeOf` and the visibility pair is empty. */
 class NullSink implements SceneSink {
     readonly #visible = new Map<Surface, boolean>();
     readonly #assets: Map<string, ResidentAsset>;
@@ -115,9 +105,8 @@ class NullSink implements SceneSink {
 /**
  * A headless `IRenderer`.
  *
- * Also exposes two test-only members that are NOT on `IRenderer` — `isCulled` and `drawOrderOf` —
- * because the contract suite needs a backend-independent way to ask about cull state and draw
- * order, and inventing interface surface for a test would be worse.
+ * Also exposes `isCulled` and `drawOrderOf`, which are not on `IRenderer`: the contract suite needs
+ * a backend-independent way to ask about cull state and draw order.
  */
 export class NullRenderer implements IRenderer {
     #core: RendererCore | null = null;
@@ -131,7 +120,7 @@ export class NullRenderer implements IRenderer {
         return this.#core !== null && !this.#destroyed;
     }
 
-    /** Always `'ok'`: there is no GPU context to lose, so nothing ever queues (§10). */
+    /** Always `'ok'`: there is no GPU context to lose, so nothing ever queues. */
     get contextState(): ContextState {
         return 'ok';
     }
@@ -141,15 +130,14 @@ export class NullRenderer implements IRenderer {
         return 0;
     }
 
-    // `async` so an option violation REJECTS rather than throwing synchronously — a caller
-    // writing `init(...).catch(...)` would otherwise miss it.
+    // `async` so an option violation rejects rather than throwing synchronously, which a caller
+    // writing `init(...).catch(...)` would miss.
     async init(options: RendererInitOptions): Promise<void> {
         if (this.#core !== null) {
             rendererError('already-initialized', 'init() was already called on this renderer');
         }
 
-        // There is no container to measure — this backend must run where there is no DOM at all —
-        // so the design stage IS the initial canvas size. `resize()` changes it.
+        // No container to measure, so the design stage is the initial canvas size.
         const canvas = { width: options.design.width, height: options.design.height };
         // No `devicePixelRatio` either: a headless backend has no display.
         const resolution = effectiveResolution(1, options.maxResolution ?? 2);
@@ -168,8 +156,6 @@ export class NullRenderer implements IRenderer {
         this.#queue.clear();
         this.#assets.clear();
     }
-
-    // ─── sizing ─────────────────────────────────────────────────────
 
     resize(cssWidth: number, cssHeight: number): void {
         const core = this.#live();
@@ -199,8 +185,6 @@ export class NullRenderer implements IRenderer {
         return this.#core?.viewport ?? { left: 0, right: 0, top: 0, bottom: 0 };
     }
 
-    // ─── surfaces ───────────────────────────────────────────────────
-
     setSurfaceVisible(surface: Surface, visible: boolean): void {
         this.#live()?.setSurfaceVisible(surface, visible);
     }
@@ -209,8 +193,6 @@ export class NullRenderer implements IRenderer {
         return this.#core?.isSurfaceEnabled(surface) ?? false;
     }
 
-    // ─── assets ─────────────────────────────────────────────────────
-
     async loadAsset(entry: AssetManifestEntry): Promise<AssetInfo> {
         return Promise.resolve(this.#loadOne(entry));
     }
@@ -218,8 +200,8 @@ export class NullRenderer implements IRenderer {
     async loadAssets(entries: readonly AssetManifestEntry[]): Promise<AssetLoadResult> {
         const result: AssetLoadResult = { loaded: [], failed: [], queued: false };
         for (const entry of entries) {
-            // Resolves with a result rather than rejecting, so one bad entry cannot kill a whole
-            // level load (§9.1).
+            // Resolves with a result rather than rejecting, so one bad entry cannot kill a
+            // whole level load.
             try {
                 result.loaded.push(this.#loadOne(entry));
             } catch (error) {
@@ -238,8 +220,8 @@ export class NullRenderer implements IRenderer {
         const result: AssetUnloadResult = { unloaded: [], unknown: [], inUse: [], queued: false };
         const core = this.#core;
 
-        // Fonts unload LAST: one still referenced by a live text node is kept, because dropping
-        // it re-rasterizes live text to a fallback face, which reads as corruption (§9.2).
+        // Fonts last: one still referenced by live text is kept, because dropping it re-rasterizes
+        // that text to a fallback face, which reads as corruption.
         const names = entries.map((entry) => (typeof entry === 'string' ? entry : entry.name));
         const fonts: string[] = [];
         const rest: string[] = [];
@@ -250,7 +232,7 @@ export class NullRenderer implements IRenderer {
         for (const name of [...rest, ...fonts]) {
             const resident = this.#assets.get(name);
             if (resident === undefined) {
-                // Unknown names are reported, not thrown — idempotent teardown needs no guard.
+                // Reported, not thrown: idempotent teardown needs no guard.
                 result.unknown.push(name);
                 continue;
             }
@@ -258,8 +240,7 @@ export class NullRenderer implements IRenderer {
             const nodeCount = core?.referenceCount(name) ?? 0;
             if (nodeCount > 0) {
                 result.inUse.push({ name, nodeCount });
-                // A font in use is KEPT; anything else unloads anyway and shows the
-                // placeholder (§9.2).
+                // A font in use is kept; anything else unloads and shows the placeholder.
                 if (resident.entry.kind === 'font') continue;
             }
 
@@ -281,16 +262,14 @@ export class NullRenderer implements IRenderer {
     }
 
     hasAsset(name: string): boolean {
-        // Routed through the queue even though nothing ever queues here, so the intended-state
-        // code path is the one the Pixi backend uses too (§10).
+        // Routed through the queue even though nothing queues here, so both backends take the
+        // same intended-state path.
         return this.#queue.intendedHas(name, this.#assets.has(name));
     }
 
     getAssetSize(name: string): Readonly<Size> | null {
         return this.#assets.get(name)?.size ?? null;
     }
-
-    // ─── nodes ──────────────────────────────────────────────────────
 
     createNode(desc: NodeDesc): NodeId {
         return this.#live()?.createNode(desc) ?? NO_NODE;
@@ -342,8 +321,6 @@ export class NullRenderer implements IRenderer {
         this.#live()?.clear(surface);
     }
 
-    // ─── hierarchy ──────────────────────────────────────────────────
-
     attachNode(child: NodeId, parent: NodeId, opts?: { keepResolvedPosition?: boolean }): void {
         this.#live()?.attachNode(child, parent, opts);
     }
@@ -364,8 +341,6 @@ export class NullRenderer implements IRenderer {
         return this.#core?.surfaceOf(id) ?? null;
     }
 
-    // ─── camera ─────────────────────────────────────────────────────
-
     setCamera(camera: Readonly<CameraState>): void {
         this.#live()?.setCamera(camera);
     }
@@ -373,8 +348,6 @@ export class NullRenderer implements IRenderer {
     get camera(): Readonly<CameraState> {
         return this.#core?.camera ?? { position: { x: 0, y: 0, z: 0 }, zoom: 1, framing: 'stage' };
     }
-
-    // ─── transforms & bounds ────────────────────────────────────────
 
     localTransformOf(id: NodeId, out?: Transform): Transform | null {
         return this.#core?.localTransformOf(id, out) ?? null;
@@ -430,45 +403,31 @@ export class NullRenderer implements IRenderer {
         this.#live()?.flush();
     }
 
-    // ─── test-only observability (NOT part of IRenderer) ────────────
-
-    /**
-     * `true` when `render()` culled this node.
-     *
-     * Test-only: `IRenderer` has no cull query because a caller has no business branching on it,
-     * but the contract suite needs one to verify §8.
-     */
+    /** `true` when `render()` culled this node. Test-only: a caller must not branch on it. */
     isCulled(id: NodeId): boolean {
         return this.#core?.isCulled(id) ?? false;
     }
 
-    /**
-     * Root ids for a surface in DRAW ORDER — by `layer`, ties by insertion (§11.1).
-     *
-     * Test-only, for the same reason as {@link isCulled}. The logic itself moved to the core when
-     * `inspect()` needed it too, so this is now delegation — the two can no longer disagree.
-     */
+    /** Root ids for a surface in draw order. Test-only, for the same reason as {@link isCulled}. */
     drawOrderOf(surface: Surface): NodeId[] {
         return this.#core?.drawOrderOf(surface) ?? [];
     }
 
-    /** Draw order of the surfaces themselves, for the §4 ordering test. */
+    /** Draw order of the surfaces themselves. Test-only. */
     surfaceDrawOrder(): Surface[] {
         const enabled = this.#core?.config.enabledSurfaces ?? [];
         return [...enabled].toSorted((a, b) => surfaceOrder(a) - surfaceOrder(b));
     }
 
-    // ─── internals ──────────────────────────────────────────────────
-
-    /** The core, or `null` before init and after destroy — which makes every method a no-op. */
+    /** The core, or `null` before init and after destroy, which makes every method a no-op. */
     #live(): RendererCore | null {
         return this.#destroyed ? null : this.#core;
     }
 
     #loadOne(entry: AssetManifestEntry): AssetInfo {
         const size = this.#sizeOf(entry);
-        // Retain the manifest entry: restore needs it, and `unloadAssets` accepts entries because
-        // of it (§10, §9.2).
+        // The entry is retained because a restore re-uploads from it and `unloadAssets` accepts
+        // entries as well as names.
         this.#assets.set(entry.name, { size, entry });
         return { name: entry.name, size: { ...size } };
     }
@@ -478,9 +437,8 @@ export class NullRenderer implements IRenderer {
             case 'text':
                 return measureTextHeadless(entry.text, entry.style);
             case 'image':
-                // A headless backend cannot decode a PNG, so a declared `size` is the only real
-                // answer available; otherwise the documented 1x1 fallback keeps `AssetInfo`
-                // uniform rather than returning null.
+                // A headless backend cannot decode a PNG, so a declared size is the only real
+                // answer; the 1x1 fallback keeps `AssetInfo` uniform rather than returning null.
                 return entry.size ?? UNKNOWN_IMAGE_SIZE;
             case 'atlas':
             case 'font':

@@ -1,28 +1,24 @@
-// The backend-neutral renderer contract (§11). Nothing here names a Pixi type, so a
-// second backend is a new folder under src/ rather than a rewrite.
+// The backend-neutral contract. Nothing here names a Pixi type, so a second backend is a new
+// folder under src/ rather than a rewrite.
 
 import type { MutableVec3, Vec3Like, Bounds, Size } from '@platform/math';
 import type { NodeId } from './node-id.js';
 
-// ─── surfaces, modes ────────────────────────────────────────────────
-
-/**
- * One of the five draw roots. Order is fixed bottom-to-top and is NOT configurable —
- * a sixth surface would be an API version, not a runtime argument (§4).
- */
+/** One of the five draw roots. Order is fixed bottom-to-top and is not configurable. */
 export type Surface = 'editorSpace' | 'world' | 'ui' | 'editorOverlay' | 'editorUi';
 
-/** `'free'` is the infinite editor canvas: `fitScale` is 1 and nothing letterboxes (§4.1). */
+/** `'free'` is the infinite editor canvas: `fitScale` is 1 and nothing letterboxes. */
 export type Framing = 'stage' | 'free';
 
-/** How the design stage maps onto the canvas (§4.2). `stretch` is deliberately absent. */
+/** How the design stage maps onto the canvas. `stretch` is absent: non-uniform scale breaks
+ * circular colliders' visual match. */
 export type ScaleMode = 'fit' | 'fill' | 'expand';
 
 export type TextureFilter = 'nearest' | 'linear';
 
 export type ContextState = 'ok' | 'lost' | 'restoring';
 
-/** Mirrors `HUDAnchor`, api_spec.ts:67. */
+/** Mirrors `HUDAnchor` in the creator API. */
 export type UiAnchor =
     | 'top-left'
     | 'top-center'
@@ -34,21 +30,16 @@ export type UiAnchor =
     | 'bottom-center'
     | 'bottom-right';
 
-/**
- * The camera shared by all three camera-transformed surfaces — which is what makes an
- * editor gizmo register with the entity it is attached to (§4).
- */
+/** The one camera the three camera-transformed surfaces share, so a gizmo tracks its entity. */
 export interface CameraState {
     position: Vec3Like;
     zoom: number;
     framing?: Framing;
 }
 
-// ─── init ───────────────────────────────────────────────────────────
-
 export interface RendererInitOptions {
     container: HTMLElement;
-    /** The reference stage, in world px. UI is authored against this size (§3). */
+    /** The reference stage, in world px. UI is authored against this size. */
     design: Size;
     /** Default `['world', 'ui']` — a shipped game allocates no editor containers. */
     enabledSurfaces?: readonly Surface[];
@@ -65,13 +56,11 @@ export interface RendererInitOptions {
     antialias?: boolean;
     /** Default `true` — an internal `ResizeObserver` on `container`. */
     autoResize?: boolean;
-    /** WORLD px of slack added to the viewport before the cull test. Default 64 (§8). */
+    /** World px of slack added to the viewport before the cull test. Default 64. */
     cullMargin?: number;
     /** Default `'webgl'`. Both loss paths are handled either way. */
     preference?: 'webgl' | 'webgpu';
 }
-
-// ─── assets ─────────────────────────────────────────────────────────
 
 export type AssetManifestEntry =
     | { name: string; kind: 'image'; url: string; filter?: TextureFilter; size?: Size }
@@ -93,7 +82,7 @@ export interface AssetFailure {
 export interface AssetLoadResult {
     loaded: AssetInfo[];
     failed: AssetFailure[];
-    /** `true` when the work was deferred past a context loss (§10). */
+    /** `true` when the work was deferred past a context loss. */
     queued: boolean;
 }
 
@@ -101,12 +90,10 @@ export interface AssetUnloadResult {
     unloaded: string[];
     /** Never loaded. Not an error — idempotent teardown needs no guard. */
     unknown: string[];
-    /** Unloaded anyway; affected nodes show the placeholder. Fonts are kept instead (§9.2). */
+    /** Unloaded anyway; affected nodes show the placeholder. A font in use is kept instead. */
     inUse: Array<{ name: string; nodeCount: number }>;
     queued: boolean;
 }
-
-// ─── nodes ──────────────────────────────────────────────────────────
 
 export interface TextStyle {
     font?: string;
@@ -119,7 +106,7 @@ export interface TextStyle {
     stroke?: { color: number; width: number };
     wrapWidth?: number;
     lineHeight?: number;
-    /** Raster scale for text assets — the caller's explicit answer to zoom blur (§9.3). */
+    /** Raster scale for text assets — the caller's explicit answer to zoom blur. */
     resolution?: number;
 }
 
@@ -129,13 +116,13 @@ interface NodeBase {
     /** Default `NO_NODE` — a root of its surface. */
     parent?: NodeId;
 
-    // INHERITED by children (§5)
+    // Inherited by children.
 
     /** LOCAL to `parent`. */
     position?: Vec3Like;
     visible?: boolean;
 
-    // NOT inherited — these stop at the node that declares them (§5)
+    // Not inherited: these stop at the node that declares them.
 
     /** Degrees, CCW-positive. */
     rotation?: number;
@@ -160,12 +147,12 @@ export interface SpriteNodeDesc extends NodeBase {
     texture: string;
 }
 
-/** A positional pivot with no art. Its rotation/scale/alpha/tint are inert (§6.2). */
+/** A positional pivot with no art, so its rotation, scale, alpha and tint are inert. */
 export interface GroupNodeDesc extends NodeBase {
     kind: 'group';
 }
 
-/** UI surfaces ONLY. World text goes through `createTextAsset` (§9.3). */
+/** UI surfaces only — world text goes through `createTextAsset`. */
 export interface TextNodeDesc extends NodeBase {
     kind: 'text';
     text: string;
@@ -174,7 +161,7 @@ export interface TextNodeDesc extends NodeBase {
 
 export type NodeDesc = SpriteNodeDesc | GroupNodeDesc | TextNodeDesc;
 
-/** An `undefined` field means unchanged. Nothing is retained past the call (§11.1). */
+/** An `undefined` field means unchanged. Nothing is retained past the call. */
 export interface NodePatch {
     id: NodeId;
     parent?: NodeId;
@@ -193,9 +180,10 @@ export interface NodePatch {
 }
 
 /**
- * A node's transform. Returned by both `localTransformOf` and `resolvedTransformOf` for
- * uniformity; only `position` and `visible` can differ between them, because rotation,
- * scale and alpha do not inherit (§6.1).
+ * A node's transform.
+ *
+ * Only `position` and `visible` can differ between the local and resolved forms, because nothing
+ * else inherits.
  */
 export interface Transform {
     position: MutableVec3;
@@ -205,14 +193,11 @@ export interface Transform {
     visible: boolean;
 }
 
-// ─── inspection (dev/tooling) ───────────────────────────────────────
-
 /**
- * One node, as a debugger sees it. A PLAIN SNAPSHOT — every field is a copy, so holding one
- * cannot mutate the scene and reading one later cannot observe a change (§11.2).
+ * One node, as a debugger sees it.
  *
- * `parent` is `NO_NODE` for a surface root. `children` is in draw order, same rule as
- * {@link SceneSnapshot.roots}.
+ * Every field is a copy, so holding one cannot mutate the scene and reading one later cannot
+ * observe a change. `children` is in draw order, same rule as {@link SceneSnapshot.roots}.
  */
 export interface NodeSnapshot {
     id: NodeId;
@@ -228,9 +213,9 @@ export interface NodeSnapshot {
     children: NodeId[];
     /** LOCAL to `parent`. */
     local: Transform;
-    /** After inheritance — position and visibility only, since nothing else inherits (§5). */
+    /** After inheritance, which reaches position and visibility only. */
     resolved: Transform;
-    /** `null` for a group, which has no art and therefore no extent (§8). */
+    /** `null` for a group, which has no art and therefore no extent. */
     localBounds: Bounds | null;
     /** Rotated AABB, world space. `null` for a group. */
     worldBounds: Bounds | null;
@@ -271,21 +256,17 @@ export interface InspectOptions {
     skipBounds?: boolean;
 }
 
-// ─── events ─────────────────────────────────────────────────────────
-
 export interface RendererEvents {
     contextlost: { reason: string };
     contextrestored: { reloadedAssets: string[]; failedAssets: string[] };
     resize: { canvas: Size; stage: Bounds; viewport: Bounds; resolution: number };
 }
 
-// ─── the interface ──────────────────────────────────────────────────
-
 /**
- * The renderer contract. An interface with per-backend factories
- * (`createPixiRenderer()`, `createNullRenderer()`) rather than an abstract class: no
- * inheritance coupling, no runtime import needed to reference the type, and a mock is one
- * object literal (§11.1).
+ * The renderer contract.
+ *
+ * An interface with per-backend factories rather than an abstract class: no inheritance coupling,
+ * no runtime import needed to reference the type, and a mock is one object literal.
  */
 export interface IRenderer {
     readonly initialized: boolean;
@@ -318,33 +299,33 @@ export interface IRenderer {
     loadAssets(entries: readonly AssetManifestEntry[]): Promise<AssetLoadResult>;
     unloadAssets(entries: readonly (string | AssetManifestEntry)[]): Promise<AssetUnloadResult>;
     createTextAsset(name: string, text: string, style?: TextStyle): Promise<AssetInfo>;
-    /** INTENDED state, post-queue — never raw GPU state (§10). */
+    /** Intended state, post-queue — never raw GPU state. */
     hasAsset(name: string): boolean;
     getAssetSize(name: string): Readonly<Size> | null;
 
-    // nodes — store ops; always immediate, even during a context loss (§10)
+    // Store ops: always immediate, even during a context loss.
 
-    /** Synchronous by design: `game.spawn` is specified sync and always safe (§9.1). */
+    /** Synchronous by design: `game.spawn` is specified sync and always safe. */
     createNode(desc: NodeDesc): NodeId;
     createNodes(descs: readonly NodeDesc[], out?: NodeId[]): NodeId[];
     createNodeAsync(desc: NodeDesc): Promise<{ id: NodeId } & AssetInfo>;
-    /** Cascades to children, matching `Entity.destroy()` (api_spec.ts:256). */
+    /** Cascades to children, matching `Entity.destroy()`. */
     destroyNode(id: NodeId): void;
     destroyNodes(ids: readonly NodeId[]): void;
     updateNodes(patches: readonly NodePatch[]): void;
-    /** Set-only fan-out. Establishes no inheritance (§5.1). */
+    /** Set-only fan-out, establishing no inheritance. */
     updateSubtree(
         root: NodeId,
         patch: Omit<NodePatch, 'id' | 'parent'>,
         opts?: { includeRoot?: boolean },
     ): void;
-    /** UI text nodes only — world text is an asset (§9.3). */
+    /** UI text nodes only — world text is an asset. */
     setNodeText(id: NodeId, text: string): void;
     isAlive(id: NodeId): boolean;
     /** Drops nodes; keeps the canvas and every loaded asset. */
     clear(surface?: Surface): void;
 
-    // hierarchy — position and visibility only (§5)
+    // Hierarchy carries position and visibility only.
 
     /** `keepResolvedPosition` defaults to `false`: position becomes local to parent. */
     attachNode(child: NodeId, parent: NodeId, opts?: { keepResolvedPosition?: boolean }): void;
@@ -360,14 +341,14 @@ export interface IRenderer {
     setCamera(camera: Readonly<CameraState>): void;
     readonly camera: Readonly<CameraState>;
 
-    // transforms & bounds — our store answers these, never the backend (§6)
+    // Our store answers these, never the backend.
 
     localTransformOf(id: NodeId, out?: Transform): Transform | null;
     resolvedTransformOf(id: NodeId, out?: Transform): Transform | null;
     localBoundsOf(id: NodeId): Bounds | null;
-    /** Rotated AABB in world space — culling and editor selection (§8). */
+    /** Rotated AABB in world space — culling and editor selection. */
     worldBoundsOf(id: NodeId): Bounds | null;
-    /** Screen space, for UI hit-testing (§12.4). */
+    /** Screen space, for UI hit-testing. */
     screenBoundsOf(id: NodeId): Bounds | null;
     screenPositionOf(id: NodeId, out?: MutableVec3): MutableVec3 | null;
     worldToScreen(point: Vec3Like, out?: MutableVec3): MutableVec3;
@@ -376,28 +357,21 @@ export interface IRenderer {
     /**
      * A snapshot of the whole scene, for a debugger, an inspector panel, or editor selection UI.
      *
-     * DEV AND TOOLING ONLY. This is the one method here that ALLOCATES per call — a fresh object
-     * per node — so it must not be called per frame in a shipped game, and no game logic may
-     * branch on what it returns. The narrow queries exist for that: `resolvedTransformOf` for one
-     * node's position, `worldBoundsOf` for one node's extent.
-     *
-     * It is on the interface rather than test-only — the shape `isCulled` and `drawOrderOf` take —
-     * because enumeration is otherwise IMPOSSIBLE from outside: the per-node queries are all
-     * top-down from a handle the caller already holds, so nothing can discover a surface's roots.
-     * A tool that cannot enumerate cannot show a node its caller forgot to track, which is the
-     * bug class an inspector is worth having for. Every backend answers it from `RendererCore`,
-     * so the cost of the wider contract is a one-line delegation.
+     * Dev and tooling only: it allocates a fresh object per node, so nothing may call it per frame
+     * or branch game logic on it — the narrow queries exist for that. It is on the interface
+     * because enumeration is otherwise impossible from outside, every per-node query walking down
+     * from a handle the caller already holds.
      *
      * Returns an empty snapshot before `init` and after `destroy`, never `null`.
      */
     inspect(opts?: InspectOptions): SceneSnapshot;
 
-    /** Returns an unsubscribe function, matching api_spec.ts:264. */
+    /** Returns an unsubscribe function. */
     on<K extends keyof RendererEvents>(
         event: K,
         handler: (e: RendererEvents[K]) => void,
     ): () => void;
 
-    /** No `dt` — the renderer owns no clock (§11.1). Nothing draws until this is called. */
+    /** No `dt` — the renderer owns no clock. Nothing draws until this is called. */
     render(): void;
 }

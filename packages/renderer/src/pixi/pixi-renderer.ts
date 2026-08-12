@@ -1,13 +1,7 @@
-// The PixiJS backend. ORCHESTRATION ONLY.
-//
-// This file holds no arithmetic and no store logic. The backend-independent half lives in
-// `core/renderer-core.ts` — the SAME instance type the headless backend uses — and the display
-// objects live behind `PixiSink`. What is left here is genuinely Pixi's: `Application` setup, the
-// DPR read, the ResizeObserver, the asset pipeline, the context guard, and presenting a frame.
-//
-// Sharing the core is what keeps the two backends honest. Before it existed, 15 methods here were
-// byte-identical to their headless twins and `createNode`'s whole validation block was duplicated,
-// with only one backend under test — and they had already drifted on the cull path.
+// Orchestration only: no arithmetic and no store logic. What is left here is genuinely Pixi's —
+// `Application` setup, the DPR read, the ResizeObserver, the asset pipeline, the context guard and
+// presenting a frame — while the shared half lives in `RendererCore` and the display objects behind
+// `PixiSink`.
 
 import { Application } from 'pixi.js';
 import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
@@ -70,37 +64,34 @@ export class PixiRenderer implements IRenderer {
         return this.#guard?.pendingCount ?? 0;
     }
 
-    // `async` so an option violation REJECTS rather than throwing synchronously — the same
-    // contract the headless backend honours, and the reason `init` returns a promise at all is
-    // that `Application.init()` is async (§14.4).
+    // `async` so an option violation rejects rather than throwing synchronously, matching the
+    // headless backend; `init` returns a promise at all because `Application.init()` is async.
     async init(options: RendererInitOptions): Promise<void> {
         if (this.#core !== null) {
             rendererError('already-initialized', 'init() was already called on this renderer');
         }
 
-        // This is the one module allowed to read a global — the pure helper takes the DPR as an
-        // argument precisely so it stays testable.
+        // The one module allowed to read a global; the pure helper takes the DPR as an argument.
         const dpr =
             typeof globalThis.devicePixelRatio === 'number' ? globalThis.devicePixelRatio : 1;
         const resolution = effectiveResolution(dpr, options.maxResolution ?? 2);
 
         const measured = measureContainer(options.container, options.design);
-        // Validates and applies defaults BEFORE any GPU work, so a bad option cannot leave a
-        // half-built Application behind.
+        // Before any GPU work, so a bad option cannot leave a half-built Application behind.
         const config = resolveInitOptions(options, measured, resolution);
 
         this.#assets.setDefaultFilter(options.defaultFilter ?? 'nearest');
 
         const app = new Application();
-        // Conditional spread throughout: `exactOptionalPropertyTypes` makes an explicit
-        // `undefined` a compile error here.
+        // Conditional spread because `exactOptionalPropertyTypes` makes an explicit `undefined` a
+        // compile error.
         await app.init({
             width: measured.width,
             height: measured.height,
             resolution,
             antialias: options.antialias ?? false,
             preference: options.preference ?? 'webgl',
-            // The client owns the frame loop, so Pixi's ticker must not drive rendering (§1).
+            // The client owns the frame loop, so Pixi's ticker must not drive rendering.
             autoStart: false,
             autoDensity: true,
             ...(options.background === 'transparent'
@@ -113,9 +104,8 @@ export class PixiRenderer implements IRenderer {
         options.container.appendChild(app.canvas);
 
         this.#surfaces = new SurfaceTree(app.stage, config.enabledSurfaces);
-        // The core and the sink each need the other, so the sink is constructed first and handed
-        // the core's store immediately afterwards. The core calls no sink method while
-        // constructing, so nothing observes the unbound window.
+        // Each needs the other, so the sink is built first and bound immediately afterwards; the
+        // core calls no sink method while constructing, so nothing observes the unbound window.
         const sink = new PixiSink(this.#surfaces, this.#assets);
         const core = new RendererCore(sink, config);
         sink.bind(core.xf);
@@ -133,8 +123,7 @@ export class PixiRenderer implements IRenderer {
 
         this.#observer?.disconnect();
         this.#observer = null;
-        // Settles queued promises as cancelled rather than rejecting, so teardown produces no
-        // unhandled rejections (§10).
+        // Settles queued promises as cancelled rather than rejecting, so teardown stays quiet.
         this.#guard?.destroy(() => ({
             loaded: [],
             failed: [{ name: '*', reason: CANCELLED_REASON }],
@@ -150,13 +139,10 @@ export class PixiRenderer implements IRenderer {
         this.#queue.clear();
         this.#assets.clear();
 
-        // `removeView: true` takes the canvas out of the container, so a re-init on the same
-        // element does not stack a second canvas on the first.
+        // `removeView: true`, so a re-init on the same element cannot stack a second canvas.
         this.#app?.destroy({ removeView: true }, { children: true });
         this.#app = null;
     }
-
-    // ─── sizing ─────────────────────────────────────────────────────
 
     resize(cssWidth: number, cssHeight: number): void {
         const core = this.#live();
@@ -187,8 +173,6 @@ export class PixiRenderer implements IRenderer {
         return this.#core?.viewport ?? { left: 0, right: 0, top: 0, bottom: 0 };
     }
 
-    // ─── surfaces ───────────────────────────────────────────────────
-
     setSurfaceVisible(surface: Surface, visible: boolean): void {
         this.#live()?.setSurfaceVisible(surface, visible);
     }
@@ -196,8 +180,6 @@ export class PixiRenderer implements IRenderer {
     isSurfaceEnabled(surface: Surface): boolean {
         return this.#core?.isSurfaceEnabled(surface) ?? false;
     }
-
-    // ─── assets ─────────────────────────────────────────────────────
 
     async loadAsset(entry: AssetManifestEntry): Promise<AssetInfo> {
         const result = await this.loadAssets([entry]);
@@ -211,8 +193,7 @@ export class PixiRenderer implements IRenderer {
     async loadAssets(entries: readonly AssetManifestEntry[]): Promise<AssetLoadResult> {
         if (this.#live() === null) return { loaded: [], failed: [], queued: false };
 
-        // Mid-loss the intent is recorded and the work deferred; the promise still resolves, so
-        // the caller's frame loop needs no branch (§10).
+        // Mid-loss the intent is recorded and the work deferred, but the promise still resolves.
         const guard = this.#guard;
         if (guard?.lost === true) {
             for (const entry of entries) this.#queue.load(entry);
@@ -247,8 +228,8 @@ export class PixiRenderer implements IRenderer {
             ...(style !== undefined && { style }),
         };
 
-        // Measurement uses a 2D canvas, so a real size is available even mid-loss — only the
-        // upload queues, and layout never blocks (§9.3).
+        // Measurement uses a 2D canvas, so a real size is available mid-loss: only the upload
+        // queues, and layout never blocks.
         const size = measureText(text, style);
 
         const upload = async (): Promise<AssetInfo> => {
@@ -261,7 +242,7 @@ export class PixiRenderer implements IRenderer {
         const guard = this.#guard;
         if (guard?.lost === true) {
             this.#queue.load(entry);
-            // Resolves with the MEASURED size now; the texture lands on restore.
+            // Resolves with the measured size now; the texture lands on restore.
             void guard.run(upload);
             return { name, size: { ...size } };
         }
@@ -269,16 +250,13 @@ export class PixiRenderer implements IRenderer {
     }
 
     hasAsset(name: string): boolean {
-        // INTENDED state, post-queue — never raw GPU state, so a caller cannot branch wrongly
-        // mid-loss (§10).
+        // Intended state, post-queue, so a caller cannot branch wrongly mid-loss.
         return this.#queue.intendedHas(name, this.#assets.has(name));
     }
 
     getAssetSize(name: string): Readonly<Size> | null {
         return this.#assets.sizeOf(name);
     }
-
-    // ─── nodes ──────────────────────────────────────────────────────
 
     createNode(desc: NodeDesc): NodeId {
         return this.#live()?.createNode(desc) ?? NO_NODE;
@@ -330,8 +308,6 @@ export class PixiRenderer implements IRenderer {
         this.#live()?.clear(surface);
     }
 
-    // ─── hierarchy ──────────────────────────────────────────────────
-
     attachNode(child: NodeId, parent: NodeId, opts?: { keepResolvedPosition?: boolean }): void {
         this.#live()?.attachNode(child, parent, opts);
     }
@@ -352,18 +328,14 @@ export class PixiRenderer implements IRenderer {
         return this.#core?.surfaceOf(id) ?? null;
     }
 
-    // ─── camera ─────────────────────────────────────────────────────
-
     setCamera(camera: Readonly<CameraState>): void {
-        // Touches one container and zero nodes (§6.4).
+        // Touches one container and zero nodes.
         this.#live()?.setCamera(camera);
     }
 
     get camera(): Readonly<CameraState> {
         return this.#core?.camera ?? { position: { x: 0, y: 0, z: 0 }, zoom: 1, framing: 'stage' };
     }
-
-    // ─── transforms & bounds ────────────────────────────────────────
 
     localTransformOf(id: NodeId, out?: Transform): Transform | null {
         return this.#core?.localTransformOf(id, out) ?? null;
@@ -400,8 +372,7 @@ export class PixiRenderer implements IRenderer {
     inspect(opts?: InspectOptions): SceneSnapshot {
         const core = this.#core;
         if (core === null) return emptySnapshot(this.contextState);
-        // The registry is ours, not the core's — asset residency is the one thing a backend owns
-        // (§9), which is why the core takes the list rather than reading a map.
+        // Residency is the one thing a backend owns, which is why the core takes a list.
         return core.inspect(opts, this.#assets.inspectEntries(), this.contextState);
     }
 
@@ -415,8 +386,8 @@ export class PixiRenderer implements IRenderer {
     render(): void {
         const core = this.#live();
         if (core === null) return;
-        // A no-op while the context is gone; the store stayed current, so the next good frame is
-        // correct with no caller involvement (§10).
+        // A no-op while the context is gone: the store stayed current, so the next good frame is
+        // correct with no caller involvement.
         if (this.#guard?.lost === true) return;
 
         core.flush();
@@ -428,9 +399,7 @@ export class PixiRenderer implements IRenderer {
         return this.#core?.isCulled(id) ?? false;
     }
 
-    // ─── internals ──────────────────────────────────────────────────
-
-    /** The core, or `null` before init and after destroy — which makes every method a no-op. */
+    /** The core, or `null` before init and after destroy, which makes every method a no-op. */
     #live(): RendererCore | null {
         return this.#destroyed ? null : this.#core;
     }
@@ -447,8 +416,8 @@ export class PixiRenderer implements IRenderer {
     }
 
     #installGuard(app: Application): void {
-        // WebGPU exposes device loss as a promise rather than a DOM event; feature-detected
-        // because a WebGL renderer has no `.gpu` (§10).
+        // WebGPU exposes device loss as a promise rather than a DOM event, and a WebGL renderer
+        // has no `.gpu` at all.
         const gpu = (app.renderer as { gpu?: { device?: { lost?: Promise<unknown> } } }).gpu;
         const deviceLost = gpu?.device?.lost;
 
@@ -480,18 +449,16 @@ export class PixiRenderer implements IRenderer {
     }
 
     /**
-     * Loads entries SEQUENTIALLY, on purpose.
+     * Loads entries sequentially on purpose.
      *
-     * `Promise.all` would be faster but would make two things nondeterministic: the order of
-     * `loaded`/`failed`, and which atlas wins a cross-sheet frame-name collision. A level load
-     * that reports its failures in a different order every run costs far more to debug than the
-     * parallelism is worth.
+     * `Promise.all` would be faster but would make the order of `loaded`/`failed` and the winner of
+     * a cross-sheet frame-name collision nondeterministic.
      */
     async #loadNow(entries: readonly AssetManifestEntry[]): Promise<AssetLoadResult> {
         const result: AssetLoadResult = { loaded: [], failed: [], queued: false };
         for (const entry of entries) {
             if (entry.kind === 'text') {
-                // A text entry rasterizes rather than fetches (§9.3).
+                // A text entry rasterizes rather than fetches.
                 result.loaded.push(await this.createTextAsset(entry.name, entry.text, entry.style));
                 continue;
             }
@@ -506,8 +473,8 @@ export class PixiRenderer implements IRenderer {
         const result: AssetUnloadResult = { unloaded: [], unknown: [], inUse: [], queued: false };
         const core = this.#core;
 
-        // Fonts LAST: one still referenced by a live text node is kept, because dropping it
-        // re-rasterizes live text to a fallback face, which reads as corruption (§9.2).
+        // Fonts last: one still referenced by live text is kept, because dropping it re-rasterizes
+        // that text to a fallback face, which reads as corruption.
         const fonts: string[] = [];
         const rest: string[] = [];
         for (const name of names) {
@@ -527,7 +494,7 @@ export class PixiRenderer implements IRenderer {
                 if (isFont) continue;
             }
 
-            // Affected nodes fall back to the placeholder; their ids stay valid (§9.2).
+            // Affected nodes fall back to the placeholder; their ids stay valid.
             const slots = core?.slotsUsingTexture(name) ?? [];
             this.#assets.unload(name);
             this.#sink?.repointToPlaceholder(slots);
@@ -541,8 +508,8 @@ export class PixiRenderer implements IRenderer {
 /**
  * The container's CSS size, falling back to the design stage.
  *
- * A container measured mid-layout reports 0; the design stage is the sane starting point and the
- * ResizeObserver corrects it on the first real layout.
+ * A container measured mid-layout reports 0, and the ResizeObserver corrects the fallback on the
+ * first real layout.
  */
 function measureContainer(container: HTMLElement, design: Size): Size {
     const width = container.clientWidth;

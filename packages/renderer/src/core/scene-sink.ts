@@ -5,8 +5,7 @@
 // else — the stores, validation, hierarchy, projection, bounds, culling — lives in
 // `renderer-core.ts` in ONE copy.
 //
-// Indices, not `NodeId`s: handle validation already happened in the core, and both stores are
-// addressed by slot index (§6.1, §7).
+// Indices, not `NodeId`s: handle validation already happened in the core.
 
 import type { Bounds, Size } from '@platform/math';
 import type { CameraState, ScaleMode, Surface } from '../renderer.js';
@@ -31,18 +30,17 @@ export interface SceneSink {
     reparent(index: number, record: NodeRecord, parentIndex: number): void;
 
     /**
-     * Destroys the objects for `root` and its `descendants`.
+     * Destroys the objects for a subtree, root first.
      *
-     * Both are passed because a backend with a nested tree gets the cascade for free from the
-     * root and only needs the descendant list to drop bookkeeping (§6.2), while a flat backend
-     * can walk the list.
+     * One array rather than a root plus a copied tail: a backend with a nested tree gets the cascade
+     * for free from `subtree[0]` and walks the rest only to drop bookkeeping.
      */
-    destroySubtree(root: number, descendants: readonly number[]): void;
+    destroySubtree(subtree: readonly number[]): void;
 
-    /** Pushes a node's LOCAL transform values. Called once per flush-dirty node (§6.2). */
+    /** Pushes a node's local transform values. Called once per flush-dirty node. */
     write(index: number, record: NodeRecord): void;
 
-    /** Toggles whether a node's ART draws — never its children (§8). */
+    /** Toggles whether a node's art draws — never its children. */
     setRenderable(index: number, renderable: boolean): void;
 
     /** A sprite node's texture name changed. */
@@ -62,7 +60,7 @@ export interface SceneSink {
      */
     sizeOf(index: number, record: NodeRecord): Size;
 
-    /** Applies the camera and the letterbox mask to the surface roots (§6.4). */
+    /** Applies the camera and the letterbox mask to the surface roots. */
     applyView(
         camera: Readonly<CameraState>,
         scaleMode: ScaleMode,

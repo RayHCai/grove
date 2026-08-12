@@ -1,8 +1,5 @@
-// PURE. Surface order and the camera-transformed predicate (§4).
-//
-// Draw order is fixed bottom-to-top and is not configurable, so a UI node can never sort
-// beneath a world node regardless of `layer`. `editorOverlay` sits above `ui` on purpose:
-// a gizmo must stay grabbable over the widget it moves.
+// Pure. Draw order is fixed, so a UI node can never sort beneath a world node whatever its
+// `layer`; `editorOverlay` sits above `ui` so a gizmo stays grabbable over the widget it moves.
 
 import type { Surface } from './renderer.js';
 
@@ -18,19 +15,14 @@ export const SURFACE_ORDER: readonly Surface[] = [
 /** What `enabledSurfaces` defaults to: a shipped game allocates no editor containers. */
 export const DEFAULT_SURFACES: readonly Surface[] = ['world', 'ui'] as const;
 
-/** The three surfaces the shared camera transforms (§4). */
+/** The three surfaces the shared camera transforms. */
 const CAMERA_TRANSFORMED: ReadonlySet<Surface> = new Set<Surface>([
     'editorSpace',
     'world',
     'editorOverlay',
 ]);
 
-/**
- * The surfaces clipped to `stageRect` when letterboxing is active.
- *
- * Editor chrome is excluded so a bar never cuts off a gizmo or a panel — and `'free'`
- * framing (what the editor uses) forces letterboxing off anyway.
- */
+/** Editor chrome is excluded so a letterbox bar never cuts off a gizmo or a panel. */
 const CLIPPED_WHEN_LETTERBOXED: ReadonlySet<Surface> = new Set<Surface>([
     'editorSpace',
     'world',
@@ -57,7 +49,7 @@ export function isClippedWhenLetterboxed(surface: Surface): boolean {
     return CLIPPED_WHEN_LETTERBOXED.has(surface);
 }
 
-/** `true` for a valid `Surface` string. Narrows an unchecked value. */
+/** `true` for a valid `Surface` string. */
 export function isSurface(value: unknown): value is Surface {
     return typeof value === 'string' && SURFACE_ORDER.includes(value as Surface);
 }

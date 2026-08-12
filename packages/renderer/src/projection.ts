@@ -1,28 +1,19 @@
-// PURE. World <-> screen, the y-flip, degrees -> Pixi radians, and UI anchors (§6.3, §6.4).
+// Pure. The y-flip is arithmetic at the write boundary, in this file and nowhere else: the
+// tempting `root.scale.y = -1` mirrors every sprite and glyph in the tree, so the flip is a sign
+// on the value handed to the backend and the camera root keeps a positive uniform scale.
 //
-// THE Y-FLIP IS ARITHMETIC AT THE WRITE BOUNDARY, in this file and nowhere else. The
-// tempting `root.scale.y = -1` is wrong: a negative root scale mirrors every sprite and
-// every glyph in the tree. So the flip is a sign on the value we hand the backend —
-// `pixi.y = -local.y`, `pixi.rotation = -degrees * DEG2RAD` — and the camera root keeps a
-// POSITIVE uniform scale (§6.3, §6.4).
+// Three spaces meet here, and the y direction differs between them:
 //
-// Three spaces meet here, and the y direction differs between them (§3):
+//   world   origin stage-center,      y-up,   world px
+//   ui      origin a named anchor,    y-down, design px scaled by fitScale
+//   screen  origin canvas top-left,   y-down, CSS px
 //
-//   world   origin stage-center, y-UP,   world px
-//   ui      origin a named anchor, y-DOWN, DESIGN px scaled by fitScale
-//   screen  origin canvas top-left, y-DOWN, CSS px
-//
-// UI stays y-down because §12.1 defines placement as an anchor plus an offset, and
-// `{uiAnchor: 'top-left', position: {x: 20, y: 20}}` has to read as "20 in from the left,
-// 20 DOWN from the top" — under y-up that offset would point off-screen.
-//
-// `z` passes through every function unchanged: present-but-reserved for a 3D backend (§17).
+// `z` passes through every function unchanged, reserved for a 3D backend.
 
 import { DEG2RAD, vec3, vec3Set } from '@platform/math';
 import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import type { CameraState, ScaleMode, UiAnchor } from './renderer.js';
-// Aliased so `uiToScreen`'s `fitScale` PARAMETER — the name the caller sees — does not
-// shadow this import.
+// Aliased so `uiToScreen`'s `fitScale` parameter does not shadow this import.
 import { fitScale as stageFitScale } from './viewport.js';
 
 /** `value` when it is finite and positive, else `fallback`. */
@@ -35,7 +26,7 @@ function finiteOr(value: number, fallback: number): number {
     return Number.isFinite(value) ? value : fallback;
 }
 
-/** Fractional position of each anchor within the stage rect. y is measured DOWN (§3). */
+/** Fractional position of each anchor within the stage rect. y is measured down. */
 const UI_ANCHOR_FRACTION: Record<UiAnchor, { x: number; y: number }> = {
     'top-left': { x: 0, y: 0 },
     'top-center': { x: 0.5, y: 0 },
@@ -51,9 +42,8 @@ const UI_ANCHOR_FRACTION: Record<UiAnchor, { x: number; y: number }> = {
 /**
  * Interpolates between two edges.
  *
- * The endpoints are returned verbatim rather than as `lo + f * (hi - lo)`, which is not
- * exactly `hi` at `f === 1` in floating point. An anchored HUD element must land ON the
- * stage edge, not a rounding error away from it.
+ * The endpoints are returned verbatim because `lo + f * (hi - lo)` is not exactly `hi` at
+ * `f === 1`, and an anchored HUD element must land on the stage edge.
  */
 function edge(lo: number, hi: number, fraction: number): number {
     if (fraction === 0) return lo;
@@ -62,11 +52,10 @@ function edge(lo: number, hi: number, fraction: number): number {
 }
 
 /**
- * Composed camera scale: `fitScale * zoom` — CSS px per world unit (§6.4).
+ * Composed camera scale: `fitScale * zoom` — CSS px per world unit.
  *
- * Framing comes off the camera, defaulting to `'stage'`. Guaranteed finite and positive:
- * a non-positive or NaN `zoom` falls back to 1, so no projection can divide by zero and
- * `worldToScreen` / `screenToWorld` stay exact inverses whatever they are handed.
+ * Always finite and positive, so no projection divides by zero and `worldToScreen` /
+ * `screenToWorld` stay exact inverses whatever they are handed.
  */
 export function cameraScale(
     camera: Readonly<CameraState>,
@@ -81,25 +70,23 @@ export function cameraScale(
 /**
  * Pixi rotation, in radians, from authored degrees.
  *
- * Authored rotation is CCW-positive in a y-up world; the backend's y-down space makes the
- * same visual turn CW-positive, so the sign flips. This is the rotation half of §6.3 — the
- * companion to {@link flipY}, and the reason a root `scale.y = -1` is not needed.
+ * Authored rotation is CCW-positive in a y-up world; the backend's y-down space makes the same
+ * visual turn CW-positive, so the sign flips.
  */
 export function pixiRotation(degrees: number): number {
     return -degrees * DEG2RAD;
 }
 
-/** The backend-space y for a world y: the write-boundary flip (§6.3). */
+/** The backend-space y for a world y: the write-boundary flip. */
 export function flipY(y: number): number {
     return -y;
 }
 
 /**
- * World -> screen, in CSS px with y DOWN (§6.4).
+ * World -> screen, in CSS px with y down.
  *
- * `screenX = cw/2 + (wx - cam.x) * s`, `screenY = ch/2 + (cam.y - wy) * s`. Note the
- * REVERSED subtraction on y: that is the flip, and it means a point ABOVE the camera in
- * world space gets a SMALLER screen y.
+ * The reversed subtraction on y is the flip: a point above the camera in world space gets a
+ * smaller screen y.
  */
 export function worldToScreen(
     point: Vec3Like,
@@ -147,12 +134,16 @@ export function screenToWorld(
 }
 
 /**
- * The screen-space (CSS px) point a {@link UiAnchor} names on a stage rect (§3, §12.1).
+ * The screen-space (CSS px) point a {@link UiAnchor} names on a stage rect.
  *
- * `stage` is screen space, so `bottom > top` — which makes `'top-left'` the rect's
- * numerically SMALLEST corner and `'bottom-right'` its largest.
+ * `stage` is screen space, so `bottom > top` — which makes `'top-left'` the rect's numerically
+ * smallest corner and `'bottom-right'` its largest.
  */
-export function uiAnchorOrigin(anchor: UiAnchor, stage: Bounds, out: MutableVec3 = vec3()): MutableVec3 {
+export function uiAnchorOrigin(
+    anchor: UiAnchor,
+    stage: Bounds,
+    out: MutableVec3 = vec3(),
+): MutableVec3 {
     const fraction = UI_ANCHOR_FRACTION[anchor];
     return vec3Set(
         out,
@@ -163,13 +154,10 @@ export function uiAnchorOrigin(anchor: UiAnchor, stage: Bounds, out: MutableVec3
 }
 
 /**
- * A UI node's screen position: its anchor origin plus its design-px offset scaled by
- * `fitScale` (§3).
+ * A UI node's screen position: its anchor origin plus its design-px offset scaled by `fitScale`.
  *
- * The offset is ADDED on both axes because UI is y-down like screen space, so
- * `{uiAnchor: 'top-left', position: {x: 20, y: 20}}` is 20 design px in from the left and
- * 20 design px down from the top. Scaling by `fitScale` is what makes a HUD authored
- * against the design stage land identically on every screen.
+ * The offset is added on both axes because UI is y-down like screen space, and scaling by
+ * `fitScale` is what makes a HUD authored against the design stage land the same on every screen.
  */
 export function uiToScreen(
     offset: Vec3Like,
@@ -178,9 +166,8 @@ export function uiToScreen(
     fitScale: number,
     out: MutableVec3 = vec3(),
 ): MutableVec3 {
-    // `offset` is read into locals BEFORE `out` is written, so `out` may safely be the same
-    // object as `offset` — the pooled-scratch call `uiToScreen(p, anchor, stage, s, p)`.
-    // Writing the anchor origin into `out` first would clobber the offset in that case.
+    // `offset` is read into locals before `out` is written, so a caller may pass the same object
+    // as both; writing the anchor origin into `out` first would clobber the offset.
     const s = positiveOr(fitScale, 1);
     const dx = offset.x * s;
     const dy = offset.y * s;
