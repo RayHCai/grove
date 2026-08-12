@@ -1,12 +1,7 @@
-// The Runtime is the swappable slot the ambient consts (game, hud, random, assets) are
-// facades over (DESIGN §8.4). It holds every store — each registered with the
-// StoreRegistry so snapshot() iterates them (§8.1) — the scope tree, the host table, the
-// replication channels, the dispatcher, the seams, and the tick counter.
-//
-// createRuntime() builds an isolated world; withRuntime(rt, fn) runs fn against it. This
-// is what makes the spec's module-const surface testable and multi-instance-per-process.
+// The Runtime is the swappable world the ambient consts (game, hud, random, assets) are facades
+// over, which is what makes that module-const surface testable and multi-instance-per-process.
 
-import { DEFAULT_SIM_RATE } from '../config.js';
+import { DEFAULT_SIM_RATE, MAX_LOG_RECORDS } from '../config.js';
 import { ScopeTree } from '../dispatch/scope-tree.js';
 import { BreakerCounters } from '../dispatch/breaker.js';
 import { Dispatcher } from '../dispatch/dispatcher.js';
@@ -21,7 +16,7 @@ import { TagIndex } from '../world/tag-index.js';
 import { EntityManager } from '../world/entity-manager.js';
 import { ReplicationChannels } from '../state/channels.js';
 import type { HandlerErrorRecord } from '../errors.js';
-import { HostTable } from './hosts.js';
+import { ENTITY_KEY_PREFIX, HostTable } from './hosts.js';
 import { PRNGStore } from './prng-store.js';
 import { ManualClock, MemoryKVStore, NullEffectSink } from './seams.js';
 import type { Clock, EffectSink, KVStore, PhysicsSink } from './seams.js';
@@ -29,6 +24,7 @@ import { NullPhysicsSink } from './physics.js';
 
 import type { DispatchOptions } from '../dispatch/dispatcher.js';
 import type { EntityId } from '../ids.js';
+import { entityIndex } from '../ids.js';
 import type { Bounds } from '@platform/math';
 import type { Broadphase } from '../world/broadphase.js';
 import type { PlayerManager, Player } from './player.js';
@@ -39,10 +35,11 @@ import type { Roster } from './roster.js';
 import type { Camera } from './camera.js';
 import type { Storage } from './wrappers.js';
 import type { Random } from './random.js';
+import type { Assets } from './assets.js';
 import type { Game, WorldQuery } from './game.js';
 import type { RegionIndex } from './regions.js';
 
-/** The per-tick passes the loop drives, in tick order (§8.2). Wired by loadGame. */
+/** The per-tick passes the loop drives, in tick order. */
 export interface TickPasses {
     input(dispatch: DispatchOptions): void;
     movement(dt: number, scope: ReadonlySet<EntityId> | undefined): void;
@@ -52,22 +49,34 @@ export interface TickPasses {
     update(dispatch: DispatchOptions, dt: number, scope: ReadonlySet<EntityId> | undefined): void;
 }
 
-/** A logged handler throw or engine warning (§4.4, §14). Console by default. */
+/** A logged handler throw or engine warning. */
 export interface EngineLog extends DispatchLog {
     warn(message: string): void;
     readonly records: ReadonlyArray<HandlerErrorRecord & { phase?: string; disabled?: boolean }>;
 }
 
-/** Default log: collects records and mirrors them to the console. */
+/** Default log: retains the most recent MAX_LOG_RECORDS error records in memory. */
 export class CollectingLog implements EngineLog {
     readonly #records: Array<HandlerErrorRecord & { phase?: string; disabled?: boolean }> = [];
+    #dropped = 0;
 
     error(record: HandlerErrorRecord & { phase?: string; disabled?: boolean }): void {
+        // Capped: a session runs for hours and an unbounded array is a slow leak that only shows
+        // up on the machine already having a bad day.
+        if (this.#records.length >= MAX_LOG_RECORDS) {
+            this.#records.shift();
+            this.#dropped++;
+        }
         this.#records.push(record);
     }
 
+    /** Records evicted by the cap, so a reader can tell a quiet log from a truncated one. */
+    get dropped(): number {
+        return this.#dropped;
+    }
+
     warn(_message: string): void {
-        // Engine warnings go to the dev console in a real host (§14.3); collected here.
+        // Warnings belong in the host's dev console, not in the error records.
     }
 
     get records(): ReadonlyArray<HandlerErrorRecord & { phase?: string; disabled?: boolean }> {
@@ -94,7 +103,7 @@ export class Runtime {
     readonly dispatcher = new Dispatcher(this.scopes, this.breaker, this.log);
     readonly entityManager = new EntityManager(this);
 
-    // Seams — null implementations by default (§10); a host swaps them in.
+    // Null implementations by default, so every member is exercisable in Node.
     clock: Clock = new ManualClock();
     physics: PhysicsSink = new NullPhysicsSink(this.transforms);
     kv: KVStore = new MemoryKVStore();
@@ -102,49 +111,43 @@ export class Runtime {
 
     simRate = DEFAULT_SIM_RATE;
 
-    /** Monotonic tick counter from 0; engine-internal (§8.1). The `step` argument, not this. */
+    /** The tick the loop last adopted; step() assigns its argument rather than incrementing. */
     tick = 0;
 
-    /** Whether this runtime is authoritative (server retains the lag ring). */
+    /** Whether this runtime is authoritative; only a server captures the lag ring. */
     isServer = true;
 
-    // Collaborators wired during loadGame — optional so the Runtime is constructible bare
-    // for a pure-store test. Each is set once by the wiring step (§8.3).
+    // Optional so a store-level test can construct a Runtime bare; loadGame fills them in.
     playerManager?: PlayerManager;
     contacts?: ContactSource;
     wiring?: Wiring;
     lagRing?: LagRing;
     roster?: Roster;
-    /** send(entityId, event, payload) via the dispatcher; set by wiring. */
     send?: (id: EntityId, event: string, payload?: Record<string, unknown>) => Promise<void>;
-    /** Camera/Storage factories, per-player; set by wiring so the facade needn't import them. */
+    /** Injected so the player facade need not import Camera and Storage. */
     makeCamera?: (player: Player) => Camera;
     makeStorage?: (player: Player) => Storage;
-    /** The local player on a client runtime; undefined on the server ("local" names nothing). */
+    /** The local player on a client runtime; undefined on the server. */
     localPlayer?: Player | null;
-    /** Persisted @serverState from a previous session, keyed by (hostId, field) (§5.3). */
+    /** Persisted @serverState from a previous session, keyed by (hostId, field). */
     persisted?: { get(hostId: string, field: string): unknown };
-    /** Client→server request delivery; set by wiring in loopback, by transport over a network. */
+    /** Client→server request delivery; loadGame installs the loopback sink. */
     requestSink?: (name: string, payload?: Record<string, unknown>) => void;
-    /** The seeded random facade (§8.4). */
     random?: Random;
-    /** The one Game instance (§7). */
+    /** The manifest's asset table; the `assets` const resolves through here. */
+    assets?: Assets;
     gameInstance?: Game;
-    /** The FindQuery resolver. */
     query?: WorldQuery;
-    /** The live Broadphase over the transform store (§2). */
+    /** Broadphase over the live transform store, never a lag-ring buffer. */
     broadphase?: Broadphase;
-    /** The panel-authored region index (§8.2). */
     regions?: RegionIndex;
-    /** Build-time world extent, readonly once loaded (§7). */
     worldBounds?: Bounds;
-    /** The per-tick passes the loop drives; set by loadGame (§8.2). */
     passes?: TickPasses;
-    /** Local-mode pause gate (§7). */
+    /** For the host's accumulator to honour; `step` runs a tick regardless. */
     paused = false;
 
     constructor() {
-        // Registration order is capture/apply order; derived stores register last (§8.1).
+        // Registration order is capture and apply order.
         this.registry.register(this.entities);
         this.registry.register(this.transforms);
         this.registry.register(this.tags);
@@ -154,7 +157,7 @@ export class Runtime {
 
         this.timers.setSimRate(this.simRate);
         this.tweens.setSimRate(this.simRate);
-        this.timers.setScopeOwnerLookup(scopeId => this.#entityForScope(scopeId));
+        this.timers.setScopeOwnerLookup((scopeId) => this.#entityForScope(scopeId));
     }
 
     setSimRate(rate: number): void {
@@ -163,14 +166,13 @@ export class Runtime {
         this.tweens.setSimRate(rate);
     }
 
-    /** Reverse lookup used by the timer heap's scoped snapshot filter. */
+    // Through the host table's reverse index: a scan of every slot per pending timer put a scoped
+    // snapshot — which the client takes every frame — well past a whole frame's budget.
     #entityForScope(scopeId: number): number {
-        for (let i = 0; i < this.entities.slotCount; i++) {
-            const id = this.entities.idAt(i as never) as unknown as number;
-            if (id === 0) continue;
-            if (this.hosts.scopeForEntity(id) === scopeId) return id % 0x100_0000;
-        }
-        return -1;
+        const key = this.hosts.keyForScope(scopeId);
+        if (key === undefined || !key.startsWith(ENTITY_KEY_PREFIX)) return -1;
+        const id = Number(key.slice(ENTITY_KEY_PREFIX.length));
+        return Number.isSafeInteger(id) ? entityIndex(id as EntityId) : -1;
     }
 }
 
@@ -182,7 +184,7 @@ export function createRuntime(): Runtime {
     return current;
 }
 
-/** The current runtime. Throws if none is active — a facade read before loadGame. */
+/** The current runtime; throws if none is active. */
 export function currentRuntime(): Runtime {
     if (current === null) {
         throw new Error('no active runtime — call createRuntime() or loadGame() first');
