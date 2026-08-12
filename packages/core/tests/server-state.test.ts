@@ -1,4 +1,4 @@
-// The @serverState accessor-pair mechanism (DESIGN §5.2) — the highest-risk claim in the
+// The @serverState accessor-pair mechanism — the highest-risk claim in the
 // design. Fixtures are compiled by the build (see src/testkit/fixtures.ts); this file
 // carries no decorator syntax, so the oxc test transform handles it.
 
@@ -58,7 +58,7 @@ describe('@serverState accessor pair', () => {
         const record = new Map<string, unknown>();
         record.set('credits', 500); // a restored value seeded on the record
         const marked: string[] = [];
-        redirectState(w as object, record, field => marked.push(field));
+        redirectState(w as object, record, (field) => marked.push(field));
 
         expect(w.credits).toBe(500);
         expect((w as unknown as Record<symbol, unknown>)[STATE_TARGET]).toBe(record);

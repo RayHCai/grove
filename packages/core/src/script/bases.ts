@@ -1,5 +1,5 @@
-// The four script bases. Location is the base class; host is a type parameter (§3.1).
-// BaseScript is not extendable directly — it names no location.
+// Location is the base class and host a type parameter; BaseScript names no location, so
+// nothing attachable extends it directly.
 
 import type { ScriptLocation } from './types.js';
 import type { Player } from '../runtime/player.js';
@@ -9,7 +9,7 @@ export type Host = object;
 export abstract class BaseScript<H extends Host = Host> {
     readonly host!: H;
 
-    /** @internal — set by the engine during wiring. */
+    /** @internal — declared by the location subclasses, read at wire time. */
     static readonly __location: ScriptLocation = undefined!;
 }
 

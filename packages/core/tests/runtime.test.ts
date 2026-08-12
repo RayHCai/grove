@@ -42,9 +42,8 @@ describe('runtime end to end', () => {
         const e = game.spawn('crate', 0, 0);
         e.addScript(Target as never);
         await e.send('damage', { amount: 5 });
-        expect(e.alive).toBe(false); // §5.8 contract, synchronous handler
-        // still present until the drain
-        expect(game.entities.some(x => x === e)).toBe(true);
+        expect(e.alive).toBe(false);
+        expect(game.entities.some((x) => x === e)).toBe(true); // still present until the drain
     });
 
     it('hoists @serverState onto the entity host record and mutates through it', async () => {
