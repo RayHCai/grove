@@ -187,15 +187,18 @@ The exception, unchanged from the previous design, is `Camera` — a `ClientScri
 
 **Reconnection.** A dropped client keeps predicting locally while the server holds its state for a grace period before firing `@onPlayerLeave`; on reconnect, authoritative state wins and the avatar snaps back. Clients stop accepting input after ~1s of silence so players don't accumulate long stretches of ghost gameplay.
 
-**Run modes.** One code path, three deployments:
+**Run modes.** One code path, two deployments:
 
-| Mode          | Server                  | Network | Players                                   |
-| ------------- | ----------------------- | ------- | ----------------------------------------- |
-| Networked     | remote process          | yes     | join over time                            |
-| Local co-op   | same process (loopback) | no      | 1–N on one machine, separate binding sets |
-| Single player | same process (loopback) | no      | one, synthesized at start                 |
+| Mode      | Server                  | Network | Players                   |
+| --------- | ----------------------- | ------- | ------------------------- |
+| Networked | remote process          | yes     | N, join over time         |
+| Local     | same process (loopback) | no      | one, synthesized at start |
 
-Local modes skip serialization and prediction entirely — but handler order and the `player` object are identical, so a game written for one runs in all three.
+Local mode skips serialization and prediction entirely — but handler order and the `player` object are identical, so a game written for one runs in both.
+
+**Local mode has a server; what it does not have is a server deployment.** The client speaks to a real, co-located server across a real transport — nothing is client-authoritative — so the only thing local mode drops is the process to stand up and the port to dial.
+
+**There is no local co-op mode.** N players on one machine would need per-local-player binding sets and N views into one canvas, which is a renderer capability that does not exist; it is also the one topology that forks local from networked, because the predicted set would be several players' entities in a single ownership scope. A second player joins over the network.
 
 ---
 
@@ -511,6 +514,7 @@ entity.clearSay();
 
 - Bubble text is **replicated state on the entity**, not a fire-and-forget effect. A player joining mid-sentence sees the bubble that is currently up.
 - One bubble per entity. A second `say` replaces the first.
+- Bubble text is capped at 200 characters. It is replicated state, so an unbounded string is a per-tick broadcast of whatever the game can be talked into saying.
 - The engine owns placement: anchored above the entity, flipped or nudged to stay on screen, following the entity as it moves. Creators never position a bubble.
 - Bubbles clear automatically when the entity is destroyed.
 - The duration form is awaitable, so conversations are straight-line code:
@@ -754,7 +758,7 @@ entity.animation.clip; // READ: what is on screen now, '' if nothing
 
 **Networking rule.** Derived animation costs nothing: clients compute idle/run/jump from replicated velocity and `grounded` at render framerate, so animation stays smooth between snapshots. Explicit `play()` sends one small event. Frame indices are never replicated.
 
-**Direction of dependency:** animation reads from movement, never the reverse. Root motion, animation-driven hitboxes, and frame data are out of scope (see §15). The escape hatch is ordinary code: disable movement, `await` the clip, re-enable.
+**Direction of dependency:** animation reads from movement, never the reverse. Root motion, animation-driven hitboxes, and frame data are out of scope. The escape hatch is ordinary code: disable movement, `await` the clip, re-enable.
 
 **Blocks:** three blocks total — play, play-looping, stop. The automatic case needs none.
 
@@ -867,7 +871,7 @@ Present-tense is the default and covers every non-shot case. The flag pulls the 
 
 **Load-time errors.** `asSeen` on any query in a `SyncedScript` — the ring is server-only, and reading from it in synced code would desync (§1.2). `asSeen` from a handler with no view tick — a `@onUpdate`, a `@onCollide`, a `@onStart` — because "as seen" needs a viewing client, and defaulting to "now" would silently produce a present-tense answer under a name that promised otherwise. Both point at `@onRequest`, which is the input-originated handler that carries a usable tick.
 
-**Reads happen in the past; writes always happen in the present.** The mechanism is one-directional: a query reads a captured buffer and leaves the live simulation running. Nothing can write into a capture, and the flag exists only on the read verbs. See core DESIGN §8.1 for the invariant and the ring implementation.
+**Reads happen in the past; writes always happen in the present.** The mechanism is one-directional: a query reads a captured buffer and leaves the live simulation running. Nothing can write into a capture, and the flag exists only on the read verbs. See core DESIGN §3 for the invariant and the ring implementation.
 
 ### 5.5 Pointer
 
@@ -921,7 +925,7 @@ The corollary is an asymmetry worth knowing: a **Game-hosted** script has one in
 
 **Panel is the default, code overrides** (rule 5). Blocks get a checkbox on the hat block; text gets `{ concurrency: ... }`. Both compile to the same dispatcher flag, so block-built and text-built games behave identically.
 
-**Why there is no `queue` mode.** `ignore` cannot emulate it — they are opposites, one dropping the event and one guaranteeing it eventually runs. It is cut anyway because "must not overlap _and_ must not drop" is real but narrow, and its uses are already served: sequential dialogue is successive `await entity.say(...)` calls, sequential flourishes are `playEffect` (fire-and-forget, no conflict), and input buffering needs a time window rather than an unbounded queue — deferred to a purpose-built setting (§15). An unbounded queue also has the nastiest failure mode of the candidates considered: a mashing player builds a backlog and the game keeps responding for seconds after they stop.
+**Why there is no `queue` mode.** `ignore` cannot emulate it — they are opposites, one dropping the event and one guaranteeing it eventually runs. It is cut anyway because "must not overlap _and_ must not drop" is real but narrow, and its uses are already served: sequential dialogue is successive `await entity.say(...)` calls, sequential flourishes are `playEffect` (fire-and-forget, no conflict), and input buffering needs a time window rather than an unbounded queue — deferred to a purpose-built setting. An unbounded queue also has the nastiest failure mode of the candidates considered: a mashing player builds a backlog and the game keeps responding for seconds after they stop.
 
 **Cancellation.** A handler whose host is destroyed is cancelled at its next await point, so any loop containing an await terminates on its own. `ctx.alive` is only needed for loops with no awaitable call in them — and a fully synchronous infinite loop stalls the tick, which an engine watchdog aborts with a creator-visible error rather than hanging the server.
 
@@ -1082,9 +1086,9 @@ new Countdown(seconds, onZero?); // server-ticked, replicated; onZero fires at 0
 new Team(name); // player grouping; scores, spawns
 ```
 
-**The four stateful wrappers — `Scoreboard`, `Leaderboard`, `Inventory`, `Team` — share an exported base, `StatefulWrapper`.** A field holding one is authoritative _without_ a `@serverState` decorator, because the wrapper's own methods mark the replication channel; the base is what makes "is this field replicated state" an `instanceof` rather than a class-name list, and what a creator subclass inherits its marking from. The base declares three engine-only members — `bind(record, fieldName)` (called by wiring, throws if bound twice), `serialize`, and `restore` — which supply the identity a wrapper lacks when it is constructed as a field initializer, before any host exists. `Countdown` and `Storage` stay outside it: a countdown is derived from its clock, and `Storage` is the key-value escape hatch rather than replicated state. Creator code never calls the three engine members; it only sees the domain methods. See core DESIGN §5.2 and §12.10.
+**The four stateful wrappers — `Scoreboard`, `Leaderboard`, `Inventory`, `Team` — share an exported base, `StatefulWrapper`.** A field holding one is authoritative _without_ a `@serverState` decorator, because the wrapper's own methods mark the replication channel; the base is what makes "is this field replicated state" an `instanceof` rather than a class-name list, and what a creator subclass inherits its marking from. The base declares three engine-only members — `bind(record, fieldName)` (called by wiring, throws if bound twice), `serialize`, and `restore` — which supply the identity a wrapper lacks when it is constructed as a field initializer, before any host exists. `Countdown` and `Storage` stay outside it: a countdown is derived from its clock, and `Storage` is the key-value escape hatch rather than replicated state. Creator code never calls the three engine members; it only sees the domain methods. See core DESIGN §4.
 
-**`Countdown` takes an optional `onZero` callback** rather than firing `@onEnd`. `@onEnd` is a _host_ lifecycle decorator ("my host stopped existing"), and a `Countdown` is not a host, so `new Countdown(s, onZero)` is how a creator reacts to it reaching zero (core DESIGN §12.11).
+**`Countdown` takes an optional `onZero` callback** rather than firing `@onEnd`. `@onEnd` is a _host_ lifecycle decorator ("my host stopped existing"), and a `Countdown` is not a host, so `new Countdown(s, onZero)` is how a creator reacts to it reaching zero (core DESIGN §4).
 
 ```ts
 scores.add(1); // defaults to the acting player in a player-context handler
