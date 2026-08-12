@@ -3,11 +3,15 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Viewer: interpolation, prediction, and input capture.",
+    "description": "Viewer: the mirror world, the client clock, input capture, and the display loop.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./browser": {
+            "types": "./dist/browser/index.d.ts",
+            "import": "./dist/browser/index.js"
         }
     },
     "main": "./dist/index.js",
@@ -24,6 +28,7 @@
     "dependencies": {
         "@platform/core": "workspace:*",
         "@platform/math": "workspace:*",
+        "@platform/protocol": "workspace:*",
         "@platform/renderer": "workspace:*",
         "@platform/transport": "workspace:*"
     },

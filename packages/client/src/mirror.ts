@@ -1,0 +1,474 @@
+// The mirror world: a real core runtime with nothing running in it, and the one path that writes it.
+//
+// A real runtime rather than typed arrays, because prediction needs one — snapshot/restore reach core's
+// private stores, so a hand-rolled mirror would be thrown away to get it. Nothing simulates: every pass is
+// something the client must not do, having no authority behind it and no handlers to dispatch to.
+
+import type { EntityId, Runtime, TickPasses } from '@platform/core';
+import { GAME_KEY, Loop, entityKey, loadGame, playerKey, Player } from '@platform/core';
+import type { Bounds } from '@platform/math';
+import { bounds as makeBounds } from '@platform/math';
+import type {
+    EntitySnapshot,
+    NetId,
+    PlayerSnapshot,
+    StateEnvelope,
+    StateDiff,
+    StateHostAddr,
+    TransformEnvelope,
+    Welcome,
+    WireBounds,
+    WireStructuralOp,
+    WireTransform,
+} from '@platform/protocol';
+import { MirrorIndex } from './index-map.js';
+
+/** One applied reparent, in local handles. `parent` is null for a detach to the root. */
+export interface MirrorReparent {
+    local: EntityId;
+    parent: EntityId | null;
+}
+
+/**
+ * What a batch of applied ops changed, for the layers above to react to.
+ *
+ * Ordered, not sets: a batch can add and remove the same entity, and a set-union would create a node for a
+ * dead entity or destroy one never created.
+ */
+export interface MirrorDelta {
+    added: EntityId[];
+    removed: EntityId[];
+    /** Reparents, in journal order — the render tree cannot infer these from `added`/`removed`. */
+    reparented: MirrorReparent[];
+    joined: Player[];
+    left: string[];
+}
+
+/** Counters for ops the mirror declined to apply. A nonzero count after a clean session is a bug. */
+export interface MirrorCounters {
+    /** An op naming a netId the mirror does not hold — a reconnect or interest-management race. */
+    unknownNetId: number;
+    /** A child applied before its parent, which the wire makes the server's obligation. */
+    outOfOrderParent: number;
+    /** `attach` ops, which the MVP instantiates no scripts for. */
+    droppedAttach: number;
+    /** A transform envelope superseded while held for its state envelope. */
+    supersededTransforms: number;
+    /** A spawn whose `netId` was not a plausible server handle, so it never entered the map. */
+    invalidNetId: number;
+}
+
+/**
+ * The read-only face the render bridge holds, so the layer that runs every frame cannot reach
+ * `rt.transforms.setPosition` by accident.
+ */
+export interface MirrorView {
+    readonly runtime: Runtime;
+    readonly depictedTick: number;
+    entityFor(netId: NetId): EntityId | undefined;
+    netFor(local: EntityId): NetId | undefined;
+    templateOf(local: EntityId): string;
+    entries(): IterableIterator<[NetId, EntityId]>;
+}
+
+/** What `Welcome` supplies that the mirror needs to build its runtime. */
+export interface MirrorOptions {
+    simRate: number;
+    bounds: Bounds;
+    regions: Array<{ name: string; bounds: Bounds }>;
+}
+
+function emptyDelta(): MirrorDelta {
+    return { added: [], removed: [], reparented: [], joined: [], left: [] };
+}
+
+/** Every pass a no-op: the mirror holds a `Loop` for snapshot/restore and never calls `step`. */
+function inertPasses(): TickPasses {
+    return {
+        input() {},
+        movement() {},
+        contacts() {},
+        regions() {},
+        countdowns() {},
+        update() {},
+    };
+}
+
+export class Mirror {
+    readonly #rt: Runtime;
+    readonly #loop: Loop;
+    readonly #index = new MirrorIndex();
+    /** Held until the `StateEnvelope` for the same tick lands — the join key is an equality. */
+    #heldTransforms: TransformEnvelope | undefined;
+    /** The highest tick whose state envelope has been applied; the snapshot stands in for its own. */
+    #stateAppliedTick = -1;
+    /** netIds whose teardown is queued; unmapped after `drainDestroyed` so the drain can read them. */
+    readonly #pendingUnmap: NetId[] = [];
+
+    readonly counters: MirrorCounters = {
+        unknownNetId: 0,
+        outOfOrderParent: 0,
+        droppedAttach: 0,
+        invalidNetId: 0,
+        supersededTransforms: 0,
+    };
+
+    constructor(opts: MirrorOptions) {
+        this.#rt = loadGame({
+            role: 'client', // → ['client','synced'], rt.isServer = false
+            simRate: opts.simRate,
+            bounds: opts.bounds,
+            regions: opts.regions,
+            // gameScripts: deliberately absent — the MVP instantiates no creator code.
+        });
+        // No startGame(rt): it dispatches @onStart at every attached instance, and there are none.
+        // Skipped rather than awaited — with an empty registry it would resolve immediately, and calling
+        // it would read as though the client runs a lifecycle it does not have.
+        this.#rt.passes = inertPasses();
+        this.#loop = new Loop(this.#rt);
+    }
+
+    get runtime(): Runtime {
+        return this.#rt;
+    }
+
+    /** Held for prediction's `restore` + `step`; never `step`ped here. */
+    get loop(): Loop {
+        return this.#loop;
+    }
+
+    /**
+     * The depicted tick — where the server was in the state the mirror holds.
+     *
+     * Distinct from the client's `localTick`, which is the input tick and ahead of it; the gap sawtooths,
+     * so the only sound statement is `localTick >= depictedTick`.
+     */
+    get depictedTick(): number {
+        return this.#rt.tick;
+    }
+
+    get index(): MirrorIndex {
+        return this.#index;
+    }
+
+    view(): MirrorView {
+        const rt = this.#rt;
+        return {
+            runtime: rt,
+            get depictedTick(): number {
+                return rt.tick;
+            },
+            entityFor: (netId) => this.#index.local(netId),
+            netFor: (local) => this.#index.net(local),
+            templateOf: (local) => this.templateOf(local),
+            entries: () => this.#index.entries(),
+        };
+    }
+
+    templateOf(local: EntityId): string {
+        return this.#rt.entities.record(local)?.template ?? '';
+    }
+
+    /** The reliable envelope: structural journal, then `@serverState` diffs, then any held transform. */
+    applyState(envelope: StateEnvelope): MirrorDelta {
+        const delta = emptyDelta();
+
+        // rt.tick is the depicted tick — set to the envelope's, never incremented.
+        this.#rt.tick = envelope.tick;
+
+        // The ops do not commute, so this is a `for` loop and never a group-by-kind.
+        for (const op of envelope.structural) {
+            this.#applyStructural(op, delta);
+        }
+
+        // Once per envelope, not per op: core's destroy is teardown-at-end-of-tick and the client has no
+        // tick to drain in, and a destroy-then-reparent of a sibling must still see a coherent child list.
+        this.#rt.entityManager.drainDestroyed();
+        for (const netId of this.#pendingUnmap) this.#index.delete(netId);
+        this.#pendingUnmap.length = 0;
+
+        // State after structural — `@serverState` on a newly spawned entity needs its host.
+        for (const diff of envelope.state) this.#applyStateField(diff);
+
+        this.#stateAppliedTick = envelope.tick;
+        this.#discardMarks();
+
+        // Transform last, so it wins: the newest position information by construction.
+        this.#releaseHeldTransforms(envelope.tick);
+
+        return delta;
+    }
+
+    /** Holds the droppable envelope until its tick's state envelope lands; `tick` is the join key. */
+    applyTransforms(envelope: TransformEnvelope): void {
+        if (envelope.tick > this.#stateAppliedTick) {
+            // Dropped, not queued: transform is droppable and the newer one is strictly better.
+            if (this.#heldTransforms !== undefined) this.counters.supersededTransforms++;
+            this.#heldTransforms = envelope;
+            return;
+        }
+        this.#writeTransforms(envelope);
+    }
+
+    /**
+     * The initial snapshot, through the same appliers — it is "spawn everything, set every field".
+     *
+     * Applied to a non-empty mirror this is a resync, which is what makes both the resync and prediction's
+     * snap-back cheap.
+     */
+    applySnapshot(welcome: Welcome): MirrorDelta {
+        const snapshot = welcome.snapshot;
+        return this.applyState({
+            kind: 'state',
+            tick: snapshot.tick,
+            ackSeq: 0,
+            structural: [
+                ...snapshot.players.map((player): WireStructuralOp => ({
+                    kind: 'player-join',
+                    player,
+                })),
+                // Parents before children is the server's obligation; the applier checks rather than
+                // assuming, and counts a violation.
+                ...snapshot.entities.map((entity): WireStructuralOp => ({
+                    kind: 'spawn',
+                    snapshot: entity,
+                })),
+            ],
+            state: snapshot.state,
+        });
+    }
+
+    /**
+     * Empties the world for a resync: every entity destroyed, the roster dropped, the map cleared.
+     *
+     * The runtime is kept, so the fresh snapshot lands through the same path.
+     */
+    reset(): MirrorDelta {
+        const delta = emptyDelta();
+        for (const [, local] of this.#index.entries()) {
+            if (!this.#rt.entities.isAlive(local)) continue;
+            delta.removed.push(local);
+            this.#rt.entityManager.destroy(local);
+        }
+        this.#index.clear();
+        this.#rt.entityManager.drainDestroyed();
+
+        for (const player of this.#rt.playerManager?.players ?? []) {
+            delta.left.push(player.id);
+            this.#rt.playerManager?.remove(player.id);
+        }
+
+        this.#heldTransforms = undefined;
+        this.#stateAppliedTick = -1;
+        this.#rt.tick = 0;
+        // The dirty set is the bridge's queue, and `delta.removed` already destroys every node it names.
+        this.#discardMarks();
+        return delta;
+    }
+
+    #applyStructural(op: WireStructuralOp, delta: MirrorDelta): void {
+        switch (op.kind) {
+            case 'spawn':
+            case 'enter-interest':
+                // One applier for both: the same `EntitySnapshot`, both answering "here is an entity you
+                // have not been watching".
+                this.#spawn(op.snapshot, delta);
+                return;
+
+            case 'destroy':
+            case 'leave-interest':
+                // Interest is parent-closed, so a parent leaving never orphans a child still in view.
+                this.#destroy(op.netId, delta);
+                return;
+
+            case 'reparent': {
+                const local = this.#resolve(op.netId);
+                if (local === undefined) return;
+                const entity = this.#rt.entityManager.facade(local);
+                if (op.parent === null) {
+                    entity.detach();
+                    delta.reparented.push({ local, parent: null });
+                    return;
+                }
+                const parent = this.#resolve(op.parent);
+                if (parent === undefined) return;
+                entity.attachTo(this.#rt.entityManager.facade(parent));
+                delta.reparented.push({ local, parent });
+                return;
+            }
+
+            case 'tag': {
+                const local = this.#resolve(op.netId);
+                if (local === undefined) return;
+                const entity = this.#rt.entityManager.facade(local);
+                if (op.added) entity.tag(op.tag);
+                else entity.untag(op.tag);
+                return;
+            }
+
+            case 'player-join':
+                delta.joined.push(this.#joinPlayer(op.player));
+                return;
+
+            case 'player-leave': {
+                // The server must emit this after the destroys of that player's entities: journal order is
+                // meaning, and leave-first would null `entity.owner` before anyone is told about the avatar.
+                if (this.#rt.playerManager?.byId(op.id) == null) {
+                    this.counters.unknownNetId++;
+                    return;
+                }
+                this.#rt.playerManager.remove(op.id);
+                this.#rt.hosts.remove(playerKey(op.id));
+                delta.left.push(op.id);
+                return;
+            }
+
+            case 'attach':
+                // Dropped, with a counter: no scripts are instantiated. Prediction gives it a consumer.
+                this.counters.droppedAttach++;
+                return;
+        }
+    }
+
+    #spawn(snapshot: EntitySnapshot, delta: MirrorDelta): void {
+        // The only place a peer-chosen netId enters the map, so the only place it has to be plausible:
+        // a fractional or negative one could never name a server handle, and would key an entry no
+        // later op can address.
+        if (!Number.isSafeInteger(snapshot.netId) || snapshot.netId < 0) {
+            this.counters.invalidNetId++;
+            return;
+        }
+        const t = snapshot.transform;
+        const entity = this.#rt.entityManager.spawn(
+            snapshot.template,
+            t.posX,
+            t.posY,
+            snapshot.owner ?? '',
+        );
+        const local = entity.entityId;
+        this.#index.set(snapshot.netId, local);
+
+        if (snapshot.parent !== null) {
+            const parent = this.#resolve(snapshot.parent);
+            if (parent === undefined) {
+                // Rooted AND counted: a wire requirement no receiver checks quietly stops holding, and a
+                // silently rooted child is the flat-world bug arriving through ordering.
+                this.counters.outOfOrderParent++;
+            } else {
+                entity.attachTo(this.#rt.entityManager.facade(parent));
+            }
+        }
+
+        for (const tag of snapshot.tags) entity.tag(tag);
+        // `spawn` sets position only, so a wall authored at scale 3 on layer 2 would render at scale 1 on
+        // layer 0 forever — a static entity is dirty exactly once.
+        this.#writeTransform(local, t);
+        delta.added.push(local);
+    }
+
+    #destroy(netId: NetId, delta: MirrorDelta): void {
+        const local = this.#resolve(netId);
+        if (local === undefined) return;
+        delta.removed.push(local);
+        this.#rt.entityManager.destroy(local);
+        this.#pendingUnmap.push(netId);
+    }
+
+    #joinPlayer(snapshot: PlayerSnapshot): Player {
+        const existing = this.#rt.playerManager?.byId(snapshot.id);
+        if (existing) {
+            existing.name = snapshot.name;
+            return existing;
+        }
+        // Minted directly, not through core's `joinPlayer`, which dispatches @onPlayerJoin — the server's
+        // authority. `index` comes from the wire, so a mid-session joiner does not renumber the roster.
+        const player = new Player(this.#rt, snapshot.id, snapshot.index, snapshot.name);
+        this.#rt.playerManager?.adopt(player);
+        this.#rt.hosts.ensure(playerKey(snapshot.id));
+        return player;
+    }
+
+    /**
+     * Writes the host record directly: with no scripts there is no accessor to hoist onto, and
+     * `channels.markState` would mark a channel with no consumer.
+     *
+     * Attaching a `ClientScript` later hoists onto this same record, which is why it is not a parallel map.
+     */
+    #applyStateField(diff: StateDiff): void {
+        const key = this.#hostKey(diff.host);
+        if (key === undefined) return;
+        const fields = diff.fields;
+        if (typeof fields !== 'object' || fields === null) return;
+        const values = this.#rt.hosts.ensure(key).record.values;
+        for (const [field, value] of Object.entries(fields)) values.set(field, value);
+    }
+
+    /**
+     * Built with core's own helpers: `hosts.ensure` mints a record for any key without validating, so an
+     * unprefixed one silently creates a second, empty record every write lands in.
+     */
+    #hostKey(host: StateHostAddr): string | undefined {
+        switch (host.kind) {
+            case 'game':
+                return GAME_KEY;
+            case 'player':
+                return playerKey(host.id);
+            case 'entity': {
+                const local = this.#resolve(host.netId);
+                // The full packed local EntityId, not the slot index.
+                return local === undefined ? undefined : entityKey(local as number);
+            }
+        }
+    }
+
+    #releaseHeldTransforms(tick: number): void {
+        const held = this.#heldTransforms;
+        if (held === undefined || held.tick > tick) return;
+        this.#heldTransforms = undefined;
+        this.#writeTransforms(held);
+    }
+
+    #writeTransforms(envelope: TransformEnvelope): void {
+        for (const diff of envelope.transform) {
+            const local = this.#resolve(diff.netId);
+            if (local === undefined) continue;
+            this.#writeTransform(local, diff);
+        }
+    }
+
+    #writeTransform(local: EntityId, t: WireTransform): void {
+        const transforms = this.#rt.transforms;
+        transforms.setPosition(local, t.posX, t.posY, t.posZ);
+        transforms.setRotation(local, t.rot);
+        transforms.setScale(local, t.scale);
+        transforms.setOpacity(local, t.opacity);
+        transforms.setLayer(local, t.layer);
+    }
+
+    /**
+     * Core's facades mark channels the client has no consumer for; left alone the journal grows for the
+     * session (3000 marks over 1000 apply cycles).
+     *
+     * Safe here specifically because `clear()` does not reach the transform dirty set — that lives on
+     * `SimTransformStore`, not `ReplicationChannels`, and wiping it would drop a frame's movement. A test
+     * pins the property so a future core change cannot pass silently.
+     */
+    #discardMarks(): void {
+        this.#rt.channels.clear();
+    }
+
+    /** Dropped and counted, never thrown: a destroy for something already gone is ordinary. */
+    #resolve(netId: NetId): EntityId | undefined {
+        const local = this.#index.local(netId);
+        if (local === undefined) {
+            this.counters.unknownNetId++;
+            return undefined;
+        }
+        return local;
+    }
+}
+
+/** `WireBounds` → math's `Bounds`. Structurally identical; restated on the wire. */
+export function wireBounds(b: WireBounds): Bounds {
+    return makeBounds(b.left, b.right, b.top, b.bottom);
+}

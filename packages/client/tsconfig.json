@@ -3,7 +3,13 @@
     "compilerOptions": {
         "rootDir": "src",
         "outDir": "dist",
-        "tsBuildInfoFile": "dist/.tsbuildinfo"
+        "tsBuildInfoFile": "dist/.tsbuildinfo",
+
+        // Per-package override, NOT a base change, the same one the renderer makes: only
+        // `src/browser/` touches the DOM, and under the base `lib: ["ES2023"]` neither
+        // `requestAnimationFrame` nor `window` resolves. `Buffer` still does not resolve and must
+        // not be reached for — this is a browser adapter, not a Node one.
+        "lib": ["ES2023", "DOM", "DOM.Iterable"]
     },
     "include": ["src/**/*.ts"],
     "references": [
@@ -12,6 +18,9 @@
         },
         {
             "path": "../../packages/math"
+        },
+        {
+            "path": "../../packages/protocol"
         },
         {
             "path": "../../packages/renderer"
