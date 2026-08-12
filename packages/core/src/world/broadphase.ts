@@ -1,11 +1,6 @@
-// One Broadphase, three consumers (DESIGN §2): the contact set, find({ near }), and
-// per-player interest scoping. The naive implementation is O(n²) per query over entity
-// AABBs; a grid or Rapier-backed index substitutes behind the same interface later. Its
-// iteration order is stable (ascending entity id) for determinism (§1.2).
-//
-// Constructible over a SUPPLIED transform source, not only the live store (§8.1), so a
-// historical query builds a throwaway index over a ring buffer without disturbing the
-// present.
+// Query order is ascending entity id because the contact set it feeds must be deterministic.
+// The transform source is a constructor argument so a historical query can run over a ring
+// buffer instead of the live store.
 
 import type { EntityId } from '../ids.js';
 
@@ -35,7 +30,7 @@ export class Broadphase {
             const ey = this.#view.posY(id);
             const dx = ex - x;
             const dy = ey - y;
-            // Euclidean over x/y, ignoring z (§12.13); AABB half-extent slack included.
+            // Ignores z on purpose — proximity is a planar question here.
             const reach = radius + Math.max(this.#view.halfWidth(id), this.#view.halfHeight(id));
             if (dx * dx + dy * dy <= reach * reach) out.push(id);
         }
@@ -53,7 +48,10 @@ export class Broadphase {
             if (other === id) continue;
             const bx = this.#view.posX(other);
             const by = this.#view.posY(other);
-            if (Math.abs(ax - bx) <= ahw + this.#view.halfWidth(other) && Math.abs(ay - by) <= ahh + this.#view.halfHeight(other)) {
+            if (
+                Math.abs(ax - bx) <= ahw + this.#view.halfWidth(other) &&
+                Math.abs(ay - by) <= ahh + this.#view.halfHeight(other)
+            ) {
                 out.push(other);
             }
         }

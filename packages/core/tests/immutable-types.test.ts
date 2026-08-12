@@ -1,4 +1,4 @@
-// The @serverState immutability constraint is type-level (DESIGN §5.2): mutable
+// The @serverState immutability constraint is type-level: mutable
 // declarations must fail to compile, readonly ones must not. This suite is a COMPILE-TIME
 // check — the assertions live in the `Immutable<T>` conditional types below, and the file
 // failing to typecheck IS the failure. The one runtime `expect` keeps vitest happy.
@@ -31,7 +31,7 @@ const probes = {
     mutInReadonly: true satisfies Rejects<readonly { hp: number }[]>,
 };
 
-describe('@serverState immutability predicate (§5.2)', () => {
+describe('@serverState immutability predicate', () => {
     it('classifies immutable and mutable declarations at compile time', () => {
         // The real assertions are the `satisfies` clauses above; if any mis-classified,
         // this file would not compile. This runtime check just anchors the suite.

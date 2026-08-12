@@ -1,9 +1,4 @@
-// Host records: @serverState lives on the host, not the declaring script (DESIGN §5.1,
-// §6.1). One record per host — game, player, entity instance — holds the values. The
-// getter reads the record; the setter writes it and marks the state channel (§5.2).
-//
-// The record also carries a per-field TYPE TAG for restore validation (§5.2 step 3) and
-// the set of bound wrappers on this host.
+// @serverState values live on one record per host, not on the declaring script instance.
 
 export type TypeTag =
     | { kind: 'number' | 'string' | 'boolean' | 'undefined' | 'null' }
@@ -45,12 +40,12 @@ export function tagOf(value: unknown): TypeTag {
 /** A cheap structural hash: the sorted key set and element kinds, one level deep. */
 function shapeHash(value: unknown): string {
     if (Array.isArray(value)) {
-        const kinds = new Set(value.map(v => primitiveKind(v)));
+        const kinds = new Set(value.map((v) => primitiveKind(v)));
         return `[${[...kinds].toSorted().join('|')}]`;
     }
     if (value && typeof value === 'object') {
         const keys = Object.keys(value as Record<string, unknown>).toSorted();
-        return `{${keys.map(k => `${k}:${primitiveKind((value as Record<string, unknown>)[k])}`).join(',')}}`;
+        return `{${keys.map((k) => `${k}:${primitiveKind((value as Record<string, unknown>)[k])}`).join(',')}}`;
     }
     return primitiveKind(value);
 }
@@ -63,7 +58,10 @@ function primitiveKind(value: unknown): string {
 
 export function tagsMatch(a: TypeTag, b: TypeTag): boolean {
     if (a.kind !== b.kind) return false;
-    if ((a.kind === 'object' || a.kind === 'array') && (b.kind === 'object' || b.kind === 'array')) {
+    if (
+        (a.kind === 'object' || a.kind === 'array') &&
+        (b.kind === 'object' || b.kind === 'array')
+    ) {
         return a.shape === b.shape;
     }
     return true;

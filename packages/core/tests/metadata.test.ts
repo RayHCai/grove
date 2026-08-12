@@ -1,4 +1,4 @@
-// The registry's prototype-chain metadata walk (DESIGN §3.2): a subclass inherits its
+// The registry's prototype-chain metadata walk: a subclass inherits its
 // parent's declarations, an override does not re-register, and a sibling's write is
 // copy-on-write. Fixtures compiled by the build (src/testkit/fixtures.ts).
 
@@ -7,15 +7,15 @@ import { DoubleJump, Movement, Sibling } from '../dist/testkit/fixtures.js';
 import { getMetadata } from '../src/script/metadata.js';
 
 const events = (klass: abstract new () => object) =>
-    (getMetadata(klass)?.handlers ?? []).map(h => h.event).toSorted();
+    (getMetadata(klass)?.handlers ?? []).map((h) => h.event).toSorted();
 
 const jumpHandlers = (klass: abstract new () => object) =>
-    (getMetadata(klass)?.handlers ?? []).filter(h => h.event === 'jump');
+    (getMetadata(klass)?.handlers ?? []).filter((h) => h.event === 'jump');
 
-describe('metadata inheritance (§3.2)', () => {
+describe('metadata inheritance', () => {
     it('collects the base class handlers', () => {
         const meta = getMetadata(Movement);
-        expect((meta?.handlers ?? []).map(h => `${h.kind}:${h.event}`).toSorted()).toEqual([
+        expect((meta?.handlers ?? []).map((h) => `${h.kind}:${h.event}`).toSorted()).toEqual([
             'onEvent:jump',
             'onStart:@start',
         ]);
@@ -38,6 +38,6 @@ describe('metadata inheritance (§3.2)', () => {
     it('a sibling adding a handler is copy-on-write — the base stays put', () => {
         expect(events(Sibling)).toEqual(['@start', 'dash', 'jump']);
         // the base Movement never gained `dash`
-        expect((getMetadata(Movement)?.handlers ?? []).some(h => h.event === 'dash')).toBe(false);
+        expect((getMetadata(Movement)?.handlers ?? []).some((h) => h.event === 'dash')).toBe(false);
     });
 });

@@ -1,4 +1,4 @@
-// A rewind sweeps invocations newer than the target tick (DESIGN §8.1): a handler parked
+// A rewind sweeps invocations newer than the target tick: a handler parked
 // at an await from a timeline that did not happen is marked dead, releasing its
 // concurrency lock so the same event can fire fresh after the rewind.
 
@@ -10,7 +10,7 @@ import { Loop } from '../src/loop/loop.js';
 
 afterEach(() => clearRuntime());
 
-describe('parked-invocation sweep (§8.1)', () => {
+describe('parked-invocation sweep', () => {
     it('restore releases a concurrency lock held by an invocation newer than the snapshot', () => {
         const rt = loadGame();
         const loop = new Loop(rt);
@@ -53,7 +53,11 @@ describe('parked-invocation sweep (§8.1)', () => {
     });
 });
 
-function instanceOf<T>(rt: ReturnType<typeof loadGame>, e: { entityId: unknown }, className: string): T {
+function instanceOf<T>(
+    rt: ReturnType<typeof loadGame>,
+    e: { entityId: unknown },
+    className: string,
+): T {
     for (const si of rt.instances.forHost(`entity:${e.entityId as number}`)) {
         if (si.className === className) return si.instance as T;
     }

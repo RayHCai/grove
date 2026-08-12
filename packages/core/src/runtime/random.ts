@@ -1,6 +1,4 @@
-// The seeded random facade (DESIGN §8.4, api_spec.ts:81). Delegates to the runtime's PRNG
-// store (captured whole by snapshot, §8.1) and resolves `pointIn` against the region index.
-// `random` is a module const facade over the current runtime slot.
+// Delegates to the runtime's PRNG store so every draw is captured by snapshot.
 
 import type { Vec3 } from '@platform/math';
 import { vec3 } from '@platform/math';
@@ -49,13 +47,13 @@ export class RuntimeRandom implements Random {
     }
 }
 
-/** The creator-facing `random` const — a facade over the current runtime (§8.4). */
+/** The creator-facing `random` const — a facade over the current runtime. */
 export const random: Random = {
-    seed: n => resolve().seed(n),
+    seed: (n) => resolve().seed(n),
     between: (min, max) => resolve().between(min, max),
-    pick: list => resolve().pick(list),
-    chance: p => resolve().chance(p),
-    pointIn: region => resolve().pointIn(region),
+    pick: (list) => resolve().pick(list),
+    chance: (p) => resolve().chance(p),
+    pointIn: (region) => resolve().pointIn(region),
 };
 
 function resolve(): Random {

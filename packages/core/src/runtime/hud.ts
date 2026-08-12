@@ -10,7 +10,9 @@ export class HUDScreen {
     open(): void {}
     close(): void {}
 
-    addScript(_script: new () => BaseScript<HUDScreen>): this { return this; }
+    addScript(_script: new () => BaseScript<HUDScreen>): this {
+        return this;
+    }
 }
 
 export class HUD {
@@ -26,11 +28,15 @@ export class HUD {
     enable(_widget: string, _enabled?: boolean): void {}
     disable(_widget: string): void {}
 
-    open(_screen: string): HUDScreen { return null!; }
+    open(_screen: string): HUDScreen {
+        return null!;
+    }
     close(_screen: string): void {}
     closeAll(): void {}
 
-    screen(_name: string): HUDScreen | null { return null; }
+    screen(_name: string): HUDScreen | null {
+        return null;
+    }
     readonly screens!: HUDScreen[];
     readonly openScreens!: HUDScreen[];
 }
