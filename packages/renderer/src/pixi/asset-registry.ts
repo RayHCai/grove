@@ -6,7 +6,7 @@
 // Nothing here rejects on a failed load — unlike `Assets.load` — so one 404 sprite yields a
 // placeholder and a reported failure rather than killing a level load.
 
-import { Assets, Texture } from 'pixi.js';
+import { Assets, BufferImageSource, Texture } from 'pixi.js';
 import type { Spritesheet } from 'pixi.js';
 import type { Size } from '@platform/math';
 import type { AssetFailure, AssetInfo, AssetManifestEntry, TextureFilter } from '../renderer.js';
@@ -24,16 +24,38 @@ interface ResidentAsset {
 export interface LoadOutcome {
     info?: AssetInfo;
     failure?: AssetFailure;
+    /**
+     * Frame names an atlas could not claim because another sheet already holds them.
+     *
+     * Reported alongside a successful atlas rather than kept internally: a cross-sheet collision is
+     * an authoring bug, and a list nobody drains is a bug nobody sees.
+     */
+    collisions?: AssetFailure[];
+}
+
+const EMPTY_FRAMES: readonly string[] = [];
+
+/** The key `Assets.load` was given for an entry, or `null` for a rasterized one. */
+function urlOf(entry: AssetManifestEntry): string | null {
+    return entry.kind === 'text' ? null : entry.url;
 }
 
 /**
- * The stand-in for an unresolved texture name.
+ * A magenta 1x1 for an unresolved texture name.
  *
- * Pixi's shared white 1x1, so it needs no upload and its `destroy` is already a no-op — but it also
- * means a missing texture reads as a pale speck rather than as a loud failure.
+ * Magenta because a missing texture has to read as a failure at a glance: pixi's shared white would
+ * draw as a pale speck, which reads as a layout bug or as nothing at all.
  */
 function makePlaceholder(): Texture {
-    return Texture.WHITE;
+    return new Texture({
+        source: new BufferImageSource({
+            resource: new Uint8Array([255, 0, 255, 255]),
+            width: 1,
+            height: 1,
+            label: 'renderer:placeholder',
+        }),
+        label: 'renderer:placeholder',
+    });
 }
 
 /**
@@ -75,6 +97,16 @@ export class AssetRegistry {
         return this.#resident.get(name)?.entry.kind ?? null;
     }
 
+    /**
+     * The frame names an atlas contributed; empty for every other kind.
+     *
+     * Exposed because sprites reference an atlas by bare frame name, so an unload has to count and
+     * repoint the frames' users, not the atlas name's.
+     */
+    framesOf(name: string): readonly string[] {
+        return this.#resident.get(name)?.frames ?? EMPTY_FRAMES;
+    }
+
     /** The retained manifest, copied rather than exposed, for `AssetQueue.merge` on restore. */
     retainedManifest(): ReadonlyMap<string, AssetManifestEntry> {
         const out = new Map<string, AssetManifestEntry>();
@@ -104,7 +136,7 @@ export class AssetRegistry {
                 case 'image':
                     return { info: await this.#loadImage(entry) };
                 case 'atlas':
-                    return { info: await this.#loadAtlas(entry) };
+                    return await this.#loadAtlas(entry);
                 case 'font':
                     return { info: await this.#loadFont(entry) };
                 case 'text':
@@ -134,6 +166,7 @@ export class AssetRegistry {
      * queueing and post-loss re-upload with no special case anywhere.
      */
     registerTexture(entry: AssetManifestEntry, texture: Texture, size: Size): AssetInfo {
+        this.#release(this.#resident.get(entry.name));
         this.#resident.set(entry.name, { texture, size, entry, frames: [] });
         return { name: entry.name, size: { ...size } };
     }
@@ -150,16 +183,22 @@ export class AssetRegistry {
 
         for (const frame of resident.frames) this.#resident.delete(frame);
         this.#resident.delete(name);
-        // Fire-and-forget: no caller waits on the GPU-side release, and a rejection here would be
-        // an unhandled one.
-        void Assets.unload(resident.entry.kind === 'image' ? resident.entry.url : name).catch(
-            () => undefined,
-        );
+        this.#release(resident);
+
+        // Keyed by URL, because that is what `Assets.load` was given: passing our logical name
+        // makes the resolver invent an entry for it, warn, and release nothing at all.
+        const key = urlOf(resident.entry);
+        if (key !== null) {
+            // Fire-and-forget: no caller waits on the GPU-side release, and a rejection here would
+            // be an unhandled one.
+            void Assets.unload(key).catch(() => undefined);
+        }
         return true;
     }
 
-    /** Drops everything. The placeholder survives — it is not a loaded asset. */
+    /** Drops everything, releasing the textures we built ourselves. */
     clear(): void {
+        for (const resident of this.#resident.values()) this.#release(resident);
         this.#resident.clear();
     }
 
@@ -172,15 +211,25 @@ export class AssetRegistry {
         return { name: entry.name, size: { ...size } };
     }
 
-    async #loadAtlas(entry: Extract<AssetManifestEntry, { kind: 'atlas' }>): Promise<AssetInfo> {
+    async #loadAtlas(
+        entry: Extract<AssetManifestEntry, { kind: 'atlas' }>,
+    ): Promise<{ info: AssetInfo; collisions: AssetFailure[] }> {
         const sheet = await Assets.load<Spritesheet>(entry.url);
         const frames: string[] = [];
+        const collisions: AssetFailure[] = [];
 
         // Bare frame names, not `atlas/frame`: the panel authors the manifest and can guarantee
         // cross-sheet uniqueness, so a collision is an authoring bug worth reporting.
+        //
+        // A frame this same atlas contributed is not a collision, it is a re-load — which every
+        // context restore performs — so it is re-registered rather than reported and skipped.
         for (const [frameName, frameTexture] of Object.entries(sheet.textures)) {
-            if (this.#resident.has(frameName)) {
-                this.#collisions.push({ frame: frameName, atlas: entry.name });
+            const held = this.#resident.get(frameName);
+            if (held !== undefined && held.entry.name !== entry.name) {
+                collisions.push({
+                    name: frameName,
+                    reason: `frame '${frameName}' is already held by '${held.entry.name}'`,
+                });
                 continue;
             }
             this.#applyFilter(frameTexture, entry.filter);
@@ -198,8 +247,10 @@ export class AssetRegistry {
             ? new Texture({ source: sheet.textureSource })
             : this.placeholder;
         const size: Size = { width: sheetTexture.width, height: sheetTexture.height };
+        // The wrapper is ours, so the one a re-load replaces has to go with it.
+        this.#release(this.#resident.get(entry.name));
         this.#resident.set(entry.name, { texture: sheetTexture, size, entry, frames });
-        return { name: entry.name, size: { ...size } };
+        return { info: { name: entry.name, size: { ...size } }, collisions };
     }
 
     async #loadFont(entry: Extract<AssetManifestEntry, { kind: 'font' }>): Promise<AssetInfo> {
@@ -210,12 +261,19 @@ export class AssetRegistry {
         return { name: entry.name, size: { ...size } };
     }
 
-    /** Cross-sheet frame-name collisions, for the orchestrator to warn about. */
-    readonly #collisions: Array<{ frame: string; atlas: string }> = [];
-
-    /** Drains the recorded frame-name collisions. */
-    takeCollisions(): Array<{ frame: string; atlas: string }> {
-        return this.#collisions.splice(0, this.#collisions.length);
+    /**
+     * Destroys a texture this registry built rather than borrowed.
+     *
+     * A rasterized text asset is a render target and an atlas wrapper is ours, so dropping the map
+     * entry alone leaks GPU memory. Anything `Assets` owns is released through `Assets.unload`
+     * instead, and the shared placeholder is never destroyed.
+     */
+    #release(resident: ResidentAsset | undefined): void {
+        if (resident === undefined) return;
+        if (resident.texture === this.placeholder) return;
+        if (resident.entry.kind === 'text' || resident.entry.kind === 'atlas') {
+            resident.texture.destroy(resident.entry.kind === 'text');
+        }
     }
 
     #applyFilter(texture: Texture, filter: TextureFilter | undefined): void {

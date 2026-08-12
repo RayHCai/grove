@@ -26,7 +26,7 @@ import type {
 import type { NodeId } from '../node-id.js';
 import { NO_NODE } from '../node-id.js';
 import { rendererError } from '../errors.js';
-import { AssetQueue } from '../asset-queue.js';
+import { AssetQueue, validateAssetEntry } from '../asset-queue.js';
 import type { MergedAssetWork } from '../asset-queue.js';
 import { emptySnapshot, RendererCore, resolveInitOptions } from '../core/renderer-core.js';
 import { effectiveResolution } from '../viewport.js';
@@ -124,11 +124,7 @@ export class PixiRenderer implements IRenderer {
         this.#observer?.disconnect();
         this.#observer = null;
         // Settles queued promises as cancelled rather than rejecting, so teardown stays quiet.
-        this.#guard?.destroy(() => ({
-            loaded: [],
-            failed: [{ name: '*', reason: CANCELLED_REASON }],
-            queued: false,
-        }));
+        this.#guard?.destroy();
         this.#guard = null;
 
         this.#core?.teardown();
@@ -193,11 +189,17 @@ export class PixiRenderer implements IRenderer {
     async loadAssets(entries: readonly AssetManifestEntry[]): Promise<AssetLoadResult> {
         if (this.#live() === null) return { loaded: [], failed: [], queued: false };
 
-        // Mid-loss the intent is recorded and the work deferred, but the promise still resolves.
         const guard = this.#guard;
         if (guard?.lost === true) {
+            // Mid-loss the intent is recorded and the restore's merge performs the upload, so the
+            // deferred operation only reports what landed — replaying the load here would upload
+            // every entry a second time.
+            const names = entries.map((entry) => entry.name);
             for (const entry of entries) this.#queue.load(entry);
-            return guard.run(async () => this.#loadNow(entries));
+            return guard.run(
+                async () => this.#loadResultFor(names),
+                () => cancelledLoad(names),
+            );
         }
         return this.#loadNow(entries);
     }
@@ -212,8 +214,11 @@ export class PixiRenderer implements IRenderer {
         const names = entries.map((entry) => (typeof entry === 'string' ? entry : entry.name));
         const guard = this.#guard;
         if (guard?.lost === true) {
+            // Reported from current residency and resolved now: the restore's merge performs the
+            // drop, and a deferred replay would run after it and report every name as unknown.
+            const result = this.#unloadIntent(names);
             for (const name of names) this.#queue.unload(name);
-            return guard.run(async () => this.#unloadNow(names));
+            return result;
         }
         return this.#unloadNow(names);
     }
@@ -241,9 +246,8 @@ export class PixiRenderer implements IRenderer {
 
         const guard = this.#guard;
         if (guard?.lost === true) {
+            // Resolves with the measured size now; the restore's merge rasterizes the texture.
             this.#queue.load(entry);
-            // Resolves with the measured size now; the texture lands on restore.
-            void guard.run(upload);
             return { name, size: { ...size } };
         }
         return upload();
@@ -441,11 +445,50 @@ export class PixiRenderer implements IRenderer {
 
         for (const name of work.toUnload) this.#assets.unload(name);
         for (const entry of work.toLoad) {
+            // A text entry rasterizes rather than fetches, and the registry refuses that kind by
+            // design — so routing it through the loader would report every world label as failed.
+            if (entry.kind === 'text') {
+                this.#assets.unload(entry.name);
+                const info = await this.createTextAsset(entry.name, entry.text, entry.style);
+                (this.#assets.has(info.name) ? reloaded : failed).push(info.name);
+                continue;
+            }
             const outcome = await this.#assets.load(entry);
             if (outcome.info !== undefined) reloaded.push(outcome.info.name);
             else if (outcome.failure !== undefined) failed.push(outcome.failure.name);
+            for (const collision of outcome.collisions ?? []) failed.push(collision.name);
         }
         return { reloaded, failed };
+    }
+
+    /** What a deferred load reports once the restore has applied the queued intents. */
+    #loadResultFor(names: readonly string[]): AssetLoadResult {
+        const result: AssetLoadResult = { loaded: [], failed: [], queued: true };
+        for (const name of names) {
+            const size = this.#assets.sizeOf(name);
+            if (size === null) result.failed.push({ name, reason: 'not restored' });
+            else result.loaded.push({ name, size: { ...size } });
+        }
+        return result;
+    }
+
+    /** The unload a queued intent will perform, reported from residency as it stands now. */
+    #unloadIntent(names: readonly string[]): AssetUnloadResult {
+        const result: AssetUnloadResult = { unloaded: [], unknown: [], inUse: [], queued: true };
+        const core = this.#core;
+        for (const name of names) {
+            if (!this.#assets.has(name)) {
+                result.unknown.push(name);
+                continue;
+            }
+            const nodeCount = this.#referenceCount(name, core);
+            if (nodeCount > 0) {
+                result.inUse.push({ name, nodeCount });
+                if (this.#assets.kindOf(name) === 'font') continue;
+            }
+            result.unloaded.push(name);
+        }
+        return result;
     }
 
     /**
@@ -457,6 +500,13 @@ export class PixiRenderer implements IRenderer {
     async #loadNow(entries: readonly AssetManifestEntry[]): Promise<AssetLoadResult> {
         const result: AssetLoadResult = { loaded: [], failed: [], queued: false };
         for (const entry of entries) {
+            // A structurally invalid entry is reported like a 404 rather than thrown, because one
+            // bad line in a manifest must not lose the whole level load.
+            const invalid = invalidReason(entry);
+            if (invalid !== null) {
+                result.failed.push({ name: String(entry?.name ?? ''), reason: invalid });
+                continue;
+            }
             if (entry.kind === 'text') {
                 // A text entry rasterizes rather than fetches.
                 result.loaded.push(await this.createTextAsset(entry.name, entry.text, entry.style));
@@ -465,6 +515,8 @@ export class PixiRenderer implements IRenderer {
             const outcome = await this.#assets.load(entry);
             if (outcome.info !== undefined) result.loaded.push(outcome.info);
             if (outcome.failure !== undefined) result.failed.push(outcome.failure);
+            // A frame an atlas could not claim is an authoring bug the caller has to hear about.
+            if (outcome.collisions !== undefined) result.failed.push(...outcome.collisions);
         }
         return result;
     }
@@ -487,15 +539,20 @@ export class PixiRenderer implements IRenderer {
                 continue;
             }
 
-            const nodeCount = core?.referenceCount(name) ?? 0;
+            const nodeCount = this.#referenceCount(name, core);
             const isFont = this.#assets.kindOf(name) === 'font';
             if (nodeCount > 0) {
                 result.inUse.push({ name, nodeCount });
                 if (isFont) continue;
             }
 
-            // Affected nodes fall back to the placeholder; their ids stay valid.
+            // Affected nodes fall back to the placeholder; their ids stay valid. Sprites reference
+            // an atlas by BARE FRAME NAME, so the frames the sheet contributed have to be repointed
+            // as well — the atlas name itself is usually on no node at all.
             const slots = core?.slotsUsingTexture(name) ?? [];
+            for (const frame of this.#assets.framesOf(name)) {
+                slots.push(...(core?.slotsUsingTexture(frame) ?? []));
+            }
             this.#assets.unload(name);
             this.#sink?.repointToPlaceholder(slots);
             result.unloaded.push(name);
@@ -503,6 +560,34 @@ export class PixiRenderer implements IRenderer {
 
         return result;
     }
+
+    /** Live nodes on a name, counting an atlas's frame names as uses of the atlas. */
+    #referenceCount(name: string, core: RendererCore | null): number {
+        let count = core?.referenceCount(name) ?? 0;
+        for (const frame of this.#assets.framesOf(name)) {
+            count += core?.referenceCount(frame) ?? 0;
+        }
+        return count;
+    }
+}
+
+/** The reason an entry is unusable, or `null` when it is fine. */
+function invalidReason(entry: AssetManifestEntry): string | null {
+    try {
+        validateAssetEntry(entry);
+        return null;
+    } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+    }
+}
+
+/** What a queued load settles with when the context never comes back. */
+function cancelledLoad(names: readonly string[]): AssetLoadResult {
+    return {
+        loaded: [],
+        failed: names.map((name) => ({ name, reason: CANCELLED_REASON })),
+        queued: true,
+    };
 }
 
 /**
