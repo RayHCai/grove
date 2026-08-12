@@ -1,8 +1,5 @@
-// Player is identity and outlives the avatar (DESIGN §7, api_spec.ts:352). `index` is
-// assigned by the roster and stable for the session. @serverState declared on a
-// Player-hosted script hoists onto the player's host record, so `player.credits` reads
-// through the same record `this.credits` writes (§6.1) — the PlayerManager exposes the
-// record for the wiring step and for the read-side cast the samples use.
+// @serverState on a Player-hosted script hoists onto the player's host record, so `player.credits`
+// reads through the same record `this.credits` writes.
 
 import type { Vec3 } from '@platform/math';
 import { vec3 } from '@platform/math';
@@ -40,26 +37,36 @@ export interface ActionState {
     axis(action: string): number;
 }
 
-/** Presentation-only cursor stub (tier C — needs a client). */
 class NullCursor implements Cursor {
-    get position(): Vec3 { return vec3(); }
-    get screenPosition(): Vec3 { return vec3(); }
-    get over(): Entity | null { return null; }
-    get isDown(): boolean { return false; }
+    get position(): Vec3 {
+        return vec3();
+    }
+    get screenPosition(): Vec3 {
+        return vec3();
+    }
+    get over(): Entity | null {
+        return null;
+    }
+    get isDown(): boolean {
+        return false;
+    }
     visible = true;
     setIcon(): void {}
     lock(): void {}
     unlock(): void {}
 }
 
-/** Panel-authored, per-player bindings stub — an in-memory map is enough for core. */
 class MemoryBindings implements InputBindings {
     readonly #b = new Map<string, string[]>();
-    rebind(action: string, bindings: string[]): void { this.#b.set(action, [...bindings]); }
+    rebind(action: string, bindings: string[]): void {
+        this.#b.set(action, [...bindings]);
+    }
     addBinding(action: string, binding: string): void {
         this.#b.set(action, [...(this.#b.get(action) ?? []), binding]);
     }
-    getBindings(action: string): string[] { return [...(this.#b.get(action) ?? [])]; }
+    getBindings(action: string): string[] {
+        return [...(this.#b.get(action) ?? [])];
+    }
     resetBindings(action?: string): void {
         if (action === undefined) this.#b.clear();
         else this.#b.delete(action);
@@ -81,13 +88,13 @@ export class Player {
     #storage: Storage | null = null;
     movement?: BaseMovement;
 
-    /** @internal — the roster sets the attached movement instance (or clears it). */
+    /** @internal — set by the roster. */
     setMovementInstance(movement: BaseMovement | undefined): void {
         if (movement === undefined) delete this.movement;
         else this.movement = movement;
     }
 
-    /** @internal — clears the movement accessor for a spectating/bodiless player. */
+    /** @internal — a spectating or bodiless player has no movement. */
     clearMovement(): void {
         delete this.movement;
     }
@@ -99,8 +106,14 @@ export class Player {
         this.name = name;
     }
 
+    /** @internal — the non-throwing test, for engine code that must branch rather than catch. */
+    get hasAvatar(): boolean {
+        return this.#avatar !== null;
+    }
+
     get avatar(): Entity {
-        if (!this.#avatar) throw new Error(`player ${this.id} has no avatar (spectating or bodiless)`);
+        if (!this.#avatar)
+            throw new Error(`player ${this.id} has no avatar (spectating or bodiless)`);
         return this.#avatar;
     }
 
@@ -133,8 +146,6 @@ export class Player {
 
     teleportTo(x: number, y: number): void {
         if (this.#avatar) this.#avatar.setPosition(x, y);
-        // The prediction-reset flag the client reads (§3.2) is a replication concern; the
-        // structural mark carries it.
     }
 
     setMovement(movement: new () => BaseMovement): this {
@@ -167,6 +178,21 @@ export class PlayerManager {
         return player;
     }
 
+    /**
+     * Registers a Player built elsewhere, keeping the index it already carries.
+     *
+     * `create` would renumber from arrival order, and a client mirror's numbering then drifts from
+     * the server's the first time a player leaves — but `index` is stable for the session and
+     * observable, so it has to come from whoever is authoritative about it.
+     */
+    adopt(player: Player): void {
+        if (this.#byId.has(player.id)) return;
+        this.#byId.set(player.id, player);
+        this.#order.push(player);
+        this.#nextIndex = Math.max(this.#nextIndex, player.index + 1);
+        this.#rt.hosts.ensure(playerKey(player.id));
+    }
+
     byId(id: string): Player | null {
         return this.#byId.get(id) ?? null;
     }
@@ -177,6 +203,9 @@ export class PlayerManager {
         this.#byId.delete(id);
         const at = this.#order.indexOf(player);
         if (at >= 0) this.#order.splice(at, 1);
+        // Instances before the host: the update pass walks every instance, so a departed player's
+        // scripts would keep taking @onUpdate against a scope that no longer exists.
+        this.#rt.instances.removeHost(playerKey(id));
         this.#rt.hosts.remove(playerKey(id));
     }
 

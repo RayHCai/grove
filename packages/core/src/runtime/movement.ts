@@ -1,12 +1,5 @@
-// BaseMovement: a SyncedScript<Entity> with a sealed tick (DESIGN §4.1, api_spec.ts:653).
-// The order IS the prediction contract, so `tick` is sealed and overriding it is a
-// load-time error. Stages 1-3 are real; stage 4 (move) delegates to the PhysicsSink whose
-// null implementation integrates position and sets `blocked` all-false — a platformer runs
-// and falls but does not land until Rapier fills the seam.
-//
-// velocity and intent are readonly and setter-written (§3.1); the one write channel is
-// setVelocity. impulse is a discrete Δvelocity never dt-scaled; addForce accumulates and
-// drains in applyForces.
+// The stage order in `tick` is the prediction contract both endpoints replay, so subclasses
+// override the hooks and never `tick` itself. Nothing enforces that yet.
 
 import type { Vec3 } from '@platform/math';
 import { approach as mathApproach, vec3, vec3Length } from '@platform/math';
@@ -16,7 +9,7 @@ import type { Entity } from './entity.js';
 import type { Player } from './player.js';
 import type { Blocked } from './seams.js';
 import { noBlocked } from './seams.js';
-import { currentRuntime } from './runtime.js';
+import { scriptRuntime } from './script-runtime.js';
 
 export abstract class BaseMovement extends SyncedScript<Entity> {
     readonly player!: Player;
@@ -51,15 +44,13 @@ export abstract class BaseMovement extends SyncedScript<Entity> {
         return this.#blocked;
     }
 
-    // ── the sealed tick (§4.1) — do not override ────────────────────────────────
     tick(dt: number): void {
-        this.accelerate(this.readIntent(), dt); // 1: intent -> velocity
-        this.applyForces(dt); // 2: gravity, friction, drained forces
-        this.clampSpeed(); // 3: maxSpeed
-        this.#move(dt); // 4: engine sweep/slide/write position/set blocked
+        this.accelerate(this.readIntent(), dt);
+        this.applyForces(dt);
+        this.clampSpeed();
+        this.#move(dt);
     }
 
-    // ── public writes ───────────────────────────────────────────────────────────
     setVelocity(x: number, y: number, z = 0): void {
         this.#vx = x;
         this.#vy = y;
@@ -96,7 +87,6 @@ export abstract class BaseMovement extends SyncedScript<Entity> {
         this.#iz = z;
     }
 
-    // ── hooks ─────────────────────────────────────────────────────────────────────
     protected abstract accelerate(intent: Vec3, dt: number): void;
 
     protected readIntent(): Vec3 {
@@ -104,7 +94,7 @@ export abstract class BaseMovement extends SyncedScript<Entity> {
     }
 
     protected applyForces(dt: number): void {
-        // Drain the force accumulator, dt-scaled once here rather than at each call site.
+        // dt-scaled once on drain, so addForce callers never scale.
         this.#vx += this.#fx * dt;
         this.#vy += this.#fy * dt;
         this.#vz += this.#fz * dt;
@@ -127,10 +117,11 @@ export abstract class BaseMovement extends SyncedScript<Entity> {
         return mathApproach(current, target, rate);
     }
 
-    /** Engine-owned stage 4: sweep, slide, write position, correct velocity, set blocked. */
     #move(dt: number): void {
         const host = this.host as unknown as Entity;
-        this.#blocked = currentRuntime().physics.move(host.entityId, dt, {
+        // The runtime wiring attached this instance to, not the ambient one: resolving it per call
+        // sent a tick's position writes into whichever world happened to be current.
+        this.#blocked = scriptRuntime(this).physics.move(host.entityId, dt, {
             x: this.#vx,
             y: this.#vy,
             z: this.#vz,

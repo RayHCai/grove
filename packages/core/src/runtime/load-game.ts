@@ -1,9 +1,4 @@
-// loadGame wires a runtime into a live world (DESIGN §8.3). Order is the observable
-// contract: build the world, restore @serverState, attach Game scripts (wire + hoist, no
-// @onStart yet), start the loop, run Game @onStart to its first await, release joins.
-//
-// This module instantiates and connects every collaborator the facades reference, so the
-// coupling in runtime.ts stays declarations and the wiring lives in one place.
+// Every collaborator the facades reach for is constructed here, so runtime.ts stays declarations.
 
 import type { Bounds } from '@platform/math';
 import type { EntityId } from '../ids.js';
@@ -18,10 +13,10 @@ import type { Player } from './player.js';
 import { RegionIndex } from './regions.js';
 import { RuntimeRandom } from './random.js';
 import { Roster } from './roster.js';
-import { Storage, setPlayerLookup } from './wrappers.js';
+import { Storage } from './wrappers.js';
 import { Camera } from './camera.js';
 import { Entity } from './entity.js';
-import { Asset, AssetRegistry, setAssetRegistry } from './assets.js';
+import { Asset, AssetRegistry } from './assets.js';
 import type { AssetKind } from './assets.js';
 import { Wiring, activeLocationsFor } from './wiring.js';
 import { createRuntime } from './runtime.js';
@@ -34,20 +29,23 @@ export interface GameManifest {
     simRate?: number;
     bounds?: Bounds;
     regions?: Array<{ name: string; bounds: Bounds }>;
-    /** Panel-loaded assets, referenced by key (§3.5). */
-    assets?: Array<{ key: string; kind: AssetKind; meta?: { width?: number; height?: number; duration?: number } }>;
+    /** Panel-loaded assets, referenced by key. */
+    assets?: Array<{
+        key: string;
+        kind: AssetKind;
+        meta?: { width?: number; height?: number; duration?: number };
+    }>;
     /** Panel-authored Game-hosted script classes. */
     gameScripts?: Array<new () => object>;
 }
 
-/** Builds and wires a runtime for `manifest`, returning it live (§8.3). */
+/** Builds and wires a runtime for `manifest`, returning it live. */
 export function loadGame(manifest: GameManifest = {}): Runtime {
     const rt = createRuntime();
     const role = manifest.role ?? 'server';
     rt.isServer = role === 'server';
     if (manifest.simRate) rt.setSimRate(manifest.simRate);
 
-    // 1: build the world — bounds, regions, collaborators.
     if (manifest.bounds) rt.worldBounds = manifest.bounds;
     rt.regions = new RegionIndex();
     for (const r of manifest.regions ?? []) rt.regions.define(r.name, r.bounds);
@@ -59,23 +57,21 @@ export function loadGame(manifest: GameManifest = {}): Runtime {
     rt.contacts = new ContactSource(rt);
     rt.query = new WorldQuery(rt);
     rt.broadphase = new Broadphase(transformView(rt));
-    rt.lagRing = new LagRing(rt.transforms, rt.simRate);
+    rt.lagRing = new LagRing(rt.transforms, rt.entities, rt.simRate);
     rt.wiring = new Wiring(rt, activeLocationsFor(role));
     rt.gameInstance = new RuntimeGame(rt);
 
     const registry = new AssetRegistry();
     for (const a of manifest.assets ?? []) registry.define(new Asset(a.key, a.kind, a.meta));
-    setAssetRegistry(() => registry);
+    rt.assets = registry;
 
-    setPlayerLookup((id: string) => rt.playerManager?.byId(id) ?? null);
     rt.makeCamera = (player: Player) => new Camera(rt, player);
     rt.makeStorage = (player: Player) => new Storage(rt.kv, `player:${player.id}`);
     rt.send = (id, event, payload) => dispatchTo(rt, id, event, payload);
     rt.requestSink = (name, payload) => deliverRequest(rt, name, payload);
     rt.passes = makePasses(rt);
 
-    // 2: restore @serverState from the game record — the wiring seed reads rt.persisted.
-    // 3: attach Game scripts — wire + hoist; @onStart runs in startGame (§8.3 step 5).
+    // Wire and hoist only; @onStart waits for startGame, so a handler sees a built world.
     for (const klass of manifest.gameScripts ?? []) {
         rt.wiring.attachToGame(rt.gameInstance, klass as never);
     }
@@ -83,24 +79,26 @@ export function loadGame(manifest: GameManifest = {}): Runtime {
     return rt;
 }
 
-/**
- * Runs Game-hosted @onStart to its first await, then returns (§8.3 steps 4-5). Joins
- * release afterward — a player's @onStart may run before the Game's has finished, which is
- * why world construction belongs before the first await in a Game @onStart (§3.6).
- */
+/** Runs @onStart to its first await; a join can land before a Game @onStart resumes. */
 export function startGame(rt: Runtime): Promise<void> {
     return dispatchLifecycle(rt, 'onStart', '@start');
 }
 
-/** Releases a join: player record + avatar + camera + Player scripts, then their @onStart. */
+/** Creates the player record, then lets @onPlayerJoin decide spawn or spectate. */
 export function joinPlayer(rt: Runtime, id: string, name: string): Player {
     const player = rt.playerManager!.create(id, name);
-    // @onPlayerJoin on the Game-hosted ServerScript (§5.2); the handler decides spawn/spectate.
     void dispatchToHost(rt, 'game', 'onPlayerJoin', '@playerJoin', { player });
     return player;
 }
 
-/** Fires a lifecycle kind at every attached instance (Game @onStart, etc.). */
+/** Ends a session; @onPlayerLeave runs before removal, while the player is still readable. */
+export function leavePlayer(rt: Runtime, id: string): void {
+    const player = rt.playerManager?.byId(id);
+    if (!player) return;
+    void dispatchToHost(rt, 'game', 'onPlayerLeave', '@playerLeave', { player });
+    rt.playerManager?.remove(id);
+}
+
 function dispatchLifecycle(rt: Runtime, kind: 'onStart' | 'onEnd', event: string): Promise<void> {
     const pending: Promise<void>[] = [];
     for (const si of rt.instances.all()) {
@@ -111,7 +109,10 @@ function dispatchLifecycle(rt: Runtime, kind: 'onStart' | 'onEnd', event: string
                 event,
                 '',
                 { data: {}, dt: 1 / rt.simRate, alive: true },
-                { activeLocations: activeLocationsFor(rt.isServer ? 'server' : 'client'), tick: rt.tick },
+                {
+                    activeLocations: activeLocationsFor(rt.isServer ? 'server' : 'client'),
+                    tick: rt.tick,
+                },
             ),
         );
     }
@@ -135,9 +136,13 @@ function dispatchToHost(
     );
 }
 
-/** Loopback request delivery: dispatch to @onRequest handlers on Game/Player/Entity hosts. */
-function deliverRequest(rt: Runtime, name: string, payload: Record<string, unknown> | undefined): void {
-    // ctx.player is engine-supplied and unforgeable (§5.9); the local player in loopback.
+/** Loopback delivery for request(): every server-located @onRequest handler, in place. */
+function deliverRequest(
+    rt: Runtime,
+    name: string,
+    payload: Record<string, unknown> | undefined,
+): void {
+    // ctx.player is engine-supplied and unforgeable; in loopback that is the local player.
     const player = rt.localPlayer ?? rt.playerManager?.players[0] ?? undefined;
     for (const si of rt.instances.all()) {
         if (si.location !== 'server') continue;
@@ -146,20 +151,26 @@ function deliverRequest(rt: Runtime, name: string, payload: Record<string, unkno
             'onRequest',
             name,
             '',
-            { data: payload ?? {}, dt: 1 / rt.simRate, alive: true, player, from: null, viewTick: rt.tick },
+            {
+                data: payload ?? {},
+                dt: 1 / rt.simRate,
+                alive: true,
+                player,
+                from: null,
+                viewTick: rt.tick,
+            },
             { activeLocations: activeLocationsFor('server'), tick: rt.tick },
         );
     }
 }
 
-/** Fires an event at one entity's handlers via the dispatcher (Entity.send, §5.8). */
 function dispatchTo(
     rt: Runtime,
     id: EntityId,
     event: string,
     payload: Record<string, unknown> | undefined,
 ): Promise<void> {
-    if (!rt.entities.isAlive(id)) return Promise.resolve(); // dead entity is a no-op (§5.8)
+    if (!rt.entities.isAlive(id)) return Promise.resolve();
     const instances = rt.instances.forHost(entityKey(id as number));
     return rt.dispatcher.dispatch(
         instances,
@@ -174,14 +185,13 @@ function dispatchTo(
 function transformView(rt: Runtime): TransformView {
     return {
         liveIds: (o: EntityId[] = []) => rt.entities.liveIds(o),
-        posX: id => rt.transforms.posX(id),
-        posY: id => rt.transforms.posY(id),
+        posX: (id) => rt.transforms.posX(id),
+        posY: (id) => rt.transforms.posY(id),
         halfWidth: () => 0,
         halfHeight: () => 0,
     };
 }
 
-/** The per-tick passes (§8.2). Each dispatches a lifecycle/event kind to the right hosts. */
 function makePasses(rt: Runtime): TickPasses {
     const dispatchKind = (dispatch: DispatchOptions, kind: HandlerKind, event: string) => {
         for (const si of rt.instances.all()) {
@@ -198,11 +208,17 @@ function makePasses(rt: Runtime): TickPasses {
 
     return {
         input() {
-            // Input source drives @onEvent press/release/hold; scripted in tests / by the client.
+            // Core owns no input source; the client and tests dispatch input events themselves.
         },
         movement(dt) {
             for (const player of rt.playerManager?.players ?? []) {
-                player.movement?.tick(dt);
+                const movement = player.movement;
+                if (!movement) continue;
+                // A destroyed avatar leaves its movement instance live, and the physics sink would
+                // otherwise keep writing positions for whatever entity reuses the released slot.
+                const host = movement.host as unknown as { entityId: EntityId };
+                if (!rt.entities.isAlive(host.entityId)) continue;
+                movement.tick(dt);
             }
         },
         contacts(dispatch) {
@@ -212,14 +228,13 @@ function makePasses(rt: Runtime): TickPasses {
             }
         },
         regions() {
-            // Region enter/exit + checkpoints — a point query per entity against static shapes.
+            // Nothing dispatches region enter/exit; find({ in }) queries RegionIndex on demand.
         },
         countdowns() {
-            // Countdowns advance via their own registration; the loop already ticks timers.
+            // No Countdown registry exists, so there is nothing to advance.
         },
         update(dispatch, _dt) {
-            // @onUpdate at simRate fires on SyncedScript and ServerScript only; a
-            // ClientScript's @onUpdate is display-rate via frame(), never step (§8.1).
+            // A ClientScript's @onUpdate is display-rate via frame(), never the sim step.
             const simUpdate: DispatchOptions = {
                 ...dispatch,
                 activeLocations: new Set(['server', 'synced'] as const),
@@ -229,7 +244,12 @@ function makePasses(rt: Runtime): TickPasses {
     };
 }
 
-function fireCollide(rt: Runtime, self: EntityId, other: EntityId, dispatch: DispatchOptions): void {
+function fireCollide(
+    rt: Runtime,
+    self: EntityId,
+    other: EntityId,
+    dispatch: DispatchOptions,
+): void {
     const instances = rt.instances.forHost(entityKey(self as number));
     const otherEntity = rt.entityManager.facade(other);
     for (const tag of rt.tags.tagsOf(other)) {

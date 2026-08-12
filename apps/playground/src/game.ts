@@ -91,9 +91,8 @@ interface LeafRecord {
 /**
  * A running game: a core runtime, its loop, and the leaves it simulates.
  *
- * `advance(dt)` is a fixed-step accumulator over `Loop.step` — the same shape as
- * `Loop.advance`, re-owned here only so the panel can read the tick count and sub-tick
- * fill the loop otherwise keeps private.
+ * `advance(dt)` is a fixed-step accumulator over `Loop.step`. Core owns no accumulator: only the
+ * host knows what its clock means, and here the panel reads the tick count and sub-tick fill.
  */
 export class LeafGame {
     readonly #rt;

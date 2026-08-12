@@ -1,6 +1,6 @@
 export type { Ctx } from './ctx.js';
 
-export { Asset, AssetRegistry, assets, setAssetRegistry } from './assets.js';
+export { Asset, AssetRegistry, assets } from './assets.js';
 export type { AssetKind, AssetRef, Assets } from './assets.js';
 
 export { sound, music } from './audio.js';
@@ -22,6 +22,9 @@ export { HUD, HUDScreen, hud } from './hud.js';
 export { Player, PlayerManager } from './player.js';
 export type { Cursor, InputBindings, ActionState } from './player.js';
 
+export { createActionStates } from './action-states.js';
+export type { ActionStates, InputEdge } from './action-states.js';
+
 export { Game, RuntimeGame, WorldQuery, game } from './game.js';
 export type { FindQuery } from './game.js';
 
@@ -40,7 +43,6 @@ export {
 export { BaseMovement, TopDownMovement, PlatformerMovement } from './movement.js';
 export type { Movement } from './movement.js';
 
-// ─── runtime plumbing (not creator-facing, but part of the package surface) ──────
 export {
     Runtime,
     createRuntime,
@@ -52,7 +54,7 @@ export {
 } from './runtime.js';
 export type { EngineLog, TickPasses } from './runtime.js';
 
-export { loadGame, startGame, joinPlayer } from './load-game.js';
+export { loadGame, startGame, joinPlayer, leavePlayer } from './load-game.js';
 export type { GameManifest } from './load-game.js';
 
 export { Roster } from './roster.js';
