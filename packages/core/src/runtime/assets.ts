@@ -1,6 +1,6 @@
-// Asset is immutable panel-loaded data (tier C — the panel loads it, DESIGN §3.5). The
-// `assets` registry is read-only; loading stays in the panel. Core holds whatever the
-// manifest declares, and answers null for an unknown key rather than throwing.
+// Core never loads an asset: it holds whatever the manifest declared, so there is no load API here.
+
+import { currentRuntime, hasRuntime } from './runtime.js';
 
 export type AssetKind = 'texture' | 'atlas' | 'audio' | 'font' | 'clip' | 'effect';
 
@@ -12,7 +12,11 @@ export class Asset {
     readonly height: number;
     readonly duration: number;
 
-    constructor(key: string, kind: AssetKind, meta?: { width?: number; height?: number; duration?: number }) {
+    constructor(
+        key: string,
+        kind: AssetKind,
+        meta?: { width?: number; height?: number; duration?: number },
+    ) {
         this.key = key;
         this.kind = kind;
         this.loaded = true;
@@ -29,7 +33,7 @@ export interface Assets {
     all(kind?: AssetKind): Asset[];
 }
 
-/** The panel-loaded asset table. loadGame populates it from the manifest; empty otherwise. */
+/** The asset table loadGame fills from the manifest; empty otherwise. */
 export class AssetRegistry implements Assets {
     readonly #byKey = new Map<string, Asset>();
 
@@ -43,7 +47,7 @@ export class AssetRegistry implements Assets {
 
     all(kind?: AssetKind): Asset[] {
         const all = [...this.#byKey.values()];
-        return kind ? all.filter(a => a.kind === kind) : all;
+        return kind ? all.filter((a) => a.kind === kind) : all;
     }
 }
 
@@ -51,17 +55,12 @@ const emptyRegistry = new AssetRegistry();
 
 /** The creator-facing `assets` const — a facade over the current runtime's registry. */
 export const assets: Assets = {
-    get: key => resolve().get(key),
-    all: kind => resolve().all(kind),
+    get: (key) => resolve().get(key),
+    all: (kind) => resolve().all(kind),
 };
 
-let currentRegistry: () => Assets = () => emptyRegistry;
-
-/** @internal — loadGame installs the live registry accessor. */
-export function setAssetRegistry(fn: () => Assets): void {
-    currentRegistry = fn;
-}
-
+// Resolved per call off the runtime, not held in a module slot: a second loadGame would otherwise
+// repoint the first world's assets, and withRuntime could not put them back.
 function resolve(): Assets {
-    return currentRegistry();
+    return hasRuntime() ? (currentRuntime().assets ?? emptyRegistry) : emptyRegistry;
 }

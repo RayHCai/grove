@@ -1,16 +1,27 @@
-// The data wrappers (DESIGN §5.2, §6.2): bind identity, marking, persistence round-trip,
+// The data wrappers: bind identity, marking, persistence round-trip,
 // and the bind-twice load-time error.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { Scoreboard, Leaderboard, Inventory, Team } from '../src/runtime/wrappers.js';
-import { setPlayerLookup } from '../src/runtime/wrappers.js';
 import { createHostRecord } from '../src/state/host-record.js';
+import { createRuntime, clearRuntime } from '../src/runtime/runtime.js';
 import type { Player } from '../src/runtime/player.js';
+import type { PlayerManager } from '../src/runtime/player.js';
 
 // A minimal Player stand-in — the wrappers key by `.id` only.
 const player = (id: string) => ({ id, name: id }) as unknown as Player;
 
-describe('StatefulWrapper.bind (§5.2)', () => {
+// top()/players() resolve ids through the current runtime, so a lookup needs one to live on.
+function withPlayerLookup(): void {
+    const rt = createRuntime();
+    rt.playerManager = { byId: (id: string) => player(id) } as unknown as PlayerManager;
+}
+
+afterEach(() => {
+    clearRuntime();
+});
+
+describe('StatefulWrapper.bind', () => {
     it('throws when the same instance is bound twice', () => {
         const s = new Scoreboard();
         const r1 = createHostRecord('game');
@@ -28,7 +39,7 @@ describe('StatefulWrapper.bind (§5.2)', () => {
         const s = new Scoreboard();
         const record = createHostRecord('game');
         const marks: string[] = [];
-        record.markDirty = field => marks.push(field);
+        record.markDirty = (field) => marks.push(field);
         s.bind(record, 'scores');
         s.add(5, player('p1'));
         expect(marks).toEqual(['scores']);
@@ -37,18 +48,18 @@ describe('StatefulWrapper.bind (§5.2)', () => {
 
 describe('wrapper behavior', () => {
     it('Scoreboard tracks and ranks', () => {
-        setPlayerLookup(id => player(id));
+        withPlayerLookup();
         const s = new Scoreboard();
         s.bind(createHostRecord('game'), 'scores');
         s.add(3, player('a'));
         s.add(5, player('b'));
         s.add(1, player('c'));
         expect(s.of(player('b'))).toBe(5);
-        expect(s.top(2).map(p => p.id)).toEqual(['b', 'a']);
+        expect(s.top(2).map((p) => p.id)).toEqual(['b', 'a']);
     });
 
     it('Leaderboard keeps the best and ranks', () => {
-        setPlayerLookup(id => player(id));
+        withPlayerLookup();
         const lb = new Leaderboard({ order: 'high' });
         lb.bind(createHostRecord('game'), 'wins');
         lb.submit(10, player('a'));
@@ -70,16 +81,16 @@ describe('wrapper behavior', () => {
     });
 
     it('Team membership', () => {
-        setPlayerLookup(id => player(id));
+        withPlayerLookup();
         const t = new Team('red');
         t.bind(createHostRecord('game'), 'red');
         t.add(player('a'));
         expect(t.has(player('a'))).toBe(true);
-        expect(t.players.map(p => p.id)).toEqual(['a']);
+        expect(t.players.map((p) => p.id)).toEqual(['a']);
     });
 
     it('serialize / restore round-trips a Scoreboard', () => {
-        setPlayerLookup(id => player(id));
+        withPlayerLookup();
         const a = new Scoreboard();
         a.bind(createHostRecord('game'), 'scores');
         a.add(7, player('x'));

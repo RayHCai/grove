@@ -1,8 +1,8 @@
-// Load order, lifecycle, request path, and wire-time rejections (DESIGN §8.2, §8.3, §5.9).
+// Load order, lifecycle, request path, and wire-time rejections.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { Rules, SyncedWithRequest } from '../dist/testkit/fixtures.js';
-import { loadGame, startGame, joinPlayer } from '../src/runtime/load-game.js';
+import { Roll, Rules, SyncedWithRequest } from '../dist/testkit/fixtures.js';
+import { loadGame, startGame, joinPlayer, leavePlayer } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import { request } from '../src/runtime/request.js';
 import { Loop } from '../src/loop/loop.js';
@@ -10,7 +10,7 @@ import { game } from '../src/runtime/game.js';
 
 afterEach(() => clearRuntime());
 
-describe('game @onStart (§8.3)', () => {
+describe('game @onStart', () => {
     it('runs Game-hosted @onStart and seeds global @serverState', async () => {
         const rt = loadGame({ gameScripts: [Rules as never] });
         await startGame(rt);
@@ -20,7 +20,7 @@ describe('game @onStart (§8.3)', () => {
     });
 });
 
-describe('tick order (§8.2)', () => {
+describe('tick order', () => {
     it('adopts the tick index rather than incrementing — replaying 97 reports 97', () => {
         const rt = loadGame();
         const loop = new Loop(rt);
@@ -31,7 +31,7 @@ describe('tick order (§8.2)', () => {
     });
 });
 
-describe('@onRequest loopback (§5.9)', () => {
+describe('@onRequest loopback', () => {
     it('delivers a client request to a ServerScript handler', async () => {
         const rt = loadGame({ gameScripts: [Rules as never] });
         await startGame(rt);
@@ -42,7 +42,7 @@ describe('@onRequest loopback (§5.9)', () => {
     });
 });
 
-describe('wire-time rejections (§5.9)', () => {
+describe('wire-time rejections', () => {
     it('rejects @onRequest on a non-ServerScript', () => {
         const rt = loadGame();
         const e = rt.gameInstance!.spawn('crate', 0, 0);
@@ -51,5 +51,38 @@ describe('wire-time rejections (§5.9)', () => {
 });
 
 function tick(): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, 0));
+    return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+describe('leavePlayer', () => {
+    it('dispatches @onPlayerLeave BEFORE the roster removal, then removes', async () => {
+        const rt = loadGame({ gameScripts: [Roll as never] });
+        await startGame(rt);
+        joinPlayer(rt, 'p1', 'Ada');
+        joinPlayer(rt, 'p2', 'Bo');
+        const roll = [...rt.instances.forHost('game')][0]!.instance as Roll;
+        expect(roll.joined).toStrictEqual(['p1', 'p2']);
+
+        let rosterAtLeave = -1;
+        roll.probe = () => {
+            rosterAtLeave = rt.playerManager!.players.length;
+        };
+        leavePlayer(rt, 'p1');
+        await tick();
+
+        expect(roll.left).toStrictEqual(['p1']);
+        // The handler is told about a player it must still be able to read: `player.avatar` and the
+        // roster are both gone once `remove` has run.
+        expect(rosterAtLeave).toBe(2);
+        expect(rt.playerManager!.players.map((p) => p.id)).toStrictEqual(['p2']);
+        expect(rt.hosts.get('player:p1')).toBeUndefined();
+    });
+
+    it('is a no-op for an unknown player', async () => {
+        const rt = loadGame({ gameScripts: [Roll as never] });
+        await startGame(rt);
+        expect(() => leavePlayer(rt, 'nobody')).not.toThrow();
+        const roll = [...rt.instances.forHost('game')][0]!.instance as Roll;
+        expect(roll.left).toStrictEqual([]);
+    });
+});

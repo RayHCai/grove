@@ -1,7 +1,5 @@
-// Game is the session and the world (DESIGN §7, api_spec.ts:488): it owns the entity
-// table, scopes queries, holds build-time bounds, and is where global @serverState lives.
-// `spawn` is synchronous and always safe; `find` returns a real array. `abstract` means
-// `new Game()` is a compile error while the engine builds the one instance.
+// Game is the session and the world. `abstract` so `new Game()` is a compile error while the
+// engine still builds the one instance.
 
 import type { Bounds, Vec3 } from '@platform/math';
 import { bounds as makeBounds } from '@platform/math';
@@ -18,11 +16,8 @@ export interface FindQuery {
     in?: string;
     near?: { of: Entity | Vec3; within: number };
     /**
-     * Resolve against the world as the acting client saw it, not the live present. Only
-     * legal in a server-side, input-originated handler (@onRequest); the engine pulls the
-     * view tick from the dispatch context, clamps to MAX_REWIND_MS, and validates against
-     * its own latency estimate. Load-time errors in a SyncedScript and in handlers with no
-     * view tick (§5.4, DESIGN §8.1).
+     * Resolve against the world as the acting client saw it — server-side, input-originated
+     * handlers only. `WorldQuery.find` does not honour it yet; only `Entity.getTouching` does.
      */
     asSeen?: boolean;
 }
@@ -40,7 +35,7 @@ export abstract class Game {
     }
 
     get entities(): Entity[] {
-        return this.rt.entities.liveIds().map(id => this.rt.entityManager.facade(id));
+        return this.rt.entities.liveIds().map((id) => this.rt.entityManager.facade(id));
     }
 
     get bounds(): Bounds {
@@ -69,7 +64,7 @@ export abstract class Game {
     }
 }
 
-/** The concrete, non-exported Game the engine instantiates (§7). */
+/** The concrete Game the engine instantiates. */
 export class RuntimeGame extends Game {
     constructor(rt: Runtime) {
         super();
@@ -77,19 +72,18 @@ export class RuntimeGame extends Game {
     }
 }
 
-// The one Game, a const facade over the current runtime's instance (§8.4). A Proxy so
-// `game.spawn(...)` always routes to the live world without the const capturing a stale
-// reference across createRuntime / withRuntime.
+// A Proxy so the const never captures a stale instance across createRuntime / withRuntime.
 export const game: Game = new Proxy({} as Game, {
     get(_t, prop) {
         const g = currentRuntime().gameInstance;
         if (!g) throw new Error('game used before loadGame');
-        const value = (g as unknown as Record<string | symbol, unknown>)[prop];
-        return typeof value === 'function' ? value.bind(g) : value;
+        // Unbound on purpose: a bound copy pins the runtime it was read from, while `this` on a
+        // `game.spawn(...)` call is this proxy and so resolves again through here.
+        return (g as unknown as Record<string | symbol, unknown>)[prop];
     },
 });
 
-/** Resolves a FindQuery against the live world or a historical capture (§5.4, §8.1). */
+/** Resolves a FindQuery against the live world. */
 export class WorldQuery {
     readonly #rt: Runtime;
 
@@ -103,18 +97,22 @@ export class WorldQuery {
         if (query.near) {
             const of = query.near.of;
             const p = 'position' in of ? of.position : of;
-            const bp = query.asSeen ? this.#rt.contacts : undefined; // asSeen path via ring; live otherwise
-            void bp;
-            ids = this.#rt.broadphase!.near(p.x, p.y, query.near.within);
+            // asSeen resolves against the lag ring's latest capture, which marks nothing, so a
+            // historical query stays invisible to replication.
+            const bp =
+                (query.asSeen ? this.#rt.lagRing?.broadphaseAtLatest() : null) ??
+                this.#rt.broadphase!;
+            ids = bp.near(p.x, p.y, query.near.within);
         } else {
             ids = this.#rt.entities.liveIds();
         }
 
         return ids
-            .map(id => this.#rt.entityManager.facade(id))
-            .filter(e => {
+            .map((id) => this.#rt.entityManager.facade(id))
+            .filter((e) => {
                 if (query.tag !== undefined && !e.hasTag(query.tag)) return false;
-                if (query.in !== undefined && !this.#rt.regions?.contains(query.in, e.position)) return false;
+                if (query.in !== undefined && !this.#rt.regions?.contains(query.in, e.position))
+                    return false;
                 return true;
             });
     }
