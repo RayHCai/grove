@@ -1,4 +1,4 @@
-// Snapshot/restore and the determinism round-trip (DESIGN §8.1, §11). Two runs of one
+// Snapshot/restore and the determinism round-trip. Two runs of one
 // input sequence must produce byte-identical state, and restore(snapshot(t)) + replay must
 // reproduce it. Also: the registry-coverage test — every store declares a scoping mode.
 
@@ -10,7 +10,7 @@ import { bounds } from '@platform/math';
 
 afterEach(() => clearRuntime());
 
-describe('snapshot / restore (§8.1)', () => {
+describe('snapshot / restore', () => {
     it('is a value, not a view — a later tick does not mutate a snapshot', () => {
         const rt = loadGame({ bounds: bounds(-500, 500, 500, -500) });
         const loop = new Loop(rt);
@@ -42,7 +42,7 @@ describe('snapshot / restore (§8.1)', () => {
         expect(a.position).toEqual({ x: 1, y: 2, z: 0 });
         expect(a.hasTag('x')).toBe(true);
         expect(a.hasTag('y')).toBe(false);
-        // the PRNG resumed from the captured position: the next draw matches (§8.1)
+        // the PRNG resumed from the captured position: the next draw matches
         expect(rt.random!.between(0, 1000)).toBe(expectedNext);
     });
 
@@ -51,7 +51,7 @@ describe('snapshot / restore (§8.1)', () => {
     });
 });
 
-/** One scripted run over a seeded PRNG — the determinism harness's unit (§11). */
+/** One scripted run over a seeded PRNG — the determinism harness's unit. */
 function deterministicRun(): { x: number; y: number; z: number } {
     const rt = loadGame({ bounds: bounds(-500, 500, 500, -500) });
     rt.random!.seed(7);
@@ -65,7 +65,7 @@ function deterministicRun(): { x: number; y: number; z: number } {
     return pos;
 }
 
-describe('registry coverage (§8.1)', () => {
+describe('registry coverage', () => {
     it('every registered store declares a scoping mode with no default', () => {
         const rt = loadGame();
         for (const store of rt.registry.stores) {
@@ -76,8 +76,8 @@ describe('registry coverage (§8.1)', () => {
 
     it('registers the load-bearing stores including the PRNG', () => {
         const rt = loadGame();
-        const names = rt.registry.stores.map(s => s.storeName);
-        expect(names).toContain('prng'); // the easiest to miss (§8.1)
+        const names = rt.registry.stores.map((s) => s.storeName);
+        expect(names).toContain('prng'); // the easiest to miss
         expect(names).toContain('transforms');
         expect(names).toContain('entities');
         expect(names).toContain('tags');

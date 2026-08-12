@@ -1,4 +1,4 @@
-// Entity destroy cascade and getTouching semantics (DESIGN §6, §5.4).
+// Entity destroy cascade and getTouching semantics.
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame } from '../src/runtime/load-game.js';
@@ -7,7 +7,7 @@ import { bounds } from '@platform/math';
 
 afterEach(() => clearRuntime());
 
-describe('destroy (§6)', () => {
+describe('destroy', () => {
     it('flips alive immediately but defers teardown to the drain', () => {
         const rt = loadGame();
         const e = rt.gameInstance!.spawn('crate', 0, 0).tag('box');
@@ -46,7 +46,7 @@ describe('destroy (§6)', () => {
     });
 });
 
-describe('getTouching (§5.4)', () => {
+describe('getTouching', () => {
     it('returns an empty array (never null) for an entity with no collider', () => {
         const rt = loadGame({ bounds: bounds(-100, 100, 100, -100) });
         const a = rt.gameInstance!.spawn('crate', 0, 0);
@@ -65,9 +65,9 @@ describe('getTouching (§5.4)', () => {
 
         const touching = a.getTouching();
         expect(touching).not.toContain(a); // self excluded
-        expect(touching.map(e => e.id)).toContain(b.id);
+        expect(touching.map((e) => e.id)).toContain(b.id);
 
-        expect(a.getTouching('enemy').map(e => e.id)).toEqual([b.id]);
+        expect(a.getTouching('enemy').map((e) => e.id)).toEqual([b.id]);
         expect(a.getTouching('nonexistent')).toHaveLength(0);
     });
 });

@@ -1,11 +1,9 @@
-// The three replication channels (DESIGN §5.1). One dirty set is the wrong shape:
-// server→client traffic is three populations differing by orders of magnitude in volume,
-// delivery requirements, and what a mark must say. Every mutation path writes to exactly
-// one. These marks are OUTPUT bookkeeping — deliberately NOT captured by snapshot (§8.1).
+// Structural changes and state writes are separate channels because they differ in volume and
+// in what a mark must carry. These marks are output bookkeeping and no snapshot captures them.
 
 import type { EntityId } from '../ids.js';
 
-/** structural — spawn, destroy, reparent, tag, script attach. Ordered, reliable journal. */
+/** One entry in the ordered structural journal. */
 export type StructuralOp =
     | { kind: 'spawn'; id: EntityId; template: string }
     | { kind: 'destroy'; id: EntityId }
@@ -13,21 +11,17 @@ export type StructuralOp =
     | { kind: 'tag'; id: EntityId; tag: string; added: boolean }
     | { kind: 'attach'; id: EntityId; scriptClass: string };
 
-/** state — a @serverState write. Reliable, per-player scoped. Unit is (hostRecord, field). */
+/** One @serverState write; the unit of replication is (host record, field). */
 export interface StateMark {
     record: object;
     field: string;
 }
 
-// The TRANSFORM channel is not here: it is the SimTransformStore's own dense per-entity
-// bitset, with two independent drains — the server's ReplicationSink and the client's
-// SceneSink, each clearing what it consumes (§5.1). Keeping it on the store is what lets
-// those two drains be independent; a shared set here would have one steal the other's
-// marks. So ReplicationChannels owns only the structural journal and the state set.
+// Transform marks are deliberately absent: they live on SimTransformStore, drained separately.
 export class ReplicationChannels {
-    /** Append-only journal; order is meaning (§5.1). */
+    /** Append-only; order is meaning. */
     readonly #structural: StructuralOp[] = [];
-    /** Set of (record, field) pairs, keyed for dedup. */
+    /** Keyed so a field written twice before a drain replicates once. */
     readonly #state = new Map<string, StateMark>();
     #stateKeySeq = new WeakMap<object, number>();
     #nextRecordId = 1;
@@ -45,8 +39,6 @@ export class ReplicationChannels {
         this.#state.set(`${recordId} ${field}`, { record, field });
     }
 
-    // ─── drains (§5.1: the sink decides cadence) ────────────────────────────────
-
     drainStructural(): StructuralOp[] {
         const out = [...this.#structural];
         this.#structural.length = 0;
@@ -58,8 +50,6 @@ export class ReplicationChannels {
         this.#state.clear();
         return out;
     }
-
-    // ─── inspection (tests) ─────────────────────────────────────────────────────
 
     get structuralCount(): number {
         return this.#structural.length;

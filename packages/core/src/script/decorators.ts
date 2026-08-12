@@ -1,19 +1,13 @@
-// Standard (TC39 Stage 3) decorators. Only this file knows how a HandlerDecl was
-// produced; the registry, dispatcher, wiring and hosts store a neutral record, so
-// nothing in the dispatch/loop/entity code depends on the decorator model (DESIGN §3.3).
-//
-// Symbol.metadata does not exist on node 24 — the one-line polyfill below is load-
-// bearing and verified (DESIGN §3.3).
+// Standard TC39 decorators, contained here so nothing downstream depends on the decorator
+// model. Symbol.metadata is absent on node 24 and without the polyfill below every table
+// silently stays empty.
 
 import type { HandlerKind } from './metadata.js';
 import { getOrCreateMetadata, ensureOwnHandlers, ensureOwnState } from './metadata.js';
 import type { HandlerOptions, Concurrency } from './types.js';
 import { installStateAccessor } from '../state/backing.js';
 
-// ─── polyfill ────────────────────────────────────────────────────────────────────
 (Symbol as { metadata?: symbol }).metadata ??= Symbol('Symbol.metadata');
-
-// ─── handler decorators ──────────────────────────────────────────────────────────
 
 function handlerDecorator(
     kind: HandlerKind,
@@ -24,7 +18,7 @@ function handlerDecorator(
         const md = getOrCreateMetadata(context.metadata);
         const handlers = ensureOwnHandlers(md, context.metadata);
         const methodName = String(context.name);
-        const existing = handlers.find(h => h.methodName === methodName);
+        const existing = handlers.find((h) => h.methodName === methodName);
         if (!existing) {
             handlers.push({ event, kind, methodName, opts: opts ?? {} });
         }
@@ -72,26 +66,21 @@ export function onRequest(name: string, opts?: HandlerOptions): MethodDecorator_
     return handlerDecorator('onRequest', name, opts);
 }
 
-// ─── @serverState ────────────────────────────────────────────────────────────────
-
 export const serverState: FieldDecorator_ = (_value, context) => {
     const md = getOrCreateMetadata(context.metadata);
     const state = ensureOwnState(md, context.metadata);
     const field = String(context.name);
     state.add(field);
 
-    // addInitializer runs AFTER the field is defined (§5.2), so the authored value is an
-    // own data property when installStateAccessor swaps it for the accessor pair.
+    // addInitializer runs after the field is defined, so the authored value is an own data
+    // property when installStateAccessor swaps it for the accessor pair.
     context.addInitializer(function (this: unknown) {
         installStateAccessor(this as object, field);
     });
 
-    // The initializer passes the authored value through untouched — one evaluation, no
-    // marking; installStateAccessor reads it off the instance afterward.
+    // The authored value passes through untouched: one evaluation, and no mark on construction.
     return (initial) => initial;
 };
-
-// ─── type helpers ────────────────────────────────────────────────────────────────
 
 type MethodDecorator_ = <This, Args extends unknown[], Return>(
     value: (this: This, ...args: Args) => Return,
@@ -102,8 +91,6 @@ type FieldDecorator_ = <This, Value>(
     value: undefined,
     context: ClassFieldDecoratorContext<This, Value>,
 ) => (this: This, initial: Value) => Value;
-
-// ─── concurrency helper ──────────────────────────────────────────────────────────
 
 export function defaultConcurrency(kind: HandlerKind): Concurrency {
     switch (kind) {

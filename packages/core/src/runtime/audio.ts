@@ -1,6 +1,4 @@
-// Audio (tier C — needs the audio layer, DESIGN §2). The facades route to the runtime's
-// EffectSink, whose null implementation drops calls (and drops them under replay, §8.1).
-// A real SoundHandle arrives when the audio layer fills the seam.
+// Playback lives behind the runtime's EffectSink, so every handle returned here is inert.
 
 import type { AssetRef } from './assets.js';
 import type { Entity } from './entity.js';
@@ -49,7 +47,7 @@ export const sound: Sound = {
 
 export const music: Music = {
     play: (asset, opts) => emit('music.play', asset, opts),
-    stop: fade => {
+    stop: (fade) => {
         if (hasRuntime()) currentRuntime().effects.play('music.stop', { fade });
     },
     volume: 1,

@@ -1,7 +1,5 @@
-// Camera is per-player and client-owned: presentation only, never authoritative (DESIGN
-// §3.3). A ClientScript may write it — the one exception to "client code never writes". Its
-// position/viewport are presentation values, not in the transform store and not captured by
-// snapshot, so most of this is tier C until a client window exists.
+// Camera state is presentation-only: it is held here rather than in the transform store, so no
+// snapshot captures it and no replication mark follows a write.
 
 import type { Bounds, Easing, Vec3 } from '@platform/math';
 import { bounds as makeBounds, vec3 } from '@platform/math';
@@ -18,7 +16,7 @@ export class Camera {
     bounds: Bounds | string | null = null;
     #x = 0;
     #y = 0;
-    /** What the camera tracks; presentation-only, applied by the client (tier C). */
+    /** Stored for the client to apply; nothing in core reads it. */
     followTarget: Player | Entity | null = null;
 
     constructor(rt: Runtime, player: Player) {
@@ -30,7 +28,7 @@ export class Camera {
         return vec3(this.#x, this.#y, 0);
     }
 
-    /** Client-window-dependent, so not readable from a SyncedScript (§3.3). Tier C. */
+    /** Placeholder extents — the real ones depend on a client window core cannot see. */
     get viewport(): Bounds {
         return makeBounds(this.#x - 400, this.#x + 400, this.#y + 300, this.#y - 300);
     }

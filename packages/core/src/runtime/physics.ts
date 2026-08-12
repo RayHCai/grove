@@ -1,5 +1,5 @@
-// The null PhysicsSink (DESIGN §10, §2). Integrates position and sets `blocked` all-false:
-// "A platformer runs and falls; it does not land." Rapier fills the same seam later.
+// Integrates position and reports nothing blocked: a platformer runs and falls, but does not
+// land until Rapier fills this seam.
 
 import type { EntityId } from '../ids.js';
 import { noBlocked } from './seams.js';
@@ -13,8 +13,11 @@ export class NullPhysicsSink implements PhysicsSink {
         this.#transforms = transforms;
     }
 
-    move(id: EntityId, dt: number, velocity: Readonly<{ x: number; y: number; z: number }>): Blocked {
-        // No contact resolution: integrate position from velocity and report nothing blocked.
+    move(
+        id: EntityId,
+        dt: number,
+        velocity: Readonly<{ x: number; y: number; z: number }>,
+    ): Blocked {
         const x = this.#transforms.posX(id) + velocity.x * dt;
         const y = this.#transforms.posY(id) + velocity.y * dt;
         const z = this.#transforms.posZ(id) + velocity.z * dt;
