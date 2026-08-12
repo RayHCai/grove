@@ -1,9 +1,6 @@
-// The error boundary's circuit breaker (DESIGN §4.4). A per-(instance, method) throw
-// count decides whether a handler runs, so it IS simulation state and registers with the
-// snapshot — an unrestored counter means a replay hits a different count than the original
-// run. The counter increments on throws and nothing else; any success resets it.
-//
-// The dedup map is deliberately NOT snapshot state: it affects only console output.
+// A per-(instance, method) throw count decides whether a handler runs, so it is simulation
+// state and registers with the snapshot — an unrestored counter makes a replay diverge from
+// the original run.
 
 import type { Scope, ScopeMode, SnapshotStore } from '../loop/store-registry.js';
 
@@ -13,16 +10,15 @@ export interface BreakerBuffer {
 
 export class BreakerCounters implements SnapshotStore<BreakerBuffer> {
     readonly storeName = 'breaker';
-    readonly scopeMode: ScopeMode = 'filtered';
+    // Whole, not filtered: counts are keyed by instance id, which no scope of entity ids narrows.
+    readonly scopeMode: ScopeMode = 'whole';
 
-    /** key = `${instanceId}#${method}` → consecutive throw count. */
     readonly #counts = new Map<string, number>();
 
     #key(instanceId: number, method: string): string {
         return `${instanceId}#${method}`;
     }
 
-    /** Records a throw; returns the new consecutive count. */
     recordThrow(instanceId: number, method: string): number {
         const key = this.#key(instanceId, method);
         const next = (this.#counts.get(key) ?? 0) + 1;
@@ -30,7 +26,6 @@ export class BreakerCounters implements SnapshotStore<BreakerBuffer> {
         return next;
     }
 
-    /** A successful invocation resets the counter (§4.4). */
     recordSuccess(instanceId: number, method: string): void {
         this.#counts.delete(this.#key(instanceId, method));
     }
@@ -43,14 +38,11 @@ export class BreakerCounters implements SnapshotStore<BreakerBuffer> {
         this.#counts.clear();
     }
 
-    // ─── snapshot/restore ────────────────────────────────────────────────────────
-    // Scope is by instance-owning host; here we capture whole because instance ids are
-    // not entity ids. The runtime's scoped snapshot maps hosts→instances before this.
-
     createBuffer(): BreakerBuffer {
         return { counts: [] };
     }
 
+    // Keys are instance ids, which a scope of entity ids cannot filter, so capture takes all.
     capture(into: BreakerBuffer, _scope: Scope): void {
         into.counts = [...this.#counts.entries()];
     }

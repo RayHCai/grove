@@ -3,6 +3,7 @@
 
 import type { ScopeId } from '../dispatch/scope-tree.js';
 import { NO_SCOPE } from '../dispatch/scope-tree.js';
+import { entityIndex } from '../ids.js';
 import type { Scope, ScopeMode, SnapshotStore } from './store-registry.js';
 
 export type TimerKind = 'sleep' | 'every' | 'after';
@@ -22,6 +23,8 @@ interface Timer {
 export interface TimerBuffer {
     timers: Array<Omit<Timer, 'fn' | 'resolve'>>;
     nextId: number;
+    /** Host scopes this buffer covers, or null for every timer; a scoped `apply` replaces only these. */
+    scopes: Set<ScopeId> | null;
 }
 
 export class TimerHeap implements SnapshotStore<TimerBuffer> {
@@ -151,25 +154,29 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
         return Math.max(1, Math.round(seconds * this.#simRate));
     }
 
-    // ─── snapshot/restore ────────────────────────────────────────────────────────
-    // Only sleeps carry a resolve closure the snapshot cannot hold. after/every carry a
-    // creator fn also uncapturable. So restore keeps the timing but not the closure — a
-    // parked timer is swept by the runtime's rewind (§8.1), not resurrected here.
-
     createBuffer(): TimerBuffer {
-        return { timers: [], nextId: 1 };
+        return { timers: [], nextId: 1, scopes: null };
     }
 
     capture(into: TimerBuffer, scope: Scope): void {
         into.nextId = this.#nextId;
         into.timers = [];
-        for (const t of this.#timers.values()) {
-            if (scope !== null) {
+
+        if (scope === null) {
+            into.scopes = null;
+        } else {
+            const owners = new Set<number>();
+            for (const id of scope) owners.add(entityIndex(id));
+            const scopes = new Set<ScopeId>();
+            for (const t of this.#timers.values()) {
                 const owner = this.#scopeOwner(t.hostScopeId);
-                if (owner < 0 || ![...scope].some((id) => (id as number) % 0x100_0000 === owner)) {
-                    continue;
-                }
+                if (owner >= 0 && owners.has(owner)) scopes.add(t.hostScopeId);
             }
+            into.scopes = scopes;
+        }
+
+        for (const t of this.#timers.values()) {
+            if (into.scopes !== null && !into.scopes.has(t.hostScopeId)) continue;
             into.timers.push({
                 id: t.id,
                 kind: t.kind,
@@ -182,19 +189,30 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
     }
 
     apply(from: TimerBuffer): void {
-        // A rewind drops parked closures; keep only the timing skeleton for the swept set.
-        // Timers whose closures survived in the live map (same id) keep their fn/resolve.
-        const surviving = new Map<number, Timer>();
+        // A buffer cannot hold closures, so a restored timer keeps only its timing and borrows
+        // fn/resolve from the live timer of the same id.
+        const restored = new Map<number, Timer>();
         for (const meta of from.timers) {
             const live = this.#timers.get(meta.id);
-            surviving.set(meta.id, {
+            restored.set(meta.id, {
                 ...meta,
                 fn: live?.fn ?? null,
                 resolve: live?.resolve ?? null,
             });
         }
-        this.#timers.clear();
-        for (const [id, t] of surviving) this.#timers.set(id, t);
-        this.#nextId = from.nextId;
+
+        if (from.scopes === null) {
+            this.#timers.clear();
+            // A replay has to mint the same ids as the original run, so the counter rewinds too.
+            this.#nextId = from.nextId;
+        } else {
+            // Clearing every timer would cancel the ones this scope never captured, and their ids
+            // are already spent, so the counter only ever moves forward here.
+            for (const [id, t] of this.#timers) {
+                if (from.scopes.has(t.hostScopeId)) this.#timers.delete(id);
+            }
+            this.#nextId = Math.max(this.#nextId, from.nextId);
+        }
+        for (const [id, t] of restored) this.#timers.set(id, t);
     }
 }
