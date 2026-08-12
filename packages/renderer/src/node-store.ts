@@ -1,15 +1,10 @@
-// PURE. The slot table behind `NodeId`: allocation, freelist reuse, generations (§7).
+// Pure. The slot table behind `NodeId`, holding the non-numeric per-node data; the numeric
+// transform data lives in transform-store.ts, addressed by the same slot index — which is why
+// slots reuse densely and `slotCount` never shrinks.
 //
-// Why a generation per slot: a handle legitimately outlives its node — `entity.destroy()`
-// mid-frame, then a queued patch still naming that id. Bumping the slot's generation on
-// release makes the old handle detectable, so `indexOf` answers -1 and the caller's write
-// becomes a silent no-op instead of landing on whatever node reused the slot. Only caller
-// bugs throw here; races do not (§7, errors.ts).
-//
-// This store owns the NON-NUMERIC per-node data. The numeric transform data lives in
-// transform-store.ts as parallel typed arrays addressed by the SAME slot index — which is
-// why slots are reused densely and `slotCount` never shrinks: both stores scan one flat
-// range, and a reused index must mean the same node in both.
+// A handle legitimately outlives its node, so each slot carries a generation: bumping it on
+// release makes the stale handle detectable and the caller's write a silent no-op instead of a
+// write landing on whatever node reused the slot.
 
 import type { NodeId } from './node-id.js';
 import {
@@ -22,12 +17,12 @@ import {
 } from './node-id.js';
 import type { Surface, TextStyle, UiAnchor } from './renderer.js';
 
-/** Generations start at 1, so a zeroed field is never a valid handle (§7). */
+/** Generations start at 1, so a zeroed field is never a valid handle. */
 const FIRST_GENERATION = 1;
 
 export type NodeKind = 'sprite' | 'group' | 'text';
 
-/** The per-node data that is not part of the transform SoA (§6.1, §7). */
+/** The per-node data that is not part of the transform SoA. */
 export interface NodeRecord {
     kind: NodeKind;
     surface: Surface;
@@ -44,10 +39,10 @@ export interface NodeRecord {
 /**
  * The generation a slot moves to when it is freed.
  *
- * Wraps to 1 rather than growing without bound: past `MAX_GENERATION` a packed handle
- * leaves the safe-integer range, where distinct handles start comparing equal. Wrapping
- * means a handle held across 2^29 reuses of one slot could alias a live node — unreachable
- * in practice, and strictly better than arithmetic that has silently stopped being exact.
+ * Wraps rather than growing without bound: past `MAX_GENERATION` a packed handle leaves the
+ * safe-integer range, where distinct handles start comparing equal. A handle held across 2^29
+ * reuses of one slot could then alias a live node — unreachable in practice, and better than
+ * arithmetic that has silently stopped being exact.
  */
 function nextGeneration(generation: number): number {
     return generation >= MAX_GENERATION ? FIRST_GENERATION : generation + 1;
@@ -60,13 +55,10 @@ function nextGeneration(generation: number): number {
  * `recordAt` gives that same object back for in-place mutation.
  */
 export class NodeStore {
-    /** Slot -> record, `null` while the slot is free. The index IS a handle's slot index. */
+    /** Slot -> record, `null` while the slot is free. */
     private readonly records: (NodeRecord | null)[] = [];
 
-    /**
-     * Slot -> generation. While a slot is live this is the generation its handle carries;
-     * `release` bumps it immediately, so it is also what the next mint will use.
-     */
+    /** Slot -> generation. `release` bumps it, so it is also what the next mint will use. */
     private readonly generations: number[] = [];
 
     /** Free slot indices. A stack: the most recently released slot is reused first. */
@@ -91,7 +83,7 @@ export class NodeStore {
         if (reused === undefined) {
             const index = this.records.length;
             if (index > MAX_INDEX) {
-                throw new RangeError(`NodeStore is full: all ${MAX_INDEX + 1} slots are live (§7)`);
+                throw new RangeError(`NodeStore is full: all ${MAX_INDEX + 1} slots are live`);
             }
             this.records.push(record);
             this.generations.push(FIRST_GENERATION);
@@ -107,11 +99,10 @@ export class NodeStore {
         return packNodeId(reused, generation);
     }
 
-    /** The slot index, or -1 for NO_NODE / a stale / an out-of-range handle. NEVER throws (§7). */
+    /** The slot index, or -1 for NO_NODE, a stale or an out-of-range handle. Never throws. */
     indexOf(id: NodeId): number {
-        // NO_NODE is 0 and no slot ever reaches generation 0, so `<= 0` covers the null
-        // handle; the safe-integer guard covers a garbage number cast to a NodeId, which
-        // would otherwise make `nodeIndex` fractional.
+        // No slot reaches generation 0, so `<= 0` covers NO_NODE; the safe-integer guard covers a
+        // garbage number cast to a NodeId, which would make `nodeIndex` fractional.
         if (id <= 0 || !Number.isSafeInteger(id)) return -1;
 
         const index = nodeIndex(id);
@@ -127,11 +118,10 @@ export class NodeStore {
 
     /** The live handle for a slot index; NO_NODE when that slot is free. */
     idAt(index: number): NodeId {
-        // A free, negative, fractional or past-the-end index all read `undefined` here,
-        // which is why this needs no separate range check.
+        // A free, negative, fractional or past-the-end index all read `undefined`, so this needs
+        // no separate range check.
         if (this.records[index] == null) return NO_NODE;
 
-        // In range: the two arrays only ever grow together.
         const generation = this.generations[index] ?? FIRST_GENERATION;
         return packNodeId(index, generation);
     }
@@ -143,8 +133,8 @@ export class NodeStore {
 
     /** Bumps the generation and returns the slot to the freelist. */
     release(index: number): void {
-        // Out of range or already free — both no-ops, so double release cannot corrupt
-        // the freelist with a duplicate index.
+        // Out of range or already free are both no-ops, so a double release cannot put a
+        // duplicate index on the freelist.
         if (this.records[index] == null) return;
 
         this.records[index] = null;
@@ -165,8 +155,8 @@ export class NodeStore {
     /** Drops every node. Generations still advance, so old handles stay stale. */
     clear(): void {
         for (let index = 0; index < this.records.length; index++) {
-            // An already-free slot had its generation bumped at release; bumping again
-            // would burn generations on every clear.
+            // An already-free slot had its generation bumped at release; bumping again would burn
+            // generations on every clear.
             if (this.records[index] == null) continue;
 
             this.records[index] = null;
@@ -174,15 +164,14 @@ export class NodeStore {
             this.live--;
         }
 
-        // Rebuilt descending so the stack pops ascending: reuse stays dense from slot 0,
-        // which keeps this store's flat scan — and transform-store's — short.
+        // Rebuilt descending so the stack pops ascending: reuse stays dense from slot 0, which
+        // keeps this store's flat scan — and transform-store's — short.
         this.freeList.length = 0;
         for (let index = this.records.length - 1; index >= 0; index--) {
             this.freeList.push(index);
         }
 
-        // `records` and `generations` are deliberately NOT truncated. Dropping the
-        // generation history would let a handle from a cleared slot validate again once
-        // that slot was re-minted at generation 1.
+        // Neither array is truncated: dropping the generation history would let a handle from a
+        // cleared slot validate again once that slot was re-minted at generation 1.
     }
 }

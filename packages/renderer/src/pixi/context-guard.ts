@@ -1,25 +1,17 @@
-// Context loss and restore (§10).
+// Store mutations apply immediately while GPU operations queue, so the client's frame loop needs no
+// branch and no caller needs a rebuild path: node ids survive a loss because the store is the source
+// of truth and the Pixi objects are derived from it.
 //
-// THE SPLIT THAT MAKES THIS WORK: store mutations apply immediately, GPU operations queue. So the
-// client's frame loop needs no branch, and NO CALLER NEEDS A REBUILD PATH — node ids survive a
-// loss, because the store is the source of truth and the Pixi objects are derived (§6).
+//   webglcontextlost  ->  preventDefault()  ->  'lost'  ->  emit 'contextlost'
+//   webglcontextrestored / GPUDevice.lost
+//                     ->  'restoring'
+//                     ->  merge retained manifest with queued intents, re-upload
+//                     ->  recreate the xform/art pairs from our node records, mark all dirty
+//                     ->  'ok'  ->  emit 'contextrestored'
 //
-//   webglcontextlost   ->  preventDefault()  ->  'lost'  ->  emit 'contextlost'
-//   webglcontextrestored / GPUDevice.lost resolution
-//                      ->  'restoring'
-//                      ->  merge retained manifest + queued intents; re-upload
-//                      ->  recreate xform/art pairs from our node records
-//                      ->  mark all dirty; full flush
-//                      ->  'ok'  ->  emit 'contextrestored' { reloadedAssets, failedAssets }
-//
-// `preventDefault()` on `webglcontextlost` is MANDATORY: without it the browser never fires
-// `webglcontextrestored`. Pixi's own `GlContextSystem.handleContextLost` already calls it, and
-// calling it again is idempotent — so this guard both observes the event and keeps the guarantee
-// even if the backend's own handler is ever reordered.
-//
-// RESTORE MERGES THE RETAINED MANIFEST WITH THE QUEUE **before** applying, so a queued unload
-// SUPPRESSES re-upload of something resident before the loss. The reverse order resurrects assets
-// a level transition meant to drop, and every frame after would pay for them.
+// `preventDefault()` on `webglcontextlost` is mandatory: without it the browser never fires
+// `webglcontextrestored`. Pixi's own handler already calls it and a second call is idempotent, so
+// this guard keeps the guarantee even if that handler is ever reordered.
 
 import type { ContextState } from '../renderer.js';
 import type { AssetQueue } from '../asset-queue.js';
@@ -28,7 +20,7 @@ import type { AssetManifestEntry } from '../renderer.js';
 
 /** What the guard needs from the renderer to drive a restore. */
 export interface ContextGuardHooks {
-    /** The retained manifest, for the merge (§10). */
+    /** The retained manifest, for the merge. */
     retainedManifest: () => ReadonlyMap<string, AssetManifestEntry>;
     /** Re-uploads the merged work and reports what came back. */
     reupload: (work: MergedAssetWork) => Promise<{ reloaded: string[]; failed: string[] }>;
@@ -38,7 +30,7 @@ export interface ContextGuardHooks {
     onRestored: (reloadedAssets: string[], failedAssets: string[]) => void;
 }
 
-/** A queued GPU operation's settlement, so `destroy()` can cancel rather than reject (§10). */
+/** A queued GPU operation plus its resolver, so `destroy()` can cancel rather than reject. */
 interface PendingOp<T> {
     resolve: (value: T) => void;
     /** Runs the real work once the context is back. */
@@ -51,8 +43,7 @@ export const CANCELLED_REASON = 'renderer destroyed before the context was resto
 /**
  * Tracks context state, queues GPU work while it is gone, and drives the restore.
  *
- * WebGPU device loss folds into the same two callbacks — the backend difference is not the
- * caller's business (§10).
+ * WebGPU device loss folds into the same callbacks, since the difference is not a caller's business.
  */
 export class ContextGuard {
     #state: ContextState = 'ok';
@@ -66,8 +57,7 @@ export class ContextGuard {
     readonly #hooks: ContextGuardHooks;
 
     readonly #onLost = (event: Event): void => {
-        // MANDATORY: without preventDefault the browser never fires `webglcontextrestored`
-        // (§10). Idempotent alongside Pixi's own handler.
+        // Without this the browser never fires `webglcontextrestored`.
         event.preventDefault();
         this.#enterLost('webglcontextlost');
     };
@@ -90,7 +80,7 @@ export class ContextGuard {
         return this.#state !== 'ok';
     }
 
-    /** Queued GPU operations — feeds `pendingAssetOps` (§11). */
+    /** Queued GPU operations — feeds `pendingAssetOps`. */
     get pendingCount(): number {
         return this.#pending.length;
     }
@@ -101,8 +91,8 @@ export class ContextGuard {
         canvas.addEventListener('webglcontextlost', this.#onLost, false);
         canvas.addEventListener('webglcontextrestored', this.#onRestored, false);
 
-        // WebGPU has no DOM event for this: the device exposes a `lost` promise instead. Folded
-        // into the same state machine so the two backends look identical from outside (§10).
+        // WebGPU has no DOM event for this, only a `lost` promise, folded into the same state
+        // machine so the two look identical from outside.
         if (gpuDeviceLost !== undefined) {
             void gpuDeviceLost.then(() => {
                 if (!this.#destroyed) this.#enterLost('GPUDevice.lost');
@@ -110,11 +100,7 @@ export class ContextGuard {
         }
     }
 
-    /**
-     * Runs `op` now, or queues it until the context is back.
-     *
-     * The returned promise resolves either way, so a caller mid-loss never has to branch (§10).
-     */
+    /** Runs `op` now, or queues it until the context is back. The promise resolves either way. */
     run<T>(op: () => Promise<T>): Promise<T> {
         if (!this.lost) return op();
 
@@ -126,10 +112,7 @@ export class ContextGuard {
         });
     }
 
-    /**
-     * Settles every queued operation with a cancelled result rather than rejecting, so teardown
-     * produces no unhandled rejections (§10).
-     */
+    /** Settles queued operations as cancelled rather than rejecting, so teardown stays quiet. */
     destroy(cancelledValue: () => unknown): void {
         this.#destroyed = true;
         if (this.#canvas !== null) {
@@ -151,18 +134,17 @@ export class ContextGuard {
         if (this.#destroyed || this.#state === 'ok') return;
         this.#state = 'restoring';
 
-        // MERGE ORDER IS LOAD-BEARING (§10): the retained manifest is merged WITH the queued
-        // intents before anything is applied, so a queued unload suppresses a re-upload.
+        // Merge order is load-bearing: merging before applying is what lets a queued unload
+        // suppress a re-upload of something that was resident before the loss.
         const work = this.#queue.merge(this.#hooks.retainedManifest());
         this.#queue.clear();
 
         const { reloaded, failed } = await this.#hooks.reupload(work);
 
-        // The pairs are derived from our records, so this needs nothing from the caller (§6).
+        // The pairs are derived from our records, so this needs nothing from the caller.
         this.#hooks.rebuildScene();
 
-        // Queued operations run only after the manifest is back, so an op that references a
-        // just-restored asset finds it.
+        // After the manifest is back, so an op referencing a just-restored asset finds it.
         const pending = this.#pending.splice(0, this.#pending.length);
         for (const op of pending) op.resolve(await op.run());
 

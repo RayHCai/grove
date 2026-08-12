@@ -1,23 +1,17 @@
-// PURE. Framing and scale mode -> fitScale, the stage rect, and the world viewport
-// (§4.1, §4.2). Reads no globals — the DPR is passed in — so this runs in plain Node.
+// Pure, and reads no globals — the DPR is passed in — so this runs in plain Node.
 //
-// TWO RECTANGLES, EASY TO CONFLATE. `stageRect` is the design stage mapped onto the canvas
-// and is what UI anchors against; `visibleRect` is the screen region world content actually
-// occupies. They coincide ONLY when bars are really drawn, which is 'stage' framing plus
-// 'fit' plus `letterbox`. Under 'fill' the scaled design rect OVERFLOWS the canvas — that
-// is what §4.2's "crops" means — and under 'expand' the canvas is simply larger than the
-// stage, so in both of those cases world content owns the FULL canvas.
+// `stageRect` is the design stage mapped onto the canvas, what UI anchors against;
+// `visibleRect` is the screen region world content occupies. They coincide only when bars are
+// really drawn.
 //
-// NOTHING HERE THROWS. Option validation belongs to the renderer. Degenerate input — a
-// container measured as 0x0 mid-layout, a zoom of 0 — is clamped to a finite answer,
-// because a NaN reaching `camera.viewport` would poison every frame after it and give no
-// hint where it came from.
+// Nothing here throws: option validation belongs to the renderer, and a NaN reaching
+// `camera.viewport` would poison every later frame with no hint where it came from.
 
 import { bounds, boundsHeight, boundsSet, boundsWidth } from '@platform/math';
 import type { Bounds, Size } from '@platform/math';
 import type { CameraState, Framing, ScaleMode } from './renderer.js';
 
-/** `value` when it is finite and positive, else `fallback`. Guards extents and zoom. */
+/** `value` when it is finite and positive, else `fallback`. */
 function positiveOr(value: number, fallback: number): number {
     return Number.isFinite(value) && value > 0 ? value : fallback;
 }
@@ -30,11 +24,9 @@ function finiteOr(value: number, fallback: number): number {
 /**
  * The largest half-extent a viewport may report.
  *
- * `visible / (2 * scale * zoom)` overflows to Infinity for a legitimately finite but very
- * small `zoom` — a stage-framed 800x600 design starts overflowing around `zoom = 1e-306`,
- * well inside the double range. Capping keeps the promise the rest of this module makes:
- * the rect is always finite. The cap is far larger than any real world and small enough
- * that adding any finite camera position to it cannot overflow either.
+ * A finite but tiny `zoom` — around 1e-306 on a stage-framed 800x600 — overflows
+ * `visible / (2 * scale * zoom)` to Infinity, and adding a camera position to this cap still
+ * cannot overflow.
  */
 const MAX_HALF_EXTENT = Number.MAX_SAFE_INTEGER;
 
@@ -45,17 +37,11 @@ function safeHalfExtent(value: number): number {
 }
 
 /**
- * Scale from design px to CSS px, before `zoom` (§4.1, §4.2).
+ * Scale from design px to CSS px, before `zoom`.
  *
- * `'free'` framing is always 1: the editor's `zoom` is literal px per world unit, so the
- * design stage does not participate at all. `'expand'` is 1 for the same reason on a game
- * stage — a bigger screen shows more world rather than bigger world.
- *
- * Returns 1 for a degenerate canvas or design size, since every caller divides by this.
- * That guard covers the RATIO as well as the two sizes: an extreme canvas:design ratio
- * overflows `cw / dw` to Infinity or underflows it to 0 even though both inputs are
- * ordinary finite positives, and either one divided into a viewport half-extent yields
- * Infinity or — the value this whole module exists to keep out of `camera.viewport` — NaN.
+ * `'free'` and `'expand'` are always 1 — a bigger screen shows more world, not bigger world.
+ * Falls back to 1 for a degenerate size or ratio, since every caller divides by this: an
+ * extreme canvas:design ratio overflows `cw / dw` from two ordinary finite positives.
  */
 export function fitScale(
     framing: Framing,
@@ -80,24 +66,19 @@ export function fitScale(
 /**
  * `true` when letterbox bars are actually drawn.
  *
- * Only 'stage' framing + 'fit' + `letterbox` qualifies. `fill` crops and `expand` reveals
- * more world; in both the content reaches every canvas edge, so there is nothing to bar.
- * `'free'` framing forces letterboxing off outright (§4.1).
+ * `fill` crops and `expand` reveals more world; in both the content reaches every canvas
+ * edge, so there is nothing to bar.
  */
 export function isLetterboxed(framing: Framing, scaleMode: ScaleMode, letterbox: boolean): boolean {
     return framing === 'stage' && scaleMode === 'fit' && letterbox;
 }
 
 /**
- * The stage in SCREEN space — y-down, so `bottom > top`.
+ * The stage in screen space — y-down, so `bottom > top`.
  *
- * Under `'stage'` this is the design rect scaled by `fitScale` and centered on the canvas;
- * under `'free'` the infinite editor canvas has no stage, so the whole canvas is it (§4.1).
- *
- * Under `'fill'` the scaled rect is LARGER than the canvas, so the returned edges fall
- * outside it (a negative `top`, a `right` past `canvas.width`). That is deliberate: UI is
- * authored against the stage, and `fill` cropping the edges of a HUD is the same tradeoff
- * as it cropping the edges of the world.
+ * Under `'free'` the infinite editor canvas has no stage, so the whole canvas is it. Under
+ * `'fill'` the scaled rect is larger than the canvas and the edges fall outside it: UI is
+ * authored against the stage, so `fill` crops a HUD exactly as it crops the world.
  */
 export function stageRect(
     framing: Framing,
@@ -137,30 +118,16 @@ export function visibleRect(
 }
 
 /**
- * The world-space rect on screen right now. This is what feeds `camera.viewport`.
+ * The world-space rect on screen right now, y-up (`top > bottom`). Feeds `camera.viewport`.
  *
- * y-up, so `top > bottom` (§4.2). Framing comes off the camera, defaulting to `'stage'`.
+ * Under fit + letterbox the visible region is `design * fitScale`, so the half-extent reduces
+ * algebraically to `design / (2 * zoom)` — but not in floating point, where multiplying then
+ * dividing by `s` rounds twice and lands 1 ulp off on canvases whose `s` is not a dyadic
+ * rational. That would make "everyone sees the same world" canvas-dependent, so this case
+ * cancels `s` symbolically instead.
  *
- * The half-extents are the visible screen region divided by px-per-world-unit. Under
- * fit + letterbox the visible region is `design * fitScale`, so that ALGEBRAICALLY reduces
- * to §4.2's `design / (2 * zoom)` — but not in floating point: `design.width * s / (2 * s *
- * zoom)` rounds twice and lands 1 ulp off the stated formula on canvases where `s` is not a
- * dyadic rational (1366x768 against a 960x540 design gives 480.00000000000006, not 480).
- * That would make the viewport differ per canvas under the one mode whose entire purpose is
- * that "everyone sees the same world" (§4.2). So the letterboxed case evaluates §4.2's
- * formula DIRECTLY, cancelling `s` symbolically, and is bit-identical on every canvas.
- *
- * A 0x0 canvas — a container measured mid-layout — never produces a NaN rect. Under
- * fit + letterbox it degrades to the design stage at the camera, because `fitScale` falls
- * back to 1 and the visible rect is then the design rect; otherwise the visible rect is the
- * empty canvas and the result is a zero-extent rect AT the camera, so everything culls until
- * the first real resize replaces it. Either way the edges are finite, which is the whole
- * point: a NaN reaching `camera.viewport` would poison every later frame.
- *
- * The four edges are ALWAYS finite, not only for the obvious degenerate inputs. A very small
- * `zoom` (below ~1e-306 on a stage-framed 800x600) or an extreme canvas:design ratio pushes
- * the division to Infinity or 0/0 from inputs that are each individually ordinary, so the
- * half-extents are clamped rather than trusted.
+ * The four edges are always finite, and a 0x0 canvas degrades to a zero-extent rect at the
+ * camera rather than a NaN one.
  */
 export function worldViewport(
     camera: Readonly<CameraState>,
@@ -176,9 +143,7 @@ export function worldViewport(
     let halfW: number;
     let halfH: number;
     if (isLetterboxed(framing, scaleMode, letterbox)) {
-        // §4.2 evaluated directly. `fitScale` cancels, so it must NOT appear here: dividing
-        // by it after multiplying by it costs a rounding step and makes the "same world for
-        // everyone" guarantee canvas-dependent in the last bit.
+        // `fitScale` cancels, so it must not appear here — see the doc comment above.
         const denominator = 2 * zoom;
         halfW = safeHalfExtent(positiveOr(design.width, 0) / denominator);
         halfH = safeHalfExtent(positiveOr(design.height, 0) / denominator);
@@ -197,11 +162,10 @@ export function worldViewport(
 }
 
 /**
- * The device pixel ratio actually usable: `min(devicePixelRatio, maxResolution)`, floored
- * at 1. Takes the DPR as an argument because this module reads no globals.
+ * The device pixel ratio actually usable: `min(devicePixelRatio, maxResolution)`, floored at 1.
  *
  * The floor means a `maxResolution` below 1 is ignored rather than shrinking the backbuffer
- * below CSS resolution. An infinite cap is honoured as "no cap".
+ * below CSS resolution.
  */
 export function effectiveResolution(devicePixelRatio: number, maxResolution: number): number {
     const dpr = positiveOr(devicePixelRatio, 1);

@@ -759,6 +759,65 @@ export function runRendererContract(
                 expect(screen?.y).toBeCloseTo(300, 9);
                 renderer.destroy();
             });
+
+            it('anchors a UI node y-down from its anchor, in design px', async () => {
+                const renderer = await ready();
+                renderer.resize(800, 600);
+                const id = renderer.createNode({
+                    kind: 'group',
+                    surface: 'ui',
+                    uiAnchor: 'top-left',
+                    position: { x: 20, y: 20 },
+                });
+
+                const screen = renderer.screenPositionOf(id);
+                expect(screen?.x).toBeCloseTo(20, 9);
+                expect(screen?.y).toBeCloseTo(20, 9);
+                renderer.destroy();
+            });
+
+            it('scales a UI offset by fitScale', async () => {
+                const renderer = await ready();
+                renderer.resize(1600, 1200);
+                const id = renderer.createNode({
+                    kind: 'group',
+                    surface: 'ui',
+                    uiAnchor: 'top-left',
+                    position: { x: 20, y: 20 },
+                });
+
+                const screen = renderer.screenPositionOf(id);
+                expect(screen?.x).toBeCloseTo(40, 9);
+                expect(screen?.y).toBeCloseTo(40, 9);
+                renderer.destroy();
+            });
+
+            it('anchors a UI child from its ROOT anchor, not its own', async () => {
+                const renderer = await ready();
+                renderer.resize(800, 600);
+                const parent = renderer.createNode({
+                    kind: 'group',
+                    surface: 'ui',
+                    uiAnchor: 'bottom-right',
+                    position: { x: -100, y: -50 },
+                });
+                const child = renderer.createNode({
+                    kind: 'group',
+                    surface: 'ui',
+                    parent,
+                    position: { x: 0, y: 0 },
+                });
+
+                // The child sits exactly on its parent, so it reports the same screen point: the
+                // origin is contributed once, by the anchoring root.
+                const at = renderer.screenPositionOf(parent);
+                const on = renderer.screenPositionOf(child);
+                expect(at?.x).toBeCloseTo(700, 9);
+                expect(at?.y).toBeCloseTo(550, 9);
+                expect(on?.x).toBeCloseTo(at?.x ?? 0, 9);
+                expect(on?.y).toBeCloseTo(at?.y ?? 0, 9);
+                renderer.destroy();
+            });
         });
 
         // ─── bounds ─────────────────────────────────────────────────
