@@ -40,6 +40,10 @@ interface Harness {
     rebuilds: number;
     /** Names the fake uploader should report as failures. */
     failNames: Set<string>;
+    /** Set to make the whole re-upload throw, standing in for a hostile asset. */
+    reuploadThrows: Error | null;
+    /** Set to make the scene rebuild throw. */
+    rebuildThrows: Error | null;
 }
 
 function harness(deviceLost?: Promise<unknown>): Harness {
@@ -54,12 +58,15 @@ function harness(deviceLost?: Promise<unknown>): Harness {
         restored: [],
         rebuilds: 0,
         failNames: new Set(),
+        reuploadThrows: null,
+        rebuildThrows: null,
     };
 
     state.guard = new ContextGuard(queue, {
         retainedManifest: () => state.retained,
         reupload: async (work) => {
             state.merges.push(work);
+            if (state.reuploadThrows !== null) throw state.reuploadThrows;
             const reloaded: string[] = [];
             const failed: string[] = [];
             for (const entry of work.toLoad) {
@@ -69,6 +76,7 @@ function harness(deviceLost?: Promise<unknown>): Harness {
             return { reloaded, failed };
         },
         rebuildScene: () => {
+            if (state.rebuildThrows !== null) throw state.rebuildThrows;
             state.rebuilds++;
         },
         onLost: (reason) => state.lost.push(reason),
@@ -151,7 +159,7 @@ describe('ContextGuard — state machine', () => {
         expect(h.restored[0]?.failedAssets).toEqual(['gone']);
     });
 
-    it('folds a WebGPU device loss into the same path (§10)', async () => {
+    it('reports a WebGPU device loss as a terminal loss', async () => {
         let resolveLost: (() => void) | undefined;
         const deviceLost = new Promise<void>((resolve) => {
             resolveLost = resolve;
@@ -161,7 +169,8 @@ describe('ContextGuard — state machine', () => {
         resolveLost?.();
         await settle();
 
-        // The backend difference is not the caller's business: same state, same event.
+        // Same state and same event as a WebGL loss; what differs is that no restore follows,
+        // because a lost device is handed back only to a new renderer.
         expect(h.guard.state).toBe('lost');
         expect(h.lost).toEqual(['GPUDevice.lost']);
     });
@@ -172,10 +181,13 @@ describe('ContextGuard — queueing (§10)', () => {
         const h = harness();
         let ran = false;
 
-        const result = await h.guard.run(async () => {
-            ran = true;
-            return 'done';
-        });
+        const result = await h.guard.run(
+            async () => {
+                ran = true;
+                return 'done';
+            },
+            () => 'cancelled',
+        );
 
         expect(ran).toBe(true);
         expect(result).toBe('done');
@@ -186,10 +198,13 @@ describe('ContextGuard — queueing (§10)', () => {
         h.canvas.fire('webglcontextlost');
 
         let ran = false;
-        const promise = h.guard.run(async () => {
-            ran = true;
-            return 'later';
-        });
+        const promise = h.guard.run(
+            async () => {
+                ran = true;
+                return 'later';
+            },
+            () => 'cancelled',
+        );
 
         // Store mutations apply immediately; GPU operations QUEUE — so nothing has run yet, and
         // the caller is still holding an unresolved promise rather than an error.
@@ -208,10 +223,13 @@ describe('ContextGuard — queueing (§10)', () => {
         h.canvas.fire('webglcontextlost');
 
         const order: string[] = [];
-        void h.guard.run(async () => {
-            order.push('queued-op');
-            return 0;
-        });
+        void h.guard.run(
+            async () => {
+                order.push('queued-op');
+                return 0;
+            },
+            () => -1,
+        );
 
         h.canvas.fire('webglcontextrestored');
         await settle();
@@ -227,10 +245,13 @@ describe('ContextGuard — queueing (§10)', () => {
         const h = harness();
         h.canvas.fire('webglcontextlost');
 
-        const promise = h.guard.run(async () => 'never');
+        const promise = h.guard.run(
+            async () => ({ cancelled: 'never' }),
+            () => ({ cancelled: CANCELLED_REASON }),
+        );
         expect(h.guard.pendingCount).toBe(1);
 
-        h.guard.destroy(() => ({ cancelled: CANCELLED_REASON }));
+        h.guard.destroy();
 
         // Rejecting here would produce an unhandled rejection during ordinary teardown.
         await expect(promise).resolves.toEqual({ cancelled: CANCELLED_REASON });
@@ -239,9 +260,140 @@ describe('ContextGuard — queueing (§10)', () => {
 
     it('stops listening after destroy', () => {
         const h = harness();
-        h.guard.destroy(() => undefined);
+        h.guard.destroy();
         h.canvas.fire('webglcontextlost');
         expect(h.lost).toEqual([]);
+    });
+
+    it('settles a queued operation that rejects, with its own cancelled value', async () => {
+        const h = harness();
+        h.canvas.fire('webglcontextlost');
+
+        const promise = h.guard.run<string>(
+            async () => {
+                throw new Error('bad style');
+            },
+            () => 'cancelled',
+        );
+
+        h.canvas.fire('webglcontextrestored');
+        // Rejecting would take the whole restore down with it and abandon every other queued op.
+        await expect(promise).resolves.toBe('cancelled');
+        expect(h.guard.state).toBe('ok');
+    });
+
+    it('runs an operation queued while the restore is already draining', async () => {
+        const h = harness();
+        h.canvas.fire('webglcontextlost');
+
+        let second: Promise<string> | undefined;
+        const first = h.guard.run(
+            async () => {
+                // Lands after `#pending` was drained but before the state is `'ok'` — the window a
+                // single splice leaves work stranded in.
+                second = h.guard.run(
+                    async () => 'second',
+                    () => 'cancelled',
+                );
+                return 'first';
+            },
+            () => 'cancelled',
+        );
+
+        h.canvas.fire('webglcontextrestored');
+        await expect(first).resolves.toBe('first');
+        await expect(second).resolves.toBe('second');
+        expect(h.guard.pendingCount).toBe(0);
+    });
+
+    it('caps the queue rather than growing it for the whole loss', async () => {
+        const h = harness();
+        h.canvas.fire('webglcontextlost');
+
+        const results: Array<Promise<string>> = [];
+        for (let i = 0; i < 1030; i++) {
+            results.push(
+                h.guard.run(
+                    async () => 'ran',
+                    () => 'cancelled',
+                ),
+            );
+        }
+
+        expect(h.guard.pendingCount).toBe(1024);
+        // Past the cap a caller is told now rather than handed a promise nobody will settle.
+        await expect(results[1029]).resolves.toBe('cancelled');
+    });
+});
+
+describe('ContextGuard — a failed restore does not wedge the renderer', () => {
+    it('returns to ok and reports the failure when the re-upload throws', async () => {
+        const h = harness();
+        h.retained.set('hero', image('hero'));
+        h.reuploadThrows = new Error('device gone');
+
+        h.canvas.fire('webglcontextlost');
+        h.canvas.fire('webglcontextrestored');
+        await settle();
+
+        // Staying at 'restoring' would leave `lost` true forever: render() no-ops for the rest of
+        // the session and every later GPU call queues behind a restore that already gave up.
+        expect(h.guard.state).toBe('ok');
+        expect(h.guard.lost).toBe(false);
+        expect(h.restored[0]?.failedAssets).toEqual(['device gone']);
+    });
+
+    it('returns to ok when the scene rebuild throws', async () => {
+        const h = harness();
+        h.rebuildThrows = new Error('rebuild failed');
+
+        h.canvas.fire('webglcontextlost');
+        h.canvas.fire('webglcontextrestored');
+        await settle();
+
+        expect(h.guard.state).toBe('ok');
+        expect(h.restored[0]?.failedAssets).toEqual(['rebuild failed']);
+    });
+
+    it('settles queued work when the restore gives up', async () => {
+        const h = harness();
+        h.reuploadThrows = new Error('device gone');
+        h.canvas.fire('webglcontextlost');
+
+        const promise = h.guard.run(
+            async () => 'ran',
+            () => 'cancelled',
+        );
+
+        h.canvas.fire('webglcontextrestored');
+        await expect(promise).resolves.toBe('cancelled');
+    });
+
+    it('does not claim ok when a second loss arrives during the restore', async () => {
+        const h = harness();
+        h.retained.set('hero', image('hero'));
+        h.canvas.fire('webglcontextlost');
+
+        // The re-upload is where a real restore spends its time, so that is where the second loss
+        // lands.
+        const fire = h.canvas.fire;
+        let lostAgain = false;
+        h.canvas.fire = ((type: string) => {
+            const event = fire(type);
+            if (type === 'webglcontextrestored' && !lostAgain) {
+                lostAgain = true;
+                fire('webglcontextlost');
+            }
+            return event;
+        }) as typeof h.canvas.fire;
+
+        h.canvas.fire('webglcontextrestored');
+        await settle();
+
+        // The context is genuinely gone again, so reporting 'ok' would tell every caller to resume
+        // GPU work against a dead context.
+        expect(h.guard.state).toBe('lost');
+        expect(h.lost).toEqual(['webglcontextlost', 'webglcontextlost']);
     });
 });
 

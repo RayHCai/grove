@@ -4,10 +4,67 @@
 // Iteration is first-mention order per name, because `Map.set` on an existing key updates in
 // place without moving it — so churn changes intents without reordering the restore.
 
+import { rendererError } from './errors.js';
 import type { AssetManifestEntry } from './renderer.js';
 
 /** What the queue intends for one name. */
 export type AssetIntent = { op: 'load'; entry: AssetManifestEntry } | { op: 'unload' };
+
+/**
+ * URL schemes an asset may be fetched from.
+ *
+ * A manifest can arrive from a server, so the scheme is checked rather than assumed: `javascript:`
+ * and `file:` have no business reaching a loader, and a relative path — the ordinary case — has no
+ * scheme at all.
+ */
+const ALLOWED_SCHEMES: ReadonlySet<string> = new Set(['http:', 'https:', 'data:', 'blob:']);
+
+/**
+ * Throws `invalid-asset-entry` unless the entry is structurally usable.
+ *
+ * Shared by both backends: a manifest the headless backend accepts and the Pixi one rejects is a
+ * divergence the contract suite cannot see, since it runs against one of them.
+ */
+export function validateAssetEntry(entry: AssetManifestEntry): void {
+    if (typeof entry?.name !== 'string' || entry.name === '') {
+        rendererError('invalid-asset-entry', 'an asset entry needs a non-empty name');
+    }
+    switch (entry.kind) {
+        case 'image':
+        case 'atlas':
+        case 'font':
+            if (typeof entry.url !== 'string' || entry.url === '') {
+                rendererError(
+                    'invalid-asset-entry',
+                    `asset '${entry.name}' (${entry.kind}) needs a non-empty url`,
+                );
+            }
+            if (!isAllowedAssetUrl(entry.url)) {
+                rendererError(
+                    'invalid-asset-entry',
+                    `asset '${entry.name}' has a url with a disallowed scheme`,
+                );
+            }
+            return;
+        case 'text':
+            if (typeof entry.text !== 'string') {
+                rendererError('invalid-asset-entry', `text asset '${entry.name}' needs a string`);
+            }
+            return;
+        default:
+            rendererError(
+                'invalid-asset-entry',
+                `asset '${String((entry as { name?: string }).name)}' has an unknown kind ` +
+                    `'${String((entry as { kind?: string }).kind)}'`,
+            );
+    }
+}
+
+/** `true` for a relative path or an allowed absolute scheme. */
+export function isAllowedAssetUrl(url: string): boolean {
+    const scheme = /^([a-z][a-z\d+\-.]*):/i.exec(url);
+    return scheme === null || ALLOWED_SCHEMES.has(scheme[1]?.toLowerCase() + ':');
+}
 
 /** The work a restore should perform, after merging the retained manifest with the queue. */
 export interface MergedAssetWork {
