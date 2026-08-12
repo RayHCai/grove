@@ -1,11 +1,6 @@
-// The simulation transform store. Structure-of-arrays over the entity id's slot index.
-// Separate from the renderer's transform store: this holds SIMULATION state (positions
-// from movement, setPosition, tweens) while the renderer holds PRESENTATION state
-// (interpolated, with anchor/tint/alpha layered on). The renderer reads from here via
-// the SceneSink seam (DESIGN §5.1).
-//
-// Float64Array for the same reason as the renderer: composed positions accumulate, and
-// at world-pixel magnitudes the memory difference is irrelevant while drift is not.
+// Simulation state only; the renderer keeps its own interpolated transforms and reads this
+// store through a sink. Float64 because composed positions accumulate and drift costs more
+// than the memory does.
 
 import type { EntityId } from '../ids.js';
 import { entityIndex } from '../ids.js';
@@ -22,6 +17,12 @@ export interface TransformBuffer {
     opacity: Float64Array<ArrayBuffer>;
     layer: Int32Array<ArrayBuffer>;
     count: number;
+    /**
+     * Slots this buffer holds, or null for the whole `[0, count)` range. A scoped capture must
+     * name them: `apply` would otherwise write the untouched slots too, teleporting every
+     * out-of-scope entity to the buffer's zeros.
+     */
+    slots: number[] | null;
 }
 
 function createTransformBuffer(capacity = INITIAL_CAPACITY): TransformBuffer {
@@ -34,7 +35,19 @@ function createTransformBuffer(capacity = INITIAL_CAPACITY): TransformBuffer {
         opacity: new Float64Array(capacity).fill(1),
         layer: new Int32Array(capacity),
         count: 0,
+        slots: null,
     };
+}
+
+/** Regrows `into` in place, keeping the caller's reference — a ring slot reuses its buffer. */
+function growBuffer(into: TransformBuffer, capacity: number): void {
+    into.posX = growF64(into.posX, capacity);
+    into.posY = growF64(into.posY, capacity);
+    into.posZ = growF64(into.posZ, capacity);
+    into.rot = growF64(into.rot, capacity);
+    into.scale = growF64(into.scale, capacity, 1);
+    into.opacity = growF64(into.opacity, capacity, 1);
+    into.layer = growI32(into.layer, capacity);
 }
 
 function growF64(src: Float64Array<ArrayBuffer>, cap: number, fill = 0): Float64Array<ArrayBuffer> {
@@ -63,7 +76,7 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
     #layer = new Int32Array(INITIAL_CAPACITY);
     #count = 0;
 
-    /** Bitset: which entities changed since the last drain (§5.1 transform channel). */
+    /** Slot indexes written since the last drain. */
     readonly #dirty = new Set<number>();
 
     get slotCount(): number {
@@ -95,8 +108,6 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
         this.#layer[index] = 0;
         this.#dirty.delete(index);
     }
-
-    // ─── writes ─────────────────────────────────────────────────────────────────
 
     setPosition(id: EntityId, x: number, y: number, z = 0): void {
         const i = entityIndex(id);
@@ -130,17 +141,27 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
         this.#dirty.add(i);
     }
 
-    // ─── reads ──────────────────────────────────────────────────────────────────
-
-    posX(id: EntityId): number { return this.#posX[entityIndex(id)] ?? 0; }
-    posY(id: EntityId): number { return this.#posY[entityIndex(id)] ?? 0; }
-    posZ(id: EntityId): number { return this.#posZ[entityIndex(id)] ?? 0; }
-    rotation(id: EntityId): number { return this.#rot[entityIndex(id)] ?? 0; }
-    scale(id: EntityId): number { return this.#scale[entityIndex(id)] ?? 1; }
-    opacity(id: EntityId): number { return this.#opacity[entityIndex(id)] ?? 1; }
-    layer(id: EntityId): number { return this.#layer[entityIndex(id)] ?? 0; }
-
-    // ─── dirty set (§5.1 transform channel) ─────────────────────────────────────
+    posX(id: EntityId): number {
+        return this.#posX[entityIndex(id)] ?? 0;
+    }
+    posY(id: EntityId): number {
+        return this.#posY[entityIndex(id)] ?? 0;
+    }
+    posZ(id: EntityId): number {
+        return this.#posZ[entityIndex(id)] ?? 0;
+    }
+    rotation(id: EntityId): number {
+        return this.#rot[entityIndex(id)] ?? 0;
+    }
+    scale(id: EntityId): number {
+        return this.#scale[entityIndex(id)] ?? 1;
+    }
+    opacity(id: EntityId): number {
+        return this.#opacity[entityIndex(id)] ?? 1;
+    }
+    layer(id: EntityId): number {
+        return this.#layer[entityIndex(id)] ?? 0;
+    }
 
     consumeDirty(out: number[] = []): number[] {
         out.length = 0;
@@ -153,18 +174,19 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
         return this.#dirty.has(entityIndex(id));
     }
 
-    // ─── snapshot/restore (§8.1) ────────────────────────────────────────────────
-
     createBuffer(): TransformBuffer {
         return createTransformBuffer(this.#count || INITIAL_CAPACITY);
     }
 
     capture(into: TransformBuffer, scope: Scope): void {
+        const cap = this.#count;
+        // A TypedArray drops an out-of-range write silently, so an undersized buffer would
+        // report a count it does not hold and restore stale values for the missing slots.
+        if (into.posX.length < cap) growBuffer(into, cap);
+        into.count = cap;
+
         if (scope === null) {
-            const cap = this.#count;
-            if (into.posX.length < cap) {
-                Object.assign(into, createTransformBuffer(cap));
-            }
+            into.slots = null;
             into.posX.set(this.#posX.subarray(0, cap));
             into.posY.set(this.#posY.subarray(0, cap));
             into.posZ.set(this.#posZ.subarray(0, cap));
@@ -172,37 +194,52 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
             into.scale.set(this.#scale.subarray(0, cap));
             into.opacity.set(this.#opacity.subarray(0, cap));
             into.layer.set(this.#layer.subarray(0, cap));
-            into.count = cap;
-        } else {
-            into.count = this.#count;
-            for (const id of scope) {
-                const i = entityIndex(id);
-                if (i >= this.#count) continue;
-                into.posX[i] = this.#posX[i]!;
-                into.posY[i] = this.#posY[i]!;
-                into.posZ[i] = this.#posZ[i]!;
-                into.rot[i] = this.#rot[i]!;
-                into.scale[i] = this.#scale[i]!;
-                into.opacity[i] = this.#opacity[i]!;
-                into.layer[i] = this.#layer[i]!;
-            }
+            return;
         }
+
+        const slots = into.slots ?? [];
+        slots.length = 0;
+        for (const id of scope) {
+            const i = entityIndex(id);
+            if (i >= cap) continue;
+            slots.push(i);
+            into.posX[i] = this.#posX[i]!;
+            into.posY[i] = this.#posY[i]!;
+            into.posZ[i] = this.#posZ[i]!;
+            into.rot[i] = this.#rot[i]!;
+            into.scale[i] = this.#scale[i]!;
+            into.opacity[i] = this.#opacity[i]!;
+            into.layer[i] = this.#layer[i]!;
+        }
+        into.slots = slots;
     }
 
     apply(from: TransformBuffer): void {
         const cap = from.count;
         this.#ensure(cap);
         this.#count = Math.max(this.#count, cap);
-        this.#posX.set(from.posX.subarray(0, cap));
-        this.#posY.set(from.posY.subarray(0, cap));
-        this.#posZ.set(from.posZ.subarray(0, cap));
-        this.#rot.set(from.rot.subarray(0, cap));
-        this.#scale.set(from.scale.subarray(0, cap));
-        this.#opacity.set(from.opacity.subarray(0, cap));
-        this.#layer.set(from.layer.subarray(0, cap));
-    }
 
-    // ─── internals ──────────────────────────────────────────────────────────────
+        if (from.slots === null) {
+            this.#posX.set(from.posX.subarray(0, cap));
+            this.#posY.set(from.posY.subarray(0, cap));
+            this.#posZ.set(from.posZ.subarray(0, cap));
+            this.#rot.set(from.rot.subarray(0, cap));
+            this.#scale.set(from.scale.subarray(0, cap));
+            this.#opacity.set(from.opacity.subarray(0, cap));
+            this.#layer.set(from.layer.subarray(0, cap));
+            return;
+        }
+
+        for (const i of from.slots) {
+            this.#posX[i] = from.posX[i]!;
+            this.#posY[i] = from.posY[i]!;
+            this.#posZ[i] = from.posZ[i]!;
+            this.#rot[i] = from.rot[i]!;
+            this.#scale[i] = from.scale[i]!;
+            this.#opacity[i] = from.opacity[i]!;
+            this.#layer[i] = from.layer[i]!;
+        }
+    }
 
     #ensure(needed: number): void {
         if (needed <= this.#posX.length) return;

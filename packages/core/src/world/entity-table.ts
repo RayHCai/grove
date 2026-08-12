@@ -1,14 +1,16 @@
-// The entity slot table: allocation, freelist reuse, generations, and the non-transform
-// per-entity data (owner, hierarchy, alive, destroy-pending). Reuses the renderer's
-// node-store pattern (DESIGN §6): a stale reference is a no-op rather than a crash, and
-// iteration is by ascending slot — creation order, the engine-stable order (§1.2).
-//
-// The numeric transform data lives in SimTransformStore, addressed by the SAME slot
-// index, so both stores scan one flat range and a reused index means the same entity in
-// both.
+// Iteration is by ascending slot — creation order, the stable order determinism needs.
+// SimTransformStore addresses entities by the same slot index, so a reused slot is the same
+// entity in both stores.
 
 import type { EntityId } from '../ids.js';
-import { MAX_GENERATION, MAX_INDEX, NO_ENTITY, entityGeneration, entityIndex, packEntityId } from '../ids.js';
+import {
+    MAX_GENERATION,
+    MAX_INDEX,
+    NO_ENTITY,
+    entityGeneration,
+    entityIndex,
+    packEntityId,
+} from '../ids.js';
 import type { Scope, ScopeMode, SnapshotStore } from '../loop/store-registry.js';
 
 const FIRST_GENERATION = 1;
@@ -26,7 +28,7 @@ export interface EntityRecord {
     parent: EntityId;
     children: EntityId[];
     alive: boolean;
-    /** Set true by destroy(); cleared in the tick's destroy drain (§6). */
+    /** Set by destroy(); the slot is released in the tick's destroy drain. */
     destroyPending: boolean;
 }
 
@@ -101,7 +103,7 @@ export class EntityTable implements SnapshotStore<EntityTableBuffer> {
 
     isAlive(id: EntityId): boolean {
         const index = this.indexOf(id);
-        return index >= 0 && (this.#records[index]!.alive);
+        return index >= 0 && this.#records[index]!.alive;
     }
 
     exists(id: EntityId): boolean {
@@ -119,7 +121,7 @@ export class EntityTable implements SnapshotStore<EntityTableBuffer> {
         return packEntityId(index, generation);
     }
 
-    /** Frees the slot. Bumps the generation so old handles stay stale. */
+    /** Frees the slot and bumps the generation, so handles minted for it stay stale. */
     release(id: EntityId): void {
         const index = this.indexOf(id);
         if (index < 0) return;
@@ -129,7 +131,7 @@ export class EntityTable implements SnapshotStore<EntityTableBuffer> {
         this.#live--;
     }
 
-    /** Live entity ids in ascending slot order — creation order (§1.2). */
+    /** Live entity ids in ascending slot order — creation order. */
     liveIds(out: EntityId[] = []): EntityId[] {
         out.length = 0;
         for (let index = 0; index < this.#records.length; index++) {
@@ -151,8 +153,6 @@ export class EntityTable implements SnapshotStore<EntityTableBuffer> {
         }
     }
 
-    // ─── snapshot/restore (§8.1) ────────────────────────────────────────────────
-
     createBuffer(): EntityTableBuffer {
         return { records: [], generations: [], freeList: [], live: 0 };
     }
@@ -162,17 +162,16 @@ export class EntityTable implements SnapshotStore<EntityTableBuffer> {
         into.freeList = [...this.#freeList];
         into.live = this.#live;
         if (scope === null) {
-            into.records = this.#records.map(r => (r ? cloneRecord(r) : null));
+            into.records = this.#records.map((r) => (r ? cloneRecord(r) : null));
         } else {
-            into.records = this.#records.map((r, index) => {
-                if (r == null) return null;
-                return scope.has(this.idAt(index)) ? cloneRecord(r) : r;
-            });
+            // Cloned even out of scope: handing back the live object would make the snapshot
+            // track every later mutation of it.
+            into.records = this.#records.map((r) => (r ? cloneRecord(r) : null));
         }
     }
 
     apply(from: EntityTableBuffer): void {
-        this.#records = from.records.map(r => (r ? cloneRecord(r) : null));
+        this.#records = from.records.map((r) => (r ? cloneRecord(r) : null));
         this.#generations = [...from.generations];
         this.#freeList = [...from.freeList];
         this.#live = from.live;
