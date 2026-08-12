@@ -1,8 +1,13 @@
-// Three-level scope tree: runtime → host → invocation (DESIGN §4.3).
-// Destroying a host cancels its invocations; `restart` cancels one; every engine
-// awaitable registers with the innermost live scope.
+// Runtime → host → invocation, so destroying a host cancels every invocation under it.
 
 export type ScopeId = number;
+
+/**
+ * The scope of nothing. Ids start at 1, so this can never name a live host — which matters because
+ * a miss sentinel that callers also pass as an owner would let one host's teardown cancel every
+ * hostless timer in the world.
+ */
+export const NO_SCOPE: ScopeId = 0;
 
 let nextId = 1;
 
@@ -65,7 +70,7 @@ export class ScopeTree {
         this.#invocations.delete(scope.id);
     }
 
-    /** Sweep all invocations newer than `tick` — the parked-invocation rewind (§8.1). */
+    /** Cancels invocations started after `tick`, so a rewound timeline's parked ones die. */
     sweepAfterTick(tick: number): void {
         for (const [, scope] of this.#invocations) {
             if (scope.startTick > tick) {
@@ -74,7 +79,6 @@ export class ScopeTree {
         }
     }
 
-    /** Find a running invocation for a (host, concurrencyKey) pair. */
     findRunning(hostId: ScopeId, concurrencyKey: string): InvocationScope | undefined {
         const invocations = this.#hostScopes.get(hostId);
         if (!invocations) return undefined;

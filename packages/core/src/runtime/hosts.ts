@@ -1,9 +1,7 @@
-// The host table ties the four things a host owns together under one key: its scope-tree
-// id (for cancellation and timer/tween ownership, §4.3), its host record (@serverState
-// values, §5.1), and its attached script instances (§5). A host key is 'game', a player
-// id, an entity id, a camera id, or a screen name.
+// One key per host ties its cancellation scope to its @serverState record.
 
 import type { ScopeId } from '../dispatch/scope-tree.js';
+import { NO_SCOPE } from '../dispatch/scope-tree.js';
 import type { HostRecord } from '../state/host-record.js';
 import { createHostRecord } from '../state/host-record.js';
 import type { ScopeTree } from '../dispatch/scope-tree.js';
@@ -17,6 +15,7 @@ export interface HostEntry {
 export class HostTable {
     readonly #scopes: ScopeTree;
     readonly #byKey = new Map<string, HostEntry>();
+    readonly #byScope = new Map<ScopeId, string>();
 
     constructor(scopes: ScopeTree) {
         this.#scopes = scopes;
@@ -32,6 +31,7 @@ export class HostTable {
                 record: createHostRecord(key),
             };
             this.#byKey.set(key, entry);
+            this.#byScope.set(entry.scopeId, key);
         }
         return entry;
     }
@@ -40,30 +40,39 @@ export class HostTable {
         return this.#byKey.get(key);
     }
 
+    /** The host's scope, or NO_SCOPE when nothing is registered under `key`. */
     scopeId(key: string): ScopeId {
-        return this.#byKey.get(key)?.scopeId ?? -1;
+        return this.#byKey.get(key)?.scopeId ?? NO_SCOPE;
     }
 
-    /** Tears a host down: destroys its scope and drops the entry. */
+    /** The key owning `scopeId`, or undefined — the reverse lookup a scoped capture needs. */
+    keyForScope(scopeId: ScopeId): string | undefined {
+        return this.#byScope.get(scopeId);
+    }
+
+    /** Drops the entry and destroys its scope, cancelling everything the host owned. */
     remove(key: string): void {
         const entry = this.#byKey.get(key);
         if (!entry) return;
         this.#scopes.destroyHostScope(entry.scopeId);
         this.#byKey.delete(key);
+        this.#byScope.delete(entry.scopeId);
     }
 
-    /** The entity id → host scope map the entity manager needs for cascade teardown. */
     scopeForEntity(id: number): ScopeId {
         return this.scopeId(`entity:${id}`);
     }
 
     clear(): void {
         this.#byKey.clear();
+        this.#byScope.clear();
     }
 }
 
+export const ENTITY_KEY_PREFIX = 'entity:';
+
 export function entityKey(id: number): string {
-    return `entity:${id}`;
+    return `${ENTITY_KEY_PREFIX}${id}`;
 }
 
 export function playerKey(id: string): string {

@@ -1,13 +1,12 @@
-// Time primitives (DESIGN §9). Each registers with the innermost live scope (§4.3): the
-// ambient invocation if one is running, else the host scope, so it auto-cancels when its
-// host dies. The loop ticks the timer heap at step 7.
+// Each timer registers with the ambient invocation's host scope, so it auto-cancels when that
+// host dies.
 
 import { currentInvocation } from '../dispatch/ambient.js';
 import { currentRuntime } from './runtime.js';
+import { NO_SCOPE } from '../dispatch/scope-tree.js';
 
 function hostScope(): number {
-    const inv = currentInvocation();
-    return inv ? inv.hostId : -1;
+    return currentInvocation()?.hostId ?? NO_SCOPE;
 }
 
 export function sleep(seconds: number): Promise<void> {
