@@ -30,7 +30,7 @@ import { NO_NODE } from '../node-id.js';
 import { rendererError } from '../errors.js';
 import { surfaceOrder } from '../surfaces.js';
 import type { NodeRecord } from '../node-store.js';
-import { AssetQueue } from '../asset-queue.js';
+import { AssetQueue, validateAssetEntry } from '../asset-queue.js';
 import type { SceneSink } from '../core/scene-sink.js';
 import { emptySnapshot, RendererCore, resolveInitOptions } from '../core/renderer-core.js';
 import { effectiveResolution } from '../viewport.js';
@@ -425,6 +425,9 @@ export class NullRenderer implements IRenderer {
     }
 
     #loadOne(entry: AssetManifestEntry): AssetInfo {
+        // The same validator the Pixi backend uses: a manifest one backend accepts and the other
+        // rejects is a divergence the contract suite cannot see.
+        validateAssetEntry(entry);
         const size = this.#sizeOf(entry);
         // The entry is retained because a restore re-uploads from it and `unloadAssets` accepts
         // entries as well as names.

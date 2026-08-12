@@ -914,6 +914,31 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
+            it('reports a structurally invalid entry rather than loading it', async () => {
+                const renderer = await ready();
+                const result = await renderer.loadAssets([
+                    { name: '', kind: 'image', url: '/a.png' },
+                    { name: 'bad-url', kind: 'image', url: 'javascript:alert(1)' },
+                    { name: 'no-url', kind: 'image', url: '' },
+                    {
+                        name: 'fine',
+                        kind: 'image',
+                        url: '/fine.png',
+                        size: { width: 2, height: 2 },
+                    },
+                ]);
+
+                // One bad line in a manifest must not cost the level its good ones.
+                expect(result.failed.map((f) => f.name).toSorted()).toEqual([
+                    '',
+                    'bad-url',
+                    'no-url',
+                ]);
+                expect(result.loaded.map((info) => info.name)).toEqual(['fine']);
+                expect(renderer.hasAsset('bad-url')).toBe(false);
+                renderer.destroy();
+            });
+
             it('resolves loadAssets with a result rather than rejecting (§9.1)', async () => {
                 const renderer = await ready();
                 const result = await renderer.loadAssets([
