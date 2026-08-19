@@ -14,6 +14,7 @@ import {
     boundsCopy,
     boundsWidth,
     boundsHeight,
+    boundsEqual,
     boundsOverlap,
     boundsContains,
     boundsExpand,
@@ -292,6 +293,37 @@ describe('boundsSize', () => {
     it('allocates a fresh Size per call', () => {
         const b = worldRect();
         expect(boundsSize(b)).not.toBe(boundsSize(b));
+    });
+});
+
+describe('boundsEqual', () => {
+    it('is true for two rects with the same four edges', () => {
+        expect(boundsEqual(worldRect(), worldRect())).toBe(true);
+        expect(boundsEqual(screenRect(), screenRect())).toBe(true);
+        expect(boundsEqual(bounds(), bounds())).toBe(true);
+    });
+
+    it('is false when any single edge differs', () => {
+        const base = worldRect();
+        for (const edge of ['left', 'right', 'top', 'bottom'] as const) {
+            const other = boundsCopy(bounds(), base);
+            other[edge] += 1;
+            expect(boundsEqual(base, other)).toBe(false);
+            expect(boundsEqual(other, base)).toBe(false);
+        }
+    });
+
+    it('treats -0 and 0 as the same edge', () => {
+        expect(boundsEqual(bounds(-0, -0, -0, -0), bounds(0, 0, 0, 0))).toBe(true);
+    });
+
+    it('does not equate a rect with its vertical flip', () => {
+        // Orientation is carried by the edge values, so a y-up rect is not the y-down one.
+        expect(boundsEqual(bounds(0, 10, 10, 0), bounds(0, 10, 0, 10))).toBe(false);
+    });
+
+    it('is re-exported from the index', () => {
+        expect(math.boundsEqual).toBe(boundsEqual);
     });
 });
 

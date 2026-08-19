@@ -1,6 +1,6 @@
 // @platform/math
-// Pure math: vectors, bounds, easing, scalar helpers, seeded random, deterministic
-// transcendentals. No dependencies.
+// Pure, dependency-free primitives: vectors, bounds, easing, scalar helpers, seeded random,
+// deterministic transcendentals, generation-packed handles, the slot table, typed-array growth.
 
 export const PACKAGE_NAME = '@platform/math';
 
@@ -23,6 +23,7 @@ export {
     boundsCopy,
     boundsWidth,
     boundsHeight,
+    boundsEqual,
     boundsOverlap,
     boundsContains,
     boundsExpand,
@@ -30,6 +31,24 @@ export {
 } from './bounds.js';
 
 export { DEG2RAD, RAD2DEG, clamp, lerp, approach } from './scalar.js';
+
+export { finiteOr, positiveOr } from './numeric.js';
+
+export {
+    INDEX_RANGE,
+    MAX_INDEX,
+    MAX_GENERATION,
+    FIRST_GENERATION,
+    packHandle,
+    handleIndex,
+    handleGeneration,
+    nextGeneration,
+} from './handle.js';
+
+export type { SlotTableSnapshot } from './slot-table.js';
+export { SlotTable } from './slot-table.js';
+
+export { growF64, growI32, growU8, grownCapacity } from './typed-array.js';
 
 export type { Easing } from './easing.js';
 export { ease } from './easing.js';

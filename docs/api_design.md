@@ -1328,17 +1328,18 @@ clamp(v, min, max) / lerp(a, b, t);
 
 ### 11.1 `packages/math`
 
-**Everything pure lives in `@platform/math`, and nothing else does.** The creator-facing import is unaffected — `clamp` and `Vec3` are reached from `@platform/engine` like the rest of the API, because a creator has one import and the tier ladder does not need a second one. The split is internal, and it is about which package a line of arithmetic is written and tested in.
+**Everything pure lives in `@platform/math`, and nothing else does.** The creator-facing import is unaffected — `clamp` and `Vec3` are reached from `@platform/engine` like the rest of the API, because a creator has one import and the tier ladder does not need a second one. The split is internal, and it is about which package a line of arithmetic is written and tested in. Pure is not the same as creator-facing: the storage primitives that live here too — generation-packed handles, `SlotTable`, the typed-array growth helpers, `finiteOr`/`positiveOr` — are engine-internal and deliberately absent from `@platform/engine`'s re-export.
 
 **The test is whether a declaration mentions an engine object or panel-authored data.** If it does not, it is math:
 
-| In `@platform/math`                                            | Stays in the engine packages                         |
-| -------------------------------------------------------------- | ---------------------------------------------------- |
-| `Vec3`, `Bounds`, and their operations                         | `Entity.distanceTo`, `faceToward`, `moveToward`      |
-| `clamp`, `lerp`, `approach`                                    | `oscillate`, `orbit`, `tween`                        |
-| `Easing` and the curve for each name                           | the timed motion verbs that take an easing           |
-| the seeded generator: `seed`, `between`, `pick`, `chance`      | `random.pointIn`, which resolves a region name first |
-| viewport arithmetic — position + zoom + window size → `Bounds` | `camera.viewport`, which knows the window size       |
+| In `@platform/math`                                                            | Stays in the engine packages                                       |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `Vec3`, `Bounds`, and their operations                                         | `Entity.distanceTo`, `faceToward`, `moveToward`                    |
+| `clamp`, `lerp`, `approach`                                                    | `oscillate`, `orbit`, `tween`                                      |
+| `Easing` and the curve for each name                                           | the timed motion verbs that take an easing                         |
+| the seeded generator: `seed`, `between`, `pick`, `chance`                      | `random.pointIn`, which resolves a region name first               |
+| viewport arithmetic — position + zoom + window size → `Bounds`                 | `camera.viewport`, which knows the window size                     |
+| generation-packed handles, the slot table and its freelist, typed-array growth | `EntityTable`/`NodeStore` lifecycle, and the SoA stores they index |
 
 The right-hand column is what makes the left-hand column a package rather than a file. Each entry on the right takes an `Entity` or a `Camera`, writes replicated state, and gets cancelled when its host dies — so it is engine lifecycle wrapped around a curve, and the curve is the part that moved. `oscillate` keeps its `every`-tick bookkeeping and hands the sine to math. This is the same shape as the `blocked`/`getTouching` division in §5.4: the interesting boundary is not "is it geometry" but "does it own anything."
 

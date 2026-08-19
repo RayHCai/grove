@@ -7,7 +7,15 @@
 
 import { describe, it, expect } from 'vitest';
 import type { MutableVec3, Vec3Like } from '../src/vec3.js';
-import { vec3, vec3Set, vec3Copy, vec3Z } from '../src/vec3.js';
+import {
+    vec3,
+    vec3Set,
+    vec3Copy,
+    vec3Z,
+    vec3Length,
+    vec3LengthSq,
+    vec3Normalize,
+} from '../src/vec3.js';
 import * as math from '../src/index.js';
 
 describe('vec3', () => {
@@ -122,6 +130,59 @@ describe('vec3Z', () => {
         const src: Vec3Like = { x: 3, y: 4 };
         const out = vec3Copy(vec3(), src);
         expect(out.z).toBe(vec3Z(src));
+    });
+});
+
+describe('vec3LengthSq', () => {
+    it('agrees with the square of the length', () => {
+        const v = { x: 3, y: 4, z: 12 };
+        expect(vec3LengthSq(v)).toBe(vec3Length(v) ** 2);
+        expect(vec3LengthSq(v)).toBe(169);
+    });
+
+    it('reads an omitted z as 0', () => {
+        expect(vec3LengthSq({ x: 3, y: 4 })).toBe(25);
+    });
+
+    it('is 0 only for the zero vector', () => {
+        expect(vec3LengthSq({ x: 0, y: 0, z: 0 })).toBe(0);
+        expect(vec3LengthSq({ x: 0, y: 0, z: -1 })).toBe(1);
+    });
+
+    it('ignores sign, so it orders magnitudes without a sqrt', () => {
+        expect(vec3LengthSq({ x: -3, y: -4 })).toBe(25);
+        expect(vec3LengthSq({ x: 1, y: 1 })).toBeLessThan(vec3LengthSq({ x: 2, y: 0 }));
+    });
+});
+
+describe('vec3Normalize', () => {
+    it('writes into out and returns that same object', () => {
+        const out = vec3(99, 99, 99);
+        const returned = vec3Normalize(out, { x: 0, y: 5, z: 0 });
+        expect(returned).toBe(out);
+        expect(out).toEqual({ x: 0, y: 1, z: 0 });
+    });
+
+    it('produces a unit-length vector', () => {
+        const out = vec3Normalize(vec3(), { x: 3, y: 4, z: 12 });
+        expect(vec3Length(out)).toBeCloseTo(1, 12);
+        expect(out.x).toBeCloseTo(3 / 13, 12);
+        expect(out.y).toBeCloseTo(4 / 13, 12);
+        expect(out.z).toBeCloseTo(12 / 13, 12);
+    });
+
+    it('normalises a zero-length vector to (0,0,0) instead of NaN', () => {
+        const out = vec3Normalize(vec3(1, 2, 3), { x: 0, y: 0, z: 0 });
+        expect(out).toEqual({ x: 0, y: 0, z: 0 });
+    });
+
+    it('reads an omitted z as 0 and overwrites a stale z in out', () => {
+        const out = vec3Normalize(vec3(9, 9, 9), { x: 5, y: 0 });
+        expect(out).toEqual({ x: 1, y: 0, z: 0 });
+    });
+
+    it('leaves an already-unit vector unchanged', () => {
+        expect(vec3Normalize(vec3(), { x: 0, y: 0, z: 1 })).toEqual({ x: 0, y: 0, z: 1 });
     });
 });
 
