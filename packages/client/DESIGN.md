@@ -39,7 +39,7 @@ reference cannot cover one subdirectory; the boundary is held by a `no-restricte
 ## The frame ([src/client.ts](src/client.ts))
 
 `GameClient.frame(nowSeconds)` is the whole loop body; what calls it is injected (`FrameSource`), so a
-browser passes rAF and a test drives it by hand.
+browser passes rAF and a headless host drives it by hand.
 
 1. `pump?.()` — loopback `deliver()`; a real socket has already delivered.
 2. Drain the inbox **in arrival order**, one `apply` per envelope. Deltas are consumed in that order too;
@@ -99,8 +99,8 @@ the **wire's** index); `player-leave`; `attach` dropped and counted.
 `@serverState` arrives as one `StateDiff` per host carrying a `fields` bag, and lands directly in
 `hosts.ensure(key).record.values` — one `StateDiff` per host, its `fields` map walked with
 `Object.entries` — keyed with core's own `GAME_KEY` /
-`playerKey` / `entityKey` helpers — with no scripts there is no hoisted accessor, and milestone 2's wiring
-hoists onto the same record. `channels.clear()` discards structural and state marks (no consumer here) but
+`playerKey` / `entityKey` helpers — with no scripts there is no hoisted accessor, and the record is the one a
+hoist would land on. `channels.clear()` discards structural and state marks (no consumer here) but
 provably **not** the transform dirty set, which is the render bridge's work queue. Unknown `netId`s,
 out-of-order parents, and a spawn whose `netId` is not a plausible server handle (not a non-negative safe
 integer) are dropped/rooted and **counted** (`MirrorCounters`), never thrown. `#spawn` is the only place a
@@ -164,8 +164,10 @@ map keys on the **local `EntityId`**, so the render layer never learns there is 
 
 - `loadManifest` splits the welcome's `RenderManifest`: assets to `renderer.loadAssets` (`texture`→`image`,
   `atlas`/`font` through, `audio`/`clip`/`effect` skipped), templates into the `template → NodeDesc` table.
-  A `url` is **parsed and scheme-checked** first — `http:`, `https:` or relative only — because it is the one
-  wire field that makes the client fetch an address the server chose; a refused entry is skipped, not fatal.
+  A `url` is **parsed and scheme-checked** first, by the renderer's own `isAllowedAssetUrl` against its
+  `REMOTE_ASSET_SCHEMES` — `http:`, `https:` or relative only, narrower than what the loader accepts, and one
+  parser so the two cannot disagree — because it is the one wire field that makes the client fetch an address
+  the server chose; a refused entry is skipped, not fatal.
   The template half fills **before the first `await`**, so the caller may start it and reconcile the join
   snapshot without waiting. A rejection is counted (`ClientStats.assetLoadFailed`), never left unhandled.
 - `reconcile(delta)` creates, **reparents**, then destroys from the ordered delta, never by diffing the
@@ -211,15 +213,6 @@ Each constant states its unit in its own doc line, because mixing them is the fa
 Plus, in the session's own ticks: `ACK_STALL_TICKS` 60, `RING_TICKS` 48. And `DEFAULT_VIEWPORT`, the extent
 the cursor quantum falls back to before the first `Welcome`.
 
-## Tests
-
-`pnpm --filter @platform/client test` — 143 tests across five files in [tests/](tests/): `handshake`,
-`mirror`, `clock`, `input`, `bridge`. No wall clock, no socket, no canvas: a scripted `ClockSource`,
-`ManualFrameSource`, `ScriptedInputDevice`, `loopbackPair` and `createNullRenderer()`.
-[tests/fake-server.ts](tests/fake-server.ts) is a protocol-conformant peer (`sendState`, `sendTransforms`,
-`ackAll`, `ackWithHeadroom`, `sendRateChange`, `sendRaw`, reject/malformed modes) that makes every test a
-black-box test of the real client — and is what `server` can later run against.
-
 ## Traps
 
 Each of these is load-bearing and reads as removable.
@@ -229,40 +222,10 @@ Each of these is load-bearing and reads as removable.
 | `#checkNotBehind`            | move it into `#onState`: apply is frame step 2, the counter advances in step 3 — it resyncs a healthy session |
 | `#checkLiveness`             | recover from `stalled` on any inbound envelope: that proves the server _sends_, not that it _processes_       |
 | `ACK_STALL_TICKS`            | count it in frames — it fires 7× early on a 144 Hz display over a 20 Hz sim                                   |
-| `RenderBridge.#destroy`      | test the immediate parent only: grandchildren leak stale map entries                                          |
+| `RenderBridge.#destroy`      | check the immediate parent only: grandchildren leak stale map entries                                         |
 | `ClientClock.advance`        | store a non-finite `now`: every later `now - lastNow` is `NaN` for the session                                |
-| `Mirror.#discardMarks`       | assume `clear()` reaches the transform dirty set — it does not, and the test pins it                          |
-| A `FakeServer`               | advance its tick per display frame: a peer must tick at the rate it announces                                 |
+| `Mirror.#discardMarks`       | assume `clear()` reaches the transform dirty set — it does not                                                |
 | `loadManifest`               | move the template loop after the `await`: the join snapshot then draws entirely as placeholders               |
 | `#resumeInput`               | re-assert a press unconditionally: after a stall the server still holds it and the handler fires twice        |
 | `BindingTable.#down`         | clear it on resync: the release edge for every key held across it is then never sent                          |
 | `destroy()`'s `clearRuntime` | call it unconditionally: core keeps one module-global and a second client loses its own runtime               |
-
-## Not here
-
-Interpolation (nodes step at `sendRate`); prediction and reconciliation (`Loop`, `ring.since()` and
-`heldAtHorizon` exist unused for it); creator scripts (`attach` is counted, and `Loop.frame(dt)` does not
-exist in core yet); automatic reconnect (`token` round-trips, but nothing retries); interest management
-(both appliers exist, nothing sends the ops). The inbox is **unbounded** and a `resyncing` session that
-never receives a `Welcome` waits forever — both are known gaps, not decisions.
-
-## Corrections
-
-What implementing and reviewing this corrected. A row here means the prose above once asserted the
-opposite; reading what a sentence replaced tells you how far to trust the ones beside it.
-
-| Claimed                                                 | Actually                                                                                                                                                                       | Caught by                                                                      |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| `tsconfig.json` adds `lib: DOM` for `src/browser/` only | It applies package-wide — a project reference cannot scope a subdirectory. Nothing stopped `client.ts` reaching `window`; a lint override now does.                            | Reading the config against the claim                                           |
-| `reconcile` creates/destroys from the delta             | `reparent` reached core but never the render tree, so a reparented node kept its old parent's transform and rendered in the wrong place. `MirrorDelta` gained `reparented`.    | `bridge` — "follows a reparent into the render tree"                           |
-| `rttSeconds` differences only the client's own stamps   | The stamp it differenced had round-tripped through the server, so it was peer-controlled. It now reads the stamp recorded at send.                                             | Review; the echo is checked for identity only                                  |
-| `asServerEnvelope` checks rather than casts             | It checked `kind` and cast everything else, so a `state` envelope with no `structural` threw out of `frame()` — no `failed` state, no UI.                                      | `handshake` — "an untrusted frame ends up as state, never as a throw"          |
-| `isUsableWelcome` validates before trusting it          | It validated five fields where the join path dereferences nine; `bounds`, `regions`, `visuals` and `snapshot.state` were unchecked.                                            | `handshake` — "treats a Welcome missing bounds as undecodable"                 |
-| `rebind` drops an action's previous **button** bindings | It dropped every binding for the action, so rebinding a key silently removed that action's gamepad axis.                                                                       | `input` — "keeps an axis binding on the same action"                           |
-| `BindingTable.reset()` is what a resync calls           | Nothing called it, and it was wrong for that case: a resync must clear the quantizer and **keep** the held set. Split into `forgetSentValues()`.                               | `input` — "keeps the held set, so a key held across a resync still releases"   |
-| `pollGamepads(device)` polls the DOM device             | `createDomInputDevice` returned no `emit`, so the poller was uncallable with the only device it existed for. The return type now carries it.                                   | Review; typed as `EmittingInputDevice`                                         |
-| `destroy()` clears the runtime                          | `clearRuntime()` nulls a core module-global, so tearing down one client broke a second — or a server in the same process.                                                      | Review; now guarded on identity                                                |
-| `clear()` does **not** reach the transform dirty set    | Confirmed and still true — the bridge's work queue survives a mark discard.                                                                                                    | `mirror` — the property is pinned                                              |
-| 126 tests across five files                             | Confirmed at the time; now 143, the additions all regression tests for the rows above.                                                                                         | `pnpm --filter @platform/client test`                                          |
-| The client only had to parse what a server sent         | It also FETCHES one field: `WireAssetRef.url` reached `renderer.loadAssets` verbatim, so a hostile `Welcome` could make the browser fetch any URL at join. Scheme-checked now. | `bridge` — "refuses an asset URL whose scheme the loader must not fetch"       |
-| Bounding inbound arrays was transport's job             | Transport caps bytes and depth, neither of which bounds cardinality; nothing capped the arrays the client walks. `MAX_WIRE_ITEMS` does, before the walk.                       | `handshake` — "drops a state envelope whose arrays exceed the cardinality cap" |

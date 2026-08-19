@@ -13,11 +13,15 @@ import type {
     NodePatch,
     AssetManifestEntry,
 } from '@platform/renderer';
+import { REMOTE_ASSET_SCHEMES, isAllowedAssetUrl } from '@platform/renderer';
 import type { RenderManifest, TemplateVisual, WireAssetRef } from '@platform/protocol';
 import type { MirrorDelta, MirrorView } from './mirror.js';
 
 /** Never resident, so the renderer shows its own placeholder; a name it could reject would abort. */
 const PLACEHOLDER_TEXTURE = '__missing__';
+
+/** What a `NodeDesc` and a `NodePatch` spell identically, so one read can serve either. */
+type TransformFields = Pick<NodePatch, 'position' | 'rotation' | 'scale' | 'alpha' | 'layer'>;
 
 export class RenderBridge {
     readonly #renderer: IRenderer;
@@ -94,19 +98,9 @@ export class RenderBridge {
             if (local === NO_ENTITY) continue;
             const node = this.#nodeFor.get(local);
             if (node === undefined) continue;
-            const scale = rt.transforms.scale(local);
-            this.#patches.push({
-                id: node,
-                position: {
-                    x: rt.transforms.posX(local),
-                    y: rt.transforms.posY(local),
-                    z: rt.transforms.posZ(local),
-                },
-                rotation: rt.transforms.rotation(local),
-                scale: { x: scale, y: scale, z: 1 },
-                alpha: rt.transforms.opacity(local),
-                layer: rt.transforms.layer(local),
-            });
+            const patch: NodePatch = { id: node };
+            this.#fillTransform(patch, local);
+            this.#patches.push(patch);
         }
         if (this.#patches.length > 0) this.#renderer.updateNodes(this.#patches);
     }
@@ -142,24 +136,36 @@ export class RenderBridge {
         if (this.#nodeFor.has(local)) return;
         const rt = this.#view.runtime;
         const desc = this.#descFor(this.#view.templateOf(local));
-        const scale = rt.transforms.scale(local);
-        const node = this.#renderer.createNode({
-            ...desc,
-            position: {
-                x: rt.transforms.posX(local),
-                y: rt.transforms.posY(local),
-                z: rt.transforms.posZ(local),
-            },
-            rotation: rt.transforms.rotation(local),
-            scale: { x: scale, y: scale, z: 1 },
-            alpha: rt.transforms.opacity(local),
-            layer: rt.transforms.layer(local),
-        });
+        const transform: TransformFields = {};
+        this.#fillTransform(transform, local);
+        // Spread into a fresh object: a `#descFor` that ever memoises per template must not hand every
+        // node of that template one desc whose position the next spawn overwrites.
+        const node = this.#renderer.createNode({ ...desc, ...transform });
         this.#nodeFor.set(local, node);
 
         // After creation: the parent's node may be created in this same batch, spawn-order first.
         const parent = rt.entities.record(local)?.parent;
         if (parent !== undefined && parent !== NO_ENTITY) this.#attach(local, parent);
+    }
+
+    /**
+     * The mirror's transform as the renderer's five fields, written into a caller-owned target.
+     *
+     * Fills rather than returns, so the per-frame path allocates one patch per moved entity and no
+     * intermediate. Core stores one uniform scale; the renderer wants three axes.
+     */
+    #fillTransform(into: TransformFields, local: EntityId): void {
+        const rt = this.#view.runtime;
+        const scale = rt.transforms.scale(local);
+        into.position = {
+            x: rt.transforms.posX(local),
+            y: rt.transforms.posY(local),
+            z: rt.transforms.posZ(local),
+        };
+        into.rotation = rt.transforms.rotation(local);
+        into.scale = { x: scale, y: scale, z: 1 };
+        into.alpha = rt.transforms.opacity(local);
+        into.layer = rt.transforms.layer(local);
     }
 
     /** `keepResolvedPosition` stays false: the wire's transform is already local to the parent. */
@@ -247,36 +253,14 @@ export class RenderBridge {
     }
 }
 
-/**
- * Schemes a manifest URL may use. The server chooses this string and the client fetches it, so it is
- * the one wire field that makes the client act on the network rather than parse — and `javascript:`
- * or a megabyte `data:` URL would be executed or decoded by the loader, not by anything here.
- *
- * Relative URLs carry no scheme and are the common case, so they pass; anything with a scheme must
- * name one of these.
- */
-const ALLOWED_ASSET_SCHEMES = new Set(['http:', 'https:']);
-
-/**
- * True when a manifest URL is safe to hand the asset loader.
- *
- * Parsed rather than pattern-matched, because the interesting evasions are lexical — leading
- * whitespace, embedded newlines, mixed case — and `URL` normalizes all of them before the check.
- */
-function isFetchableUrl(url: string): boolean {
-    if (typeof url !== 'string' || url === '') return false;
-    try {
-        // A relative URL only resolves against a base, and its scheme is then the document's own.
-        // `new URL` rather than `URL.parse`, which is too new to assume in a browser this ships to.
-        return ALLOWED_ASSET_SCHEMES.has(new URL(url, 'https://asset.invalid/').protocol);
-    } catch {
-        return false;
-    }
-}
-
 /** Core's kinds are not the renderer's, and `audio`/`clip`/`effect` are not renderer assets at all. */
 function toManifestEntry(ref: WireAssetRef): AssetManifestEntry[] {
-    if (!isFetchableUrl(ref.url)) return [];
+    // Dropped, not passed on: the loader rejects an empty url by throwing, and one bad manifest row
+    // must not take the rest of the manifest with it. A missing url is untyped wire data, not a string.
+    if (typeof ref.url !== 'string' || ref.url === '') return [];
+    // The narrower remote set, not the loader's: `data:` and `blob:` are ours to construct, and a
+    // server that can name one hands us bytes we never fetched.
+    if (!isAllowedAssetUrl(ref.url, REMOTE_ASSET_SCHEMES)) return [];
     switch (ref.kind) {
         case 'texture': {
             const entry: AssetManifestEntry = { name: ref.key, kind: 'image', url: ref.url };
