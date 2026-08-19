@@ -11,19 +11,17 @@ only dependency) and below both endpoints.
 
 ## 1. Contents
 
-| File                       | Holds                                                                  |
-| -------------------------- | ---------------------------------------------------------------------- |
-| `src/ids.ts`               | `NetId`, `PlayerId`                                                    |
-| `src/version.ts`           | `PROTOCOL_VERSION = 1`                                                 |
-| `src/envelopes.ts`         | all nine messages, both direction unions, every payload type           |
-| `src/index.ts`             | the barrel, grouped by concern; `PACKAGE_NAME`                         |
-| `tests/envelopes.test.ts`  | compile-time assertions + a `jsonCodec` round-trip                     |
-| `tests/codec-gate.test.ts` | transport's codec conformance suite, run from here against `jsonCodec` |
+| File               | Holds                                                        |
+| ------------------ | ------------------------------------------------------------ |
+| `src/ids.ts`       | `NetId`, `PlayerId`                                          |
+| `src/version.ts`   | `PROTOCOL_VERSION = 1`                                       |
+| `src/envelopes.ts` | all nine messages, both direction unions, every payload type |
+| `src/index.ts`     | the barrel, grouped by concern; `PACKAGE_NAME`               |
 
 Runtime values exported: `PACKAGE_NAME`, `PROTOCOL_VERSION`. Everything else is a type.
 
 Dependencies: `@platform/transport` — `src` imports exactly one type from it, `JsonValue`. `@platform/core` is
-a **devDependency** and a reference of `tsconfig.test.json` alone, so it cannot reach the shipped module graph.
+a **devDependency**, reachable only from the dev-only reference, so it cannot enter the shipped module graph.
 
 ## 2. The nine messages
 
@@ -94,7 +92,7 @@ flattened `TransformDiff` free.
   satisfy it, since parenting is a later mutation. A client rejects or roots-and-counts an out-of-order entity
   rather than silently rooting it.
 - **An interest set is parent-closed**, and leaving is bottom-up. No server emits `enter-interest` /
-  `leave-interest` yet; the arms exist so adding interest management later is not a breaking union change.
+  `leave-interest`; the arms are declared so interest management costs no breaking change to the union.
 - **`spawn` and `enter-interest` carry a full `EntitySnapshot`** — all seven transform fields, `parent`,
   `owner`, `tags` — because transform is dropped first under backpressure and a static entity is dirty exactly
   once. The duplicate transform in the same tick's `transform` envelope is deliberate.
@@ -103,7 +101,7 @@ flattened `TransformDiff` free.
   linear in it. No type here expresses a cap, because a cap is a receiver's policy and not a shape. Three layers
   hold one each: transport refuses a frame over `MAX_FRAME_BYTES` before parsing it, since parsing is what
   allocates; the server bounds the unauthenticated client → server surface (`MAX_ACTIONS_PER_FRAME`,
-  `MAX_ACTION_NAME_LENGTH`, `MAX_ACTION_NAMES`, `MAX_NAME_LENGTH`, `MAX_SEQ_GAP`); the client bounds every array
+  `MAX_ACTION_NAME_LENGTH`, `MAX_ACTION_NAMES`, `MAX_NAME_LENGTH`, `maxSeqGap`); the client bounds every array
   it walks at `MAX_WIRE_ITEMS` and refuses a `netId` that could not name a server handle. A `kind` check that
   narrows and then trusts is the shape of the bug.
 - **`WireAssetRef.url` is an outbound fetch at an address the peer chooses**, and the only wire field that makes
@@ -113,9 +111,9 @@ flattened `TransformDiff` free.
   relative paths only, dropping the entry rather than the join.
 - **The handshake is codec-frozen JSON.** `join-request`, `welcome`, `reject` always ride `jsonCodec`; the
   negotiated codec takes effect after `Welcome`, implied by `protocolVersion` rather than carried as a field.
-  Sound only under FIFO per direction, and unenforceable until transport grows the switch: it decodes with one
-  injected codec per process before `onMessage` fires, so today a binary-codec server would fail a JSON
-  `JoinRequest` inside transport, before protocol saw it.
+  Sound only under FIFO per direction, and not enforced anywhere: transport decodes with one injected codec per
+  process before `onMessage` fires, so a binary-codec server fails a JSON `JoinRequest` inside transport, before
+  protocol sees it.
 
 ## 5. Five types are restated, not imported
 
@@ -127,19 +125,7 @@ flattened `TransformDiff` free.
 | `NetId`         | what `EntityId` _means_ | sharing the type is the correctness bug it exists to prevent  |
 | `WireBounds`    | math `Bounds`           | math is a legal edge, but `Bounds` is an `interface` — rule 1 |
 
-`InputPhase`, `WireAssetKind` and `WireTransform` are **parity-checked** by type-level tests through the dev-only
-core reference, in both directions, so core widening _or_ narrowing breaks the build. `NetId`'s test asserts the
-opposite relation — that core's `EntityId` is _not_ assignable to it — and `WireBounds` has no check, because four
-named edges is a shape that does not grow.
-
-## 6. What writing the types corrected
-
-| The doc claimed                                                               | The fact                                                                                                                                                                                                                                                                                                                         | Caught by                                                                        |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Rule 3's "three fields carry it"                                              | Nine declarations do, twelve counting `meta`'s members — an incomplete list read as exhaustive for the one rule a contributor has to apply.                                                                                                                                                                                      | `grep -c '?:' src/envelopes.ts`                                                  |
-| `src` imports four transport types (`Codec`, `Message`, `Frame`, `JsonValue`) | It imports exactly one, `JsonValue`. The other three were never reached; §1's dependency line was right and README and the barrel header were not.                                                                                                                                                                               | `grep "from '@platform/transport'" src/`                                         |
-| Source comments could cite this document by section number                    | 118 citations named 28 distinct sections, including subsections this doc has never had, so all 118 were stale and several resolved to a real but different section. Comments now state the constraint and never the number.                                                                                                      | Grepping every `§` against the headings                                          |
-| The `Exact<T, U, V = T>` parity helper was safe as written                    | Correct at every call site, but any third argument disables the reverse direction while still compiling — `Exact<InputPhase, Drifted, string>` admits core drift. The parameter is not removable either: the two-parameter form is a circular constraint. Replaced by `Assert<IsMutual<A, B>>`, which has nothing spare to pass. | A fixture asserting simulated core drift, which the three-argument form admitted |
-| `StateFieldDiff.field` is a prototype-pollution vector on apply               | It is not, but the `Map` in the client's mirror is the SOLE defense. Transport's pollution check inspects object keys and `field` crosses as a value, so `{field:'__proto__'}` decodes clean. A refactor to a plain-object record reintroduces it with nothing behind it.                                                        | Decoding `{host,field:'__proto__',value}` through `jsonCodec`, which accepts it  |
-| A per-field `StateFieldDiff` was the right shape                              | It repeated the host address per field, the larger half of each entry, and put the field name in value position where the codec's reserved-key check cannot see it. Grouping under the host fixed both at once — density and the `__proto__` hole — which is why one change closed a performance finding and a security one.     | A test encoding both shapes, and decoding `__proto__` in each position           |
-| The `NetId` brand is nominal per declaration site                             | Confirmed. `unique symbol` on a `readonly` property of a type alias is legal, and two aliases spelling the same brand key are mutually unassignable.                                                                                                                                                                             | `tsc` on two identically-spelled brands                                          |
+`InputPhase`, `WireAssetKind` and `WireTransform` are **parity-locked** to core through the dev-only reference,
+mutually in both directions, so core widening _or_ narrowing breaks the build. `NetId` locks the opposite
+relation — core's `EntityId` must _not_ be assignable to it — and `WireBounds` locks nothing, because four named
+edges is a shape that does not grow.

@@ -15,12 +15,12 @@ Default to no comment. Comment only what the code cannot say itself.
 
 ## Docs
 
-| Path                   | Holds                                                                          |
-| ---------------------- | ------------------------------------------------------------------------------ |
-| `docs/api_design.md`   | Creator-facing API and the reasoning behind it                                 |
-| `docs/api_spec.ts`     | The authoritative TS surface — a spec artifact, never shipped                  |
-| `packages/*/README.md` | What that package owns                                                         |
-| `packages/*/DESIGN.md` | That package's internals — core, renderer, transport, protocol, server, client |
+| Path                   | Holds                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| `docs/api_design.md`   | Creator-facing API and the reasoning behind it                                              |
+| `docs/api_spec.ts`     | The authoritative TS surface — a spec artifact, never shipped                               |
+| `packages/*/README.md` | What that package owns                                                                      |
+| `packages/*/DESIGN.md` | That package's technical architecture — core, renderer, transport, protocol, server, client |
 
 Where design prose and the spec disagree, the spec wins. Change both in the same commit.
 
@@ -35,15 +35,30 @@ doc as the claim to check, not as noise to route around — and say which one yo
 **Before finishing:** bring those same docs back in line with what you shipped, in the same commit. Untouched
 docs are the failure mode, and so is a doc that grew a paragraph per commit.
 
-- **Edit the wrong sentence in place.** No new sections, no changelog entries, no "previously X, now Y", no
-  dated notes. The doc reads as if it always described the shipped code.
+### A `DESIGN.md` holds technical architecture and nothing else
+
+Present tense, shipped code only: what each module owns, the seams and the direction of every dependency, the
+data shapes and who may write them, the invariants and the constraint behind each, the ordering rules, the
+named constants and their units. A reader holding the doc and the code cannot tell which was written first.
+
+Three kinds of content are **banned** in every package. Delete them on sight, and never rebuild one under
+another name:
+
+- **No testing.** No test section, no test-file list, no test count, no test name, no fake or fixture, no "the
+  test pins it". What the suite covers is the suite's to state, and a doc naming a test rots the day it is
+  renamed.
+- **No gaps.** No "not here", "present-tense gaps", "not implemented", TODO, roadmap, milestone or future-work
+  section — and no unbuilt feature named in passing elsewhere either. State what the package **is**. A boundary
+  is written as what the package does not own, in its scope line, never as a list of what is missing.
+- **No history.** No postmortem, no corrections table, no changelog, no "previously X, now Y", no dated note. A
+  sentence that turned out wrong is edited into the true one and nothing records that it was ever there — what
+  the change corrected goes in the response and the commit message, where a reader can date it.
+
+### Editing one
+
+- **Edit the wrong sentence in place.** No new sections. The doc reads as if it always described the shipped code.
 - **One line per change.** A behaviour change is a clause; a whole feature is rarely more than a sentence and a
   table row. If you need a paragraph, the design changed — say so in the response, not in prose padding.
-- **A doc that asserted the opposite gets one row**, not a rewrite: in the final postmortem section (`protocol`
-  §11, `client` §14 — the pattern for every package, not those two only), record the claim, the corrected fact,
-  and the test that caught it. Correct rather than delete: a reader who sees what a sentence replaced knows how
-  far to trust the ones beside it.
-- **Confirmed claims count too** — a line saying a risky assertion was checked and held is worth a correction.
 - **No documented behaviour changed → no edit.** Say that instead of manufacturing one.
 - **Packages with no `DESIGN.md`** (`engine`, `math`, `platform`) keep their contract in `README.md` — update
   that; don't add a `DESIGN.md` uninvited.
