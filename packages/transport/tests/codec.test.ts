@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { jsonCodec } from '../src/codec.js';
+import { RESERVED_KEYS, jsonCodec } from '../src/codec.js';
+import { RESERVED_KEYS as barrelReservedKeys } from '../src/index.js';
 import { TransportError } from '../src/errors.js';
 import { runCodecContract } from '../src/testing/codec-contract.js';
 import type { Message } from '../src/transport.js';
@@ -232,5 +233,26 @@ describe('jsonCodec — JSON specifics', () => {
             },
         };
         expect(() => jsonCodec.encode(value)).toThrow(TransportError);
+    });
+});
+
+describe('RESERVED_KEYS', () => {
+    it('holds the three keys the codec refuses, and reaches consumers through the barrel', () => {
+        // A layer above may answer these keys differently — the server drops rather than refuses —
+        // so the set is shared and the literal exists once.
+        expect([...RESERVED_KEYS].toSorted()).toEqual(['__proto__', 'constructor', 'prototype']);
+        expect(barrelReservedKeys).toBe(RESERVED_KEYS);
+    });
+
+    it('names every key decode rejects with pollution-key', () => {
+        for (const key of RESERVED_KEYS) {
+            const frame = `{${JSON.stringify(key)}:{}}`;
+            try {
+                jsonCodec.decode(frame);
+                expect.unreachable(`decode should have rejected ${key}`);
+            } catch (error) {
+                expect((error as TransportError).code).toBe('pollution-key');
+            }
+        }
     });
 });

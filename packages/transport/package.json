@@ -3,11 +3,15 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Per-connection message pipe: a leaf interface with a loopback implementation; websocket to come.",
+    "description": "Per-connection message pipe: a leaf interface with a loopback and a websocket implementation.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./websocket": {
+            "types": "./dist/websocket.d.ts",
+            "import": "./dist/websocket.js"
         },
         "./testing": {
             "types": "./dist/testing/index.d.ts",

@@ -14,6 +14,8 @@
 import type { Codec } from './codec.js';
 import { jsonCodec } from './codec.js';
 import { transportError } from './errors.js';
+import { FrameInbox, validateRetentionCap } from './inbox.js';
+import { DEFAULT_MAX_RETAINED_BYTES } from './transport.js';
 import type {
     EncodedFrame,
     Frame,
@@ -22,23 +24,6 @@ import type {
     Message,
     Transport,
 } from './transport.js';
-
-/** A symbol rather than a sentinel frame value, so no encodable message can be mistaken for one. */
-const CLOSE_MARKER = Symbol('transport.close');
-
-/**
- * An inbox entry. `due` counts DOWN, so ageing is one decrement per pass rather than a comparison
- * against a tick counter this package has no business keeping.
- */
-interface Queued {
-    readonly item: Frame | typeof CLOSE_MARKER;
-    /** Bytes, via `codec.byteLength`. Zero for the close marker, which is not a frame. */
-    readonly bytes: number;
-    due: number;
-}
-
-/** 1 MiB. Large enough that no legitimate join sequence reaches it, small enough to bound a leak. */
-const DEFAULT_MAX_RETAINED_BYTES = 1024 * 1024;
 
 /**
  * How many drain passes a `latency: 0` `deliver()` makes before calling the exchange non-quiescent —
@@ -53,24 +38,10 @@ const MAX_QUIESCENCE_PASSES = 1000;
 class LoopbackEnd implements Transport {
     readonly #codec: Codec;
     readonly #latency: number;
-    readonly #maxRetainedBytes: number;
-    readonly #inbox: Queued[] = [];
-    /**
-     * Where the undelivered frames start. A head index rather than `shift()` per frame, because
-     * `shift()` stops being cheap once the backing store leaves V8's trimmable regime: draining a
-     * 100k-frame backlog cost 4.4 s that way and 46 ms this way. A burst that big is reachable at the
-     * default cap, since the cap bounds BYTES and a one-byte frame is legal.
-     */
-    #head = 0;
+    readonly #inbox: FrameInbox;
 
     #peer: LoopbackEnd | undefined;
-    #onMessage: ((message: Message) => void) | undefined;
-    #onClose: (() => void) | undefined;
     #closed = false;
-    /** Latched so `onClose` fires exactly once even if a marker is somehow queued twice. */
-    #closeFired = false;
-    /** Bytes of undelivered frames in the inbox — the quantity the cap bounds while unhandled. */
-    #queuedBytes = 0;
     /**
      * Latched at the overflowing `receive`, thrown from the next `drain`.
      *
@@ -83,7 +54,18 @@ class LoopbackEnd implements Transport {
     constructor(codec: Codec, latency: number, maxRetainedBytes: number) {
         this.#codec = codec;
         this.#latency = latency;
-        this.#maxRetainedBytes = maxRetainedBytes;
+        this.#inbox = new FrameInbox({
+            codec,
+            maxRetainedBytes,
+            onOverflow: (retained, bytes) => {
+                this.#overflow ??= `Retained ${retained} bytes for a handler that never registered, and this frame's ${bytes} would pass the ${maxRetainedBytes}-byte cap. Frames are retained until onMessage registers, so a join sequence that throws before wiring it grows this inbox for the life of the process. Register onMessage before the first deliver(), or raise maxRetainedBytes.`;
+            },
+            onDecodeFailure: (error) => {
+                // A hostile frame cannot arrive here — the sender's own encode produced it — so a
+                // rejection is the sender's bug and propagates to whoever called deliver().
+                throw error;
+            },
+        });
     }
 
     /** Called once by `loopbackPair`, before either end is handed out. */
@@ -105,33 +87,11 @@ class LoopbackEnd implements Transport {
     }
 
     onMessage(handler: (message: Message) => void): () => void {
-        if (this.#onMessage !== undefined) {
-            transportError(
-                'handler-already-registered',
-                "onMessage is already registered on this end; a second handler would split this connection's frames between two consumers. Dispose the first, or fan out above the transport.",
-            );
-        }
-        this.#onMessage = handler;
-        // The join sequence races wiring order, so frames that arrived with no handler were retained
-        // rather than dropped — flush them now, in order.
-        this.#drain();
-        return () => {
-            if (this.#onMessage === handler) this.#onMessage = undefined;
-        };
+        return this.#inbox.registerMessage(handler);
     }
 
     onClose(handler: () => void): () => void {
-        if (this.#onClose !== undefined) {
-            transportError(
-                'handler-already-registered',
-                'onClose is already registered on this end. Dispose the first, or fan out above the transport.',
-            );
-        }
-        this.#onClose = handler;
-        this.#drain();
-        return () => {
-            if (this.#onClose === handler) this.#onClose = undefined;
-        };
+        return this.#inbox.registerClose(handler);
     }
 
     close(): void {
@@ -144,9 +104,9 @@ class LoopbackEnd implements Transport {
         // `due: 0`, unlike the peer's copy: `latency` models time on the WIRE, and this end learning
         // that it itself closed crosses no wire. It still rides FIFO behind this end's own
         // undelivered frames, so only the delay changes, not the ordering.
-        this.#inbox.push({ item: CLOSE_MARKER, bytes: 0, due: 0 });
+        this.#inbox.queueClose(0);
         const peer = this.#peer;
-        if (peer !== undefined) peer.#receive(CLOSE_MARKER);
+        if (peer !== undefined) peer.#receiveClose();
     }
 
     /**
@@ -156,28 +116,14 @@ class LoopbackEnd implements Transport {
      * A `#` member, not a TypeScript `private`: the latter is erased, leaving a way to enqueue a
      * frame that never passed `encode` onto an object handed out as a `Transport`.
      */
-    #receive(item: Frame | typeof CLOSE_MARKER): void {
-        if (this.#closed && item !== CLOSE_MARKER) return;
+    #receive(frame: Frame): void {
+        if (this.#closed) return;
+        this.#inbox.enqueue(frame, this.#latency);
+    }
 
-        // The marker is exempt from the cap: it carries no payload and is how the peer learns the
-        // connection ended, so dropping it for a byte limit would strand teardown.
-        if (item === CLOSE_MARKER) {
-            this.#inbox.push({ item, bytes: 0, due: this.#latency });
-            return;
-        }
-
-        const bytes = this.#codec.byteLength(item);
-        // Enforced only while no handler is registered, though the byte count is maintained always:
-        // a backlog behind a live handler is the pump running late, which backpressure above the
-        // transport answers; a backlog behind no handler at all can never drain on its own.
-        if (this.#onMessage === undefined && this.#queuedBytes + bytes > this.#maxRetainedBytes) {
-            // Dropped rather than queued — the whole point of a cap is that memory stops growing.
-            this.#overflow ??= `Retained ${this.#queuedBytes} bytes for a handler that never registered, and this frame's ${bytes} would pass the ${this.#maxRetainedBytes}-byte cap. Frames are retained until onMessage registers, so a join sequence that throws before wiring it grows this inbox for the life of the process. Register onMessage before the first deliver(), or raise maxRetainedBytes.`;
-            return;
-        }
-
-        this.#queuedBytes += bytes;
-        this.#inbox.push({ item, bytes, due: this.#latency });
+    /** Exempt from the seal, unlike a frame: a marker is how the peer learns the connection ended. */
+    #receiveClose(): void {
+        this.#inbox.queueClose(this.#latency);
     }
 
     /**
@@ -188,18 +134,15 @@ class LoopbackEnd implements Transport {
      * same `deliver()`, making the delay direction-dependent.
      */
     age(): void {
-        for (let i = this.#head; i < this.#inbox.length; i++) {
-            const entry = this.#inbox[i] as Queued;
-            if (entry.due > 0) entry.due--;
-        }
+        this.#inbox.age();
     }
 
     /**
      * Drains this end's inbox into its handlers, and reports a retention overflow.
      *
-     * The overflow surfaces HERE and not in the private `#drain` a registration runs, so the throw
-     * lands on the host loop that owns the wiring bug rather than inside a handler call —
-     * registering a handler must not fail because of a frame that predates it.
+     * The overflow surfaces HERE and not in the drain a registration runs, so the throw lands on the
+     * host loop that owns the wiring bug rather than inside a handler call — registering a handler
+     * must not fail because of a frame that predates it.
      */
     drain(): void {
         const overflow = this.#overflow;
@@ -209,66 +152,12 @@ class LoopbackEnd implements Transport {
             this.#overflow = undefined;
             transportError('retention-overflow', overflow);
         }
-        this.#drain();
+        this.#inbox.drain();
     }
 
     /** True while anything is eligible and a handler exists to take it — the `latency: 0` loop's test. */
     get deliverable(): boolean {
-        const next = this.#inbox[this.#head];
-        if (next === undefined || next.due > 0) return false;
-        return next.item === CLOSE_MARKER
-            ? this.#onClose !== undefined
-            : this.#onMessage !== undefined;
-    }
-
-    /** Reclaims the consumed prefix, so a long-lived connection's array does not grow without bound. */
-    #compact(): void {
-        if (this.#head === 0) return;
-        if (this.#head >= this.#inbox.length) {
-            this.#inbox.length = 0;
-            this.#head = 0;
-            return;
-        }
-        // Only once the consumed prefix outweighs what is left, so the copy is amortised O(1)/frame.
-        if (this.#head >= 1024 && this.#head * 2 >= this.#inbox.length) {
-            this.#inbox.splice(0, this.#head);
-            this.#head = 0;
-        }
-    }
-
-    #drain(): void {
-        // Consumed one at a time rather than from a snapshot, which buys three properties a snapshot
-        // loses: a handler that closes mid-drain leaves anything behind the marker unconsumed; one
-        // that disposes itself leaves the rest RETAINED for the next registration rather than
-        // delivered into a disposed closure; and one that throws leaves the frames behind it queued
-        // rather than dropped. A `send` from inside a handler lands in the PEER's inbox, so it cannot
-        // extend this loop.
-        while (this.#head < this.#inbox.length) {
-            const next = this.#inbox[this.#head] as Queued;
-
-            // Strict FIFO outranks the delay: a frame still waiting holds everything behind it, so
-            // when jitter arrives this is the line that keeps reordering an explicit choice rather
-            // than a side effect of per-frame delays.
-            if (next.due > 0) break;
-
-            if (next.item === CLOSE_MARKER) {
-                if (this.#onClose === undefined) break; // retain; fires on register
-                this.#head++;
-                if (this.#closeFired) continue;
-                this.#closeFired = true;
-                this.#onClose();
-                continue;
-            }
-
-            if (this.#onMessage === undefined) break; // retain; flushed on register
-            this.#head++;
-            this.#queuedBytes -= next.bytes;
-            // Decode is paid on delivery, not on enqueue, so a frame dropped under pressure costs
-            // nothing more to discard. A hostile frame cannot arrive here in loopback — the sender's
-            // own encode produced it — so a throw is the sender's bug and propagates.
-            this.#onMessage(this.#codec.decode(next.item));
-        }
-        this.#compact();
+        return this.#inbox.deliverable;
     }
 }
 
@@ -302,12 +191,7 @@ export function loopbackPair(opts?: LoopbackOptions): LoopbackPair {
             `latency counts deliver() calls, so it must be a non-negative integer; received ${String(latency)}.`,
         );
     }
-    if (!(maxRetainedBytes > 0)) {
-        transportError(
-            'invalid-option',
-            `maxRetainedBytes must be a positive byte count; received ${String(maxRetainedBytes)}.`,
-        );
-    }
+    validateRetentionCap(maxRetainedBytes);
 
     const client = new LoopbackEnd(codec, latency, maxRetainedBytes);
     const server = new LoopbackEnd(codec, latency, maxRetainedBytes);

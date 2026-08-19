@@ -52,7 +52,7 @@ const MAX_DEPTH = 128;
 export const MAX_FRAME_BYTES = 4 * 1024 * 1024;
 
 /**
- * Keys that poison a downstream recursive merge.
+ * Object keys no message may carry, because they poison a downstream recursive merge.
  *
  * `JSON.parse` creates an OWN `__proto__` key rather than walking the prototype chain, so the value
  * survives to whatever merges it next. Rejected on decode, never stripped: deleting a key would
@@ -60,8 +60,15 @@ export const MAX_FRAME_BYTES = 4 * 1024 * 1024;
  *
  * Rejected on ENCODE too, and that symmetry is the point — otherwise a frame this codec produced is
  * one its own `decode` refuses, and the peer blames a hostile sender for a field a creator named.
+ *
+ * Exported because a layer above may answer the same key differently — dropping it rather than
+ * refusing the frame — and two copies of the set would drift apart.
  */
-const POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+export const RESERVED_KEYS: ReadonlySet<string> = new Set([
+    '__proto__',
+    'constructor',
+    'prototype',
+]);
 
 /**
  * How many values one message may expand to.
@@ -225,7 +232,7 @@ function admit(root: unknown): JsonLike {
 
         if (!isArray) {
             // Array indices are exempt: a key is only dangerous where it can name a prototype slot.
-            if (POLLUTION_KEYS.has(key)) {
+            if (RESERVED_KEYS.has(key)) {
                 transportError(
                     'encode-rejected',
                     `${at(path)} uses the reserved key "${key}", which a decoder must refuse because it poisons any recursive merge downstream — and an own "__proto__" key would not even survive the copy. Rename the field.`,
@@ -326,7 +333,7 @@ function admitDecoded(root: unknown): void {
         const isArray = Array.isArray(node);
         // `__proto__` is among these, which is the point: `JSON.parse` made it an own property.
         for (const key of Object.keys(node)) {
-            if (!isArray && POLLUTION_KEYS.has(key)) {
+            if (!isArray && RESERVED_KEYS.has(key)) {
                 transportError(
                     'pollution-key',
                     `Frame carries a "${key}" key, which poisons any recursive merge downstream. Rejected, not stripped — a frame carrying it IS a malformed frame.`,

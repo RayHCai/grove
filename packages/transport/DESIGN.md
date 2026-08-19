@@ -5,30 +5,34 @@ opaque JSON values to its single peer with the value semantics of a real wire. I
 `@platform/server` (which drains core's replication channels) and `@platform/client` (which feeds
 interpolation and prediction), and it is a **leaf**: no dependencies, no engine types, no clock. Two
 run modes — networked and local — differ only in which implementation sits behind the interface.
-Shipped today: the `Transport` seam, the `Codec` seam with `jsonCodec`, `loopbackPair`, and a reusable
-codec conformance suite. **No WebSocket backend yet.**
+It ships the `Transport` seam, the `Codec` seam with `jsonCodec`, `loopbackPair`, a WebSocket backend
+behind `./websocket`, and a reusable codec conformance suite.
 
 `@platform/protocol/DESIGN.md` is authoritative for anything on the wire (envelope shapes, versioning,
-the future binary codec). This file describes only what exists in this package.
+codec negotiation). This file describes only what exists in this package.
 
 ---
 
 ## 1. Files
 
-| Path               | Holds                                                                        |
-| ------------------ | ---------------------------------------------------------------------------- |
-| `src/transport.ts` | `Transport`, `Message`, `Frame`, `EncodedFrame`, `TimerSource`, option types |
-| `src/codec.ts`     | `Codec` interface + `jsonCodec` (validation, UTF-8 `byteLength`)             |
-| `src/loopback.ts`  | `loopbackPair` and its pump                                                  |
-| `src/errors.ts`    | `TransportError`, `TransportErrorCode`, `transportError()`                   |
-| `src/testing/`     | `runCodecContract` — the gate every `Codec` clears, exported as `./testing`  |
-| `src/index.ts`     | Barrel (`.` export)                                                          |
-| `tests/`           | `codec.test.ts`, `loopback.test.ts` — 169 tests                              |
+| Path               | Holds                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| `src/transport.ts` | `Transport`, `Message`, `Frame`, `EncodedFrame`, `TimerSource`, option types, the retention cap    |
+| `src/codec.ts`     | `Codec` interface + `jsonCodec` (validation, UTF-8 `byteLength`)                                   |
+| `src/inbox.ts`     | `FrameInbox` — the FIFO both backends drain: retention and its cap, the handlers, the close marker |
+| `src/loopback.ts`  | `loopbackPair` and its pump                                                                        |
+| `src/websocket.ts` | `connectWebSocket`, `webSocketTransport`, `WebSocketLike`, the heartbeat — `./websocket`           |
+| `src/errors.ts`    | `TransportError`, `TransportErrorCode`, `transportError()`                                         |
+| `src/testing/`     | `runCodecContract` — the gate every `Codec` clears, exported as `./testing`                        |
+| `src/index.ts`     | Barrel (`.` export)                                                                                |
 
-`src/transport.ts` imports nothing from an implementation. `transport.ts` ↔ `codec.ts` is a
-**type-only** cycle (`import type` both ways), so nothing survives to emitted JS. The gate ships under
-`src/` rather than `tests/` because `@platform/protocol` sits above transport and cannot reach `tests/` —
-a gate the implementer cannot import is not a gate.
+`src/transport.ts` imports nothing from an implementation. Both backends depend on `inbox.ts` and it
+depends on neither: what an overflow or a `decode` rejection does is injected as a policy rather than
+branched on there, and ageing is the caller's — loopback enqueues with a `due` and pumps, a socket
+enqueues everything already due. `transport.ts` ↔ `codec.ts` is a **type-only** cycle (`import type`
+both ways), so nothing survives to emitted JS. The gate ships under
+`src/` behind its own `./testing` export because `@platform/protocol` sits above transport and must be
+able to import it — a gate the implementer cannot reach is not a gate.
 
 ## 2. Public surface
 
@@ -53,19 +57,25 @@ interface Codec {
 }
 
 function loopbackPair(opts?: LoopbackOptions): LoopbackPair; // { client, server, deliver() }
+function connectWebSocket(url: string, opts?: ConnectWebSocketOptions): Promise<Transport>; // dials
+function webSocketTransport(socket: WebSocketLike, opts?: WebSocketOptions): Transport; // accepts
 declare const jsonCodec: Codec;
 class TransportError extends Error {
     readonly code: TransportErrorCode;
 }
 ```
 
-Options: `codec` (default `jsonCodec`), `maxRetainedBytes` (default 1 MiB), `latency` (loopback only,
-default `1`), plus `token` / `timer` on `ConnectOptions`. A bad `latency` (non-integer or negative) or
-`maxRetainedBytes` (≤ 0) throws `invalid-option` from the factory.
+Options: `codec` (default `jsonCodec`), `maxRetainedBytes` (default 1 MiB, `DEFAULT_MAX_RETAINED_BYTES`,
+one constant because every factory defaults to it), `latency` (loopback only, default `1`), and
+`onError` / `maxBufferedBytes` / `timer` / `createSocket` (websocket only). A bad `latency` (non-integer
+or negative), `maxRetainedBytes` or `maxBufferedBytes` (≤ 0) throws `invalid-option` from the factory,
+as does a socket that is not OPEN — and the dial validates before it constructs a socket.
 
-**Type-only, not implemented:** `Connect` (`(url, opts?) => Promise<Transport>`) and `TimerSource`
-exist so endpoints compile against the networked seam; `src/websocket.ts` does not exist. Also
-exported: `PACKAGE_NAME`.
+`Connect` (`(url, opts?) => Promise<Transport>`) is the networked seam endpoints compile against, and
+`connectWebSocket` implements it. `ConnectOptions.token` reaches no wire: the reconnect token rides
+`JoinRequest.token`, which protocol owns, and one credential with two channels is a second thing to
+keep in agreement. Also exported: `PACKAGE_NAME`, and `RESERVED_KEYS` — the three object keys the codec
+refuses, shared so a layer that answers them differently holds no second copy of the set.
 
 `EncodedFrame` is branded so `sendEncoded` accepts only a `Codec.encode` result — a hand-built or
 foreign-codec frame is a compile error at the call site instead of a decode failure at the peer.
@@ -107,8 +117,10 @@ non-ASCII character.
 
 ## 4. Loopback
 
-An encoded-frame queue per direction, an encode in, a decode out. Each end owns its **inbox** and
-writes into its peer's, which is what lets `close()` seal both directions.
+An encoded-frame queue per direction, an encode in, a decode out. Each end owns its **inbox** — a
+`FrameInbox`, the same class the websocket backend stands on — and writes into its peer's, which is what
+lets `close()` seal both directions. Retention, the close marker's place in the FIFO, the
+single-handler rule and the drain below are the inbox's; the pump and `latency` are loopback's alone.
 
 - **Delivery is pumped, never self-driving.** Nothing is delivered outside `deliver()`, which the host
   application calls at the **top of each server tick**. So frames the server produces during `step()`
@@ -133,63 +145,101 @@ writes into its peer's, which is what lets `close()` seal both directions.
   registration (the join sequence races wiring order); retention resumes after a disposer runs. Capped
   at `maxRetainedBytes` (1 MiB, summed via `codec.byteLength`) and **only while no handler is
   registered** — a backlog behind a live handler is just a late pump, and it drains in O(1) per frame
-  off a head index rather than a `shift()`, which went quadratic once the queue left V8's trimmable
-  regime (100k frames: 4.4 s, now 41 ms). On overflow the frame is dropped
-  and the condition latched, then thrown as `retention-overflow` from the **next `deliver()`** (not
-  from the sender's stack, and not from a registration), once rather than every pump. The close marker
-  is exempt from the cap.
+  off a head index rather than a `shift()`, which stops being cheap once the queue leaves V8's trimmable
+  regime and a 100k-frame backlog is reachable at the cap, since the cap bounds bytes and a one-byte frame is
+  legal. On overflow the frame is dropped and the condition latched,
+  then thrown as `retention-overflow` from the **next `deliver()`** (not from the sender's stack, and not
+  from a registration), once rather than every pump. The close marker is exempt from the cap.
 - **One handler per end.** A second live `onMessage`/`onClose` throws `handler-already-registered` —
   two consumers would silently split one connection's frames. A stale disposer is harmless.
-- **The drain shifts as it goes**, so a handler that throws propagates out of `deliver()` leaving the
+- **The drain consumes one entry at a time**, so a handler that throws propagates out of `deliver()` leaving the
   frames behind it queued; one that disposes itself leaves the rest retained; one that closes leaves
   everything behind the marker unconsumed.
 - `send` encodes **before** the closed check, so a bad payload is the sender's bug either way rather
   than timing-dependent on which peer dropped first.
 
-## 5. Error codes
+## 5. WebSocket
 
-| Code                         | Whose bug | Response                                     |
-| ---------------------------- | --------- | -------------------------------------------- |
-| `encode-rejected`            | ours      | defect above the transport — surface it      |
-| `malformed-frame`            | peer's    | drop the frame, close the connection         |
-| `pollution-key`              | peer's    | same                                         |
-| `unsupported-value`          | peer's    | same                                         |
-| `frame-too-deep`             | peer's    | same                                         |
-| `frame-too-large`            | peer's    | same                                         |
-| `retention-overflow`         | ours      | a join sequence that never wired `onMessage` |
-| `delivery-not-quiescent`     | ours      | a `latency: 0` handler cycle                 |
-| `delivery-reentered`         | ours      | a handler that called `deliver()`            |
-| `handler-already-registered` | ours      | a wiring bug                                 |
-| `invalid-option`             | ours      | a factory option it cannot honour            |
+Two doors, because the two ends acquire a socket differently: `connectWebSocket(url, opts?)` dials and
+resolves on OPEN, `webSocketTransport(socket, opts?)` wraps one a listener already accepted. The
+listener stays outside the package — it needs a socket library and a leaf has no dependencies — so it
+belongs to the composition root, and `webSocketTransport` is called in its connection handler
+**synchronously**: retention covers a late `onMessage`, not a late transport.
+
+- **`WebSocketLike` is structural**, because `src/` declares neither `node` nor `DOM` types; a browser's
+  `WebSocket`, Node's global and `ws` all satisfy it. `send` takes `Uint8Array<ArrayBuffer>` rather than
+  `Frame`'s wider `Uint8Array`, which also admits a `SharedArrayBuffer` backing no socket API accepts —
+  with the wider type a real socket is not assignable. `binaryType` is typed `unknown` because the three
+  implementations declare three different unions, and is set to `'arraybuffer'` at construction: a `Blob`
+  frame would have to be awaited, and awaiting reorders frames. Listeners are **added**, never assigned
+  over, since the root may hold one on the socket it accepted.
+- **Delivery is not pumped** — the event loop is the pump, so there is no `deliver()` and no `latency`.
+  One FIFO carries frames and the close marker together, which is what puts `onClose` behind every frame
+  ahead of it however the two handlers registered; retention, its `maxRetainedBytes` cap and the drain
+  are the **inbox's** — the same `FrameInbox` loopback stands on, with the overflow answer (reported once
+  here, latched and thrown from the next pump there) and the decode-failure answer injected, and nothing
+  ageing, since `due` is loopback's. A frame arriving after close is dropped, as it is into a sealed
+  loopback inbox. `close()` queues no marker of its own: the socket's close event is the single source of
+  one, and the standard queues that as a task, which is what keeps `onClose` out of `close()`'s stack.
+- **`onError` carries what the seam cannot.** A `decode` rejection, a stalled peer, silence and an
+  abnormal close arrive on socket events, where a throw lands where nothing can catch it — so each is
+  reported there and the connection closes behind it, because `onClose` alone cannot tell a hostile peer
+  from a clean quit. A decode failure is the **peer's** here, unlike loopback where the sender's own
+  `encode` minted the frame; a codec throw that is not a `TransportError` is ours and propagates, as does
+  a throw from `onMessage`. With no `onError` registered the cause is lost but the close still happens.
+- **`close()` always writes 1000**, and inbound 1000 and 1001 are both clean — 1001 is a tab navigating
+  away, and reporting it would make every page close look hostile. Any other code is `socket-error`,
+  unless this end closed first, since an implementation may still report 1006 after a local close. A
+  close code is not a protocol channel: protocol's `reject` is, and it precedes the close.
+- **The heartbeat sends nothing.** `HEARTBEAT_INTERVAL_MS` (5 000) counts windows with nothing inbound,
+  `MAX_MISSED_HEARTBEATS` (3) consecutive ones close the connection, so the cutoff falls between 10 and
+  15 s — a frame may land just before a boundary. Protocol's nine messages are the whole wire and a
+  browser cannot send a ping control frame, so liveness is read off traffic both directions already carry
+  unprompted: `state` every send-tick, `time-sync` every 2 s. Any inbound frame resets the count, one the
+  codec refuses included. The interval is cleared on every close path, because its closure holds the end.
+- **`maxBufferedBytes`** (default `MAX_FRAME_BYTES`) bounds the socket's own `bufferedAmount` ahead of
+  each send, and the connection closes past it. Sized off the frame cap rather than chosen: a peer
+  refuses anything larger than one frame, so a longer backlog is a peer that stopped reading. Nothing
+  above the transport can see `bufferedAmount`, so no layer above could hold this bound.
+
+## 6. Error codes
+
+| Code                         | Whose bug | Response                                       |
+| ---------------------------- | --------- | ---------------------------------------------- |
+| `encode-rejected`            | ours      | defect above the transport — surface it        |
+| `malformed-frame`            | peer's    | drop the frame, close the connection           |
+| `pollution-key`              | peer's    | same                                           |
+| `unsupported-value`          | peer's    | same                                           |
+| `frame-too-deep`             | peer's    | same                                           |
+| `frame-too-large`            | peer's    | same                                           |
+| `retention-overflow`         | ours      | a join sequence that never wired `onMessage`   |
+| `delivery-not-quiescent`     | ours      | a `latency: 0` handler cycle                   |
+| `delivery-reentered`         | ours      | a handler that called `deliver()`              |
+| `handler-already-registered` | ours      | a wiring bug                                   |
+| `invalid-option`             | ours      | a factory option it cannot honour              |
+| `connect-failed`             | neither   | an address or a network — report it or retry   |
+| `socket-error`               | neither   | the connection is gone; `onClose` follows      |
+| `heartbeat-timeout`          | neither   | a half-open socket no close event would report |
+| `send-buffer-overflow`       | peer's    | a peer that stopped draining the connection    |
 
 The union exists so a consumer can crash on its own bugs and merely close on a hostile peer's, which
-message text cannot support.
+message text cannot support. Every code is thrown except on the websocket's receive paths, where the
+last four and the frame rejections reach `onError` instead — a socket event has no catchable stack, and
+`connect-failed` refuses the dial's promise rather than either.
 
-## 5.1 Corrections
-
-| This document claimed                                                                      | The fact                                                                                                                                                                                  | Caught by                                                                    |
-| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| "Validate-then-encode, **both directions**" with pollution keys listed only under `decode` | `encode` admitted `constructor` / `prototype` and emitted a frame its own `decode` refused as `pollution-key`, blaming the peer for a field a creator named                               | `handles a key that names a prototype slot the same way in both directions`  |
-| Depth is capped "so the walk is bounded by policy"                                         | `MAX_DEPTH` bounds the ancestor chain, not the work: 23 objects nested 22 deep expanded to a 75 MB frame, 27 exhausted a 4 GB heap                                                        | `refuses a shared-reference graph that expands past the node budget`         |
-| "Own enumerable string keys, which is exactly what `JSON.stringify` serializes"            | `copy[key] = value` hit the prototype setter for an own `__proto__`, so `encode` returned `{}` where `stringify` returned the key                                                         | `rejects an own __proto__ key rather than silently dropping it`              |
-| A bad option "throws `encode-rejected` from the factory"                                   | Nothing was encoded; it is now `invalid-option`                                                                                                                                           | `rejects a latency that cannot count deliver() calls`                        |
-| "a backlog behind a live handler is just a late pump"                                      | `shift()` per frame made the drain quadratic — 100k frames blocked the loop for 4.4 s; a head index makes it 41 ms                                                                        | measured, then `keeps counting deliver() calls when a handler tries to pump` |
-| The pumped guarantee, stated without a re-entrancy clause                                  | A handler calling `deliver()` aged both queues twice, delivering a frame a tick early; now `delivery-reentered`                                                                           | `refuses a deliver() from inside a handler`                                  |
-| `Transport` is the surface an end exposes                                                  | `link` / `receive` / `age` / `drain` were reachable at runtime on the handed-out object; `link` could re-point a live pair and `receive` could inject a frame past `encode` and the brand | `hides the pump members from a consumer holding one end`                     |
-
-## 6. Conventions
+## 7. Conventions
 
 - **Leaf.** No `dependencies`, no `references` in `tsconfig.json`.
-- **No `node` or `DOM` types in `src/`** — hence the hand-rolled UTF-8 count.
+- **No `node` or `DOM` types in `src/`** — hence the hand-rolled UTF-8 count and `WebSocketLike`.
 - `NodeNext` + `verbatimModuleSyntax`: explicit `.js` on relative imports, `import type` where
   type-only, no runtime cycles.
-- A future backend goes in its own file behind its own subpath export, so importing the interface
-  never drags a socket library into the module graph.
+- A backend lives in its own file behind its own subpath export, so importing the interface never
+  drags a socket into the module graph.
 - **Envelopes must be `type` aliases, not `interface`s** — an `interface` is not assignable to
   `Message` (no implicit index signature), and the failure reads as a confusing assignability error at
   the `send` call.
 
-## 7. Consumers
+## 8. Consumers
 
 `@platform/server` (`Transport`, `Codec`, `EncodedFrame`, `Message`, `TimerSource`, `jsonCodec`),
 `@platform/client` (`Transport`, `Message`, `TransportError`), `@platform/protocol` (`JsonValue`, and
