@@ -326,6 +326,17 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
+            it('honours an explicit keepResolvedPosition: true on detach', async () => {
+                const renderer = await ready();
+                const parent = renderer.createNode(sprite({ position: { x: 100, y: 0 } }));
+                const child = renderer.createNode(sprite({ parent, position: { x: 10, y: 0 } }));
+
+                renderer.detachNode(child, { keepResolvedPosition: true });
+                expect(renderer.resolvedTransformOf(child)?.position.x).toBe(110);
+                expect(renderer.localTransformOf(child)?.position.x).toBe(110);
+                renderer.destroy();
+            });
+
             it('honours an explicit keepResolvedPosition: false on detach', async () => {
                 const renderer = await ready();
                 const parent = renderer.createNode(sprite({ position: { x: 100, y: 0 } }));

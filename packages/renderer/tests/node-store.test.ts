@@ -5,6 +5,7 @@
 // and the handle it is handed out with MUST NOT equal the one that was freed.
 
 import { describe, it, expect } from 'vitest';
+import type { SlotTable } from '@platform/math';
 import {
     MAX_GENERATION,
     NO_NODE,
@@ -29,10 +30,18 @@ function record(overrides: Partial<NodeRecord> = {}): NodeRecord {
     };
 }
 
+/** Clones nothing, so a snapshot round-trip keeps the very record objects the store holds. */
+function sameRecord(r: NodeRecord): NodeRecord {
+    return r;
+}
+
 /** Forces a slot's generation, so wrap-around is testable without 2^29 release cycles. */
 function pokeGeneration(store: NodeStore, index: number, generation: number): void {
-    const internals = store as unknown as { generations: number[] };
-    internals.generations[index] = generation;
+    const { slots } = store as unknown as { slots: SlotTable<NodeId, NodeRecord> };
+    // The snapshot pair is the only route to a generation.
+    const snapshot = slots.capture(sameRecord);
+    snapshot.generations[index] = generation;
+    slots.apply(snapshot, sameRecord);
 }
 
 describe('handle lifecycle', () => {

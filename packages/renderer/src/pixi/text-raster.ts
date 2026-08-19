@@ -14,13 +14,13 @@ import type { TextStyle } from '../renderer.js';
 import { toPixiTextStyleOptions } from './text-style.js';
 
 /** Characters kept from a text asset's string; the rest are dropped. */
-export const MAX_TEXT_LENGTH = 4096;
+const MAX_TEXT_LENGTH = 4096;
 
 /** The largest raster a text asset may ask for, per axis, after `resolution`. */
-export const MAX_TEXT_RASTER = 4096;
+const MAX_TEXT_RASTER = 4096;
 
 /** `text` truncated to what a raster can hold. */
-export function clampText(text: string): string {
+function clampText(text: string): string {
     return text.length <= MAX_TEXT_LENGTH ? text : text.slice(0, MAX_TEXT_LENGTH);
 }
 

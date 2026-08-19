@@ -2,32 +2,33 @@
 
 **TL;DR** — Owns the canvas, the world→screen transform, asset residency, draw order and culling.
 Exposes one backend-neutral interface, `IRenderer`, with two implementations behind subpath exports:
-`pixi` (PixiJS v8, the real one) and `null` (headless, for tests/CI/server). `@platform/client` drives
+`pixi` (PixiJS v8, the real one) and `null` (headless, no DOM). `@platform/client` drives
 it — the renderer owns no clock and no frame loop; nothing draws until `render()` is called. It holds
 an authoritative CPU-side scene graph, so the backend's display objects are derived and disposable.
 
 ## Layout
 
-| File                    | Owns                                                                     |
-| ----------------------- | ------------------------------------------------------------------------ |
-| `index.ts`              | Public barrel — types, `IRenderer`, pure math. **Must not import pixi.** |
-| `renderer.ts`           | `IRenderer`, options, node descs, patches, snapshots, events             |
-| `node-id.ts`            | `NodeId` brand, `NO_NODE`, pack/unpack                                   |
-| `errors.ts`             | `RendererError` + `RendererErrorCode`                                    |
-| `surfaces.ts`           | Surface order, camera-transformed / screen-space / clipped predicates    |
-| `viewport.ts`           | `fitScale`, `stageRect`, `visibleRect`, `worldViewport`, DPR cap         |
-| `projection.ts`         | world↔screen, the y-flip, deg→rad, UI anchors                            |
-| `transform-store.ts`    | SoA transform graph, resolve, the two dirty sets                         |
-| `node-store.ts`         | Slot table, freelist, generations, `NodeRecord`                          |
-| `bounds.ts`             | Local bounds, rotated world AABB, cull test                              |
-| `asset-queue.ts`        | Per-name asset intent map, manifest merge, entry validation              |
-| `core/renderer-core.ts` | Everything backend-independent, in one copy                              |
-| `core/scene-sink.ts`    | `SceneSink` — the seam a backend implements                              |
-| `null/`                 | `createNullRenderer()`, `NullRenderer`, `NullSink`                       |
-| `pixi/`                 | `createPixiRenderer()` + the PixiJS backend (8 files, below)             |
+| File                     | Owns                                                                                           |
+| ------------------------ | ---------------------------------------------------------------------------------------------- |
+| `index.ts`               | Public barrel — types, `IRenderer`, pure math, the url-scheme check. **Must not import pixi.** |
+| `renderer.ts`            | `IRenderer`, options, node descs, patches, snapshots, events                                   |
+| `node-id.ts`             | `NodeId` brand and `NO_NODE` over math's packed handle                                         |
+| `errors.ts`              | `RendererError` + `RendererErrorCode`                                                          |
+| `surfaces.ts`            | Surface order, camera-transformed / screen-space / clipped predicates                          |
+| `viewport.ts`            | `fitScale`, `stageRect`, `visibleRect`, `worldViewport`, DPR cap                               |
+| `projection.ts`          | world↔screen, the y-flip, deg→rad, UI anchors                                                  |
+| `transform-store.ts`     | SoA transform graph, resolve, the two dirty sets                                               |
+| `node-store.ts`          | `NodeRecord` over math's `SlotTable`, labelled `NodeStore`                                     |
+| `bounds.ts`              | Local bounds, rotated world AABB, cull test                                                    |
+| `asset-queue.ts`         | Per-name asset intent map, manifest merge, entry validation, the two url-scheme policies       |
+| `core/renderer-core.ts`  | The backend-independent scene and frame logic, in one copy                                     |
+| `core/renderer-shell.ts` | `RendererShell` — `IRenderer`'s backend-independent half, plus the fonts-last unload           |
+| `core/scene-sink.ts`     | `SceneSink` — the seam a backend implements                                                    |
+| `null/`                  | `createNullRenderer()`, `NullRenderer`, `NullSink`                                             |
+| `pixi/`                  | `createPixiRenderer()` + the PixiJS backend (8 files, below)                                   |
 
-Everything above `core/` is pure: no DOM import, runs in plain Node. That is what makes the
-sign-bearing math testable without a browser.
+Everything above `core/` is pure: no DOM import, runs in plain Node. That is what keeps the
+sign-bearing math reachable without a browser.
 
 `pixi/`: `pixi-renderer.ts` (orchestration only — `Application`, DPR, `ResizeObserver`, asset
 pipeline, presenting a frame) · `pixi-sink.ts` (the only file touching an xform/art pair) ·
@@ -35,7 +36,7 @@ pipeline, presenting a frame) · `pixi-sink.ts` (the only file touching an xform
 cascade) · `asset-registry.ts` (name→`Texture`, atlas expansion, retained manifest, texture release) ·
 `context-guard.ts` (loss/restore state machine) · `text-raster.ts` (2D-canvas measure + rasterize,
 raster clamps) · `text-style.ts` (`TextStyle` → Pixi's). The per-frame pass is `RendererCore.flush`,
-not a `pixi/` file: it is backend-independent, and a second copy here had already drifted from it.
+not a `pixi/` file: it is backend-independent, and a per-backend copy drifts from it.
 
 ## Invariants — do not break these
 
@@ -48,7 +49,8 @@ not a `pixi/` file: it is backend-independent, and a second copy here had alread
 3. **The store is authoritative; the backend mirrors it.** Queries, culling and post-loss rebuild all
    resolve from our typed arrays. Nothing asks the backend for a transform.
 4. **Node ids are arithmetic, never bitwise.** `generation * 2^24 + index`; `<<` coerces to int32 and
-   wraps at generation 128 into handles that collide with live ones.
+   wraps at generation 128 into handles that collide with live ones. The packing lives in
+   `@platform/math`, so node and entity handles cannot drift apart.
 5. **The y-flip lives only in `projection.ts`**, applied at the write boundary (`pixi.y = -local.y`,
    `pixi.rotation = -deg * DEG2RAD`) and **only for camera-transformed surfaces** — UI is authored
    y-down, so a screen-space node takes the anchor origin and `fitScale` instead. The camera root
@@ -69,6 +71,12 @@ not a `pixi/` file: it is backend-independent, and a second copy here had alread
 11. **The cull pass is O(dirty), not O(scene).** A node's cull answer can only change if its own
     values changed, if its resolved position moved, or if the viewport, a surface's visibility or its
     texture did. A frame in which nothing changed writes nothing and re-culls nothing.
+12. **An asset url is parsed, never pattern-matched**, because any character the parser normalises
+    away defeats a scheme pattern — `"java\nscript:alert(1)"` matches none, so it reads as a
+    relative path. `isAllowedAssetUrl` therefore takes the allowed set: the loader passes
+    `LOADER_ASSET_SCHEMES` (`http`/`https`/`data`/`blob`), and `@platform/client` checks a
+    server-supplied manifest against the narrower `REMOTE_ASSET_SCHEMES` (`http`/`https`), since a
+    peer that can name a `data:` url hands us bytes we never fetched.
 
 ## Coordinate spaces
 
@@ -132,20 +140,25 @@ than describing only the last `resolve()`.
 
 ## Backends
 
-Both are thin shells over one `RendererCore` + a `SceneSink`. The core owns the stores, `createNode`'s
-validation _and its order_, hierarchy, the attach/detach asymmetry, `updateSubtree`'s set semantics,
-resolve/flush/cull, projection, bounds, `inspect`, `isCulled`, `drawOrderOf`. A sink supplies only:
-`create` / `reparent` / `destroySubtree` / `write` / `setRenderable` / `setTexture` / `setText` /
-`setLayer` / `sizeOf` / `applyView` / `surfaceVisible` / `setSurfaceVisible` / `clearAll`. A sink also
-places screen-space nodes, since the anchor origin and `fitScale` are the backend's to apply.
+Both extend `RendererShell` over one `RendererCore` + a `SceneSink`. The core owns the stores,
+`createNode`'s validation _and its order_, hierarchy, the attach/detach asymmetry, `updateSubtree`'s
+set semantics, resolve/flush/cull, projection, bounds, `inspect`, `isCulled`, `drawOrderOf`. The
+shell owns every `IRenderer` member that is pure delegation to the core, the no-op-before-`init`-and-
+after-`destroy` rule, the fonts-last unload, and `teardownCore`, which drops the core and the
+deferred asset work for a backend's `destroy` to call around releasing its own fields — so a backend
+declares only `init`, `destroy`, `render`, its surface resize, its context state, its asset pipeline,
+its residency and its text measurement. A sink supplies only: `create` / `reparent` /
+`destroySubtree` / `write` / `setRenderable` / `setTexture` / `setText` / `setLayer` / `sizeOf` /
+`applyView` / `surfaceVisible` / `setSurfaceVisible` / `clearAll`. A sink also places screen-space
+nodes, since the anchor origin and `fitScale` are the backend's to apply.
 
-So the semantics the contract suite asserts exist in exactly one place, and its coverage protects both
-backends even though it currently only _runs_ against the headless one.
+So every one of those semantics exists in exactly one place — `renderer-core.ts` or
+`renderer-shell.ts` — and both backends inherit it rather than each restating it.
 
 | Genuinely per-backend | `pixi`                                           | `null`                                                           |
 | --------------------- | ------------------------------------------------ | ---------------------------------------------------------------- |
 | `init`                | builds a GPU `Application`                       | no DOM; design size _is_ the initial canvas                      |
-| `resize`              | resizes the surface                              | records the size                                                 |
+| `resizeSurface`       | resizes the GPU surface                          | no drawing surface, so nothing to resize                         |
 | assets                | `Assets` + atlas expansion + placeholder         | manifest-declared sizes                                          |
 | context loss          | `ContextGuard`; a lost WebGPU device is terminal | `contextState` always `'ok'`; nothing queues                     |
 | `sizeOf` for text     | real font metrics                                | `longestLine * size * 0.5` — stable, monotonic, not real metrics |
@@ -203,29 +216,3 @@ kill a level load; unknown unload names are reported, not thrown.
   reports it; nothing replays, because the merge would then run twice. A step that throws leaves the
   state `'ok'` with a reported failed asset rather than `'restoring'` forever, which would stop
   `render()` for the rest of the session.
-
-## Postmortem — what implementing this corrected
-
-Each row is a claim this document made, the fact that replaced it, and the test that holds the line.
-Corrected rather than deleted: a reader who sees what a sentence replaced knows how far to trust the
-ones beside it.
-
-| The doc said                                                      | What was true                                                                                                                                                                                                   | Caught by                                        |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| The y-flip is applied at the write boundary, full stop            | It was applied to UI nodes too, which are authored y-down — and `uiAnchor` and `fitScale` reached no drawing code at all, so every HUD element drew off-stage while `screenPositionOf` reported the right place | `pixi-sink.test.ts` (real sink, real containers) |
-| `flush.ts` owns "dirty → local writes + cull toggles"             | Nothing imported it; the core owned the pass, and the dead copy had already drifted on which nodes get a cull flag                                                                                              | `grep` for an importer; the file is now deleted  |
-| The cull pass "skips clean subtrees"                              | Resolve did; the cull pass rescanned every live slot every frame and allocated an index array doing it                                                                                                          | `renderer-core.test.ts`, through a counting sink |
-| `inspect()` is the only allocating method                         | Every bounds/transform query allocates, and so did `flush`; only the frame path is allocation-free now                                                                                                          | the same counting sink                           |
-| A missing texture yields a magenta placeholder                    | It was pixi's shared white 1x1 — a pale speck rather than a visible failure                                                                                                                                     | `asset-registry.test.ts`                         |
-| `not-initialized` is thrown                                       | Nothing ever threw it, and nothing logs a stale handle either: both are silent no-ops in every build                                                                                                            | `grep`; the code is now documented as reserved   |
-| `invalid-asset-entry` is thrown                                   | Also never thrown, and the two backends disagreed on which manifests they accepted                                                                                                                              | a contract case, so both backends are held to it |
-| Two dirty sets                                                    | Three — and the third had no production consumer until the cull pass became incremental                                                                                                                         | `transform-store.test.ts`                        |
-| Both context-loss paths are handled                               | A lost WebGPU device could never restore: nothing routed it to `#restore`, so the renderer stayed `'lost'` for good                                                                                             | `context-guard.test.ts`                          |
-| A queued GPU op resolves once the context is back                 | Unless a step threw, in which case the state stayed `'restoring'` forever and `render()` stopped for the session                                                                                                | `context-guard.test.ts`                          |
-| Restore merges the retained manifest with the queue, then applies | It did, and then applied the queued work a second time by replaying the deferred call — reporting unloads as `unknown`                                                                                          | `context-guard.test.ts`                          |
-| `cullMargin` negative is clamped to 0                             | `init` rejects it; the clamp is a second line of defence inside the cull test                                                                                                                                   | `bounds.test.ts`, `null-renderer.test.ts`        |
-| Pure modules never throw                                          | `node-store.ts` throws a `RangeError` when every slot is live, which is a caller bug, not degenerate input                                                                                                      | `node-store.test.ts`                             |
-
-Confirmed under review and left alone: the arithmetic-not-bitwise handle packing, the two-object tree
-shape that makes position-only inheritance structural, the merge-before-apply order, and
-`preventDefault()` on `webglcontextlost`.

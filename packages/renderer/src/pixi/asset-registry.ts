@@ -114,11 +114,6 @@ export class AssetRegistry {
         return out;
     }
 
-    /** Every resident name. */
-    names(): string[] {
-        return [...this.#resident.keys()];
-    }
-
     /** Resident names with copied sizes, so an `inspect()` snapshot is not a live view. */
     inspectEntries(): Array<{ name: string; size: Size }> {
         return [...this.#resident].map(([name, asset]) => ({ name, size: { ...asset.size } }));
