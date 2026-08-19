@@ -19,11 +19,11 @@
         "prepare": "lefthook install"
     },
     "devDependencies": {
-        "@types/node": "^26.1.2",
+        "@types/node": "^26.2.0",
         "lefthook": "^2.1.10",
-        "oxlint": "^1.76.0",
+        "oxlint": "^1.78.0",
         "prettier": "^3.9.6",
-        "turbo": "^2.10.7",
+        "turbo": "^2.10.10",
         "typescript": "^7.0.2",
         "vitest": "^4.1.10"
     }
