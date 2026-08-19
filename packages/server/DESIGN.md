@@ -9,19 +9,18 @@ only `@platform/protocol`, which is authoritative for every envelope shape. The 
 which tick an input applies to, whether it is admissible, when to broadcast, what each connection is
 owed. It never opens a socket, never reads `Date.now()`, and never re-implements the tick order.
 
-It is driven today by a scripted clock over `loopbackPair`; a WebSocket listener belongs to the composition
-root, which `accept` is already shaped for.
+It is driven by an injected clock over a `loopbackPair`; a socket listener belongs to the composition root,
+which `accept` is shaped for.
 
-| File                  | Holds                                                                                     |
-| --------------------- | ----------------------------------------------------------------------------------------- |
-| `server.ts`           | `GameServer`: registry, `accept`, join/reject/resync, `pump`, `setSimRate`, close path    |
-| `connection.ts`       | `Connection` record; `AdmissionState` (resolution frontier, headroom, token bucket)       |
-| `input.ts`            | `InputBuffer` (tick-keyed, `drainThrough`), the admission checks, `runInputPass`          |
-| `driver.ts`           | `Driver`: accumulator, step cap + shed, send cadence, `deliver`→step, self-driven `start` |
-| `broadcast.ts`        | the three drains → `SendSet`, wire retyping, `encodeStateValue`, per-connection fan-out   |
-| `snapshot.ts`         | `buildSnapshot` — the join-time world walk; `ancestorsFirst`                              |
-| `constants.ts`        | engine constants, in ms with per-`simRate` tick conversions                               |
-| `testkit/fixtures.ts` | decorated script fixtures, compiled by `tsc` for the tests (not public surface)           |
+| File            | Holds                                                                                     |
+| --------------- | ----------------------------------------------------------------------------------------- |
+| `server.ts`     | `GameServer`: registry, `accept`, join/reject/resync, `pump`, `setSimRate`, close path    |
+| `connection.ts` | `Connection` record; `AdmissionState` (resolution frontier, headroom, token bucket)       |
+| `input.ts`      | `InputBuffer` (tick-keyed, `drainThrough`), the admission checks, `runInputPass`          |
+| `driver.ts`     | `Driver`: accumulator, step cap + shed, send cadence, `deliver`→step, self-driven `start` |
+| `broadcast.ts`  | the three drains → `SendSet`, wire retyping, `encodeStateValue`, per-connection fan-out   |
+| `snapshot.ts`   | `buildSnapshot` — the join-time world walk; `ancestorsFirst`                              |
+| `constants.ts`  | engine constants, in ms with per-`simRate` tick conversions                               |
 
 ---
 
@@ -61,10 +60,10 @@ Core exports no `createWorld` / `step(tick, inputs)` / `collectChanges`; this is
 ### 3.1 A registry over a `Transport` factory
 
 `Transport` is one end of one established connection, so the multiplexer transport declined to hold lives
-here: `Map<connectionId, Connection>`. Keyed by a **server-minted `connectionId`, never by player id**, so
-a future reconnect rebinds a new `Transport` to the same `Player`. `accept(transport)` returns the id, or
-**`null`** for a socket it refused and closed — an id for a dead socket reads at the composition root as a
-live connection. The composition root feeds it from `loopbackPair()` or (later) a WebSocket listener.
+here: `Map<connectionId, Connection>`. Keyed by a **server-minted `connectionId`, never by player id**,
+since a connection exists before it has a player and may end without ever getting one.
+`accept(transport)` returns the id, or **`null`** for a socket it refused and closed — an id for a dead socket reads at the composition root as a
+live connection. The composition root feeds it from `loopbackPair()` or from a socket listener.
 
 `Connection` carries `transport`, nullable `player`, `pendingJoin`, one `ActionStates` fold (core's, not a
 second implementation), `AdmissionState`, `disposers`, `acceptedAtSeconds` (null until the first wake
@@ -147,7 +146,7 @@ core's `applyEdge` and dispatched, then per connection the stale-hold backstop, 
 - **`fillIntent` runs here**, ahead of movement's step 4; without it `intent` stays zero and nothing moves.
 - **Identity comes from the connection**, never the frame; dispatch targets `playerKey(player.id)` and the
   avatar's entity host (absent for a spectator, whose `player.avatar` throws).
-- **Stale-hold backstop:** after `HOLD_STALE_TICKS` with no traffic, every held action is released and every
+- **Stale-hold backstop:** after `holdStaleTicks(simRate)` with no traffic, every held action is released and every
   axis returned to neutral — the crash / killed tab / yanked cable a client blur handler cannot cover. **Any**
   well-formed frame counts as traffic, because edges-only input means a player holding one button sends
   nothing; `TimeSync` is the only thing a live client sends unprompted, so it is what liveness means.
@@ -222,8 +221,8 @@ Protocol's types, split by reliability class and joined by an equal `tick`:
 
 - **`StateEnvelope`** (reliable, per connection) — `tick`, `ackSeq`, `earliestHeadroom?`, `structural`,
   `state`. Per-connection by construction, so it cannot be encoded once.
-- **`TransformEnvelope`** (droppable, shared) — `tick` plus whole-transform diffs; identical for every peer
-  until interest management lands, so it is the encode-once subset.
+- **`TransformEnvelope`** (droppable, shared) — `tick` plus whole-transform diffs; identical for every peer,
+  so it is the encode-once subset.
 
 ### 5.3 The drain: three channels to one `SendSet`
 
@@ -250,16 +249,17 @@ for exactly one send.
   `Player` → id, plain objects/arrays recursed, cycle- and depth-guarded); game/entity marks are shared,
   player marks scoped to their owner, and one bucket per host so an address is named once however many
   fields it wrote. Anything unrepresentable is **dropped and counted** (`server.droppedMarks`) rather than
-  thrown — including a field named `__proto__` / `constructor` / `prototype`, since the grouped shape makes
-  the name a KEY, and assigning one would set the bucket's prototype rather than add it.
+  thrown — including a field named `__proto__` / `constructor` / `prototype`, transport's `RESERVED_KEYS`
+  rather than a second copy of the set, since the grouped shape makes the name a KEY and assigning one would
+  set the bucket's prototype rather than add it.
 
 ### 5.4 Fan-out
 
 A loop over the registry, reliable envelope first (the client holds a transform envelope until the state
 envelope for that tick is applied). The transform frame is encoded lazily and memoised on the `SendSet`, so
 N connections still cost one `codec.encode`. Most of a state envelope is per-connection (`ackSeq`,
-`earliestHeadroom`, scoped state), and delta replication plus interest management will shrink the shared
-subset further. No try/catch per send: `send`/`sendEncoded` after a peer's `close()` are silent no-ops, so
+`earliestHeadroom`, scoped state), so the transform frame is the whole of the shared subset. No try/catch per
+send: `send`/`sendEncoded` after a peer's `close()` are silent no-ops, so
 one dead peer cannot abort the fan-out.
 
 ---
@@ -321,8 +321,7 @@ registry so the next broadcast skips it, drop the connection's buffered frames, 
 then release the player: **destroy its owned entities first** (found by scanning `liveIds()` for
 `record.ownerId`, never `player.avatar`, which throws for a spectator), then `leavePlayer(rt, id)` — which
 dispatches `@onPlayerLeave` at the Game host **before** `PlayerManager.remove`, so the handler can still
-read the player — then queue the `player-leave` op. No grace period and no reconnect;
-connection-keying is what will make that a rebind rather than a rejoin.
+read the player — then queue the `player-leave` op. No grace period and no reconnect.
 
 `GameServer.close()` is the whole-server form: stop the driver, then run that path **inline** for every
 connection rather than waiting on each transport's `onClose`, which arrives on the next delivery — and after
@@ -335,8 +334,8 @@ verb: it parks the driver and leaves every connection open.
 ## 8. Conventions
 
 `NodeNext` + `verbatimModuleSyntax`: explicit `.js` on relative imports, `import type` where type-only, no
-cycles. `src/` drives core only as values (`loadGame`, `Loop`, `Runtime`) and declares no script, so core's
-decorator-toolchain caveats apply to `testkit/fixtures.ts` alone. Engine constants live in `constants.ts`,
+cycles. The exported barrel drives core only as values (`loadGame`, `Loop`, `Runtime`) and declares no
+script, so nothing on this package's surface carries a decorator. Engine constants live in `constants.ts`,
 grouped by unit, never on the creator surface:
 
 | Constant                   | Value                 | Bounds                                                 |
@@ -361,21 +360,4 @@ grouped by unit, never on the creator surface:
 `ticksPerSend` convert these to ticks of the session's own rate, and `maxSeqGap` composes the first two with
 `HORIZON_CLAMP_TICKS` rather than naming a bound of its own. `MAX_STATE_DEPTH` is the one that is not a
 policy choice: it must stay far below the codec's own 128-level cap, which the envelope's own nesting eats
-into, because a value the encoder passes and the codec refuses throws out of the fan-out (§9).
-
----
-
-## 9. What implementing it corrected
-
-| The doc claimed                                                            | The fact                                                                                                                                                                                                                                                                                | Caught by                                                                                 |
-| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| §5.3: anything unrepresentable is dropped and counted, never thrown        | True for `undefined` and cycles, not for depth: the guard sat at 128, the codec's own cap, which the envelope's nesting eats into — so a value at depth ≥125 passed the encoder and threw out of `encode`, aborting the fan-out for every connection and escaping `pump`. Now 64.       | `tests/admission.test.ts`, wrapping an accepted value in the deepest envelope it can ride |
-| §4.3: every check here exists because a frame cannot be trusted            | All four bounded how **many** frames arrive. None bounded one frame's `actions[]`, its action-name length, or the key space those names open in core's fold — where a held name costs a `hold` dispatch every tick, so one frame bought unbounded per-tick work for the session.        | Reading `createActionStates`' unbounded `held` / `axis` maps against `activeActions`      |
-| §6.4: `start()`/`stop()` self-drive off the injected `TimerSource`         | With no timer injected it returned silently, so a networked host calling `start()` got a server that never ticked and no error. It throws now.                                                                                                                                          | `tests/admission.test.ts`                                                                 |
-| §7: `onClose` is the close path                                            | It was the **only** one, so there was no way to shut a server down: `stop()` parks the driver, and a transport's `onClose` needs a delivery that a parked driver never makes — every `Player` and every handler leaked. `close()` runs the path inline.                                 | `tests/admission.test.ts`                                                                 |
-| §4.3: a seq bound of `MAX_SEQ_GAP` (1 024)                                 | Thirty-two times wider than it can be used: one frame per tick is the wire's ceiling, so a seq past the window names a tick nothing could apply — the extra 992 bought only gap-dating. `maxSeqGap` is now the window. A duplicate below the frontier was also admitted and re-applied. | `tests/input.test.ts`, replaying a resolved seq against a `Recorder`                      |
-| §3.1: `accept(transport)` returns the id                                   | It returned one for a socket it had just refused and closed, so the composition root could not tell a live connection from a dead one. `null` on refusal.                                                                                                                               | `tests/admission.test.ts`                                                                 |
-| §3.4: the config defaults                                                  | `resolveConfig` fills them without validating anything, so `simRate: 0` reached the accumulator as an infinite `dt` and stepped zero times forever. Validated at the constructor, alongside a missing `rt.passes`.                                                                      | `tests/admission.test.ts`                                                                 |
-| §3.2: the name is sanitized — control chars stripped, ≤24 chars            | C0 and DEL only, leaving bidi overrides and zero-width characters that reorder every name beside them; and the cap counted UTF-16 units, so it could split a surrogate pair into a lone half. Now NFC, `\p{Cc}`+`\p{Cf}`, capped by code point.                                         | Re-reading the strip against what a display name is rendered into                         |
-| §5.4: no try/catch per send, because a closed peer's send is a no-op       | Confirmed. Transport documents `send`/`sendEncoded` after `close()` as silent no-ops, so a peer dropping between the step and the send cannot abort the fan-out — but it covers only close, not an `encode` throw, which is why the two guards above matter.                            | `tests/broadcast.test.ts`'s dropped-peer case                                             |
-| §5.3: a spawn-then-destroy pair is detected by the entity having no record | Confirmed. `EntityTable.record` returns `EntityRecord \| null`, so the `=== null` test is right — but it is the one place in the package testing that API by strict equality, and an `undefined` return would ship a `destroy` for a netId the client never spawned.                    | Reading `core/src/world/entity-table.ts`'s signature                                      |
+into, because a value the encoder passes and the codec refuses throws out of the fan-out.

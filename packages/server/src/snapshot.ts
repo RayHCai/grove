@@ -14,13 +14,8 @@ import type { EntityId, Player, Runtime } from '@platform/core';
 import { GAME_KEY, NO_ENTITY, entityKey, playerKey } from '@platform/core';
 import type { EntitySnapshot, StateDiff, StateHostAddr, WorldSnapshot } from '@platform/protocol';
 import type { JsonValue } from '@platform/transport';
-import {
-    RESERVED_FIELDS,
-    encodeStateValue,
-    readEntitySnapshot,
-    readPlayerSnapshot,
-    toNetId,
-} from './broadcast.js';
+import { RESERVED_KEYS } from '@platform/transport';
+import { encodeStateValue, readEntitySnapshot, readPlayerSnapshot, toNetId } from './broadcast.js';
 
 /**
  * The world as `forPlayer` should first see it, at the current tick.
@@ -115,7 +110,7 @@ function collect(rt: Runtime, into: StateDiff[], hostKey: string, host: StateHos
     const fields: { [field: string]: JsonValue } = {};
     let any = false;
     for (const [field, value] of record.values) {
-        if (RESERVED_FIELDS.has(field)) continue;
+        if (RESERVED_KEYS.has(field)) continue;
         const encoded = encodeStateValue(value);
         if (encoded === undefined) continue;
         fields[field] = encoded;

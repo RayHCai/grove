@@ -288,6 +288,9 @@ describe('the manifest and the template table', () => {
                 // Lexical evasions the parse normalizes away before the check.
                 { key: 'spaced', kind: 'texture', url: '  javascript:alert(1)' },
                 { key: 'cased', kind: 'texture', url: 'JavaScript:alert(1)' },
+                { key: 'newline', kind: 'texture', url: 'java\nscript:alert(1)' },
+                // Ours to construct, never the server's to name.
+                { key: 'blob', kind: 'texture', url: 'blob:http://localhost/8f3c-1' },
                 // The legitimate shapes: a relative path, and an absolute https one.
                 { key: 'ok-rel', kind: 'texture', url: '/coin.png' },
                 { key: 'ok-abs', kind: 'texture', url: 'https://cdn.example/coin.png' },
@@ -297,6 +300,22 @@ describe('the manifest and the template table', () => {
 
         const loaded = renderer.inspect().assets.map((a) => a.name);
         expect(loaded).toStrictEqual(['ok-rel', 'ok-abs']);
+    });
+
+    it('drops a manifest row with no url rather than letting the loader throw on it', async () => {
+        const { bridge, renderer } = await harness();
+        // Untyped wire data: an empty url resolves against the base and would pass a scheme test, but
+        // `loadAssets` refuses it by throwing, which would take the rest of the manifest with it.
+        await bridge.loadManifest({
+            assets: [
+                { key: 'blank', kind: 'texture', url: '' },
+                { key: 'absent', kind: 'atlas', url: undefined as unknown as string },
+                { key: 'ok', kind: 'texture', url: '/coin.png' },
+            ],
+            templates: [],
+        });
+
+        expect(renderer.inspect().assets.map((a) => a.name)).toStrictEqual(['ok']);
     });
 
     it('maps a sprite template’s visual onto the node desc', async () => {
