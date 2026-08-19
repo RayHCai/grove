@@ -11,13 +11,29 @@ import type { AssetManifestEntry } from './renderer.js';
 export type AssetIntent = { op: 'load'; entry: AssetManifestEntry } | { op: 'unload' };
 
 /**
- * URL schemes an asset may be fetched from.
+ * Schemes the asset loader may fetch from.
  *
  * A manifest can arrive from a server, so the scheme is checked rather than assumed: `javascript:`
- * and `file:` have no business reaching a loader, and a relative path — the ordinary case — has no
- * scheme at all.
+ * and `file:` have no business reaching a loader, and a relative path — the ordinary case — has
+ * no scheme at all.
  */
-const ALLOWED_SCHEMES: ReadonlySet<string> = new Set(['http:', 'https:', 'data:', 'blob:']);
+export const LOADER_ASSET_SCHEMES: ReadonlySet<string> = new Set([
+    'http:',
+    'https:',
+    'data:',
+    'blob:',
+]);
+
+/**
+ * Schemes a server-supplied manifest may name.
+ *
+ * Narrower than what the loader accepts: `data:` and `blob:` are ours to construct locally, and a
+ * peer that can name one can hand us bytes we never fetched.
+ */
+export const REMOTE_ASSET_SCHEMES: ReadonlySet<string> = new Set(['http:', 'https:']);
+
+/** Resolves a relative url. Only its scheme matters, and `http:` is in every allowed set. */
+const RELATIVE_URL_BASE = 'http://localhost/';
 
 /**
  * Throws `invalid-asset-entry` unless the entry is structurally usable.
@@ -39,7 +55,7 @@ export function validateAssetEntry(entry: AssetManifestEntry): void {
                     `asset '${entry.name}' (${entry.kind}) needs a non-empty url`,
                 );
             }
-            if (!isAllowedAssetUrl(entry.url)) {
+            if (!isAllowedAssetUrl(entry.url, LOADER_ASSET_SCHEMES)) {
                 rendererError(
                     'invalid-asset-entry',
                     `asset '${entry.name}' has a url with a disallowed scheme`,
@@ -60,10 +76,20 @@ export function validateAssetEntry(entry: AssetManifestEntry): void {
     }
 }
 
-/** `true` for a relative path or an allowed absolute scheme. */
-export function isAllowedAssetUrl(url: string): boolean {
-    const scheme = /^([a-z][a-z\d+\-.]*):/i.exec(url);
-    return scheme === null || ALLOWED_SCHEMES.has(scheme[1]?.toLowerCase() + ':');
+/**
+ * `true` for a relative path or an absolute url whose scheme is in `allowed`.
+ *
+ * Parsed rather than pattern-matched, because a lexical scheme test is defeated by any character
+ * the parser normalises away: `"java\nscript:alert(1)"` matches no scheme pattern, so it reads as a
+ * relative path and passes, while the parser strips the newline and reports `javascript:`.
+ */
+export function isAllowedAssetUrl(url: string, allowed: ReadonlySet<string>): boolean {
+    try {
+        return allowed.has(new URL(url, RELATIVE_URL_BASE).protocol);
+    } catch {
+        // An unparseable url is no more fetchable than a forbidden one.
+        return false;
+    }
 }
 
 /** The work a restore should perform, after merging the retained manifest with the queue. */

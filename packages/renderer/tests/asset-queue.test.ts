@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 
-import { AssetQueue } from '../src/asset-queue.js';
+import {
+    AssetQueue,
+    isAllowedAssetUrl,
+    LOADER_ASSET_SCHEMES,
+    REMOTE_ASSET_SCHEMES,
+    validateAssetEntry,
+} from '../src/asset-queue.js';
+import { RendererError } from '../src/errors.js';
 import type { AssetManifestEntry } from '../src/renderer.js';
 
 function image(name: string, url = `/assets/${name}.png`): AssetManifestEntry {
@@ -351,5 +358,69 @@ describe('AssetQueue.clear', () => {
         q.clear();
 
         expect(q.size).toBe(0);
+    });
+});
+
+describe('isAllowedAssetUrl', () => {
+    it('allows the ordinary case: a relative path', () => {
+        for (const url of ['/assets/hero.png', 'hero.png', './a/b.png', '../up.png']) {
+            expect(isAllowedAssetUrl(url, LOADER_ASSET_SCHEMES)).toBe(true);
+            expect(isAllowedAssetUrl(url, REMOTE_ASSET_SCHEMES)).toBe(true);
+        }
+    });
+
+    it('allows http and https under both policies', () => {
+        expect(isAllowedAssetUrl('https://cdn.example.com/a.png', LOADER_ASSET_SCHEMES)).toBe(true);
+        expect(isAllowedAssetUrl('http://cdn.example.com/a.png', LOADER_ASSET_SCHEMES)).toBe(true);
+        expect(isAllowedAssetUrl('https://cdn.example.com/a.png', REMOTE_ASSET_SCHEMES)).toBe(true);
+        expect(isAllowedAssetUrl('http://cdn.example.com/a.png', REMOTE_ASSET_SCHEMES)).toBe(true);
+    });
+
+    it('takes data: and blob: from the loader but not from a remote manifest', () => {
+        const data = 'data:image/png;base64,iVBORw0KGgo=';
+        const blob = 'blob:http://localhost/8f3c-1';
+
+        expect(isAllowedAssetUrl(data, LOADER_ASSET_SCHEMES)).toBe(true);
+        expect(isAllowedAssetUrl(blob, LOADER_ASSET_SCHEMES)).toBe(true);
+        // A peer that can name one of these hands us bytes we never fetched.
+        expect(isAllowedAssetUrl(data, REMOTE_ASSET_SCHEMES)).toBe(false);
+        expect(isAllowedAssetUrl(blob, REMOTE_ASSET_SCHEMES)).toBe(false);
+    });
+
+    it('refuses file: and javascript: under every policy', () => {
+        for (const url of ['file:///etc/passwd', 'javascript:alert(1)']) {
+            expect(isAllowedAssetUrl(url, LOADER_ASSET_SCHEMES)).toBe(false);
+            expect(isAllowedAssetUrl(url, REMOTE_ASSET_SCHEMES)).toBe(false);
+        }
+    });
+
+    it('refuses the lexical evasions a scheme pattern lets through', () => {
+        // Leading whitespace and mixed case are trimmed and folded by the parser; the embedded
+        // newline is the one a `^([a-z][a-z\d+\-.]*):` test reads as a relative path and allows.
+        for (const url of [
+            '  javascript:alert(1)',
+            'JavaScript:alert(1)',
+            'java\nscript:alert(1)',
+        ]) {
+            expect(isAllowedAssetUrl(url, LOADER_ASSET_SCHEMES)).toBe(false);
+            expect(isAllowedAssetUrl(url, REMOTE_ASSET_SCHEMES)).toBe(false);
+        }
+    });
+});
+
+describe('validateAssetEntry — url schemes', () => {
+    it('accepts a relative path, https and data:', () => {
+        const urls = ['/assets/hero.png', 'https://cdn.example.com/hero.png', 'data:image/png,x'];
+        for (const url of urls) {
+            expect(() => validateAssetEntry({ name: 'hero', kind: 'image', url })).not.toThrow();
+        }
+    });
+
+    it('rejects a disallowed scheme as invalid-asset-entry', () => {
+        for (const url of ['javascript:alert(1)', 'java\nscript:alert(1)', 'file:///etc/passwd']) {
+            const entry: AssetManifestEntry = { name: 'hero', kind: 'image', url };
+            expect(() => validateAssetEntry(entry)).toThrow(RendererError);
+            expect(() => validateAssetEntry(entry)).toThrow(/disallowed scheme/);
+        }
     });
 });

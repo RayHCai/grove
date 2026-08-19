@@ -15,6 +15,8 @@
 //
 // `Float64Array` because composed positions accumulate and the drift matters more than the bytes.
 
+import { growF64, growI32, growU8, grownCapacity } from '@platform/math';
+
 /** Empty sentinel for the tree arrays. Not 0 — slot 0 is a perfectly good node. */
 const NONE = -1;
 
@@ -669,8 +671,7 @@ export class TransformStore {
     #ensure(needed: number): void {
         if (needed <= this.#posX.length) return;
 
-        let capacity = this.#posX.length;
-        while (capacity < needed) capacity *= 2;
+        const capacity = grownCapacity(this.#posX.length, needed);
 
         this.#posX = growF64(this.#posX, capacity);
         this.#posY = growF64(this.#posY, capacity);
@@ -701,31 +702,4 @@ export class TransformStore {
         this.#nextSibling = growI32(this.#nextSibling, capacity, NONE);
         this.#depth = growI32(this.#depth, capacity, 0);
     }
-}
-
-// The `<ArrayBuffer>` argument is load-bearing: the unparameterized spelling widens to
-// `ArrayBufferLike`, which includes `SharedArrayBuffer` and is not assignable back to the fields.
-
-function growF64(src: Float64Array<ArrayBuffer>, capacity: number): Float64Array<ArrayBuffer> {
-    const next = new Float64Array(capacity);
-    next.set(src);
-    return next;
-}
-
-function growU8(src: Uint8Array<ArrayBuffer>, capacity: number): Uint8Array<ArrayBuffer> {
-    const next = new Uint8Array(capacity);
-    next.set(src);
-    return next;
-}
-
-function growI32(
-    src: Int32Array<ArrayBuffer>,
-    capacity: number,
-    fill: number,
-): Int32Array<ArrayBuffer> {
-    const next = new Int32Array(capacity);
-    // Only the new tail needs the sentinel; `set` overwrites the rest.
-    if (fill !== 0) next.fill(fill, src.length);
-    next.set(src);
-    return next;
 }

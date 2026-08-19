@@ -10,21 +10,11 @@
 //
 // `z` passes through every function unchanged, reserved for a 3D backend.
 
-import { DEG2RAD, vec3, vec3Set } from '@platform/math';
+import { DEG2RAD, finiteOr, positiveOr, vec3, vec3Set } from '@platform/math';
 import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import type { CameraState, ScaleMode, UiAnchor } from './renderer.js';
 // Aliased so `uiToScreen`'s `fitScale` parameter does not shadow this import.
 import { fitScale as stageFitScale } from './viewport.js';
-
-/** `value` when it is finite and positive, else `fallback`. */
-function positiveOr(value: number, fallback: number): number {
-    return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-/** `value` when it is finite, else `fallback`. For coordinates, which may be negative. */
-function finiteOr(value: number, fallback: number): number {
-    return Number.isFinite(value) ? value : fallback;
-}
 
 /** Fractional position of each anchor within the stage rect. y is measured down. */
 const UI_ANCHOR_FRACTION: Record<UiAnchor, { x: number; y: number }> = {

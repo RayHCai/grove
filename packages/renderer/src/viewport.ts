@@ -7,19 +7,9 @@
 // Nothing here throws: option validation belongs to the renderer, and a NaN reaching
 // `camera.viewport` would poison every later frame with no hint where it came from.
 
-import { bounds, boundsHeight, boundsSet, boundsWidth } from '@platform/math';
+import { bounds, boundsHeight, boundsSet, boundsWidth, finiteOr, positiveOr } from '@platform/math';
 import type { Bounds, Size } from '@platform/math';
 import type { CameraState, Framing, ScaleMode } from './renderer.js';
-
-/** `value` when it is finite and positive, else `fallback`. */
-function positiveOr(value: number, fallback: number): number {
-    return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-/** `value` when it is finite, else `fallback`. For coordinates, which may be negative. */
-function finiteOr(value: number, fallback: number): number {
-    return Number.isFinite(value) ? value : fallback;
-}
 
 /**
  * The largest half-extent a viewport may report.

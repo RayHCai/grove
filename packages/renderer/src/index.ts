@@ -61,3 +61,7 @@ export {
 } from './projection.js';
 
 export { DEFAULT_CULL_MARGIN } from './bounds.js';
+
+// The client validates a server-supplied manifest before it reaches the renderer; a second copy of
+// the scheme check is how the two policies drift apart.
+export { isAllowedAssetUrl, LOADER_ASSET_SCHEMES, REMOTE_ASSET_SCHEMES } from './asset-queue.js';
