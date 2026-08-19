@@ -63,6 +63,11 @@ export function boundsHeight(b: Bounds): number {
     return Math.abs(b.bottom - b.top);
 }
 
+/** `true` when all four edges match. Compares as authored: a flipped rect is not an equal one. */
+export function boundsEqual(a: Readonly<Bounds>, b: Readonly<Bounds>): boolean {
+    return a.left === b.left && a.right === b.right && a.top === b.top && a.bottom === b.bottom;
+}
+
 /** `true` when the two rectangles share any area. Touching edges count as overlapping. */
 export function boundsOverlap(a: Bounds, b: Bounds): boolean {
     const aMinX = Math.min(a.left, a.right);

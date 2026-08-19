@@ -3,7 +3,7 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Pure math: vectors, bounds, easing, scalar helpers, seeded random. No dependencies.",
+    "description": "Pure, dependency-free primitives: vectors, bounds, easing, scalar helpers, seeded random, deterministic transcendentals, generation-packed handles, the slot table, typed-array growth.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
