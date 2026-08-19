@@ -20,7 +20,9 @@ import type {
     WireStructuralOp,
     WireTransform,
 } from '@platform/protocol';
+import { finiteOr } from '@platform/math';
 import type { Codec, EncodedFrame, JsonValue, Message, Transport } from '@platform/transport';
+import { RESERVED_KEYS } from '@platform/transport';
 import type { Connection } from './connection.js';
 import { MAX_STATE_DEPTH } from './constants.js';
 
@@ -35,27 +37,23 @@ export function toNetId(id: EntityId): NetId {
     return id as number as NetId;
 }
 
-/** The seven transform fields in core's own declaration order. A read, never a write. */
+/**
+ * The seven transform fields in core's own declaration order. A read, never a write.
+ *
+ * Each non-finite cell degrades to the store's own slot default rather than reaching the codec: core
+ * guards nothing — `setPosition(NaN)` writes straight into the `Float64Array` — and the codec refuses
+ * `NaN`, which would abort the fan-out for every connection and then repeat on every send.
+ */
 export function readTransform(rt: Runtime, id: EntityId): WireTransform {
     return {
-        posX: finite(rt.transforms.posX(id), 0),
-        posY: finite(rt.transforms.posY(id), 0),
-        posZ: finite(rt.transforms.posZ(id), 0),
-        rot: finite(rt.transforms.rotation(id), 0),
-        scale: finite(rt.transforms.scale(id), 1),
-        opacity: finite(rt.transforms.opacity(id), 1),
-        layer: finite(rt.transforms.layer(id), 0),
+        posX: finiteOr(rt.transforms.posX(id), 0),
+        posY: finiteOr(rt.transforms.posY(id), 0),
+        posZ: finiteOr(rt.transforms.posZ(id), 0),
+        rot: finiteOr(rt.transforms.rotation(id), 0),
+        scale: finiteOr(rt.transforms.scale(id), 1),
+        opacity: finiteOr(rt.transforms.opacity(id), 1),
+        layer: finiteOr(rt.transforms.layer(id), 0),
     };
-}
-
-/**
- * Degrades a non-finite cell to the store's own slot default rather than letting it reach the codec.
- *
- * Core guards nothing — `setPosition(NaN)` writes straight into the `Float64Array` — and the codec
- * refuses `NaN`, which would abort the fan-out for every connection and then repeat on every send.
- */
-function finite(value: number, fallback: number): number {
-    return Number.isFinite(value) ? value : fallback;
 }
 
 /**
@@ -253,13 +251,6 @@ function put<K, V>(into: Map<K, V>, key: K, value: V): V {
     return value;
 }
 
-/**
- * Field names a grouped diff cannot carry, so they are dropped and counted like an unrepresentable
- * value. Assigning one would set the bucket's prototype instead of adding a key, and the codec
- * refuses the key on the way out regardless.
- */
-export const RESERVED_FIELDS = new Set(['__proto__', 'constructor', 'prototype']);
-
 function toStateWrite(
     mark: StateMark,
     hosts: Map<string, StateHostAddr>,
@@ -267,7 +258,9 @@ function toStateWrite(
     const record = mark.record as HostRecord;
     const host = hosts.get(record.hostId);
     if (host === undefined) return undefined;
-    if (RESERVED_FIELDS.has(mark.field)) return undefined;
+    // A grouped diff cannot carry these: assigning one would set the bucket's prototype instead of
+    // adding a key, so it is dropped and counted like an unrepresentable value.
+    if (RESERVED_KEYS.has(mark.field)) return undefined;
     const value = encodeStateValue(record.values.get(mark.field));
     // The codec throws on `undefined`, so one unrepresentable field would abort the whole send for
     // every connection. Dropped and counted instead.

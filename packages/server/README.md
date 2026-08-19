@@ -32,8 +32,8 @@ order — all of which is core's. The reliability class of a frame, which is the
 interpolation, which are the client's. And the byte movement, which is the transport's.
 
 It also does not open sockets. A `Transport` is one end of one established connection, so standing up a
-listener is a factory concern: transports arrive from `loopbackPair()` or, later, a WebSocket listener, and
-the composition root wires them into `accept`.
+listener is a factory concern: transports arrive from `loopbackPair()` or from `webSocketTransport(socket)` in
+a listener's connection handler, and the composition root wires them into `accept`.
 
 ## Using it
 
@@ -69,8 +69,8 @@ supplied by the small amount of code that already knows which factory it used.
 
 Unlike core (pumped, never self-driving) and unlike the transport (buffered, pumped by its host), this is the
 layer that advances real time into ticks. But it never reads `Date.now()` or calls `setInterval`: the clock
-arrives as `pump(now)`, or as an injected `TimerSource` when it self-drives. So the whole server is testable
-against a scripted clock with no wall-clock and no socket, which is how its own suite runs.
+arrives as `pump(now)`, or as an injected `TimerSource` when it self-drives. So the whole server runs against a
+scripted clock with no wall clock and no socket.
 
 The accumulator has a per-wake step cap. Past it, the server **sheds** unsimulated wall-clock rather than
 carrying it, so a hitch cannot compound into the spiral of death. What a shed discards is wall-clock, never

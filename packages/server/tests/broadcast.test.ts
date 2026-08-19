@@ -123,6 +123,35 @@ describe('§5.3 — the drain runs once and the broadcast fans it out', () => {
         expect(Number.isInteger(diff?.layer)).toBe(true);
     });
 
+    it('degrades a non-finite cell to the store’s own slot default rather than to the codec', () => {
+        const h = harness({ config: { gameScripts: [Rules] } });
+        const peer = h.joined('a');
+        const rt = h.server.runtime;
+        const crate = rt.entityManager.spawn('crate', 1, 2);
+        // Core guards nothing on the way in, and jsonCodec throws on NaN — which would abort the
+        // fan-out for every connection and then repeat on the next send.
+        rt.transforms.setPosition(crate.entityId, Number.NaN, 2, Number.POSITIVE_INFINITY);
+        rt.transforms.setRotation(crate.entityId, Number.NaN);
+        rt.transforms.setScale(crate.entityId, Number.NaN);
+        rt.transforms.setOpacity(crate.entityId, Number.NaN);
+        rt.transforms.setLayer(crate.entityId, Number.NaN);
+        peer.clear();
+        h.pumpTicks(6);
+
+        const diff = peer.transforms
+            .flatMap((t) => t.transform)
+            .find((d) => d.netId === (crate.entityId as unknown as number));
+        expect(diff).toMatchObject({
+            posX: 0,
+            posY: 2,
+            posZ: 0,
+            rot: 0,
+            scale: 1,
+            opacity: 1,
+            layer: 0,
+        });
+    });
+
     it('a spawn carries a full snapshot with no hierarchy, since parenting arrives as its own op', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
