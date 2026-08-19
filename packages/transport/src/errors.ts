@@ -34,7 +34,21 @@ export type TransportErrorCode =
     /** A second `onMessage` / `onClose` on one end, which would split a connection's frames. */
     | 'handler-already-registered'
     /** A factory was handed an option it cannot honour, so nothing was constructed. */
-    | 'invalid-option';
+    | 'invalid-option'
+    /** A dial never reached OPEN, so no `Transport` was ever handed out and the promise refused. */
+    | 'connect-failed'
+    /**
+     * An established socket ended without either end asking — an `error` event, or a close code
+     * neither side wrote. Distinct from a clean close because `onClose` fires for both.
+     */
+    | 'socket-error'
+    /**
+     * Consecutive silence windows passed with nothing inbound, so the socket is half-open: the link
+     * is gone but TCP has not noticed, which no close event will ever report.
+     */
+    | 'heartbeat-timeout'
+    /** The socket's own send buffer passed its cap, so the peer has stopped draining the connection. */
+    | 'send-buffer-overflow';
 
 /** A transport or codec failure with a machine-readable {@link TransportErrorCode}. */
 export class TransportError extends Error {
