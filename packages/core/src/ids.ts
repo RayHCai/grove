@@ -1,5 +1,4 @@
-// Must be arithmetic, never bitwise: `<<` and `|` coerce to int32, so `generation << 24` wraps
-// negative at generation 128 and starts minting handles that collide with live ones.
+import { handleGeneration, handleIndex, packHandle } from '@platform/math';
 
 /** An opaque handle to an entity slot. Branded so a raw number cannot pass as one. */
 export type EntityId = number & { readonly __entityId: unique symbol };
@@ -7,26 +6,19 @@ export type EntityId = number & { readonly __entityId: unique symbol };
 /** The null handle. Generations start at 1, so a zeroed field is never a valid id. */
 export const NO_ENTITY = 0 as EntityId;
 
-/** Slots per generation. 2^24 = 16,777,216 live entities. */
-export const INDEX_RANGE = 0x100_0000;
-
-/** Highest slot index a handle can address. */
-export const MAX_INDEX = INDEX_RANGE - 1;
-
-/** Highest generation before a handle would leave the safe-integer range. */
-export const MAX_GENERATION = Math.floor(Number.MAX_SAFE_INTEGER / INDEX_RANGE);
+export { INDEX_RANGE, MAX_INDEX, MAX_GENERATION } from '@platform/math';
 
 /** Packs a slot index and generation into a handle. */
 export function packEntityId(index: number, generation: number): EntityId {
-    return (generation * INDEX_RANGE + index) as EntityId;
+    return packHandle(index, generation) as EntityId;
 }
 
 /** The slot index a handle addresses. */
 export function entityIndex(id: EntityId): number {
-    return id % INDEX_RANGE;
+    return handleIndex(id);
 }
 
 /** The generation a handle was minted in. */
 export function entityGeneration(id: EntityId): number {
-    return Math.floor(id / INDEX_RANGE);
+    return handleGeneration(id);
 }

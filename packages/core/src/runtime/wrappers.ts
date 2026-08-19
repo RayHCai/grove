@@ -2,6 +2,7 @@
 // mutating methods mark the replication channel.
 
 import type { HostRecord } from '../state/host-record.js';
+import { currentActingPlayer } from '../dispatch/acting-player.js';
 import type { Player } from './player.js';
 import type { KVStore } from './seams.js';
 import { currentRuntime, hasRuntime } from './runtime.js';
@@ -30,10 +31,6 @@ export abstract class StatefulWrapper {
     abstract serialize(): unknown;
     abstract restore(data: unknown): void;
 
-    protected get bound(): boolean {
-        return this.#record !== null;
-    }
-
     protected requireBound(): void {
         if (!this.#record) {
             throw new Error(
@@ -45,12 +42,6 @@ export abstract class StatefulWrapper {
 
 export class Scoreboard extends StatefulWrapper {
     readonly #scores = new Map<string, number>();
-    #actingPlayer: Player | null = null;
-
-    /** @internal — set by the dispatcher so `add(1)` can default to the acting player. */
-    setActingPlayer(player: Player | null): void {
-        this.#actingPlayer = player;
-    }
 
     add(amount: number, player?: Player): void {
         this.requireBound();
@@ -69,7 +60,7 @@ export class Scoreboard extends StatefulWrapper {
     // Throwing, not returning: a silent no-op here loses a score the creator believed was
     // recorded, and the acting-player default is only available inside a player-driven handler.
     #require(player: Player | undefined, method: string): Player {
-        const p = player ?? this.#actingPlayer;
+        const p = player ?? (currentActingPlayer() as Player | null);
         if (!p) {
             throw new Error(
                 `Scoreboard.${method} needs a player — there is no acting player outside a handler driven by one`,
@@ -102,10 +93,7 @@ export class Scoreboard extends StatefulWrapper {
     }
 
     restore(data: unknown): void {
-        const d = data as { kind?: string; scores?: [string, number][] };
-        if (d?.kind !== 'Scoreboard') return;
-        this.#scores.clear();
-        for (const [id, s] of d.scores ?? []) this.#scores.set(id, s);
+        restoreCounts(this.#scores, data, 'Scoreboard', 'scores');
     }
 }
 
@@ -160,10 +148,7 @@ export class Leaderboard extends StatefulWrapper {
     }
 
     restore(data: unknown): void {
-        const d = data as { kind?: string; scores?: [string, number][] };
-        if (d?.kind !== 'Leaderboard') return;
-        this.#scores.clear();
-        for (const [id, s] of d.scores ?? []) this.#scores.set(id, s);
+        restoreCounts(this.#scores, data, 'Leaderboard', 'scores');
     }
 }
 
@@ -213,10 +198,7 @@ export class Inventory extends StatefulWrapper {
     }
 
     restore(data: unknown): void {
-        const d = data as { kind?: string; items?: [string, number][] };
-        if (d?.kind !== 'Inventory') return;
-        this.#items.clear();
-        for (const [item, c] of d.items ?? []) this.#items.set(item, c);
+        restoreCounts(this.#items, data, 'Inventory', 'items');
     }
 }
 
@@ -262,6 +244,23 @@ export class Team extends StatefulWrapper {
     }
 }
 
+type WirePayload = { kind?: string } & Record<string, unknown>;
+
+// A payload tagged with another wrapper's kind is left alone: the field it came from may since
+// hold a different class, and a half-applied restore is worse than none.
+function restoreCounts(
+    into: Map<string, number>,
+    data: unknown,
+    kind: string,
+    field: string,
+): void {
+    const d = data as WirePayload;
+    if (d?.kind !== kind) return;
+    const entries = (d[field] as [string, number][] | undefined) ?? [];
+    into.clear();
+    for (const [key, count] of entries) into.set(key, count);
+}
+
 // Not a StatefulWrapper: it is advanced a tick at a time and no method here marks the state channel.
 export class Countdown {
     #remainingTicks: number;
@@ -276,16 +275,6 @@ export class Countdown {
         this.#simRate = hasRuntime() ? currentRuntime().simRate : DEFAULT_SIM_RATE;
         this.#remainingTicks = Math.max(0, Math.round(seconds * this.#simRate));
         this.#onZero = onZero;
-    }
-
-    /** @internal — set by the loop; rescales so the remaining time survives a rate change. */
-    setSimRate(rate: number): void {
-        if (rate <= 0 || rate === this.#simRate) return;
-        this.#remainingTicks = Math.max(
-            0,
-            Math.round((this.#remainingTicks / this.#simRate) * rate),
-        );
-        this.#simRate = rate;
     }
 
     get remaining(): number {

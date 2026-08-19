@@ -1,12 +1,10 @@
 // The manifest carries simRate, sendRate and maxPlayers; everything else here is an engine
 // constant rather than a creator knob.
 
-/** Simulation rate options and default; `dt` inside a tick is 1/simRate. */
-export const SIM_RATES = [20, 30, 60] as const;
+/** Default simulation rate; `dt` inside a tick is 1/simRate. */
 export const DEFAULT_SIM_RATE = 60;
 
-/** Replication rate options and default; governs the transform channel's cadence. */
-export const SEND_RATES = [10, 20, 30] as const;
+/** Default replication rate; governs the transform channel's cadence. */
 export const DEFAULT_SEND_RATE = 20;
 
 /** Consecutive throws that disable a handler — any success resets the count. */

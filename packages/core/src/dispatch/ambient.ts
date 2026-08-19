@@ -14,17 +14,6 @@ export function setCurrentInvocation(scope: InvocationScope | null): void {
     current = scope;
 }
 
-/** Runs `fn` with `scope` as the ambient invocation, restoring the previous ambient after. */
-export function withInvocation<T>(scope: InvocationScope, fn: () => T): T {
-    const prev = current;
-    current = scope;
-    try {
-        return fn();
-    } finally {
-        current = prev;
-    }
-}
-
 /** Wraps an engine awaitable so it restores `scope` as the ambient when it settles. */
 export function resumeWith<T>(scope: InvocationScope | null, promise: Promise<T>): Promise<T> {
     return promise.then(

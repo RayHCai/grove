@@ -1,4 +1,4 @@
-// The Runtime is the swappable world the ambient consts (game, hud, random, assets) are facades
+// The Runtime is the swappable world the ambient consts (game, random, assets) are facades
 // over, which is what makes that module-const surface testable and multi-instance-per-process.
 
 import { DEFAULT_SIM_RATE, MAX_LOG_RECORDS } from '../config.js';
@@ -58,21 +58,14 @@ export interface EngineLog extends DispatchLog {
 /** Default log: retains the most recent MAX_LOG_RECORDS error records in memory. */
 export class CollectingLog implements EngineLog {
     readonly #records: Array<HandlerErrorRecord & { phase?: string; disabled?: boolean }> = [];
-    #dropped = 0;
 
     error(record: HandlerErrorRecord & { phase?: string; disabled?: boolean }): void {
         // Capped: a session runs for hours and an unbounded array is a slow leak that only shows
         // up on the machine already having a bad day.
         if (this.#records.length >= MAX_LOG_RECORDS) {
             this.#records.shift();
-            this.#dropped++;
         }
         this.#records.push(record);
-    }
-
-    /** Records evicted by the cap, so a reader can tell a quiet log from a truncated one. */
-    get dropped(): number {
-        return this.#dropped;
     }
 
     warn(_message: string): void {

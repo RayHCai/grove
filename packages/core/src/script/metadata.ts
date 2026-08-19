@@ -2,7 +2,7 @@
 // override re-registers nothing; writes fork the inherited record so a sibling never reaches
 // the base.
 
-import type { Concurrency, EventPhase } from './types.js';
+import type { HandlerOptions } from './types.js';
 
 export interface HandlerDecl {
     event: string;
@@ -11,10 +11,8 @@ export interface HandlerDecl {
     opts: HandlerDeclOpts;
 }
 
-export interface HandlerDeclOpts {
-    concurrency?: Concurrency;
-    on?: EventPhase;
-}
+/** The creator-facing name is HandlerOptions; the registry stores exactly that shape. */
+export type HandlerDeclOpts = HandlerOptions;
 
 export type HandlerKind =
     | 'onStart'
@@ -65,20 +63,4 @@ export function getMetadata(
 ): ScriptMetadata | undefined {
     const meta = (klass as { [Symbol.metadata]?: Record<symbol, ScriptMetadata> })[Symbol.metadata];
     return meta?.[METADATA_KEY];
-}
-
-/** The class's own handlers table — getOrCreateMetadata already forked it. */
-export function ensureOwnHandlers(
-    md: ScriptMetadata,
-    _metadata: DecoratorMetadataObject,
-): HandlerDecl[] {
-    return md.handlers;
-}
-
-/** The class's own state set — getOrCreateMetadata already forked it. */
-export function ensureOwnState(
-    md: ScriptMetadata,
-    _metadata: DecoratorMetadataObject,
-): Set<string> {
-    return md.state;
 }
