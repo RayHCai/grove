@@ -121,10 +121,6 @@ export class TweenEngine {
         }
     }
 
-    get activeCount(): number {
-        return this.#tweens.size;
-    }
-
     clear(): void {
         this.#tweens.clear();
         this.#byProp.clear();

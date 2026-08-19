@@ -5,6 +5,7 @@ import { Broadphase } from '../world/broadphase.js';
 import type { TransformView } from '../world/broadphase.js';
 import type { Runtime } from './runtime.js';
 import type { Entity } from './entity.js';
+import { liveTransformView } from './transform-view.js';
 
 export class ContactSource {
     readonly #rt: Runtime;
@@ -16,7 +17,7 @@ export class ContactSource {
 
     constructor(rt: Runtime) {
         this.#rt = rt;
-        this.#view = viewOverLive(rt);
+        this.#view = liveTransformView(rt, this.#halfExtent);
         this.#live = new Broadphase(this.#view);
     }
 
@@ -74,16 +75,6 @@ export class ContactSource {
     #historicalBroadphase(): Broadphase {
         return this.#rt.lagRing?.broadphaseAtLatest(this.#halfExtent) ?? this.#live;
     }
-}
-
-function viewOverLive(rt: Runtime): TransformView {
-    return {
-        liveIds: (o?: EntityId[]) => rt.entities.liveIds(o),
-        posX: (id) => rt.transforms.posX(id),
-        posY: (id) => rt.transforms.posY(id),
-        halfWidth: (id) => halfExtent(rt, id, 'w'),
-        halfHeight: (id) => halfExtent(rt, id, 'h'),
-    };
 }
 
 function halfExtent(rt: Runtime, id: EntityId, axis: 'w' | 'h'): number {

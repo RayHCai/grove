@@ -102,6 +102,56 @@ describe('wrapper behavior', () => {
         expect(b.of(player('x'))).toBe(7);
     });
 
+    it('serialize / restore round-trips a Leaderboard, order and all', () => {
+        withPlayerLookup();
+        const a = new Leaderboard({ order: 'low' });
+        a.bind(createHostRecord('game'), 'times');
+        a.submit(30, player('x'));
+        a.submit(10, player('y'));
+        const wire = a.serialize();
+        expect(Object.keys(wire as object)).toEqual(['kind', 'order', 'scores']);
+        expect(wire).toEqual({
+            kind: 'Leaderboard',
+            order: 'low',
+            scores: [
+                ['x', 30],
+                ['y', 10],
+            ],
+        });
+
+        const b = new Leaderboard({ order: 'low' });
+        b.bind(createHostRecord('game'), 'times');
+        b.restore(wire);
+        expect(b.of(player('x'))).toBe(30);
+        expect(b.rankOf(player('y'))).toBe(1);
+    });
+
+    it('serialize / restore refills a Team that already holds another member', () => {
+        withPlayerLookup();
+        const a = new Team('red');
+        a.bind(createHostRecord('game'), 'red');
+        a.add(player('x'));
+        const wire = a.serialize();
+        expect(Object.keys(wire as object)).toEqual(['kind', 'name', 'members']);
+        expect(wire).toEqual({ kind: 'Team', name: 'red', members: ['x'] });
+
+        const b = new Team('red');
+        b.bind(createHostRecord('game'), 'red');
+        b.add(player('stale'));
+        b.restore(wire);
+        expect(b.has(player('stale'))).toBe(false);
+        expect(b.players.map((p) => p.id)).toEqual(['x']);
+    });
+
+    it('Team.restore leaves membership alone when handed another class wire form', () => {
+        withPlayerLookup();
+        const t = new Team('red');
+        t.bind(createHostRecord('game'), 'red');
+        t.add(player('a'));
+        t.restore(new Scoreboard().serialize());
+        expect(t.players.map((p) => p.id)).toEqual(['a']);
+    });
+
     it('restore ignores a wire form from a different wrapper class (tag mismatch)', () => {
         const inv = new Inventory(player('a'));
         inv.bind(createHostRecord('player:a'), 'bag');

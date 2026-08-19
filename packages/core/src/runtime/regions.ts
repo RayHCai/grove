@@ -20,8 +20,4 @@ export class RegionIndex {
     bounds(name: string): Bounds | undefined {
         return this.#regions.get(name);
     }
-
-    get names(): string[] {
-        return [...this.#regions.keys()];
-    }
 }

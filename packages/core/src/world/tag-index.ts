@@ -60,10 +60,6 @@ export class TagIndex implements SnapshotStore<TagBuffer> {
         return entityTags ? [...entityTags] : [];
     }
 
-    entitiesWithTag(tag: string): ReadonlySet<EntityId> {
-        return this.#byTag.get(tag) ?? EMPTY_SET;
-    }
-
     removeAll(id: EntityId): void {
         const index = entityIndex(id);
         const entityTags = this.#byEntity.get(index);
@@ -158,5 +154,3 @@ export class TagIndex implements SnapshotStore<TagBuffer> {
         this.#byEntity.delete(index);
     }
 }
-
-const EMPTY_SET: ReadonlySet<EntityId> = new Set();

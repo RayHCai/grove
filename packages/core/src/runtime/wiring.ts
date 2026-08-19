@@ -5,7 +5,7 @@ import { getMetadata } from '../script/index.js';
 import { makeInstance } from '../dispatch/instances.js';
 import type { DispatchOptions } from '../dispatch/dispatcher.js';
 import { STATE_BACKING, authoredValue, redirectState } from '../state/backing.js';
-import { tagOf } from '../state/host-record.js';
+import { tagOf, tagsMatch } from '../state/host-record.js';
 import type { HostRecord } from '../state/host-record.js';
 import { StatefulWrapper } from './wrappers.js';
 import { setScriptRuntime } from './script-runtime.js';
@@ -21,12 +21,9 @@ type AnyScriptClass = new () => BaseScript<any>;
 
 export class Wiring {
     readonly #rt: Runtime;
-    /** Which locations run here: server+synced on a server, client+synced on a client. */
-    readonly activeLocations: ReadonlySet<ScriptLocation>;
 
-    constructor(rt: Runtime, activeLocations: ReadonlySet<ScriptLocation>) {
+    constructor(rt: Runtime) {
         this.#rt = rt;
-        this.activeLocations = activeLocations;
     }
 
     attachToEntity(id: EntityId, klass: AnyScriptClass): object {
@@ -130,7 +127,7 @@ export class Wiring {
             // A persisted value whose tag no longer matches the declaration is discarded.
             const persisted = this.#rt.persisted?.get(record.hostId, field);
             const seed =
-                persisted !== undefined && tagsMatchLoose(tagOf(persisted), declaredTag)
+                persisted !== undefined && tagsMatch(tagOf(persisted), declaredTag)
                     ? persisted
                     : authored;
             record.values.set(field, seed);
@@ -193,21 +190,13 @@ export class Wiring {
     }
 }
 
-function tagsMatchLoose(a: ReturnType<typeof tagOf>, b: ReturnType<typeof tagOf>): boolean {
-    if (a.kind !== b.kind) return false;
-    if (
-        (a.kind === 'object' || a.kind === 'array') &&
-        (b.kind === 'object' || b.kind === 'array')
-    ) {
-        return a.shape === b.shape;
-    }
-    return true;
-}
+// One set per role rather than one per call: this is read once a tick and never written.
+const SERVER_LOCATIONS: ReadonlySet<ScriptLocation> = new Set(['server', 'synced']);
+const CLIENT_LOCATIONS: ReadonlySet<ScriptLocation> = new Set(['client', 'synced']);
 
+/** Which locations run here: server+synced on a server, client+synced on a client. */
 export function activeLocationsFor(role: 'server' | 'client'): ReadonlySet<ScriptLocation> {
-    return role === 'server'
-        ? new Set<ScriptLocation>(['server', 'synced'])
-        : new Set<ScriptLocation>(['client', 'synced']);
+    return role === 'server' ? SERVER_LOCATIONS : CLIENT_LOCATIONS;
 }
 
 export type { DispatchOptions };

@@ -88,10 +88,6 @@ export class ScopeTree {
         return undefined;
     }
 
-    invocationsForHost(hostId: ScopeId): ReadonlySet<InvocationScope> {
-        return this.#hostScopes.get(hostId) ?? EMPTY;
-    }
-
     clear(): void {
         for (const [, invocations] of this.#hostScopes) {
             for (const inv of invocations) {
@@ -103,5 +99,3 @@ export class ScopeTree {
         this.#invocations.clear();
     }
 }
-
-const EMPTY: ReadonlySet<InvocationScope> = new Set();

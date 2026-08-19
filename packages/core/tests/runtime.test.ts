@@ -6,6 +6,8 @@ import { Target } from '../dist/testkit/fixtures.js';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import { game } from '../src/runtime/game.js';
+import { HUDScreen, hud } from '../src/runtime/hud.js';
+import { Countdown } from '../src/runtime/wrappers.js';
 import { bounds } from '@platform/math';
 
 beforeEach(() => {
@@ -62,5 +64,47 @@ describe('runtime end to end', () => {
         e.addScript(Target as never);
         e.destroy();
         await expect(e.send('damage', { amount: 1 })).resolves.toBeUndefined();
+    });
+});
+
+describe('hud', () => {
+    it('is an inert instance, so a creator call is a no-op and not a TypeError', () => {
+        expect(() => {
+            hud.text('score', '10');
+            hud.number('lives', 3);
+            hud.bar('health', 0.5);
+            hud.icon('badge', 'gold-star');
+            hud.timer('clock', new Countdown(30));
+            hud.show('score');
+            hud.hide('score');
+            hud.enable('score');
+            hud.enable('score', false);
+            hud.disable('score');
+            hud.close('pause');
+            hud.closeAll();
+        }).not.toThrow();
+        expect(hud.screen('pause')).toBeNull();
+        expect(hud.player).toBeUndefined();
+    });
+
+    it('reads its screen lists as empty rather than throwing', () => {
+        expect(hud.screens).toEqual([]);
+        expect(hud.openScreens).toEqual([]);
+        expect(hud.openScreens.length).toBe(0);
+    });
+
+    it('open() hands back an inert screen whose own methods no-op', () => {
+        const screen = hud.open('pause');
+        expect(screen).toBeInstanceOf(HUDScreen);
+        expect(screen.name).toBe('');
+        expect(screen.visible).toBe(false);
+        expect(() => {
+            screen.open();
+            screen.close();
+        }).not.toThrow();
+        expect(screen.visible).toBe(false);
+        expect(screen.addScript(Target as never)).toBe(screen);
+        expect(hud.screens).toEqual([]);
+        expect(hud.openScreens).toEqual([]);
     });
 });

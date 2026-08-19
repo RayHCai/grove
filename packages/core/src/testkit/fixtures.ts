@@ -70,19 +70,15 @@ export class Target extends SyncedScript<Entity> {
     }
 }
 
-// The pending promise is exposed so a test can settle the await deterministically.
-export class Cooldown extends SyncedScript<Entity> {
-    fires = 0;
-    completions = 0;
+// The pending promise is exposed so a test can settle the await deterministically, and this base
+// declares no handler because a decorated one here would register on both subclasses.
+abstract class Parked extends SyncedScript<Entity> {
     #release: (() => void) | null = null;
 
-    @onEvent('attack', { concurrency: 'ignore' })
-    async attack(): Promise<void> {
-        this.fires += 1;
-        await new Promise<void>((resolve) => {
+    protected park(): Promise<void> {
+        return new Promise<void>((resolve) => {
             this.#release = resolve;
         });
-        this.completions += 1;
     }
 
     release(): void {
@@ -92,24 +88,27 @@ export class Cooldown extends SyncedScript<Entity> {
     }
 }
 
-export class Aimer extends SyncedScript<Entity> {
+export class Cooldown extends Parked {
+    fires = 0;
+    completions = 0;
+
+    @onEvent('attack', { concurrency: 'ignore' })
+    async attack(): Promise<void> {
+        this.fires += 1;
+        await this.park();
+        this.completions += 1;
+    }
+}
+
+export class Aimer extends Parked {
     starts = 0;
     finishes = 0;
-    #release: (() => void) | null = null;
 
     @onEvent('aim', { concurrency: 'restart' })
     async aim(): Promise<void> {
         this.starts += 1;
-        await new Promise<void>((resolve) => {
-            this.#release = resolve;
-        });
+        await this.park();
         this.finishes += 1;
-    }
-
-    release(): void {
-        const r = this.#release;
-        this.#release = null;
-        r?.();
     }
 }
 

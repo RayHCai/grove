@@ -88,10 +88,6 @@ export class EntityManager {
         }
     }
 
-    get pendingDestroyCount(): number {
-        return this.#pendingDestroy.length;
-    }
-
     clear(): void {
         this.#facades.clear();
         this.#pendingDestroy.length = 0;
