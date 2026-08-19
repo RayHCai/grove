@@ -2,9 +2,8 @@
 
 import type { Bounds } from '@platform/math';
 import type { EntityId } from '../ids.js';
-import type { HandlerKind } from '../script/index.js';
+import type { HandlerKind, ScriptLocation } from '../script/index.js';
 import { Broadphase } from '../world/broadphase.js';
-import type { TransformView } from '../world/broadphase.js';
 import { ContactSource } from './contacts.js';
 import { RuntimeGame, WorldQuery } from './game.js';
 import { LagRing } from './lag-ring.js';
@@ -21,8 +20,9 @@ import type { AssetKind } from './assets.js';
 import { Wiring, activeLocationsFor } from './wiring.js';
 import { createRuntime } from './runtime.js';
 import type { Runtime, TickPasses } from './runtime.js';
-import type { DispatchOptions } from '../dispatch/dispatcher.js';
+import type { DispatchCtx, DispatchOptions } from '../dispatch/dispatcher.js';
 import { entityKey } from './hosts.js';
+import { liveTransformView } from './transform-view.js';
 
 export interface GameManifest {
     role?: 'server' | 'client';
@@ -56,9 +56,9 @@ export function loadGame(manifest: GameManifest = {}): Runtime {
     rt.roster = new Roster(rt);
     rt.contacts = new ContactSource(rt);
     rt.query = new WorldQuery(rt);
-    rt.broadphase = new Broadphase(transformView(rt));
+    rt.broadphase = new Broadphase(liveTransformView(rt));
     rt.lagRing = new LagRing(rt.transforms, rt.entities, rt.simRate);
-    rt.wiring = new Wiring(rt, activeLocationsFor(role));
+    rt.wiring = new Wiring(rt);
     rt.gameInstance = new RuntimeGame(rt);
 
     const registry = new AssetRegistry();
@@ -99,21 +99,23 @@ export function leavePlayer(rt: Runtime, id: string): void {
     rt.playerManager?.remove(id);
 }
 
+/** The per-tick half of a DispatchCtx; `extra` carries whatever the event itself supplies. */
+function tickCtx(rt: Runtime, extra?: Omit<Partial<DispatchCtx>, 'dt' | 'alive'>): DispatchCtx {
+    return { data: {}, dt: 1 / rt.simRate, alive: true, ...extra };
+}
+
+function roleLocations(rt: Runtime): ReadonlySet<ScriptLocation> {
+    return activeLocationsFor(rt.isServer ? 'server' : 'client');
+}
+
 function dispatchLifecycle(rt: Runtime, kind: 'onStart' | 'onEnd', event: string): Promise<void> {
     const pending: Promise<void>[] = [];
     for (const si of rt.instances.all()) {
         pending.push(
-            rt.dispatcher.dispatch(
-                [si],
-                kind,
-                event,
-                '',
-                { data: {}, dt: 1 / rt.simRate, alive: true },
-                {
-                    activeLocations: activeLocationsFor(rt.isServer ? 'server' : 'client'),
-                    tick: rt.tick,
-                },
-            ),
+            rt.dispatcher.dispatch([si], kind, event, '', tickCtx(rt), {
+                activeLocations: roleLocations(rt),
+                tick: rt.tick,
+            }),
         );
     }
     return Promise.all(pending).then(() => undefined);
@@ -131,8 +133,8 @@ function dispatchToHost(
         kind,
         event,
         hostKey,
-        { data: {}, dt: 1 / rt.simRate, alive: true, player: ctx.player },
-        { activeLocations: activeLocationsFor(rt.isServer ? 'server' : 'client'), tick: rt.tick },
+        tickCtx(rt, { player: ctx.player }),
+        { activeLocations: roleLocations(rt), tick: rt.tick },
     );
 }
 
@@ -151,14 +153,7 @@ function deliverRequest(
             'onRequest',
             name,
             '',
-            {
-                data: payload ?? {},
-                dt: 1 / rt.simRate,
-                alive: true,
-                player,
-                from: null,
-                viewTick: rt.tick,
-            },
+            tickCtx(rt, { data: payload ?? {}, player, from: null, viewTick: rt.tick }),
             { activeLocations: activeLocationsFor('server'), tick: rt.tick },
         );
     }
@@ -177,32 +172,15 @@ function dispatchTo(
         'onEvent',
         event,
         String(id as number),
-        { data: payload ?? {}, dt: 1 / rt.simRate, alive: true, from: null },
-        { activeLocations: activeLocationsFor(rt.isServer ? 'server' : 'client'), tick: rt.tick },
+        tickCtx(rt, { data: payload ?? {}, from: null }),
+        { activeLocations: roleLocations(rt), tick: rt.tick },
     );
-}
-
-function transformView(rt: Runtime): TransformView {
-    return {
-        liveIds: (o: EntityId[] = []) => rt.entities.liveIds(o),
-        posX: (id) => rt.transforms.posX(id),
-        posY: (id) => rt.transforms.posY(id),
-        halfWidth: () => 0,
-        halfHeight: () => 0,
-    };
 }
 
 function makePasses(rt: Runtime): TickPasses {
     const dispatchKind = (dispatch: DispatchOptions, kind: HandlerKind, event: string) => {
         for (const si of rt.instances.all()) {
-            void rt.dispatcher.dispatch(
-                [si],
-                kind,
-                event,
-                '',
-                { data: {}, dt: 1 / rt.simRate, alive: true },
-                dispatch,
-            );
+            void rt.dispatcher.dispatch([si], kind, event, '', tickCtx(rt), dispatch);
         }
     };
 
@@ -237,7 +215,7 @@ function makePasses(rt: Runtime): TickPasses {
             // A ClientScript's @onUpdate is display-rate via frame(), never the sim step.
             const simUpdate: DispatchOptions = {
                 ...dispatch,
-                activeLocations: new Set(['server', 'synced'] as const),
+                activeLocations: activeLocationsFor('server'),
             };
             dispatchKind(simUpdate, 'onUpdate', '@update');
         },
@@ -258,7 +236,7 @@ function fireCollide(
             'onCollide',
             tag,
             String(self as number),
-            { data: {}, dt: 1 / rt.simRate, alive: true, other: otherEntity },
+            tickCtx(rt, { other: otherEntity }),
             dispatch,
         );
     }

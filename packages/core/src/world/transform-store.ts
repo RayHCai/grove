@@ -2,6 +2,7 @@
 // store through a sink. Float64 because composed positions accumulate and drift costs more
 // than the memory does.
 
+import { growF64, growI32, grownCapacity } from '@platform/math';
 import type { EntityId } from '../ids.js';
 import { entityIndex } from '../ids.js';
 import type { Scope, ScopeMode, SnapshotStore } from '../loop/store-registry.js';
@@ -50,19 +51,6 @@ function growBuffer(into: TransformBuffer, capacity: number): void {
     into.layer = growI32(into.layer, capacity);
 }
 
-function growF64(src: Float64Array<ArrayBuffer>, cap: number, fill = 0): Float64Array<ArrayBuffer> {
-    const next = new Float64Array(cap);
-    next.set(src);
-    if (fill !== 0) next.fill(fill, src.length);
-    return next;
-}
-
-function growI32(src: Int32Array<ArrayBuffer>, cap: number): Int32Array<ArrayBuffer> {
-    const next = new Int32Array(cap);
-    next.set(src);
-    return next;
-}
-
 export class SimTransformStore implements SnapshotStore<TransformBuffer> {
     readonly storeName = 'transforms';
     readonly scopeMode: ScopeMode = 'filtered';
@@ -78,10 +66,6 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
 
     /** Slot indexes written since the last drain. */
     readonly #dirty = new Set<number>();
-
-    get slotCount(): number {
-        return this.#count;
-    }
 
     initSlot(id: EntityId): void {
         const index = entityIndex(id);
@@ -243,8 +227,7 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
 
     #ensure(needed: number): void {
         if (needed <= this.#posX.length) return;
-        let cap = this.#posX.length;
-        while (cap < needed) cap *= 2;
+        const cap = grownCapacity(this.#posX.length, needed);
         this.#posX = growF64(this.#posX, cap);
         this.#posY = growF64(this.#posY, cap);
         this.#posZ = growF64(this.#posZ, cap);

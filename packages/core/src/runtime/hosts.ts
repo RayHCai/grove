@@ -60,7 +60,7 @@ export class HostTable {
     }
 
     scopeForEntity(id: number): ScopeId {
-        return this.scopeId(`entity:${id}`);
+        return this.scopeId(entityKey(id));
     }
 
     clear(): void {

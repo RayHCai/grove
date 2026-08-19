@@ -5,6 +5,7 @@ import { BREAKER_THRESHOLD, MAX_DEDUP_KEYS, MAX_SEND_DEPTH } from '../config.js'
 import type { EventPhase, HandlerDecl, HandlerKind, ScriptLocation } from '../script/index.js';
 import { defaultConcurrency } from '../script/index.js';
 import type { HandlerErrorRecord } from '../errors.js';
+import { currentActingPlayer, setActingPlayer } from './acting-player.js';
 import { currentInvocation, setCurrentInvocation, resumeWith } from './ambient.js';
 import type { ScopeTree } from './scope-tree.js';
 import type { BreakerCounters } from './breaker.js';
@@ -149,7 +150,11 @@ export class Dispatcher {
         // Restored, not cleared: a nested synchronous send would otherwise return the outer handler
         // to its own body with no invocation, orphaning any timer it starts next.
         const outer = currentInvocation();
+        const outerPlayer = currentActingPlayer();
         setCurrentInvocation(scope);
+        // The acting player a wrapper defaults to; only the synchronous part of the handler is
+        // covered, since a parked continuation resumes with no ambient of its own.
+        setActingPlayer(ctx.player ?? null);
         let result: unknown;
         try {
             result = fn.call(si.instance, ctx);
@@ -157,9 +162,11 @@ export class Dispatcher {
             this.#recordThrow(si, method, hostId, tick, decl.event, err);
             this.#scopes.completeInvocation(scope);
             setCurrentInvocation(outer);
+            setActingPlayer(outerPlayer);
             return null;
         }
         setCurrentInvocation(outer);
+        setActingPlayer(outerPlayer);
 
         if (!(result instanceof Promise)) {
             this.#breaker.recordSuccess(si.id, method);
@@ -222,9 +229,5 @@ export class Dispatcher {
     /** How many times `class#method#message` has thrown, including the suppressed repeats. */
     throwCount(scriptClass: string, method: string, message: string): number {
         return this.#dedup.get(`${scriptClass}#${method}#${message}`) ?? 0;
-    }
-
-    clearDedup(): void {
-        this.#dedup.clear();
     }
 }

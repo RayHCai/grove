@@ -4,8 +4,8 @@ import type { Countdown } from './wrappers.js';
 import type { Player } from './player.js';
 
 export class HUDScreen {
-    readonly name!: string;
-    readonly visible!: boolean;
+    readonly name: string = '';
+    readonly visible: boolean = false;
 
     open(): void {}
     close(): void {}
@@ -28,8 +28,10 @@ export class HUD {
     enable(_widget: string, _enabled?: boolean): void {}
     disable(_widget: string): void {}
 
+    // An inert screen rather than null: `hud.open('pause').close()` should no-op like every other
+    // call here, and the declared return type is non-null.
     open(_screen: string): HUDScreen {
-        return null!;
+        return new HUDScreen();
     }
     close(_screen: string): void {}
     closeAll(): void {}
@@ -37,8 +39,10 @@ export class HUD {
     screen(_name: string): HUDScreen | null {
         return null;
     }
-    readonly screens!: HUDScreen[];
-    readonly openScreens!: HUDScreen[];
+    // Real arrays, not declarations: reading one off the inert `hud` should be an empty list rather
+    // than a TypeError one line later.
+    readonly screens: HUDScreen[] = [];
+    readonly openScreens: HUDScreen[] = [];
 }
 
-export const hud: HUD = null!;
+export const hud: HUD = new HUD();
