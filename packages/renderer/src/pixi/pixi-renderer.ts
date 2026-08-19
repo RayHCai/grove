@@ -1,34 +1,24 @@
 // Orchestration only: no arithmetic and no store logic. What is left here is genuinely Pixi's —
 // `Application` setup, the DPR read, the ResizeObserver, the asset pipeline, the context guard and
-// presenting a frame — while the shared half lives in `RendererCore` and the display objects behind
-// `PixiSink`.
+// presenting a frame — while the shared half lives in `RendererShell` plus `RendererCore`, and
+// the display objects behind `PixiSink`.
 
 import { Application } from 'pixi.js';
-import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
+import type { Size } from '@platform/math';
 import type {
     AssetInfo,
     AssetLoadResult,
     AssetManifestEntry,
     AssetUnloadResult,
-    CameraState,
     ContextState,
-    InspectOptions,
-    IRenderer,
-    NodeDesc,
-    NodePatch,
-    RendererEvents,
     RendererInitOptions,
-    SceneSnapshot,
-    Surface,
     TextStyle,
-    Transform,
 } from '../renderer.js';
-import type { NodeId } from '../node-id.js';
-import { NO_NODE } from '../node-id.js';
 import { rendererError } from '../errors.js';
-import { AssetQueue, validateAssetEntry } from '../asset-queue.js';
+import { validateAssetEntry } from '../asset-queue.js';
 import type { MergedAssetWork } from '../asset-queue.js';
-import { emptySnapshot, RendererCore, resolveInitOptions } from '../core/renderer-core.js';
+import { RendererCore, resolveInitOptions } from '../core/renderer-core.js';
+import { assetNames, RendererShell } from '../core/renderer-shell.js';
 import { effectiveResolution } from '../viewport.js';
 import { AssetRegistry } from './asset-registry.js';
 import { measureText, rasterizeText } from './text-raster.js';
@@ -40,21 +30,14 @@ import { CANCELLED_REASON, ContextGuard } from './context-guard.js';
 const PLACEHOLDER_SIZE: Size = { width: 1, height: 1 };
 
 /** The PixiJS v8 implementation of {@link IRenderer}. */
-export class PixiRenderer implements IRenderer {
+export class PixiRenderer extends RendererShell {
     #app: Application | null = null;
-    #core: RendererCore | null = null;
     #sink: PixiSink | null = null;
     #surfaces: SurfaceTree | null = null;
     #guard: ContextGuard | null = null;
     #observer: ResizeObserver | null = null;
-    #destroyed = false;
 
-    readonly #queue = new AssetQueue();
     readonly #assets = new AssetRegistry();
-
-    get initialized(): boolean {
-        return this.#core !== null && !this.#destroyed;
-    }
 
     get contextState(): ContextState {
         return this.#guard?.state ?? 'ok';
@@ -67,7 +50,7 @@ export class PixiRenderer implements IRenderer {
     // `async` so an option violation rejects rather than throwing synchronously, matching the
     // headless backend; `init` returns a promise at all because `Application.init()` is async.
     async init(options: RendererInitOptions): Promise<void> {
-        if (this.#core !== null) {
+        if (this.core !== null) {
             rendererError('already-initialized', 'init() was already called on this renderer');
         }
 
@@ -110,7 +93,7 @@ export class PixiRenderer implements IRenderer {
         const core = new RendererCore(sink, config);
         sink.bind(core.xf);
         this.#sink = sink;
-        this.#core = core;
+        this.core = core;
         this.#installGuard(app);
 
         if (options.autoResize !== false) this.#installObserver(options.container);
@@ -118,8 +101,8 @@ export class PixiRenderer implements IRenderer {
     }
 
     destroy(): void {
-        if (this.#destroyed) return;
-        this.#destroyed = true;
+        if (this.destroyed) return;
+        this.destroyed = true;
 
         this.#observer?.disconnect();
         this.#observer = null;
@@ -127,12 +110,10 @@ export class PixiRenderer implements IRenderer {
         this.#guard?.destroy();
         this.#guard = null;
 
-        this.#core?.teardown();
-        this.#core = null;
+        this.teardownCore();
         this.#sink = null;
         this.#surfaces?.destroy();
         this.#surfaces = null;
-        this.#queue.clear();
         this.#assets.clear();
 
         // `removeView: true`, so a re-init on the same element cannot stack a second canvas.
@@ -140,41 +121,15 @@ export class PixiRenderer implements IRenderer {
         this.#app = null;
     }
 
-    resize(cssWidth: number, cssHeight: number): void {
-        const core = this.#live();
+    render(): void {
+        const core = this.live();
         if (core === null) return;
-        core.setCanvasSize(cssWidth, cssHeight);
-        this.#app?.renderer.resize(core.canvasSize.width, core.canvasSize.height, core.resolution);
-        core.emit('resize', {
-            canvas: { ...core.canvasSize },
-            stage: { ...core.stageRect },
-            viewport: { ...core.viewport },
-            resolution: core.resolution,
-        });
-    }
+        // A no-op while the context is gone: the store stayed current, so the next good frame is
+        // correct with no caller involvement.
+        if (this.#guard?.lost === true) return;
 
-    get canvasSize(): Readonly<Size> {
-        return this.#core?.canvasSize ?? { width: 0, height: 0 };
-    }
-
-    get resolution(): number {
-        return this.#core?.resolution ?? 1;
-    }
-
-    get stageRect(): Readonly<Bounds> {
-        return this.#core?.stageRect ?? { left: 0, right: 0, top: 0, bottom: 0 };
-    }
-
-    get viewport(): Bounds {
-        return this.#core?.viewport ?? { left: 0, right: 0, top: 0, bottom: 0 };
-    }
-
-    setSurfaceVisible(surface: Surface, visible: boolean): void {
-        this.#live()?.setSurfaceVisible(surface, visible);
-    }
-
-    isSurfaceEnabled(surface: Surface): boolean {
-        return this.#core?.isSurfaceEnabled(surface) ?? false;
+        core.flush();
+        this.#app?.render();
     }
 
     async loadAsset(entry: AssetManifestEntry): Promise<AssetInfo> {
@@ -187,7 +142,7 @@ export class PixiRenderer implements IRenderer {
     }
 
     async loadAssets(entries: readonly AssetManifestEntry[]): Promise<AssetLoadResult> {
-        if (this.#live() === null) return { loaded: [], failed: [], queued: false };
+        if (this.live() === null) return { loaded: [], failed: [], queued: false };
 
         const guard = this.#guard;
         if (guard?.lost === true) {
@@ -195,7 +150,7 @@ export class PixiRenderer implements IRenderer {
             // deferred operation only reports what landed — replaying the load here would upload
             // every entry a second time.
             const names = entries.map((entry) => entry.name);
-            for (const entry of entries) this.#queue.load(entry);
+            for (const entry of entries) this.queue.load(entry);
             return guard.run(
                 async () => this.#loadResultFor(names),
                 () => cancelledLoad(names),
@@ -204,27 +159,27 @@ export class PixiRenderer implements IRenderer {
         return this.#loadNow(entries);
     }
 
-    async unloadAssets(
+    override async unloadAssets(
         entries: readonly (string | AssetManifestEntry)[],
     ): Promise<AssetUnloadResult> {
-        if (this.#live() === null) {
+        if (this.live() === null) {
             return { unloaded: [], unknown: [], inUse: [], queued: false };
         }
 
-        const names = entries.map((entry) => (typeof entry === 'string' ? entry : entry.name));
+        const names = assetNames(entries);
         const guard = this.#guard;
         if (guard?.lost === true) {
             // Reported from current residency and resolved now: the restore's merge performs the
             // drop, and a deferred replay would run after it and report every name as unknown.
             const result = this.#unloadIntent(names);
-            for (const name of names) this.#queue.unload(name);
+            for (const name of names) this.queue.unload(name);
             return result;
         }
-        return this.#unloadNow(names);
+        return Promise.resolve(this.unloadResident(names));
     }
 
     async createTextAsset(name: string, text: string, style?: TextStyle): Promise<AssetInfo> {
-        if (this.#live() === null) return { name, size: { width: 0, height: 0 } };
+        if (this.live() === null) return { name, size: { width: 0, height: 0 } };
 
         const entry: AssetManifestEntry = {
             name,
@@ -247,171 +202,67 @@ export class PixiRenderer implements IRenderer {
         const guard = this.#guard;
         if (guard?.lost === true) {
             // Resolves with the measured size now; the restore's merge rasterizes the texture.
-            this.#queue.load(entry);
+            this.queue.load(entry);
             return { name, size: { ...size } };
         }
         return upload();
-    }
-
-    hasAsset(name: string): boolean {
-        // Intended state, post-queue, so a caller cannot branch wrongly mid-loss.
-        return this.#queue.intendedHas(name, this.#assets.has(name));
     }
 
     getAssetSize(name: string): Readonly<Size> | null {
         return this.#assets.sizeOf(name);
     }
 
-    createNode(desc: NodeDesc): NodeId {
-        return this.#live()?.createNode(desc) ?? NO_NODE;
+    protected resizeSurface(width: number, height: number, resolution: number): void {
+        this.#app?.renderer.resize(width, height, resolution);
     }
 
-    createNodes(descs: readonly NodeDesc[], out: NodeId[] = []): NodeId[] {
-        return this.#live()?.createNodes(descs, out) ?? ((out.length = 0), out);
+    protected get fallbackAssetSize(): Readonly<Size> {
+        return PLACEHOLDER_SIZE;
     }
 
-    async createNodeAsync(desc: NodeDesc): Promise<{ id: NodeId } & AssetInfo> {
-        const id = this.createNode(desc);
-        const name = desc.kind === 'sprite' ? desc.texture : '';
-        const size =
-            desc.kind === 'text'
-                ? measureText(desc.text, desc.style)
-                : (this.getAssetSize(name) ?? PLACEHOLDER_SIZE);
-        return Promise.resolve({ id, name, size: { ...size } });
+    protected measureTextSize(text: string, style: TextStyle | undefined): Size {
+        return measureText(text, style);
     }
 
-    destroyNode(id: NodeId): void {
-        this.#live()?.destroyNode(id);
+    protected residentAssets(): Array<{ name: string; size: Size }> {
+        return this.#assets.inspectEntries();
     }
 
-    destroyNodes(ids: readonly NodeId[]): void {
-        for (const id of ids) this.destroyNode(id);
+    protected isResident(name: string): boolean {
+        return this.#assets.has(name);
     }
 
-    updateNodes(patches: readonly NodePatch[]): void {
-        this.#live()?.updateNodes(patches);
+    protected kindOf(name: string): AssetManifestEntry['kind'] | null {
+        return this.#assets.kindOf(name);
     }
 
-    updateSubtree(
-        root: NodeId,
-        patch: Omit<NodePatch, 'id' | 'parent'>,
-        opts?: { includeRoot?: boolean },
-    ): void {
-        this.#live()?.updateSubtree(root, patch, opts);
+    /** Live nodes on a name, counting an atlas's frame names as uses of the atlas. */
+    protected referenceCount(name: string): number {
+        const core = this.core;
+        let count = core?.referenceCount(name) ?? 0;
+        for (const frame of this.#assets.framesOf(name)) {
+            count += core?.referenceCount(frame) ?? 0;
+        }
+        return count;
     }
 
-    setNodeText(id: NodeId, text: string): void {
-        this.#live()?.setNodeText(id, text);
-    }
-
-    isAlive(id: NodeId): boolean {
-        return this.#core?.nodes.isAlive(id) ?? false;
-    }
-
-    clear(surface?: Surface): void {
-        this.#live()?.clear(surface);
-    }
-
-    attachNode(child: NodeId, parent: NodeId, opts?: { keepResolvedPosition?: boolean }): void {
-        this.#live()?.attachNode(child, parent, opts);
-    }
-
-    detachNode(child: NodeId, opts?: { keepResolvedPosition?: boolean }): void {
-        this.#live()?.detachNode(child, opts);
-    }
-
-    parentOf(id: NodeId): NodeId {
-        return this.#core?.parentOf(id) ?? NO_NODE;
-    }
-
-    childrenOf(id: NodeId, out: NodeId[] = []): NodeId[] {
-        return this.#core?.childrenOf(id, out) ?? ((out.length = 0), out);
-    }
-
-    surfaceOf(id: NodeId): Surface | null {
-        return this.#core?.surfaceOf(id) ?? null;
-    }
-
-    setCamera(camera: Readonly<CameraState>): void {
-        // Touches one container and zero nodes.
-        this.#live()?.setCamera(camera);
-    }
-
-    get camera(): Readonly<CameraState> {
-        return this.#core?.camera ?? { position: { x: 0, y: 0, z: 0 }, zoom: 1, framing: 'stage' };
-    }
-
-    localTransformOf(id: NodeId, out?: Transform): Transform | null {
-        return this.#core?.localTransformOf(id, out) ?? null;
-    }
-
-    resolvedTransformOf(id: NodeId, out?: Transform): Transform | null {
-        return this.#core?.resolvedTransformOf(id, out) ?? null;
-    }
-
-    localBoundsOf(id: NodeId): Bounds | null {
-        return this.#core?.localBoundsOf(id) ?? null;
-    }
-
-    worldBoundsOf(id: NodeId): Bounds | null {
-        return this.#core?.worldBoundsOf(id) ?? null;
-    }
-
-    screenBoundsOf(id: NodeId): Bounds | null {
-        return this.#core?.screenBoundsOf(id) ?? null;
-    }
-
-    screenPositionOf(id: NodeId, out?: MutableVec3): MutableVec3 | null {
-        return this.#core?.screenPositionOf(id, out) ?? null;
-    }
-
-    worldToScreen(point: Vec3Like, out?: MutableVec3): MutableVec3 {
-        return this.#core?.worldToScreen(point, out) ?? { x: 0, y: 0, z: 0 };
-    }
-
-    screenToWorld(point: Vec3Like, out?: MutableVec3): MutableVec3 {
-        return this.#core?.screenToWorld(point, out) ?? { x: 0, y: 0, z: 0 };
-    }
-
-    inspect(opts?: InspectOptions): SceneSnapshot {
-        const core = this.#core;
-        if (core === null) return emptySnapshot(this.contextState);
-        // Residency is the one thing a backend owns, which is why the core takes a list.
-        return core.inspect(opts, this.#assets.inspectEntries(), this.contextState);
-    }
-
-    on<K extends keyof RendererEvents>(
-        event: K,
-        handler: (e: RendererEvents[K]) => void,
-    ): () => void {
-        return this.#core?.on(event, handler) ?? (() => undefined);
-    }
-
-    render(): void {
-        const core = this.#live();
-        if (core === null) return;
-        // A no-op while the context is gone: the store stayed current, so the next good frame is
-        // correct with no caller involvement.
-        if (this.#guard?.lost === true) return;
-
-        core.flush();
-        this.#app?.render();
-    }
-
-    /** `true` when `render()` culled this node. Test-only, mirroring the headless backend. */
-    isCulled(id: NodeId): boolean {
-        return this.#core?.isCulled(id) ?? false;
-    }
-
-    /** The core, or `null` before init and after destroy, which makes every method a no-op. */
-    #live(): RendererCore | null {
-        return this.#destroyed ? null : this.#core;
+    protected dropResident(name: string): void {
+        // Affected nodes fall back to the placeholder; their ids stay valid. Sprites reference an
+        // atlas by BARE FRAME NAME, so the frames the sheet contributed have to be repointed as
+        // well — the atlas name itself is usually on no node at all.
+        const core = this.core;
+        const slots = core?.slotsUsingTexture(name) ?? [];
+        for (const frame of this.#assets.framesOf(name)) {
+            slots.push(...(core?.slotsUsingTexture(frame) ?? []));
+        }
+        this.#assets.unload(name);
+        this.#sink?.repointToPlaceholder(slots);
     }
 
     #installObserver(container: HTMLElement): void {
         if (typeof ResizeObserver === 'undefined') return;
         this.#observer = new ResizeObserver(() => {
-            const core = this.#core;
+            const core = this.core;
             if (core === null) return;
             const size = measureContainer(container, core.config.design);
             this.resize(size.width, size.height);
@@ -425,13 +276,13 @@ export class PixiRenderer implements IRenderer {
         const gpu = (app.renderer as { gpu?: { device?: { lost?: Promise<unknown> } } }).gpu;
         const deviceLost = gpu?.device?.lost;
 
-        this.#guard = new ContextGuard(this.#queue, {
+        this.#guard = new ContextGuard(this.queue, {
             retainedManifest: () => this.#assets.retainedManifest(),
             reupload: async (work) => this.#reupload(work),
-            rebuildScene: () => this.#core?.rebuildScene(),
-            onLost: (reason) => this.#core?.emit('contextlost', { reason }),
+            rebuildScene: () => this.core?.rebuildScene(),
+            onLost: (reason) => this.core?.emit('contextlost', { reason }),
             onRestored: (reloadedAssets, failedAssets) =>
-                this.#core?.emit('contextrestored', { reloadedAssets, failedAssets }),
+                this.core?.emit('contextrestored', { reloadedAssets, failedAssets }),
         });
         this.#guard.install(
             app.canvas as HTMLCanvasElement,
@@ -472,21 +323,16 @@ export class PixiRenderer implements IRenderer {
         return result;
     }
 
-    /** The unload a queued intent will perform, reported from residency as it stands now. */
+    /**
+     * The unload a queued intent will perform, reported from residency as it stands now.
+     *
+     * Names in the order given, not fonts-last: nothing is dropped here, so the reordering that
+     * keeps live text off a fallback face would only reshuffle the report.
+     */
     #unloadIntent(names: readonly string[]): AssetUnloadResult {
         const result: AssetUnloadResult = { unloaded: [], unknown: [], inUse: [], queued: true };
-        const core = this.#core;
         for (const name of names) {
-            if (!this.#assets.has(name)) {
-                result.unknown.push(name);
-                continue;
-            }
-            const nodeCount = this.#referenceCount(name, core);
-            if (nodeCount > 0) {
-                result.inUse.push({ name, nodeCount });
-                if (this.#assets.kindOf(name) === 'font') continue;
-            }
-            result.unloaded.push(name);
+            if (this.reportUnload(name, result)) result.unloaded.push(name);
         }
         return result;
     }
@@ -519,55 +365,6 @@ export class PixiRenderer implements IRenderer {
             if (outcome.collisions !== undefined) result.failed.push(...outcome.collisions);
         }
         return result;
-    }
-
-    async #unloadNow(names: readonly string[]): Promise<AssetUnloadResult> {
-        const result: AssetUnloadResult = { unloaded: [], unknown: [], inUse: [], queued: false };
-        const core = this.#core;
-
-        // Fonts last: one still referenced by live text is kept, because dropping it re-rasterizes
-        // that text to a fallback face, which reads as corruption.
-        const fonts: string[] = [];
-        const rest: string[] = [];
-        for (const name of names) {
-            (this.#assets.kindOf(name) === 'font' ? fonts : rest).push(name);
-        }
-
-        for (const name of [...rest, ...fonts]) {
-            if (!this.#assets.has(name)) {
-                result.unknown.push(name);
-                continue;
-            }
-
-            const nodeCount = this.#referenceCount(name, core);
-            const isFont = this.#assets.kindOf(name) === 'font';
-            if (nodeCount > 0) {
-                result.inUse.push({ name, nodeCount });
-                if (isFont) continue;
-            }
-
-            // Affected nodes fall back to the placeholder; their ids stay valid. Sprites reference
-            // an atlas by BARE FRAME NAME, so the frames the sheet contributed have to be repointed
-            // as well — the atlas name itself is usually on no node at all.
-            const slots = core?.slotsUsingTexture(name) ?? [];
-            for (const frame of this.#assets.framesOf(name)) {
-                slots.push(...(core?.slotsUsingTexture(frame) ?? []));
-            }
-            this.#assets.unload(name);
-            this.#sink?.repointToPlaceholder(slots);
-            result.unloaded.push(name);
-        }
-
-        return result;
-    }
-
-    /** Live nodes on a name, counting an atlas's frame names as uses of the atlas. */
-    #referenceCount(name: string, core: RendererCore | null): number {
-        let count = core?.referenceCount(name) ?? 0;
-        for (const frame of this.#assets.framesOf(name)) {
-            count += core?.referenceCount(frame) ?? 0;
-        }
-        return count;
     }
 }
 

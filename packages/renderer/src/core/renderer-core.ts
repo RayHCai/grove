@@ -8,7 +8,16 @@
 // hidden surfaces, and only one backend was under test.
 
 import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
-import { bounds, boundsCopy, boundsSet, vec3, vec3Set } from '@platform/math';
+import {
+    bounds,
+    boundsCopy,
+    boundsEqual,
+    boundsSet,
+    finiteOr,
+    positiveOr,
+    vec3,
+    vec3Set,
+} from '@platform/math';
 import type {
     CameraState,
     ContextState,
@@ -46,7 +55,7 @@ import { NO_PARENT } from './scene-sink.js';
 type EventName = keyof RendererEvents;
 
 /** Resolved init options, after defaults. */
-export interface CoreConfig {
+interface CoreConfig {
     design: Size;
     canvas: Size;
     scaleMode: ScaleMode;
@@ -443,42 +452,50 @@ export class RendererCore {
             rendererError('cycle', 'that parenting would make a node its own ancestor');
         }
 
-        if (keepResolvedPosition) {
-            this.xf.resolve();
-            const wantX = this.xf.resolvedX(index);
-            const wantY = this.xf.resolvedY(index);
-            const wantZ = this.xf.resolvedZ(index);
-            this.xf.link(index, parentIndex);
-            this.xf.resolve();
-            // Only position inherits, so preserving one is subtraction, not a matrix.
-            this.xf.setPosition(
-                index,
-                wantX - this.xf.resolvedX(parentIndex),
-                wantY - this.xf.resolvedY(parentIndex),
-                wantZ - this.xf.resolvedZ(parentIndex),
-            );
-        } else {
-            this.xf.link(index, parentIndex);
-        }
-
+        this.#relinkAt(index, parentIndex, keepResolvedPosition);
         this.#sink.reparent(index, childRecord, parentIndex);
     }
 
     detachAt(index: number, keepResolvedPosition: boolean): void {
         if (this.xf.parent(index) === NO_PARENT) return;
-        if (keepResolvedPosition) {
-            this.xf.resolve();
-            const wantX = this.xf.resolvedX(index);
-            const wantY = this.xf.resolvedY(index);
-            const wantZ = this.xf.resolvedZ(index);
-            this.xf.unlink(index);
-            this.xf.setPosition(index, wantX, wantY, wantZ);
-        } else {
-            this.xf.unlink(index);
-        }
+        this.#relinkAt(index, NO_PARENT, keepResolvedPosition);
 
         const record = this.nodes.recordAt(index);
         if (record !== null) this.#sink.reparent(index, record, NO_PARENT);
+    }
+
+    /**
+     * Relinks a slot under `parentIndex` — {@link NO_PARENT} detaches — and, when asked, rewrites
+     * its local position so the resolved one survives the move.
+     */
+    #relinkAt(index: number, parentIndex: number, keepResolvedPosition: boolean): void {
+        if (!keepResolvedPosition) {
+            if (parentIndex === NO_PARENT) this.xf.unlink(index);
+            else this.xf.link(index, parentIndex);
+            return;
+        }
+
+        this.xf.resolve();
+        const wantX = this.xf.resolvedX(index);
+        const wantY = this.xf.resolvedY(index);
+        const wantZ = this.xf.resolvedZ(index);
+
+        if (parentIndex === NO_PARENT) {
+            this.xf.unlink(index);
+            // A root's local position IS its resolved one, so there is nothing to subtract.
+            this.xf.setPosition(index, wantX, wantY, wantZ);
+            return;
+        }
+
+        this.xf.link(index, parentIndex);
+        this.xf.resolve();
+        // Only position inherits, so preserving one is subtraction, not a matrix.
+        this.xf.setPosition(
+            index,
+            wantX - this.xf.resolvedX(parentIndex),
+            wantY - this.xf.resolvedY(parentIndex),
+            wantZ - this.xf.resolvedZ(parentIndex),
+        );
     }
 
     parentOf(id: NodeId): NodeId {
@@ -655,7 +672,7 @@ export class RendererCore {
             this.#sink.write(index, record);
         }
 
-        if (!sameRect(this.#culledViewport, this.#viewport)) {
+        if (!boundsEqual(this.#culledViewport, this.#viewport)) {
             boundsCopy(this.#culledViewport, this.#viewport);
             this.#cullAll = true;
         }
@@ -713,10 +730,21 @@ export class RendererCore {
 
     /** Root ids for one surface in draw order — by `layer`, ties by insertion. */
     drawOrderOf(surface: Surface): NodeId[] {
+        return this.#inDrawOrder(
+            this.xf.roots().filter((slot) => this.nodes.recordAt(slot)?.surface === surface),
+        );
+    }
+
+    /**
+     * Slots as ids, ordered by `layer` with ties broken by their position in `slots`.
+     *
+     * One rule for roots and for a node's children alike: a tree view that ordered the two
+     * differently would misrepresent what draws on top. A slot with no record is dropped, because
+     * the sibling walk behind a child list is not itself checked for liveness.
+     */
+    #inDrawOrder(slots: readonly number[]): NodeId[] {
         return (
-            this.xf
-                .roots()
-                .filter((slot) => this.nodes.recordAt(slot)?.surface === surface)
+            slots
                 .map((slot, insertion) => ({
                     slot,
                     insertion,
@@ -725,6 +753,7 @@ export class RendererCore {
                 // `toSorted` is stable, so equal layers keep insertion order.
                 .toSorted((a, b) => a.layer - b.layer || a.insertion - b.insertion)
                 .map((entry) => this.nodes.idAt(entry.slot))
+                .filter((id) => id !== NO_NODE)
         );
     }
 
@@ -819,23 +848,9 @@ export class RendererCore {
         };
     }
 
-    /**
-     * A node's direct children in draw order.
-     *
-     * Same `layer`-then-insertion rule as {@link drawOrderOf} uses for roots: a tree view that
-     * ordered the two differently would misrepresent what draws on top.
-     */
+    /** A node's direct children in draw order. */
     #childrenInDrawOrder(index: number): NodeId[] {
-        return this.xf
-            .children(index)
-            .map((slot, insertion) => ({
-                slot,
-                insertion,
-                layer: this.nodes.recordAt(slot)?.layer ?? 0,
-            }))
-            .toSorted((a, b) => a.layer - b.layer || a.insertion - b.insertion)
-            .map((entry) => this.nodes.idAt(entry.slot))
-            .filter((id) => id !== NO_NODE);
+        return this.#inDrawOrder(this.xf.children(index));
     }
 
     /** How many live nodes reference an asset name — the `inUse` count. */
@@ -978,20 +993,6 @@ export function emptySnapshot(contextState: ContextState): SceneSnapshot {
         assets: [],
         counts: { nodes: 0, culled: 0, surfaces: 0, assets: 0 },
     };
-}
-
-function sameRect(a: Readonly<Bounds>, b: Readonly<Bounds>): boolean {
-    return a.left === b.left && a.right === b.right && a.top === b.top && a.bottom === b.bottom;
-}
-
-/** `value` when it is finite, else `fallback`. */
-function finiteOr(value: number, fallback: number): number {
-    return Number.isFinite(value) ? value : fallback;
-}
-
-/** `value` when it is finite and positive, else `fallback`. */
-function positiveOr(value: number, fallback: number): number {
-    return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 /** A zeroed `Transform`, for the `out`-less call path. */

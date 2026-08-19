@@ -3,7 +3,7 @@
 
 import type { Container } from 'pixi.js';
 import type { Bounds, Size } from '@platform/math';
-import { bounds, boundsCopy, vec3 } from '@platform/math';
+import { bounds, boundsCopy, boundsEqual, vec3 } from '@platform/math';
 import type { CameraState, ScaleMode, Surface } from '../renderer.js';
 import type { NodeRecord } from '../node-store.js';
 import type { TransformStore } from '../transform-store.js';
@@ -215,7 +215,7 @@ export class PixiSink implements SceneSink {
         // moved has to re-place every screen-space node — and one that did not must cost nothing,
         // since `setCamera` reaches here every frame.
         const scale = fitScale(camera.framing ?? 'stage', scaleMode, canvas, design);
-        if (scale === this.#fitScale && sameRect(this.#stage, stage)) return;
+        if (scale === this.#fitScale && boundsEqual(this.#stage, stage)) return;
 
         this.#fitScale = scale;
         boundsCopy(this.#stage, stage);
@@ -250,8 +250,4 @@ export class PixiSink implements SceneSink {
             ? this.#surfaces.root(surface)
             : this.#objects.get(parentIndex)?.xform;
     }
-}
-
-function sameRect(a: Readonly<Bounds>, b: Readonly<Bounds>): boolean {
-    return a.left === b.left && a.right === b.right && a.top === b.top && a.bottom === b.bottom;
 }

@@ -12,11 +12,11 @@ Importing `@platform/renderer` yields the interface and types **without pulling 
 the module graph** — otherwise anything touching the type (server-side tooling, the panel's type
 emission) would drag a WebGL library along.
 
-| Import                    | Gives you                                    |
-| ------------------------- | -------------------------------------------- |
-| `@platform/renderer`      | `IRenderer`, every type, and the pure math   |
-| `@platform/renderer/pixi` | `createPixiRenderer()` — the real backend    |
-| `@platform/renderer/null` | `createNullRenderer()` — headless, for tests |
+| Import                    | Gives you                                  |
+| ------------------------- | ------------------------------------------ |
+| `@platform/renderer`      | `IRenderer`, every type, and the pure math |
+| `@platform/renderer/pixi` | `createPixiRenderer()` — the real backend  |
+| `@platform/renderer/null` | `createNullRenderer()` — headless, no DOM  |
 
 ```ts
 import type { IRenderer } from '@platform/renderer';
@@ -70,52 +70,39 @@ renderer.render();
 src/
 ├── index.ts            public barrel — types + IRenderer, NO pixi import
 ├── renderer.ts         IRenderer, options, descs, patches, events
-├── node-id.ts          NodeId brand, pack/unpack, NO_NODE
+├── node-id.ts          NodeId brand and NO_NODE over math's packed handle
 ├── errors.ts           RendererError + codes
 ├── surfaces.ts         PURE: surface order, camera-transformed predicate
 ├── viewport.ts         PURE: framing + scaleMode -> fitScale, viewport, stageRect
 ├── projection.ts       PURE: world<->screen, y-flip, deg->rad, UI anchors
 ├── transform-store.ts  PURE: SoA graph, position/visible resolve, dirty
 ├── bounds.ts           PURE: local bounds, rotated AABB, cull test
-├── node-store.ts       PURE: slot table, freelist, generations
-├── asset-queue.ts      PURE: per-name intent map, manifest merge, entry validation
+├── node-store.ts       PURE: NodeRecord over math's SlotTable
+├── asset-queue.ts      PURE: per-name intent map, manifest merge, entry validation, url schemes
 ├── core/               PURE: everything both backends share
 │   ├── renderer-core.ts    stores, validation, hierarchy, resolve/cull, projection
+│   ├── renderer-shell.ts   IRenderer's backend-independent half, the fonts-last unload
 │   └── scene-sink.ts       the seam a backend implements
-├── null/               headless IRenderer — tests, server, CI
+├── null/               headless IRenderer — no DOM
 └── pixi/               the PixiJS v8 backend
 ```
 
-Everything marked PURE has no DOM import and runs in plain Node, which is what makes the
-sign-bearing math testable without a browser.
+Everything marked PURE has no DOM import and runs in plain Node, which is what keeps the
+sign-bearing math reachable without a browser.
 
 ## How the two backends stay in sync
 
-**They share `RendererCore`.** Both `NullRenderer` and `PixiRenderer` are thin shells over the
-same core: it owns the two stores, `createNode`'s validation and its order, the
+**They share `RendererCore` and `RendererShell`.** Both `NullRenderer` and `PixiRenderer` extend the
+shell over the same core. The core owns the two stores, `createNode`'s validation and its order, the
 attach/detach asymmetry, `updateSubtree`'s set semantics, the resolve/flush/cull pass, projection
-and bounds. A backend supplies only a `SceneSink` — create/reparent/destroy a node's objects, push
-its local values, toggle its art, and answer how big it is.
+and bounds; the shell owns every `IRenderer` member that is pure delegation to it, the no-op before
+`init` and after `destroy`, and the fonts-last unload. A backend supplies only a `SceneSink` —
+create/reparent/destroy a node's objects, push its local values, toggle its art, and answer how big
+it is.
 
-This is deliberately not a "keep these files in sync" convention. Those semantics exist in exactly
-one place, so the contract suite's coverage protects both backends even though it currently only
-_runs_ against the headless one — verified by mutating the core and watching the suite fail.
+This is deliberately not a "keep these files in sync" convention: each of those semantics exists in
+exactly one place, and a backend inherits it rather than restating it.
 
 What legitimately differs stays per-backend: `init` (only one builds a GPU `Application`), `resize`
 (only one resizes a surface), the asset pipeline, the context guard, and `sizeOf` — a GPU backend
 measures text with a real font, a headless one cannot.
-
-## Testing
-
-`tests/contract/renderer-contract.ts` is a reusable suite — `runRendererContract(() =>
-createNullRenderer())` — covering handle lifecycle, stale-handle no-ops, freelist reuse,
-position-only inheritance, destroy cascade, camera/viewport math, UI anchoring, invalid asset entries
-and transform round-trips. It runs against `NullRenderer` today; when a browser-mode vitest target
-exists it runs unchanged against `PixiRenderer`, and it is the acceptance test for any future
-backend.
-
-Pixi's GPU half is not unit-tested — there is no WebGL in Node — but everything below
-`Application` is: `Container`, `Sprite` and `Text` are plain objects, so `pixi-sink.test.ts` drives
-real placement through the real sink, and `asset-registry.test.ts` drives real texture release. What
-genuinely needs a browser is named rather than assumed: dual-composition agreement and
-`preventDefault()` on `webglcontextlost`.
