@@ -3,6 +3,14 @@
 
 import type { Codec } from './codec.js';
 
+/**
+ * 1 MiB. Large enough that no legitimate join sequence reaches it, small enough to bound a leak.
+ *
+ * Here rather than in one implementation because every factory defaults to it: two copies of one
+ * bound would drift, and the bound is the same bug on either wire.
+ */
+export const DEFAULT_MAX_RETAINED_BYTES = 1024 * 1024;
+
 /** The JSON value space — what `jsonCodec` carries, and the floor every codec must accept. */
 export type JsonValue =
     null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -90,9 +98,14 @@ export interface LoopbackOptions extends TransportOptions {
     latency?: number;
 }
 
-/** Options for the networked factory, taken now so a websocket backend needs no signature change. */
+/** Options for the networked factory, which `connectWebSocket` widens with its own. */
 export interface ConnectOptions extends TransportOptions {
-    /** Rebinds a reconnecting client to its existing `Player`; server-minted and opaque. */
+    /**
+     * Rebinds a reconnecting client to its existing `Player`; server-minted and opaque.
+     *
+     * Its wire slot is `JoinRequest.token`, which protocol owns, so no backend here puts it on the
+     * wire — one credential with two channels is a second thing to keep in agreement.
+     */
     token?: string;
     /** The heartbeat's scheduling seam; defaults to a real-time source. */
     timer?: TimerSource;
