@@ -34,6 +34,11 @@ import type { Vec3, Vec3Like, Bounds, Size } from '@platform/math';
 | `slot-table.ts`         | `SlotTable`, `SlotTableSnapshot`                                                                                                                                     |
 | `typed-array.ts`        | `growF64`, `growI32`, `growU8`, `grownCapacity`                                                                                                                      |
 
+The 22 transcendentals are an enforcement allowlist as much as an implementation — `.oxlintrc.json`
+refuses each matching `Math.*` property and names the replacement (`Math.random` among them, in
+favour of `SeededRandom`), and `@platform/engine` re-exports the same 22 — so renaming or dropping
+one is a cross-package change.
+
 Handles are packed arithmetically as `generation * 2^24 + index`, because `<<` coerces to int32
 and would start minting negative, colliding handles at generation 128. Releasing a slot bumps its
 generation and pushes the slot onto a freelist, so a handle that outlived its record reads as
