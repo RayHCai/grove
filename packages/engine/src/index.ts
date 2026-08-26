@@ -121,6 +121,7 @@ export type {
     ActionState,
     Collider,
     Animation,
+    HUDAnchor,
     AssetKind,
     AssetRef,
     SoundHandle,
@@ -130,5 +131,7 @@ export type {
     Concurrency,
     EventPhase,
     HandlerOptions,
+    HandlerDecorator,
+    StateDecorator,
     Host,
 } from '@platform/core';

@@ -1,6 +1,6 @@
-// Standard TC39 decorators, contained here so nothing downstream depends on the decorator
-// model. Symbol.metadata is absent on node 24 and without the polyfill below every table
-// silently stays empty.
+// Standard TC39 decorators, whose two shapes are named here so a creator can annotate one without
+// importing the TC39 context types. Symbol.metadata is absent on node 24 and without the polyfill
+// below every table silently stays empty.
 
 import type { HandlerKind } from './metadata.js';
 import { getOrCreateMetadata } from './metadata.js';
@@ -13,7 +13,7 @@ function handlerDecorator(
     kind: HandlerKind,
     event: string,
     opts?: HandlerOptions,
-): MethodDecorator_ {
+): HandlerDecorator {
     return (_value, context) => {
         const handlers = getOrCreateMetadata(context.metadata).handlers;
         const methodName = String(context.name);
@@ -24,48 +24,48 @@ function handlerDecorator(
     };
 }
 
-export const onStart: MethodDecorator_ = handlerDecorator('onStart', '@start');
-export const onEnd: MethodDecorator_ = handlerDecorator('onEnd', '@end');
-export const onUpdate: MethodDecorator_ = handlerDecorator('onUpdate', '@update');
-export const onClick: MethodDecorator_ = handlerDecorator('onClick', '@click');
-export const onHoverEnter: MethodDecorator_ = handlerDecorator('onHoverEnter', '@hoverEnter');
-export const onHoverExit: MethodDecorator_ = handlerDecorator('onHoverExit', '@hoverExit');
-export const onPlayerJoin: MethodDecorator_ = handlerDecorator('onPlayerJoin', '@playerJoin');
-export const onPlayerLeave: MethodDecorator_ = handlerDecorator('onPlayerLeave', '@playerLeave');
+export const onStart: HandlerDecorator = handlerDecorator('onStart', '@start');
+export const onEnd: HandlerDecorator = handlerDecorator('onEnd', '@end');
+export const onUpdate: HandlerDecorator = handlerDecorator('onUpdate', '@update');
+export const onClick: HandlerDecorator = handlerDecorator('onClick', '@click');
+export const onHoverEnter: HandlerDecorator = handlerDecorator('onHoverEnter', '@hoverEnter');
+export const onHoverExit: HandlerDecorator = handlerDecorator('onHoverExit', '@hoverExit');
+export const onPlayerJoin: HandlerDecorator = handlerDecorator('onPlayerJoin', '@playerJoin');
+export const onPlayerLeave: HandlerDecorator = handlerDecorator('onPlayerLeave', '@playerLeave');
 
-export function onEvent(event: string, opts?: HandlerOptions): MethodDecorator_ {
+export function onEvent(event: string, opts?: HandlerOptions): HandlerDecorator {
     return handlerDecorator('onEvent', event, opts);
 }
 
-export function onEventRelease(event: string, opts?: HandlerOptions): MethodDecorator_ {
+export function onEventRelease(event: string, opts?: HandlerOptions): HandlerDecorator {
     return handlerDecorator('onEvent', event, { ...opts, on: 'release' });
 }
 
-export function onEventHold(event: string, opts?: HandlerOptions): MethodDecorator_ {
+export function onEventHold(event: string, opts?: HandlerOptions): HandlerDecorator {
     return handlerDecorator('onEvent', event, { ...opts, on: 'hold' });
 }
 
-export function onCollide(tag: string, opts?: HandlerOptions): MethodDecorator_ {
+export function onCollide(tag: string, opts?: HandlerOptions): HandlerDecorator {
     return handlerDecorator('onCollide', tag, opts);
 }
 
-export function onEnter(region: string): MethodDecorator_ {
+export function onEnter(region: string): HandlerDecorator {
     return handlerDecorator('onEnter', region);
 }
 
-export function onExit(region: string): MethodDecorator_ {
+export function onExit(region: string): HandlerDecorator {
     return handlerDecorator('onExit', region);
 }
 
-export function onPress(widget: string): MethodDecorator_ {
+export function onPress(widget: string): HandlerDecorator {
     return handlerDecorator('onPress', widget);
 }
 
-export function onRequest(name: string, opts?: HandlerOptions): MethodDecorator_ {
+export function onRequest(name: string, opts?: HandlerOptions): HandlerDecorator {
     return handlerDecorator('onRequest', name, opts);
 }
 
-export const serverState: FieldDecorator_ = (_value, context) => {
+export const serverState: StateDecorator = (_value, context) => {
     const field = String(context.name);
     getOrCreateMetadata(context.metadata).state.add(field);
 
@@ -79,12 +79,14 @@ export const serverState: FieldDecorator_ = (_value, context) => {
     return (initial) => initial;
 };
 
-type MethodDecorator_ = <This, Args extends unknown[], Return>(
+/** Every handler decorator: generic over the method it wraps, so a decorated method keeps its exact signature. */
+export type HandlerDecorator = <This, Args extends unknown[], Return>(
     value: (this: This, ...args: Args) => Return,
     context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Return>,
 ) => void;
 
-type FieldDecorator_ = <This, Value>(
+/** The `@serverState` shape: `value` is always undefined, and the returned initializer runs per instance. */
+export type StateDecorator = <This, Value>(
     value: undefined,
     context: ClassFieldDecoratorContext<This, Value>,
 ) => (this: This, initial: Value) => Value;

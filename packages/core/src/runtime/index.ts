@@ -18,6 +18,7 @@ export type { Collider, Animation } from './entity.js';
 export { Camera } from './camera.js';
 
 export { HUD, HUDScreen, HUDState, hud } from './hud.js';
+export type { HUDAnchor } from './hud.js';
 
 export { Player, PlayerManager } from './player.js';
 export type { Cursor, InputBindings, ActionState } from './player.js';
