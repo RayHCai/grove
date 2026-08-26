@@ -5,13 +5,39 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
 import { createNullRenderer } from '@platform/renderer/null';
 import { NO_NODE } from '@platform/renderer';
-import type { IRenderer, NodePatch } from '@platform/renderer';
-import type { NetId, StateEnvelope, WireStructuralOp } from '@platform/protocol';
+import type { IRenderer, NodeId, NodePatch } from '@platform/renderer';
+import type {
+    GroupTemplateVisual,
+    NetId,
+    StateEnvelope,
+    TemplateChild,
+    WireStructuralOp,
+    WireTransform,
+} from '@platform/protocol';
+import type { EntityId } from '@platform/core';
 import { RenderBridge } from '../src/bridge.js';
+import { MAX_TEMPLATE_DEPTH, MAX_TEMPLATE_NODES } from '../src/constants.js';
 import { Mirror } from '../src/mirror.js';
 import { entity, transformDiff, wireTransform } from './fake-server.js';
 
 const BOUNDS = { left: -400, right: 400, top: 300, bottom: -300 };
+/** The package default, so the render delay under test is a round 50 ms. */
+const SEND_RATE = 20;
+const SEND_INTERVAL = 1 / SEND_RATE;
+
+/** A nested group template: a base sprite, and a barrel one level down under its own pivot. */
+const TURRET: GroupTemplateVisual = {
+    template: 'turret',
+    kind: 'group',
+    children: [
+        { kind: 'sprite', texture: 'base.png' },
+        {
+            kind: 'group',
+            offsetY: 12,
+            children: [{ kind: 'sprite', texture: 'barrel.png', offsetY: 6, rotation: 0 }],
+        },
+    ],
+};
 
 function stateEnvelope(structural: WireStructuralOp[] = [], tick = 1): StateEnvelope {
     return { kind: 'state', tick, ackSeq: 0, structural, state: [] };
@@ -24,7 +50,7 @@ function stateEnvelope(structural: WireStructuralOp[] = [], tick = 1): StateEnve
  * `createNode` returns `NO_NODE` silently — so an uninitialized harness would pass the delta tests for
  * the wrong reason and fail every assertion about what was drawn.
  */
-async function harness(): Promise<{
+async function harness(sendRate = SEND_RATE): Promise<{
     renderer: IRenderer;
     batches: NodePatch[][];
     mirror: Mirror;
@@ -39,8 +65,21 @@ async function harness(): Promise<{
         realUpdate(patches);
     };
     const mirror = new Mirror({ simRate: 60, bounds: BOUNDS, regions: [] });
-    const bridge = new RenderBridge(renderer, mirror.view());
+    const bridge = new RenderBridge(renderer, mirror.view(), sendRate);
     return { renderer, batches, mirror, bridge };
+}
+
+/** Spawns one entity and returns its local handle, which is what the buffer keys on. */
+function spawn(mirror: Mirror, bridge: RenderBridge, netId = 1): EntityId {
+    const delta = mirror.applyState(stateEnvelope([{ kind: 'spawn', snapshot: entity(netId) }], 1));
+    bridge.reconcile(delta);
+    return delta.added[0]!;
+}
+
+/** One send: the tick's state envelope, then the transform it joins on — the wire's own order. */
+function move(mirror: Mirror, netId: number, tick: number, over: Partial<WireTransform>): void {
+    mirror.applyState(stateEnvelope([], tick));
+    mirror.applyTransforms({ kind: 'transform', tick, transform: [transformDiff(netId, over)] });
 }
 
 afterEach(() => clearRuntime());
@@ -210,7 +249,7 @@ describe('transforms come from the dirty set', () => {
         bridge.reconcile(mirror.applyState(stateEnvelope(spawns, 1)));
 
         // Drain the spawn-time dirt, then move exactly one.
-        bridge.pushTransforms();
+        bridge.pushTransforms(0);
         batches.length = 0;
         mirror.applyState(stateEnvelope([], 2));
         mirror.applyTransforms({
@@ -218,7 +257,7 @@ describe('transforms come from the dirty set', () => {
             tick: 2,
             transform: [transformDiff(7, { posX: 5 })],
         });
-        bridge.pushTransforms();
+        bridge.pushTransforms(0);
 
         expect(batches).toHaveLength(1);
         expect(batches[0]).toHaveLength(1);
@@ -229,9 +268,9 @@ describe('transforms come from the dirty set', () => {
         bridge.reconcile(
             mirror.applyState(stateEnvelope([{ kind: 'spawn', snapshot: entity(1) }])),
         );
-        bridge.pushTransforms();
+        bridge.pushTransforms(0);
         batches.length = 0;
-        bridge.pushTransforms();
+        bridge.pushTransforms(0);
         expect(batches).toHaveLength(0);
     });
 
@@ -240,7 +279,7 @@ describe('transforms come from the dirty set', () => {
         bridge.reconcile(
             mirror.applyState(stateEnvelope([{ kind: 'spawn', snapshot: entity(1) }], 1)),
         );
-        bridge.pushTransforms();
+        bridge.pushTransforms(0);
         batches.length = 0;
 
         // Moves and is destroyed in the same envelope, leaving its index dirty and its slot empty.
@@ -254,14 +293,195 @@ describe('transforms come from the dirty set', () => {
             stateEnvelope([{ kind: 'destroy', netId: 1 as NetId }], 3),
         );
         bridge.reconcile(removed);
-        expect(() => bridge.pushTransforms()).not.toThrow();
+        expect(() => bridge.pushTransforms(0)).not.toThrow();
         expect(batches.flat()).toHaveLength(0);
     });
 
     it('pushes nothing when nothing moved', async () => {
         const { bridge, batches } = await harness();
-        bridge.pushTransforms();
+        bridge.pushTransforms(0);
         expect(batches).toHaveLength(0);
+    });
+});
+
+describe('the interpolation buffer sits between the send rate and the frame rate', () => {
+    it('walks an entity between the two poses the wire sent, rather than holding the last one', async () => {
+        const { mirror, bridge, renderer } = await harness();
+        const local = spawn(mirror, bridge);
+        const node = bridge.nodeFor(local)!;
+
+        bridge.pushTransforms(0);
+        move(mirror, 1, 2, { posX: 100 });
+        bridge.pushTransforms(SEND_INTERVAL);
+
+        // The drawn moment trails the newest sample by one send interval, so this frame is still on
+        // the older pose and the one halfway between the samples draws halfway between the poses.
+        expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(0, 6);
+        bridge.pushTransforms(SEND_INTERVAL * 1.5);
+        expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(50, 6);
+
+        // And it lands exactly on what the authority said, not a fraction short of it.
+        bridge.pushTransforms(SEND_INTERVAL * 2);
+        expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(100, 6);
+    });
+
+    it('patches on the frames between two envelopes — which is the whole point of it', async () => {
+        const { mirror, bridge, renderer, batches } = await harness();
+        const local = spawn(mirror, bridge);
+        const node = bridge.nodeFor(local)!;
+        bridge.pushTransforms(0);
+        move(mirror, 1, 2, { posX: 100 });
+        bridge.pushTransforms(SEND_INTERVAL);
+        batches.length = 0;
+
+        // Nothing on the wire for either frame; without the buffer both would be no-ops and the node
+        // would hold its pose until the next envelope.
+        bridge.pushTransforms(SEND_INTERVAL * 1.25);
+        const quarter = renderer.localTransformOf(node)!.position.x;
+        bridge.pushTransforms(SEND_INTERVAL * 1.75);
+        const threeQuarters = renderer.localTransformOf(node)!.position.x;
+
+        expect(batches).toHaveLength(2);
+        expect(quarter).toBeGreaterThan(0);
+        expect(threeQuarters).toBeGreaterThan(quarter);
+    });
+
+    it('stops patching once the drawn pose has caught up, so a static world stays free', async () => {
+        const { mirror, bridge, batches } = await harness();
+        spawn(mirror, bridge);
+        bridge.pushTransforms(0);
+        move(mirror, 1, 2, { posX: 100 });
+        bridge.pushTransforms(SEND_INTERVAL);
+        bridge.pushTransforms(SEND_INTERVAL * 2);
+        batches.length = 0;
+
+        bridge.pushTransforms(SEND_INTERVAL * 3);
+        expect(batches).toHaveLength(0);
+    });
+
+    it('leaves a predicted entity alone: two smoothers on one entity rubber-band', async () => {
+        const { mirror, bridge, renderer } = await harness();
+        const local = spawn(mirror, bridge);
+        const node = bridge.nodeFor(local)!;
+        bridge.setPredicted(new Set([local]));
+
+        bridge.pushTransforms(0);
+        move(mirror, 1, 2, { posX: 100 });
+        bridge.pushTransforms(SEND_INTERVAL);
+
+        // No delay and no blend — what prediction owns is drawn where the simulation put it, and the
+        // correction it already eases is the only thing allowed to move that pose.
+        expect(renderer.localTransformOf(node)!.position.x).toBe(100);
+        bridge.pushTransforms(SEND_INTERVAL * 1.5);
+        expect(renderer.localTransformOf(node)!.position.x).toBe(100);
+    });
+
+    it('holds at the newest pose the wire sent rather than extrapolating past it', async () => {
+        const { mirror, bridge, renderer } = await harness();
+        const local = spawn(mirror, bridge);
+        const node = bridge.nodeFor(local)!;
+        bridge.pushTransforms(0);
+        move(mirror, 1, 2, { posX: 100 });
+        bridge.pushTransforms(SEND_INTERVAL);
+
+        // Two intervals with nothing arriving. Carrying the last segment's velocity on would draw the
+        // entity at 200 and take it back the moment the authority disagreed.
+        bridge.pushTransforms(SEND_INTERVAL * 3);
+        expect(renderer.localTransformOf(node)!.position.x).toBe(100);
+    });
+
+    it('opens a segment at the drawn moment, not at a sample the drawn pose already passed', async () => {
+        const { mirror, bridge, renderer } = await harness();
+        const local = spawn(mirror, bridge);
+        const node = bridge.nodeFor(local)!;
+        bridge.pushTransforms(0);
+        move(mirror, 1, 2, { posX: 100 });
+        bridge.pushTransforms(SEND_INTERVAL);
+        // A second of standstill — an entity that stopped and an entity nobody sent for look the same.
+        bridge.pushTransforms(1);
+        expect(renderer.localTransformOf(node)!.position.x).toBe(100);
+
+        move(mirror, 1, 3, { posX: 200 });
+        bridge.pushTransforms(1 + SEND_INTERVAL);
+
+        // Still where it was drawn. Dated from the older sample the segment would be a second long and
+        // 95% spent, jumping the entity almost the whole way on this one frame.
+        expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(100, 6);
+        bridge.pushTransforms(1 + SEND_INTERVAL * 1.5);
+        expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(150, 6);
+    });
+
+    it('reads its delay from the rate `Welcome` named', async () => {
+        const { mirror, bridge, renderer } = await harness(10);
+        const local = spawn(mirror, bridge);
+        const node = bridge.nodeFor(local)!;
+        bridge.pushTransforms(0);
+        move(mirror, 1, 2, { posX: 100 });
+
+        // 0.1 s is one interval at 10 Hz, so the drawn moment is still the first sample. The same frame
+        // on a 20 Hz session would be at the end of the segment.
+        bridge.pushTransforms(0.1);
+        expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(0, 6);
+        bridge.pushTransforms(0.15);
+        expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(50, 6);
+    });
+
+    it('spins a wrapped rotation the short way round', async () => {
+        const { mirror, bridge, renderer } = await harness();
+        const local = spawn(mirror, bridge);
+        const node = bridge.nodeFor(local)!;
+        bridge.pushTransforms(0);
+        move(mirror, 1, 2, { rot: 350 });
+        bridge.pushTransforms(SEND_INTERVAL);
+        move(mirror, 1, 3, { rot: 10 });
+        bridge.pushTransforms(SEND_INTERVAL * 2);
+
+        // Halfway from 350° to 10° is 360°, which is 0. Lerping the raw numbers draws 180 — the leaf
+        // spinning backwards through half a turn, once per revolution.
+        bridge.pushTransforms(SEND_INTERVAL * 2.5);
+        expect(renderer.localTransformOf(node)!.rotation).toBeCloseTo(360, 6);
+    });
+
+    it('takes the newer layer whole: a fraction of a draw order is not a draw order', async () => {
+        const { mirror, bridge, renderer } = await harness();
+        const local = spawn(mirror, bridge);
+        const node = bridge.nodeFor(local)!;
+        bridge.pushTransforms(0);
+        move(mirror, 1, 2, { posX: 100, layer: 5 });
+        bridge.pushTransforms(SEND_INTERVAL);
+
+        bridge.pushTransforms(SEND_INTERVAL * 1.5);
+        expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(50, 6);
+        expect(renderer.inspect().nodes.get(node)?.layer).toBe(5);
+    });
+
+    it('follows the drawn pose for the camera, not the simulated one', async () => {
+        const { mirror, bridge } = await harness();
+        const local = spawn(mirror, bridge);
+        bridge.pushTransforms(0);
+        move(mirror, 1, 2, { posX: 100 });
+        bridge.pushTransforms(SEND_INTERVAL);
+        bridge.pushTransforms(SEND_INTERVAL * 1.5);
+
+        // A camera on the exact answer while the sprite is halfway to it slides the target across the
+        // screen by a whole send interval of motion.
+        expect(mirror.runtime.transforms.posX(local)).toBe(100);
+        expect(bridge.drawnPosition(local).x).toBeCloseTo(50, 6);
+    });
+
+    it('drops the buffer on a resync: a segment across one interpolates between two worlds', async () => {
+        const { mirror, bridge } = await harness();
+        const local = spawn(mirror, bridge);
+        bridge.pushTransforms(0);
+        move(mirror, 1, 2, { posX: 100 });
+        bridge.pushTransforms(SEND_INTERVAL);
+        expect(bridge.drawnPosition(local).x).toBeCloseTo(0, 6);
+
+        bridge.clear();
+
+        // The stamps belong to a session that has ended: nothing survives to interpolate from, so the
+        // pose is the simulation's again.
+        expect(bridge.drawnPosition(local).x).toBe(100);
     });
 });
 
@@ -349,6 +569,209 @@ describe('the manifest and the template table', () => {
         );
         bridge.reconcile(delta);
         expect(renderer.inspect().nodes.get(bridge.nodeFor(delta.added[0]!)!)?.kind).toBe('group');
+    });
+
+    it('builds a group template’s whole subtree in ONE renderer call', async () => {
+        const { mirror, bridge, renderer } = await harness();
+        let calls = 0;
+        const realCreate = renderer.createSubtree.bind(renderer);
+        renderer.createSubtree = (descs, out): NodeId[] => {
+            calls++;
+            return realCreate(descs, out);
+        };
+        await bridge.loadManifest({ assets: [], templates: [TURRET] });
+
+        const delta = mirror.applyState(
+            stateEnvelope([{ kind: 'spawn', snapshot: entity(1, 'turret') }]),
+        );
+        bridge.reconcile(delta);
+
+        const root = bridge.nodeFor(delta.added[0]!)!;
+        const scene = renderer.inspect();
+        // Root, base, the nested pivot and the barrel under it.
+        expect(scene.counts.nodes).toBe(4);
+        expect(calls).toBe(1);
+        const [base, pivot] = scene.nodes.get(root)!.children;
+        expect(scene.nodes.get(base!)?.texture).toBe('base.png');
+        expect(scene.nodes.get(scene.nodes.get(pivot!)!.children[0]!)?.texture).toBe('barrel.png');
+    });
+
+    it('destroys every descendant with the entity, leaving the map empty', async () => {
+        const { mirror, bridge, renderer } = await harness();
+        await bridge.loadManifest({ assets: [], templates: [TURRET] });
+        bridge.reconcile(
+            mirror.applyState(stateEnvelope([{ kind: 'spawn', snapshot: entity(1, 'turret') }])),
+        );
+        expect(renderer.inspect().counts.nodes).toBe(4);
+
+        bridge.reconcile(
+            mirror.applyState(stateEnvelope([{ kind: 'destroy', netId: 1 as NetId }], 2)),
+        );
+        expect(bridge.nodeCount).toBe(0);
+        expect(renderer.inspect().counts.nodes).toBe(0);
+    });
+
+    it('moves the subtree with the entity, and rotates only the node that spins', async () => {
+        // Position and visibility are the only inherited channels, which is what makes a badge ride
+        // upright over a parent that tumbles.
+        const { mirror, bridge, renderer } = await harness();
+        await bridge.loadManifest({ assets: [], templates: [TURRET] });
+        const delta = mirror.applyState(
+            stateEnvelope([{ kind: 'spawn', snapshot: entity(1, 'turret') }]),
+        );
+        bridge.reconcile(delta);
+        const root = bridge.nodeFor(delta.added[0]!)!;
+        const barrel = renderer
+            .inspect()
+            .nodes.get(renderer.inspect().nodes.get(root)!.children[1]!)!.children[0]!;
+
+        mirror.applyState(stateEnvelope([], 2));
+        mirror.applyTransforms({
+            kind: 'transform',
+            tick: 2,
+            transform: [transformDiff(1, { posX: 200, posY: 50, rot: 90 })],
+        });
+        bridge.pushTransforms();
+
+        const resolved = renderer.resolvedTransformOf(barrel)!;
+        // 12 up for the pivot, 6 more for the barrel: the offsets composed onto the entity's move.
+        expect(resolved.position.x).toBe(200);
+        expect(resolved.position.y).toBe(68);
+        expect(resolved.rotation).toBe(0);
+        expect(renderer.localTransformOf(root)?.rotation).toBe(90);
+    });
+
+    it('culls a descendant that leaves the viewport while its parent is still inside', async () => {
+        const { mirror, bridge, renderer } = await harness();
+        await bridge.loadManifest({
+            assets: [],
+            templates: [
+                {
+                    template: 'banner',
+                    kind: 'group',
+                    // Far enough out that the child clears the viewport and the cull margin.
+                    children: [{ kind: 'sprite', texture: 'far.png', offsetX: 5000 }],
+                },
+            ],
+        });
+        const delta = mirror.applyState(
+            stateEnvelope([{ kind: 'spawn', snapshot: entity(1, 'banner') }]),
+        );
+        bridge.reconcile(delta);
+        bridge.pushTransforms();
+        renderer.render();
+
+        const root = bridge.nodeFor(delta.added[0]!)!;
+        const child = renderer.inspect().nodes.get(root)!.children[0]!;
+        expect(renderer.inspect().nodes.get(child)?.culled).toBe(true);
+
+        // Sliding the parent back brings the child in: the cull pass reaches a node the bridge never
+        // patched, through the resolved-changed set.
+        mirror.applyState(stateEnvelope([], 2));
+        mirror.applyTransforms({
+            kind: 'transform',
+            tick: 2,
+            transform: [transformDiff(1, { posX: -5000 })],
+        });
+        bridge.pushTransforms();
+        renderer.render();
+        expect(renderer.inspect().nodes.get(child)?.culled).toBe(false);
+    });
+
+    it('refuses a child list past the depth bound, drawing the placeholder instead', async () => {
+        // Recursive, so a per-level cardinality cap bounds nothing: the receiver bounds depth too, and
+        // refuses the whole template rather than half-drawing it.
+        const { mirror, bridge, renderer } = await harness();
+        let deep: TemplateChild = { kind: 'sprite', texture: 'tip.png' };
+        for (let i = 0; i < MAX_TEMPLATE_DEPTH + 1; i++) {
+            deep = { kind: 'group', children: [deep] };
+        }
+        await bridge.loadManifest({
+            assets: [],
+            templates: [{ template: 'deep', kind: 'group', children: [deep] }],
+        });
+
+        const delta = mirror.applyState(
+            stateEnvelope([{ kind: 'spawn', snapshot: entity(1, 'deep') }]),
+        );
+        bridge.reconcile(delta);
+        const node = bridge.nodeFor(delta.added[0]!)!;
+        expect(renderer.inspect().counts.nodes).toBe(1);
+        expect(renderer.inspect().nodes.get(node)?.missingTexture).toBe(true);
+    });
+
+    it('refuses a child list past the node bound', async () => {
+        const { bridge, mirror, renderer } = await harness();
+        const wide: TemplateChild[] = [];
+        for (let i = 0; i <= MAX_TEMPLATE_NODES; i++)
+            wide.push({ kind: 'sprite', texture: 'x.png' });
+        await bridge.loadManifest({
+            assets: [],
+            templates: [{ template: 'wide', kind: 'group', children: wide }],
+        });
+
+        bridge.reconcile(
+            mirror.applyState(stateEnvelope([{ kind: 'spawn', snapshot: entity(1, 'wide') }])),
+        );
+        expect(renderer.inspect().counts.nodes).toBe(1);
+    });
+
+    it('counts a sibling’s descendants toward the node bound, not just its own level', async () => {
+        // Every level here passes its own entry check, because a nested sibling's subtree lands
+        // BETWEEN this level's pushes; only a running total catches the overshoot.
+        const { bridge, mirror, renderer } = await harness();
+        const packed: TemplateChild[] = [];
+        // Root plus this group fills the batch to the cap, so its two siblings have nowhere to go.
+        for (let i = 0; i < MAX_TEMPLATE_NODES - 2; i++) {
+            packed.push({ kind: 'sprite', texture: 'x.png' });
+        }
+        await bridge.loadManifest({
+            assets: [],
+            templates: [
+                {
+                    template: 'packed',
+                    kind: 'group',
+                    children: [
+                        { kind: 'group', children: packed },
+                        { kind: 'sprite', texture: 'x.png' },
+                        { kind: 'sprite', texture: 'x.png' },
+                    ],
+                },
+            ],
+        });
+
+        bridge.reconcile(
+            mirror.applyState(stateEnvelope([{ kind: 'spawn', snapshot: entity(1, 'packed') }])),
+        );
+        expect(renderer.inspect().counts.nodes).toBe(1);
+    });
+
+    it('refuses a malformed child rather than letting the renderer throw out of the frame', async () => {
+        // A sprite with no texture is a caller bug to the renderer, and it throws — from inside a
+        // spawn that would unwind the frame and end the session as a hostile peer.
+        const { bridge, mirror, renderer } = await harness();
+        await bridge.loadManifest({
+            assets: [],
+            templates: [
+                {
+                    template: 'broken',
+                    kind: 'group',
+                    children: [
+                        { kind: 'sprite', texture: 'ok.png' },
+                        { kind: 'sprite', texture: '' },
+                    ],
+                },
+            ],
+        });
+
+        expect(() =>
+            bridge.reconcile(
+                mirror.applyState(
+                    stateEnvelope([{ kind: 'spawn', snapshot: entity(1, 'broken') }]),
+                ),
+            ),
+        ).not.toThrow();
+        expect(renderer.inspect().counts.nodes).toBe(1);
     });
 
     it('skips non-renderer asset kinds rather than handing them to loadAssets', async () => {
