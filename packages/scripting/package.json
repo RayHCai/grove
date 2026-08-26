@@ -1,0 +1,36 @@
+{
+    "name": "@platform/scripting",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Script policy and toolchain: one deterministic, content-hashed ESM chunk per side, and the registry that resolves a script id to its constructor.",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./toolchain": {
+            "types": "./dist/toolchain/index.d.ts",
+            "import": "./dist/toolchain/index.js"
+        }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc -b",
+        "typecheck": "tsc -p tsconfig.test.json",
+        "test": "vitest run --passWithNoTests",
+        "clean": "rm -rf dist .turbo"
+    },
+    "dependencies": {
+        "@platform/core": "workspace:*",
+        "rolldown": "^1.2.1"
+    },
+    "devDependencies": {
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    }
+}
