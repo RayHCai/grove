@@ -129,7 +129,9 @@ flattened `TransformDiff` free.
   allocates; the server bounds the unauthenticated client → server surface (`MAX_ACTIONS_PER_FRAME`,
   `MAX_ACTION_NAME_LENGTH`, `MAX_ACTION_NAMES`, `MAX_INTERACTIONS_PER_FRAME`, `MAX_WIDGET_NAME_LENGTH`,
   `MAX_NAME_LENGTH`, `maxSeqGap`); the client bounds every array
-  it walks at `MAX_WIRE_ITEMS` and refuses a `netId` that could not name a server handle. A `kind` check that
+  it walks at `MAX_WIRE_ITEMS` — a spawn's attachment list at the smaller `MAX_ENTITY_SCRIPTS`, since each
+  entry mints a script instance that outlives the frame — and refuses a `netId` that could not name a
+  server handle. A `kind` check that
   narrows and then trusts is the shape of the bug. `TemplateChild` is the one recursive shape here, so a
   cardinality cap bounds nothing on its own — a receiver caps depth and total node count as well, or a peer
   spends the per-level cap to the power of the nesting. `Welcome.snapshotChunks` is a count that arrives
