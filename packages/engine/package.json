@@ -3,11 +3,15 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Public @platform/engine entry point. Re-exports the creator API.",
+    "description": "The creator API a script imports, and the composition roots a host stands a game up with.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./host": {
+            "types": "./dist/host/index.d.ts",
+            "import": "./dist/host/index.js"
         }
     },
     "main": "./dist/index.js",
@@ -25,12 +29,13 @@
         "@platform/core": "workspace:*",
         "@platform/math": "workspace:*",
         "@platform/project": "workspace:*",
-        "@platform/renderer": "workspace:*",
+        "@platform/scripting": "workspace:*",
         "@platform/transport": "workspace:*",
         "@platform/server": "workspace:*",
         "@platform/client": "workspace:*"
     },
     "devDependencies": {
+        "@platform/renderer": "workspace:*",
         "typescript": "^7.0.2",
         "vitest": "^4.1.10"
     }

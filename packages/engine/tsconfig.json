@@ -17,7 +17,7 @@
             "path": "../../packages/project"
         },
         {
-            "path": "../../packages/renderer"
+            "path": "../../packages/scripting"
         },
         {
             "path": "../../packages/transport"
