@@ -26,6 +26,9 @@ const PROJECT = { projectId: PROJECT_ID, projectHash: PROJECT_HASH, bundleHash: 
 /** Seconds between fps samples, which is also the averaging window. */
 const FPS_WINDOW = 0.5;
 
+/** Where this tab's player id is kept, so a reload dials back as the same player. */
+const IDENTITY_KEY = 'grove.playerId';
+
 export interface GameStats extends ClientStats {
     fps: number;
 }
@@ -83,7 +86,7 @@ export function useGame(opts: UseGameOptions): UseGameResult {
 
         void (async () => {
             try {
-                const transport = await connectWebSocket(url);
+                const transport = await connectWebSocket(withPlayer(url, tabIdentity()));
                 if (cancelled) {
                     transport.close();
                     return;
@@ -95,7 +98,7 @@ export function useGame(opts: UseGameOptions): UseGameResult {
                     frames,
                     device,
                     clock: createPerformanceClock(),
-                    name: tabName(),
+                    name: tabIdentity(),
                     bindings: BINDINGS,
                     camera: () => cameraRef.current(),
                     predict: true,
@@ -204,10 +207,26 @@ function describeFailure(client: GameClient | null): string | null {
     }
 }
 
-/** A per-tab display name, so several tabs are told apart in the roster. */
-function tabName(): string {
+/**
+ * A per-tab id that survives a reload, so this tab rejoins as the player it saved.
+ *
+ * `sessionStorage` and not `localStorage`, which every tab shares — but note it is COPIED into a
+ * duplicated tab and into one opened from a link, and the server refuses the second claim.
+ */
+function tabIdentity(): string {
+    const held = sessionStorage.getItem(IDENTITY_KEY);
+    if (held !== null) return held;
     // Not `randomUUID`, which is secure-context only: this page is served over plain http, so on
     // any origin but loopback it is undefined and the whole session would fail to construct.
     const [n] = crypto.getRandomValues(new Uint16Array(1));
-    return `tab-${(n ?? 0).toString(16).padStart(4, '0')}`;
+    const minted = `tab-${(n ?? 0).toString(16).padStart(4, '0')}`;
+    sessionStorage.setItem(IDENTITY_KEY, minted);
+    return minted;
+}
+
+/** The peer's own claim, which only a toy host would take — this one says so where it reads it. */
+function withPlayer(url: string, identity: string): string {
+    const parsed = new URL(url);
+    parsed.searchParams.set('player', identity);
+    return parsed.toString();
 }
