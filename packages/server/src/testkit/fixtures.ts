@@ -146,6 +146,24 @@ export class Rules extends ServerScript {
     }
 }
 
+/**
+ * A Game script that attaches the player-hosted state inside `@onPlayerJoin`.
+ *
+ * Attaching there and not after the join is what makes the seeding order testable: the hoist reads
+ * `rt.persisted` synchronously, so a record loaded too late seeds nothing and the test still passes
+ * if the scripts are attached once the cache is already warm.
+ */
+export class Accounts extends ServerScript {
+    @onPlayerJoin
+    join(ctx: Ctx): void {
+        const player = ctx.player as Player | undefined;
+        if (!player) return;
+        player.addScript(Wallet);
+        player.addScript(Squad);
+        player.spawn();
+    }
+}
+
 /** A Game script whose `@onPlayerJoin` spectates instead, for the bodiless-player paths. */
 export class Spectators extends ServerScript {
     @onPlayerJoin

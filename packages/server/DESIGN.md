@@ -64,18 +64,24 @@ Core exports no `createWorld` / `step(tick, inputs)` / `collectChanges`; this is
 `Transport` is one end of one established connection, so the multiplexer transport declined to hold lives
 here: `Map<connectionId, Connection>`. Keyed by a **server-minted `connectionId`, never by player id**,
 since a connection exists before it has a player and may end without ever getting one.
-`accept(transport)` returns the id, or **`null`** for a socket it refused and closed — an id for a dead socket reads at the composition root as a
-live connection. The composition root feeds it from `loopbackPair()` or from a socket listener.
+`accept(transport, playerId?)` returns the id, or **`null`** for a socket it refused and closed — an id for a dead socket reads at the composition root as a
+live connection. The composition root feeds it from `loopbackPair()` or from a socket listener, and the
+optional `playerId` is the **host's** claim about who the peer is, never the peer's: it becomes `player.id`,
+so it is what persisted `@serverState` is keyed by and what every other peer sees on the wire.
 
-`Connection` carries `transport`, nullable `player`, `pendingJoin`, one `ActionStates` fold (core's, not a
-second implementation), `AdmissionState`, `disposers`, `acceptedAtSeconds` (null until the first wake
-observes it — the injected clock's epoch is unknown), and `closed`.
+`Connection` carries `transport`, nullable `player`, `identity` (the host's id for this peer, or null),
+`playerId` (that identity or the `connectionId`), `pendingJoin`, `admitting` (true while the persisted read
+is in flight), one `ActionStates` fold (core's, not a second implementation), `AdmissionState`, `disposers`,
+`acceptedAtSeconds` (null until the first wake observes it — the injected clock's epoch is unknown), and
+`closed`.
 
 ### 3.2 The client speaks first
 
 `accept` mints the id, registers `onMessage`/`onClose` **before** any state mutation, enforces
 `MAX_UNJOINED_CONNECTIONS`, and sends nothing. The first valid `JoinRequest` then: checks
-`protocolVersion`, checks **identity**, checks `maxPlayers`, calls `joinPlayer` (which fires `@onPlayerJoin`, whose handler
+`protocolVersion`, checks **identity**, loads this player's persisted record into the cache when the host
+named one — which answers an identified join a turn later than an anonymous one — checks `maxPlayers` and
+that no live connection already holds that id, calls `joinPlayer` (which fires `@onPlayerJoin`, whose handler
 spawns or spectates), sanitizes the name (NFC, Unicode control **and format** characters stripped, ≤24
 **code points**, blank → `player`), stores `pendingJoin`, and queues a `player-join` roster op. The
 `Welcome` itself is built at the next send-tick (§5.1). `index` is assigned by core's `PlayerManager`,
@@ -417,13 +423,17 @@ period and no reconnect.
 
 Persistence is the seam's two missing halves, filled here: `ServerConfig.kv` is assigned to `rt.kv` and a
 `PersistedState` over it becomes `rt.persisted`, which is what wiring's seeding has always read and nothing
-ever produced. The record reference is taken **before** `leavePlayer` and read **after** it — the leave
+ever produced. The read is at the join and **before** `joinPlayer`: wiring seeds a field synchronously at the
+hoist and `@onPlayerJoin` attaches the player's own scripts inside that call, so a record arriving after it
+would seed nothing until the session after, and a host the cache already holds is never re-read since `save`
+captured it synchronously. The record reference is taken **before** `leavePlayer` and read **after** it — the leave
 handler may write a last value, and `PlayerManager.remove` then drops the record from the host table, so
 neither order alone works. The write is fire-and-forget with the failure routed to `rt.log.warn`: the trigger
 is a socket that has already closed, and making the close path async to carry a promise would push one up
 through `transport.onClose` and `GameServer.close()`, neither of which has anywhere to put it. `PersistedState`
 captures synchronously into its cache for exactly that reason, so a rejoin under the same host id reads the
-value back whether or not the store write has landed.
+value back whether or not the store write has landed. A record the cache does not hold under a host-supplied
+identity is not written, so a read that failed cannot be overwritten with this session's initializers.
 
 `GameServer.close()` is the whole-server form: stop the driver, then run that path **inline** for every
 connection rather than waiting on each transport's `onClose`, which arrives on the next delivery — and after
