@@ -2,6 +2,7 @@
 // `interface` (an interface gets no implicit index signature), no `readonly` field or array, and an
 // optional field means the key is ABSENT rather than explicitly `undefined`.
 
+import type { ScriptId, ScriptProps, TemplateId } from '@platform/project';
 import type { JsonValue } from '@platform/transport';
 import type { NetId, PlayerId, ProjectId } from './ids.js';
 
@@ -194,8 +195,8 @@ export type TransformEnvelope = {
     transform: TransformDiff[];
 };
 
-/** One entry in the ordered structural journal. */
-export type WireStructuralOp =
+/** One indivisible entry in the ordered structural journal. */
+export type WireSingleStructuralOp =
     | { kind: 'spawn'; snapshot: EntitySnapshot }
     | { kind: 'destroy'; netId: NetId }
     | { kind: 'reparent'; netId: NetId; parent: NetId | null }
@@ -206,11 +207,35 @@ export type WireStructuralOp =
     /** Carries the roster because nothing else on the wire names a player. */
     | { kind: 'player-join'; player: PlayerSnapshot }
     | { kind: 'player-leave'; id: PlayerId }
-    /** No consumer yet — which scripts run on which entities is on the wire nowhere else. */
-    | { kind: 'attach'; netId: NetId; scriptClass: string };
+    /**
+     * Which script runs on which entity — on the wire nowhere else, and named by the id the bundle
+     * stamped rather than by a class name, which a minifier rewrites and no receiver could resolve.
+     */
+    | ({ kind: 'attach'; netId: NetId } & WireScriptAttachment);
+
+/**
+ * Every op one template instantiation produced, applied as one.
+ *
+ * A BOUNDARY, never permission to reorder: the ops inside stay in the order they were journaled,
+ * parents ahead of children, and the group itself sits in journal order among the rest. It is flat
+ * — a subtree is emitted depth-first, so one level is all the boundary needs, and a nesting shape
+ * would force a receiver to cap depth before it could bound the walk at all.
+ */
+export type WireStructuralGroup = { kind: 'group'; ops: WireSingleStructuralOp[] };
+
+/** One entry in the ordered structural journal. */
+export type WireStructuralOp = WireSingleStructuralOp | WireStructuralGroup;
 
 /** The `kind` of a structural op, for exhaustiveness checks over the journal. */
 export type WireStructuralOpKind = WireStructuralOp['kind'];
+
+/**
+ * One script on one entity, as both the `attach` op and a spawn's overrides carry it.
+ *
+ * `props` are the values an inspector configured this attachment with — absent when it was
+ * configured with none, never `undefined`.
+ */
+export type WireScriptAttachment = { script: ScriptId; props?: ScriptProps };
 
 /**
  * Which `@serverState` host a diff addresses. Core's `StateMark` names the host by `object`, which
@@ -290,7 +315,11 @@ export type TransformDiff = WireTransform & { netId: NetId };
  */
 export type EntitySnapshot = {
     netId: NetId;
-    template: string;
+    /**
+     * The template it instances — the authoring id, not a free string: it keys the render manifest
+     * on one end and a template registry on the other, and both are saved-file identities.
+     */
+    template: TemplateId;
     /** Where it sits in the hierarchy. `null` = a child of the world root. */
     parent: NetId | null;
     /**
@@ -303,6 +332,29 @@ export type EntitySnapshot = {
     tags: string[];
     /** All seven fields, none of them defaultable. */
     transform: WireTransform;
+    /**
+     * What this instance carries beyond its template.
+     *
+     * ABSENT for an entity the template describes whole, which is the ordinary case and the reason
+     * `template` earns its place: a spawn is then one id and a transform.
+     */
+    overrides?: EntityOverrides;
+};
+
+/**
+ * Per-instance deviations from a template.
+ *
+ * It exists because `attach` is a delta and a joiner holds no earlier state to apply one against:
+ * the ops tell a live client which scripts came and went, and this is the same fact as a baseline.
+ */
+export type EntityOverrides = {
+    /**
+     * Every script on it, in attachment order — the whole list, not a merge over the template's.
+     *
+     * ABSENT when nothing is attached; a template that attaches nothing and an entity that lost its
+     * attachments are the same picture, and a receiver that runs no scripts cares about neither.
+     */
+    scripts?: WireScriptAttachment[];
 };
 
 /** One player as a joiner must receive it. Shared with `player-join`. */

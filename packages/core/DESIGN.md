@@ -20,7 +20,7 @@ path and core only ever receives an already-valid manifest.
 | `script/`      | `types.ts` locations/phases/concurrency · `metadata.ts` per-class registry · `bases.ts` the four bases · `decorators.ts` all 16 handler decorators + `@serverState` and the `Symbol.metadata` polyfill                                                                                                                                                                                                                                                                                                                                                                             |
 | `dispatch/`    | `scope-tree.ts` runtime→host→invocation · `ambient.ts` current-invocation plumbing · `acting-player.ts` the acting-player ambient · `instances.ts` attached-script registry · `breaker.ts` throw counters · `dispatcher.ts`                                                                                                                                                                                                                                                                                                                                                        |
 | `loop/`        | `store-registry.ts` snapshot contract · `timers.ts` sleep/every/after heap · `tweens.ts` the one tween engine · `loop.ts` `step`/`snapshot`/`restore`                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `world/`       | `entity-table.ts` the per-entity record and hierarchy over math's `SlotTable` · `transform-store.ts` SoA + dirty bitset · `tag-index.ts` · `entity-manager.ts` spawn/destroy/facade cache · `broadphase.ts`                                                                                                                                                                                                                                                                                                                                                                        |
+| `world/`       | `entity-table.ts` the per-entity record and hierarchy over math's `SlotTable` · `transform-store.ts` SoA + dirty bitset · `tag-index.ts` · `entity-manager.ts` spawn/destroy/facade cache · `templates.ts` the template registry and `instantiate` · `broadphase.ts`                                                                                                                                                                                                                                                                                                               |
 | `state/`       | `host-record.ts` values + type tags · `channels.ts` structural journal + state marks · `backing.ts` the `@serverState` accessor pair · `immutable.ts` deep-readonly predicate                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `runtime/`     | the creator-facing facades (`Entity`, `Game`, `Player`, `Camera`, `HUD`, `random`, `assets`, `sound`/`music`, `sleep`/`every`/`after`, `request`, motion verbs, wrappers, movement) plus the plumbing: `runtime.ts`, `wiring.ts`, `load-game.ts`, `hosts.ts`, `roster.ts`, `contacts.ts`, `regions.ts`, `lag-ring.ts`, `action-states.ts`, `seams.ts`, `persistence.ts`, `physics.ts`, `prng-store.ts`, `transform-view.ts`, and `movement-pass.ts`, which holds `tickMovement` apart from the decorator-bearing `movement.ts` so the loop's graph reaches no decorator as a value |
 
@@ -135,10 +135,14 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
 - **Host records** live in `HostTable` keyed `game` | `player:<id>` | `entity:<id>` | `camera:<playerId>` |
   `screen:<name>`, each carrying its scope id, values, tags, bound wrappers and `markDirty`.
 - **Two replication channels here, one on the store.** `ReplicationChannels` owns the ordered structural
-  journal (`spawn` | `destroy` | `reparent` | `tag` | `attach`) and the `(record, field)` state set;
+  journal (`spawn` | `destroy` | `reparent` | `tag` | `attach`, plus the `group` that bounds an
+  instantiation) and the `(record, field)` state set;
   the **transform** channel is `SimTransformStore`'s own dirty index, which is what lets the server's sink and
   the client's `SceneSink` drain it independently. None of the three is captured by snapshot — they are output
   bookkeeping. `detach()` journals `reparent → NO_ENTITY`; `attachTo` unlinks silently and journals one op.
+  `attach` carries the `ScriptId` the running bundle stamped, resolved through `rt.scriptIdOf`, and is
+  journaled at entity hosts alone — a class that resolver cannot name is attached locally and journaled
+  nowhere, since nothing on the wire can name a class.
 - **Wrappers:** `StatefulWrapper` gives `bind(record, field)` (throws if bound twice), `mark()`, and
   `serialize`/`restore`; `Scoreboard`, `Leaderboard`, `Inventory`, `Team` sit on it and mark per key with no
   decorator. An omitted player defaults to the dispatcher's acting-player ambient in `Scoreboard`, and throws
@@ -177,6 +181,22 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   handler still finds the rest of its subtree addressable — then per entity unparents, clears tags, releases
   the slot, cancels timers/tweens, removes instances and the host, journals `destroy`, and bumps the
   generation.
+- **A template is what a spawn key means**, and `instantiate` is logical-now, journaled-as-one — the mirror
+  of `destroy`. `TemplateRegistry` holds `@platform/project`'s already-resolved `TemplateDef`s: an id, the
+  attachments each instance carries, and the child templates minted beneath it, each with its own local
+  offset. It carries no visual, because core draws nothing and the art is keyed by the same `TemplateId` in
+  the render manifest. `game.spawn` and `Roster.spawnAvatar` both go through it; a key the registry does not
+  hold mints one bare entity, which is what an ad-hoc key has always done. The subtree is a REFERENCE graph
+  — a child names a template — so the walk is bounded by `MAX_TEMPLATE_DEPTH` 8 and `MAX_TEMPLATE_NODES` 256
+  and a breach is a `LoadError`; the emit is depth-first, each node spawned, attached and parented before its
+  own children exist, so parents always precede children.
+- **The group bounds replication, never visibility.** Every entity is addressable the moment it is minted,
+  exactly as a bare `spawn` is; what the boundary guarantees is that one instantiation's ops cross the wire
+  together and in the order they were journaled. It is flat and re-entrant: a child template opens its own
+  group and only the outermost produces an op, an empty one journals nothing, and a single op journals
+  itself rather than a group of one.
+- **`instantiatePlaced` builds the manifest's `entities`** through that same path, in record order, since
+  `validate` puts a parent's record ahead of its children's — one pass, no deferred parenting.
 - `Broadphase` is naive O(n²) over a `TransformView`, ascending id order, and takes its transform source as a
   constructor argument — the live store or a ring buffer. `liveTransformView` is the one factory for a view
   over the live stores, so `rt.broadphase`'s point-only view and `ContactSource`'s differ in one argument:
@@ -196,11 +216,16 @@ lives on the runtime and is resolved per call (`assets`, the player lookup behin
 module slot a second `loadGame` would repoint. Script instances get their runtime stamped at attach time, so
 simulation code inside a tick never has to consult the ambient slot at all.
 
-`loadGame(manifest)` → build world (bounds, regions, assets, collaborators, `passes`) → attach Game scripts
-(wire + hoist, **no** `@onStart`) → `startGame(rt)` runs Game `@onStart` to its first await →
+`loadGame(manifest, opts)` → build world (bounds, regions, assets, template registry, collaborators,
+`passes`) → attach Game scripts (wire + hoist, **no** `@onStart`) → instantiate the placed `entities` →
+`startGame(rt)` runs Game `@onStart` to its first await →
 `joinPlayer` / `leavePlayer` release and end sessions → `endGame(rt)` runs `@onEnd` at every attached
-instance, because the world ending ends every host under it. The manifest takes `role`, `simRate`, `bounds`,
-`regions`, `assets`, `gameScripts`. `leavePlayer` goes innermost host outward and removes last — `@onEnd` at
+instance, because the world ending ends every host under it. `GameManifest` is `@platform/project`'s
+validated narrowing rather than a parallel declaration — `role`, `simRate`, `bounds`, `regions`, `assets`,
+`templates`, `entities`, `gameScripts` — so a field added to the authoring shape cannot reach a runtime
+without passing through it; `validate` stays the server's to call. `LoadOptions.scriptIdOf` is the one
+thing a manifest cannot hold, because it names code: the registry that stamps a class with its `ScriptId`
+imports core, so the edge arrives as a function. `leavePlayer` goes innermost host outward and removes last — `@onEnd` at
 the player host then its camera host, then `@onPlayerLeave` at the Game, then `PlayerManager.remove`, which
 drops both hosts — so every handler can still read the player; `PlayerManager.adopt` keeps a wire-supplied
 `index` where `create` mints one.

@@ -30,7 +30,7 @@ export type {
     MirrorReparent,
     MirrorView,
     ScriptClass,
-    TemplateScripts,
+    ScriptIndex,
 } from './mirror.js';
 export { MirrorIndex } from './index-map.js';
 

@@ -1,9 +1,12 @@
 // The drain and the fan-out (DESIGN §5, §8). Fixtures are compiled by the build.
 
 import { afterEach, describe, expect, it } from 'vitest';
+import type { SingleStructuralOp } from '@platform/core';
 import { GAME_KEY, clearRuntime } from '@platform/core';
+import { scriptId, templateId } from '@platform/project';
 import type { WireStructuralOp } from '@platform/protocol';
 import { Health, Rules, Squad, Standings, Wallet } from '../dist/testkit/fixtures.js';
+import { drainOnce } from '../src/broadcast.js';
 import { CountingCodec, harness } from './harness.js';
 import type { Peer } from './harness.js';
 
@@ -496,6 +499,119 @@ describe('§5.4 — the fan-out', () => {
         const lurker = h.connect();
         h.pumpTicks(6);
         expect(lurker.received).toStrictEqual([]);
+    });
+});
+
+describe('§5.3 — a template instantiation crosses as one group', () => {
+    const TURRET = [
+        {
+            id: templateId('turret'),
+            scripts: [{ script: scriptId('health'), klass: Health as never }],
+            children: [{ template: templateId('barrel'), transform: { y: 12 } }],
+        },
+        { id: templateId('barrel'), scripts: [], children: [] },
+    ];
+
+    /** Names the fixture classes, which is what lets an `attach` op be journaled at all. */
+    const SCRIPTS = {
+        idOf: (klass: unknown) => (klass === Health ? scriptId('health') : undefined),
+    };
+
+    function turretHarness() {
+        return harness({
+            config: { gameScripts: [Rules], templates: TURRET, scripts: SCRIPTS },
+        });
+    }
+
+    it('sends one group op holding the whole subtree, in journal order', () => {
+        const h = turretHarness();
+        const peer = h.joined('a');
+        h.settle([peer]);
+
+        h.server.runtime.gameInstance!.spawn('turret', 10, 20);
+        h.pumpTicks(6);
+
+        const group = ops(peer).find((op) => op.kind === 'group');
+        expect(group).toBeDefined();
+        if (group?.kind !== 'group') throw new Error('unreachable');
+        expect(group.ops.map((op) => op.kind)).toStrictEqual([
+            'spawn',
+            'attach',
+            'spawn',
+            'reparent',
+        ]);
+        // The ops are converted in place, never regrouped by kind: a reordered subtree parents an
+        // entity to a netId the client does not hold yet.
+        const spawns = group.ops.filter((op) => op.kind === 'spawn');
+        expect(spawns.map((op) => op.snapshot.template)).toStrictEqual(['turret', 'barrel']);
+    });
+
+    it('names the attached script by its id, with no class name anywhere on the wire', () => {
+        const h = turretHarness();
+        const peer = h.joined('a');
+        h.settle([peer]);
+        h.server.runtime.gameInstance!.spawn('turret', 0, 0);
+        h.pumpTicks(6);
+
+        const group = ops(peer).find((op) => op.kind === 'group');
+        if (group?.kind !== 'group') throw new Error('unreachable');
+        const attach = group.ops.find((op) => op.kind === 'attach');
+        expect(attach).toStrictEqual({
+            kind: 'attach',
+            netId: expect.any(Number),
+            script: 'health',
+        });
+    });
+
+    it('gives a joiner the same attachments as an `overrides` baseline on its snapshot', () => {
+        const h = turretHarness();
+        h.server.runtime.gameInstance!.spawn('turret', 0, 0);
+        const peer = h.joined('a');
+
+        const turret = peer.welcome?.snapshot.entities.find((e) => e.template === 'turret');
+        // The joiner was not there for the `attach` op, and a delta has nothing to apply against.
+        expect(turret?.overrides).toStrictEqual({ scripts: [{ script: 'health' }] });
+        const barrel = peer.welcome?.snapshot.entities.find((e) => e.template === 'barrel');
+        // Absent, never an empty list: an entity its template describes whole says so by omission.
+        expect(barrel && 'overrides' in barrel).toBe(false);
+    });
+
+    it('counts a group against the send budget by what it holds, not as one op', () => {
+        // The budget bounds what one frame carries, and a group counted as one op would let a
+        // single instantiation spend the whole cap it exists to hold.
+        const spill: WireStructuralOp[] = [];
+        const h = turretHarness();
+        const rt = h.server.runtime;
+        rt.channels.clear();
+        rt.gameInstance!.spawn('turret', 0, 0);
+        rt.gameInstance!.spawn('turret', 0, 0);
+
+        const set = drainOnce(rt, 1, { joins: [], leaves: [] }, spill, 4);
+        expect(set.structural).toHaveLength(1);
+        expect(spill).toHaveLength(1);
+    });
+});
+
+describe('§5.3 — the translation is exhaustive', () => {
+    it('refuses a journal arm core does not declare', () => {
+        // Half of the guarantee. The other half is the `never` default in `toWireSingle`:
+        // `noImplicitReturns` is off, so an arm added to core's journal and not handled there
+        // would return `undefined`, be counted as unrepresentable, and vanish for the session.
+        // @ts-expect-error — core's journal has no `teleport` arm.
+        const bogus: SingleStructuralOp = { kind: 'teleport', id: 1 };
+        expect(bogus.kind).toBe('teleport');
+    });
+
+    it('names a branch for every arm core’s journal declares', () => {
+        const HANDLED: Record<SingleStructuralOp['kind'] | 'group', true> = {
+            spawn: true,
+            destroy: true,
+            reparent: true,
+            tag: true,
+            attach: true,
+            group: true,
+        };
+        expect(Object.keys(HANDLED)).toHaveLength(6);
     });
 });
 

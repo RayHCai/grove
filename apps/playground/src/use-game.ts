@@ -11,19 +11,9 @@ import { GameClient } from '@platform/client';
 import { createPerformanceClock } from '@platform/client/browser';
 import type { CameraState, IRenderer } from '@platform/renderer';
 import { connectWebSocket } from '@platform/transport/websocket';
-import { AVATAR_TEMPLATE, BINDINGS, CODE_CLEAR, PROJECT_HASH, PROJECT_ID } from './shared';
+import { BINDINGS, CODE_CLEAR, PROJECT_HASH, PROJECT_ID } from './shared';
 import { createStageInputDevice } from './stage-input';
-// The LOWERED copy: `Runner` carries decorators, and Vite's transform would hand them to the browser
-// verbatim. `tsc -p tsconfig.server.json` emits this, which is why `dev` runs it first.
-import { Runner } from '../dist/synced/runner.js';
-
-/**
- * The scripts this client attaches to what it mirrors, and the reason prediction has anything to run.
- *
- * The same class the authority runs, on the same template — that is the whole contract. Anything the
- * server alone owns is deliberately absent: it would be filtered out of a client tick anyway.
- */
-const SCRIPTS = { [AVATAR_TEMPLATE]: [Runner] };
+import { CLIENT_SCRIPTS } from './scripts';
 
 /**
  * What this tab claims to be running.
@@ -109,7 +99,7 @@ export function useGame(opts: UseGameOptions): UseGameResult {
                     bindings: BINDINGS,
                     camera: () => cameraRef.current(),
                     predict: true,
-                    scripts: SCRIPTS,
+                    scripts: CLIENT_SCRIPTS,
                     project: PROJECT,
                 });
 

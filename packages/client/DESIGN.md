@@ -144,9 +144,21 @@ Three wire write paths, and outside them only a prediction step:
 
 Structural ops: `spawn`/`enter-interest` share one applier over `EntitySnapshot` (template, owner, parent,
 tags, all transform fields — a static entity is dirty exactly once, so `spawn`'s position-only write would
-strand scale/layer); `destroy`/`leave-interest`; `reparent` (**also reported on the delta**, since the
+strand scale/layer — then `overrides.scripts`, the baseline for the `attach` ops a joiner was not there for);
+`destroy`/`leave-interest`; `reparent` (**also reported on the delta**, since the
 render tree cannot infer it); `tag`; `player-join` (mints a `Player` and `playerManager.adopt`s it, keeping
-the **wire's** index); `player-leave`; `attach` dropped and counted.
+the **wire's** index); `player-leave`; `attach`, resolved through the script registry; and `group`, whose
+ops are applied verbatim and in order like the outer journal, bounded at `MAX_WIRE_ITEMS` before the walk.
+The switch ends in a `never` default, because `noImplicitReturns` is off and an unhandled arm would no-op
+in silence.
+
+**One registry, keyed one way.** `GameClientOptions.scripts` is a `ScriptIndex` — `resolve(ScriptId)` and
+`locationOf(ScriptId)`, declared structurally so `@platform/scripting`'s `ScriptRegistry` satisfies it
+without this package depending on it. Both the `attach` op and a spawn's overrides name a `ScriptId`, so
+nothing here is keyed by template or by class name, which a minifier rewrites. A `ServerScript` is skipped
+rather than counted — the authority runs it and a client tick filters it out of every dispatch — while an
+id this bundle holds no class for is counted (`droppedAttach`), which is what the handshake's `projectHash`
+exists to keep at zero.
 
 `@serverState` arrives as one `StateDiff` per host carrying a `fields` bag, and lands in
 `hosts.ensure(key).record` through core's `restoreHostField` — one `StateDiff` per host, its `fields` map
@@ -165,10 +177,8 @@ peer-chosen `netId` enters the map, so it is the only place that has to check.
 
 Off unless `GameClient` is given `predict`. What it runs is the creator scripts attached to the local
 player's entities, so a mirror holding none predicts an unchanged world at the cost of the replay. Those
-come from `scripts` — a **template → classes** table the host supplies, applied at spawn — because the
-wire's `attach` op names a class this runtime has no registry to resolve, while the host already holds the
-game's code. Only a `SyncedScript` earns a place in it: a `ServerScript` is filtered out of a client tick
-and would never be dispatched to.
+arrive as `attach` ops and as a spawn's `overrides`, resolved through `scripts`; a predicting client that
+supplies no registry attaches nothing and therefore simulates nothing.
 
 The mirror holds the predicted world — the render path needs no second source — and `Prediction` holds the
 **authoritative baseline** it rewinds to. The cycle is `rewind → apply → capture → replay`, and its order is

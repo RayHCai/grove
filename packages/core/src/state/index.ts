@@ -1,5 +1,5 @@
 export { ReplicationChannels } from './channels.js';
-export type { StructuralOp, StateMark } from './channels.js';
+export type { SingleStructuralOp, StateMark, StructuralGroup, StructuralOp } from './channels.js';
 
 export { createHostRecord, tagOf, tagsMatch } from './host-record.js';
 export type { HostRecord, TypeTag } from './host-record.js';

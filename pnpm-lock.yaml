@@ -67,12 +67,18 @@ importers:
       '@platform/math':
         specifier: workspace:*
         version: link:../../packages/math
+      '@platform/project':
+        specifier: workspace:*
+        version: link:../../packages/project
       '@platform/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
       '@platform/renderer':
         specifier: workspace:*
         version: link:../../packages/renderer
+      '@platform/scripting':
+        specifier: workspace:*
+        version: link:../../packages/scripting
       '@platform/server':
         specifier: workspace:*
         version: link:../../packages/server

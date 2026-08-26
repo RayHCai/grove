@@ -17,7 +17,7 @@ import { loopbackPair } from '@platform/transport';
 import type { LoopbackPair } from '@platform/transport';
 import type { EntityId } from '@platform/core';
 import { serverConfig } from '../dist/server/config.js';
-import { Runner } from '../dist/synced/runner.js';
+import { CLIENT_SCRIPTS } from '../src/scripts';
 import {
     AVATAR_TEMPLATE,
     BINDINGS,
@@ -81,7 +81,7 @@ class Session {
             bindings: BINDINGS as readonly Binding[],
             // The same pair `use-game.ts` passes: this suite is only worth running on what ships.
             predict: true,
-            scripts: { [AVATAR_TEMPLATE]: [Runner] },
+            scripts: CLIENT_SCRIPTS,
             // As `use-game.ts` declares it. The server config declares the same, so the handshake's
             // identity check passes here and this suite covers the agreeing path end to end.
             project: { projectId: PROJECT_ID, projectHash: PROJECT_HASH, bundleHash: '' },

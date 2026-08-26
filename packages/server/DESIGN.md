@@ -46,7 +46,7 @@ Core exports no `createWorld` / `step(tick, inputs)` / `collectChanges`; this is
 
 | Need                | Core's surface                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------ |
-| build the world     | `loadGame({ role: 'server', … })` → `Runtime`, then `startGame(rt)`                              |
+| build the world     | `loadGame({ role: 'server', … }, { scriptIdOf })` → `Runtime`, then `startGame(rt)`              |
 | location filter     | `role: 'server'` → `activeLocationsFor('server')` = `['server','synced']`                        |
 | step one tick       | `new Loop(rt).step(rt.tick + 1)` — **takes no inputs**                                           |
 | apply input         | `rt.passes.input(dispatch)`, whose stub the server replaces (§4.2)                               |
@@ -121,19 +121,27 @@ single current-tick view is the one version no connection is behind at.
 
 ### 3.4 Constructing the world
 
-One runtime, once, in the constructor: `loadGame({ role: 'server', simRate, bounds, regions?, assets?,
-gameScripts? })`, then the input pass is installed **before** the first step, then the driver is built,
+One runtime, once, in the constructor, in this order: the **driver** first, because it is the one thing
+that checks `simRate` and `sendRate` and a bad rate must refuse before a world is built rather than after —
+there is no second rate assertion here; then `loadGame({ role: 'server', simRate, bounds, regions?,
+assets?, templates?, entities?, gameScripts? }, { scriptIdOf? })`, which builds the template registry,
+wires the Game scripts and instantiates the placed scene against that registry — a world built against an
+empty registry is a world of bare entities. Then the input pass is installed **before** the first step,
 then `startGame(rt)` is called and **not awaited** — its promise settles when every `@onStart` completes,
 and a handler awaiting a timer cannot complete until the loop steps, so awaiting it deadlocks the server
 against its own driver. The synchronous run to each first `await` is the guarantee that matters; `server.started`
 exposes the promise for a host that wants it. `ServerConfig` extends `Partial<EngineConfig>` and adds
 `bounds`, `regions`, `visuals` (`RenderManifest` → `Welcome.visuals`; core's asset registry holds no
-`url`), `project` (`ProjectIdentity` → the handshake comparison and `Welcome`'s four identity fields) and
+`url`), `project` (`ProjectIdentity` → the handshake comparison and `Welcome`'s four identity fields),
+`templates` / `entities` (`toGameManifest`'s output, forwarded to `loadGame`), `scripts` (a `ScriptIndex` —
+one method, `idOf`, declared structurally because `@platform/scripting`'s registry imports core) and
 `gameScripts`. Defaults: `simRate` 60, `sendRate` 20, `maxPlayers` 8, bounds ±400 × ±300 —
-and both rates and `maxPlayers` are **validated** here, because `resolveConfig` fills defaults without
-checking and a `simRate` of 0 makes `dt` infinite, so the accumulator never reaches it and the world steps
-zero times forever. A missing `rt.passes` throws for the same reason: silently keeping core's stub leaves
-every input unapplied, which reads as a dead game rather than a wiring fault.
+and `maxPlayers` is **validated** here, because `resolveConfig` fills defaults without checking and a head
+count below one admits nobody. A missing `rt.passes` throws for a related reason: silently keeping core's
+stub leaves every input unapplied, which reads as a dead game rather than a wiring fault.
+
+`booted` is false until every step above has run, and `accept` refuses while it is: a joiner's snapshot is
+its entire baseline, and no later delta repairs one taken of a world still being assembled.
 
 `GameServerOptions.onBreakerTrip` is the dev channel: core hands it every handler or callback the breaker
 disabled, and it is registered before `startGame` so a Game `@onStart` that trips on its first tick is still
@@ -304,11 +312,20 @@ would go out with an empty `template`.
   entities).
 - **Structural** keeps journal order — order is meaning. `NetId` **is** the `EntityId`, cast at the
   boundary, so no map is needed server-side. Per op: `spawn` carries a full `EntitySnapshot` with
-  `parent: null, tags: []` (at mark time `create` has set neither; both arrive later as their own ops) and a
-  current transform; `destroy` and `attach` pass through; `reparent` maps `NO_ENTITY` → `null` (core's
+  `parent: null, tags: []` and no `overrides` (at mark time `create` has set none of the three; each arrives
+  later as its own op) and a current transform; `destroy` and `attach` pass through; `reparent` maps
+  `NO_ENTITY` → `null` (core's
   `detach()`); a `say:`-prefixed `tag` is **filtered** (it is not in core's tag index — speech bubbles are
   unreplicated); and a spawn-then-destroy inside one interval is dropped **as a pair**, since a released
-  entity has no record and an empty `template` would abort the client's whole reconcile.
+  entity has no record and an empty `template` would abort the client's whole reconcile. A `group` converts
+  arm by arm and survives whole or not at all, keeps its order, and counts against
+  `MAX_STRUCTURAL_OPS_PER_SEND` by what it holds — a group over the budget on its own still goes, alone,
+  because the boundary is indivisible. The switch ends in a `never` default: `noImplicitReturns` is off, so
+  an unhandled arm would return `undefined` and be counted as unrepresentable rather than caught.
+- **The join snapshot restates the attachments** as `EntitySnapshot.overrides.scripts`, read back off the
+  instance registry through `rt.scriptIdOf` rather than off the template, because `addScript` puts classes on
+  an entity no template names — and those are exactly the ones a joiner cannot infer. A class the resolver
+  cannot name is left out, for the reason its `attach` op is never journaled.
 - **Transform:** `consumeDirty()` returns dirty slot indices, so each is resolved to an id and the whole
   seven-field transform read in core's order, non-finite cells degraded to slot defaults (`jsonCodec` throws
   on `NaN`, which would abort the send for every peer). A read, never a write.

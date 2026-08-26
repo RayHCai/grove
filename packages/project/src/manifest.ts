@@ -1,8 +1,8 @@
 // The authoring shape: what an editor saves, and the one thing every runtime input is derived from.
 // Declarations only — nothing here reads a file, fetches an asset or builds a world.
 
-import type { JsonValue } from '@platform/transport';
 import type { AssetId, ScriptId, TemplateId } from './ids.js';
+import type { ScriptProps } from './props.js';
 
 /**
  * The format this build reads and writes.
@@ -63,13 +63,8 @@ export type ScriptDecl = {
 /** One authored source module, and the script classes it exports. */
 export type ScriptModule = { path: string; scripts: ScriptDecl[] };
 
-/**
- * One script on one host, with the values it was configured with in the inspector.
- *
- * `props` is `JsonValue`-constrained because it is saved: a function, a class or an entity reference
- * has no spelling in a project file.
- */
-export type ScriptAttachment = { script: ScriptId; props?: { [key: string]: JsonValue } };
+/** One script on one host, with the values it was configured with in the inspector. */
+export type ScriptAttachment = { script: ScriptId; props?: ScriptProps };
 
 /** A template whose entities draw a sprite. */
 export type SpriteVisual = {
@@ -94,12 +89,34 @@ export type GroupVisual = { kind: 'group' };
  */
 export type TemplateVisual = SpriteVisual | GroupVisual;
 
+/**
+ * One entity minted beneath a template's root, naming the template it instances.
+ *
+ * A child names a TEMPLATE rather than restating art, tags and scripts of its own: a subtree is
+ * therefore a reference graph, one record per node however many places it appears, and the only
+ * thing local to this appearance is where it sits. `validate` closes the graph — every child names
+ * a declared template, and no template reaches itself.
+ */
+export type TemplateChildRecord = {
+    template: TemplateId;
+    /** Local to the parent node. Hierarchy carries position only, as the runtime's does. */
+    transform?: EntityTransform;
+};
+
 /** A configured entity, spawnable by key — one row of the editor's tray. */
 export type TemplateRecord = {
     id: TemplateId;
     visual: TemplateVisual;
     /** Attached to every instance ever spawned from this template, before any `@onStart` runs. */
     scripts: ScriptAttachment[];
+    /**
+     * Entities minted beneath every instance, parented to it in this order.
+     *
+     * ABSENT for a template that is one entity, which is the ordinary case. Present, spawning the
+     * template mints the whole subtree — so a turret and its barrel are one spawn key, not two the
+     * creator has to parent by hand every time.
+     */
+    children?: TemplateChildRecord[];
 };
 
 /**
