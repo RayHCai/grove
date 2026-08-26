@@ -9,7 +9,7 @@ import type { Entity } from './entity.js';
 import type { Camera } from './camera.js';
 import type { Storage } from './wrappers.js';
 import type { BaseMovement } from './movement.js';
-import { playerKey } from './hosts.js';
+import { cameraKey, playerKey } from './hosts.js';
 
 export interface Cursor {
     readonly position: Vec3;
@@ -207,6 +207,10 @@ export class PlayerManager {
         // scripts would keep taking @onUpdate against a scope that no longer exists.
         this.#rt.instances.removeHost(playerKey(id));
         this.#rt.hosts.remove(playerKey(id));
+        // The camera goes with them: it is one player's view, so a surviving camera host would keep
+        // its scripts dispatching against a player the roster no longer holds.
+        this.#rt.instances.removeHost(cameraKey(id));
+        this.#rt.hosts.remove(cameraKey(id));
     }
 
     get players(): Player[] {

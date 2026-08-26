@@ -2,7 +2,15 @@
 // and the bind-twice load-time error.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { Scoreboard, Leaderboard, Inventory, Team } from '../src/runtime/wrappers.js';
+import {
+    Scoreboard,
+    Leaderboard,
+    Inventory,
+    Team,
+    restoreHostField,
+    reviveWrapper,
+    serializeHostField,
+} from '../src/runtime/wrappers.js';
 import { createHostRecord } from '../src/state/host-record.js';
 import { createRuntime, clearRuntime } from '../src/runtime/runtime.js';
 import type { Player } from '../src/runtime/player.js';
@@ -157,5 +165,109 @@ describe('wrapper behavior', () => {
         inv.bind(createHostRecord('player:a'), 'bag');
         inv.restore(new Scoreboard().serialize()); // wrong class identity
         expect(inv.count('anything')).toBe(0);
+    });
+});
+
+// The two ends both endpoints replicate a wrapper through. Without them the field's value is the
+// wrapper OBJECT, which no codec carries — so the mark is raised, the drain finds a class instance,
+// and the write is dropped and counted while everything upstream looks like it worked.
+
+describe('serializeHostField', () => {
+    it('substitutes a bound wrapper’s wire form and leaves every other field raw', () => {
+        withPlayerLookup();
+        const record = createHostRecord('game');
+        const board = new Scoreboard();
+        board.bind(record, 'scores');
+        record.values.set('scores', board);
+        record.values.set('round', 3);
+
+        expect(serializeHostField(record, 'scores')).toEqual({
+            kind: 'Scoreboard',
+            scores: [],
+        });
+        expect(serializeHostField(record, 'round')).toBe(3);
+    });
+});
+
+describe('restoreHostField', () => {
+    it('restores a wrapper the record already holds, rather than replacing it', () => {
+        withPlayerLookup();
+        const record = createHostRecord('game');
+        const held = new Scoreboard();
+        held.bind(record, 'scores');
+        record.values.set('scores', held);
+
+        const source = new Scoreboard();
+        source.bind(createHostRecord('game'), 'scores');
+        source.add(7, player('x'));
+        restoreHostField(record, 'scores', source.serialize());
+
+        // The same instance: a script may be holding it, and swapping it for the decoded payload
+        // would leave that script pointing at a methodless object.
+        expect(record.values.get('scores')).toBe(held);
+        expect(held.of(player('x'))).toBe(7);
+    });
+
+    it('revives a working wrapper when the record holds none — methods and all', () => {
+        withPlayerLookup();
+        const record = createHostRecord('game');
+        const source = new Scoreboard();
+        source.bind(createHostRecord('game'), 'scores');
+        source.add(4, player('a'));
+        source.add(9, player('b'));
+
+        restoreHostField(record, 'scores', source.serialize());
+
+        const revived = record.values.get('scores');
+        expect(revived).toBeInstanceOf(Scoreboard);
+        // The acceptance the whole change is for: a client running no scripts can still call this.
+        expect((revived as Scoreboard).of(player('b'))).toBe(9);
+        expect((revived as Scoreboard).top(1).map((p) => p.id)).toEqual(['b']);
+        expect(record.wrappers.has('scores')).toBe(true);
+    });
+
+    it('assigns an ordinary value straight through', () => {
+        const record = createHostRecord('game');
+        restoreHostField(record, 'round', 4);
+        expect(record.values.get('round')).toBe(4);
+    });
+});
+
+describe('reviveWrapper', () => {
+    it('carries the ordering, so a low-is-better board is not silently inverted', () => {
+        withPlayerLookup();
+        const source = new Leaderboard({ order: 'low' });
+        source.bind(createHostRecord('game'), 'times');
+        source.submit(30, player('x'));
+        source.submit(10, player('y'));
+
+        const revived = reviveWrapper(source.serialize()) as Leaderboard;
+        revived.bind(createHostRecord('game'), 'times');
+        revived.restore(source.serialize());
+        expect(revived.rankOf(player('y'))).toBe(1);
+    });
+
+    it('carries a Team’s name, which is its identity', () => {
+        const source = new Team('red');
+        source.bind(createHostRecord('game'), 'red');
+        expect((reviveWrapper(source.serialize()) as Team).name).toBe('red');
+    });
+
+    it('resolves an Inventory’s player through the roster, and declines an unknown one', () => {
+        withPlayerLookup();
+        const source = new Inventory(player('a'));
+        source.bind(createHostRecord('player:a'), 'bag');
+        source.add('coin', 3);
+        expect((reviveWrapper(source.serialize()) as Inventory).player.id).toBe('a');
+
+        // No runtime, so no roster: guessing a player would attach the bag to the wrong one.
+        clearRuntime();
+        expect(reviveWrapper(source.serialize())).toBeUndefined();
+    });
+
+    it('declines anything that is not a wrapper payload', () => {
+        expect(reviveWrapper({ kind: 'Something' })).toBeUndefined();
+        expect(reviveWrapper(null)).toBeUndefined();
+        expect(reviveWrapper(7)).toBeUndefined();
     });
 });

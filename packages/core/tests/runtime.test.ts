@@ -2,18 +2,33 @@
 // @serverState hoisted onto the entity host record. Fixtures compiled by the build.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { Target } from '../dist/testkit/fixtures.js';
-import { loadGame } from '../src/runtime/load-game.js';
+import { Menu, OtherMenu, Rules, Shopper, Target } from '../dist/testkit/fixtures.js';
+import { joinPlayer, loadGame, pressWidget } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
+import type { Runtime } from '../src/runtime/runtime.js';
 import { game } from '../src/runtime/game.js';
 import { HUDScreen, hud } from '../src/runtime/hud.js';
 import { Countdown } from '../src/runtime/wrappers.js';
 import { bounds } from '@platform/math';
 
+const BOUNDS = bounds(-500, 500, 500, -500);
+
 beforeEach(() => {
-    loadGame({ role: 'server', bounds: bounds(-500, 500, 500, -500) });
+    loadGame({ role: 'server', bounds: BOUNDS });
 });
 afterEach(() => clearRuntime());
+
+/**
+ * A client world, which is the only kind that has a HUD.
+ *
+ * `role` is the location filter, so a `ClientScript<HUDScreen>` is inert on a server runtime — and
+ * the whole HUD surface is client-side by construction.
+ */
+function clientWorld(): Runtime {
+    const rt = loadGame({ role: 'client', bounds: BOUNDS });
+    rt.localPlayer = joinPlayer(rt, 'p1', 'Ada');
+    return rt;
+}
 
 describe('runtime end to end', () => {
     it('spawns an entity and reads its transform back as a copy', () => {
@@ -67,44 +82,153 @@ describe('runtime end to end', () => {
     });
 });
 
-describe('hud', () => {
-    it('is an inert instance, so a creator call is a no-op and not a TypeError', () => {
-        expect(() => {
-            hud.text('score', '10');
-            hud.number('lives', 3);
-            hud.bar('health', 0.5);
-            hud.icon('badge', 'gold-star');
-            hud.timer('clock', new Countdown(30));
-            hud.show('score');
-            hud.hide('score');
-            hud.enable('score');
-            hud.enable('score', false);
-            hud.disable('score');
-            hud.close('pause');
-            hud.closeAll();
-        }).not.toThrow();
-        expect(hud.screen('pause')).toBeNull();
-        expect(hud.player).toBeUndefined();
+describe('hud widgets', () => {
+    it('records what each verb wrote and pushes the whole record at the seam', () => {
+        const rt = clientWorld();
+        const pushed: string[] = [];
+        rt.hudSink = {
+            widget: (name) => pushed.push(name),
+            screen: () => {},
+        };
+
+        const clock = new Countdown(30);
+        hud.text('score', '10');
+        hud.number('lives', 3);
+        hud.bar('health', 0.5);
+        hud.icon('badge', 'gold-star');
+        hud.timer('clock', clock);
+        hud.disable('score');
+        hud.hide('badge');
+
+        expect(hud.widget('score')).toEqual({ text: '10', visible: true, enabled: false });
+        expect(hud.widget('lives')?.number).toBe(3);
+        expect(hud.widget('health')?.fraction).toBe(0.5);
+        expect(hud.widget('badge')).toEqual({ icon: 'gold-star', visible: false, enabled: true });
+        // The Countdown itself, not a sampled number: a bound timer counts down with no further call.
+        expect(hud.widget('clock')?.countdown).toBe(clock);
+        expect(pushed).toStrictEqual([
+            'score',
+            'lives',
+            'health',
+            'badge',
+            'clock',
+            'score',
+            'badge',
+        ]);
     });
 
-    it('reads its screen lists as empty rather than throwing', () => {
+    it('reads an untouched widget as null and defaults a touched one to shown and enabled', () => {
+        clientWorld();
+        expect(hud.widget('never-written')).toBeNull();
+        hud.text('score', '1');
+        expect(hud.widget('score')).toEqual({ text: '1', visible: true, enabled: true });
+    });
+});
+
+describe('hud.player', () => {
+    it('throws on a runtime with no local player rather than reading undefined off a field', () => {
+        // The defect the declared `readonly player!: Player` hid: a server runtime has no local
+        // player, and reaching `hud` from there is the load-time error the wiring rules already name.
+        expect(() => hud.player).toThrow(/no player/);
+    });
+
+    it('returns the owning player once the runtime carries one', () => {
+        const rt = clientWorld();
+        expect(hud.player).toBe(rt.localPlayer);
+        expect(hud.player.id).toBe('p1');
+    });
+});
+
+describe('hud screens', () => {
+    it('is empty until a screen is named, and open() mints and shows a real one', () => {
+        clientWorld();
+        expect(hud.screen('pause')).toBeNull();
         expect(hud.screens).toEqual([]);
         expect(hud.openScreens).toEqual([]);
-        expect(hud.openScreens.length).toBe(0);
-    });
 
-    it('open() hands back an inert screen whose own methods no-op', () => {
         const screen = hud.open('pause');
         expect(screen).toBeInstanceOf(HUDScreen);
-        expect(screen.name).toBe('');
-        expect(screen.visible).toBe(false);
-        expect(() => {
-            screen.open();
-            screen.close();
-        }).not.toThrow();
-        expect(screen.visible).toBe(false);
-        expect(screen.addScript(Target as never)).toBe(screen);
-        expect(hud.screens).toEqual([]);
+        expect(screen.name).toBe('pause');
+        expect(screen.visible).toBe(true);
+        expect(hud.screen('pause')).toBe(screen);
+        expect(hud.openScreens.map((s) => s.name)).toStrictEqual(['pause']);
+    });
+
+    it('opens and closes idempotently, and closeAll empties the stack', () => {
+        clientWorld();
+        hud.open('pause');
+        hud.open('pause'); // second open is not a second entry
+        hud.open('shop');
+        expect(hud.openScreens.map((s) => s.name)).toStrictEqual(['pause', 'shop']);
+
+        hud.close('pause');
+        hud.close('pause');
+        expect(hud.openScreens.map((s) => s.name)).toStrictEqual(['shop']);
+        expect(hud.screen('pause')?.visible).toBe(false);
+        // Closed, not forgotten: it stays authored so a later open finds the same screen.
+        expect(hud.screens.map((s) => s.name)).toStrictEqual(['pause', 'shop']);
+
+        hud.closeAll();
         expect(hud.openScreens).toEqual([]);
+    });
+
+    it('attaches the screen scripts at open and discards them at close', () => {
+        const rt = clientWorld();
+        const screen = hud.open('shop');
+        hud.close('shop');
+        screen.addScript(Menu as never);
+
+        // Registered, not attached: a screen never opened since has no instances.
+        expect([...rt.instances.forHost('screen:shop')]).toHaveLength(0);
+
+        hud.open('shop');
+        const menu = [...rt.instances.forHost('screen:shop')][0]!.instance as Menu;
+        expect(menu.starts).toBe(1);
+
+        hud.close('shop');
+        expect(menu.ends).toBe(1);
+        // Closing DISCARDS client state, so the reopen builds a fresh instance rather than this one.
+        expect([...rt.instances.forHost('screen:shop')]).toHaveLength(0);
+        hud.open('shop');
+        expect([...rt.instances.forHost('screen:shop')][0]!.instance).not.toBe(menu);
+    });
+
+    it('rejects a ServerScript on a screen host, because a screen exists on one machine', () => {
+        clientWorld();
+        const screen = hud.open('pause');
+        hud.close('pause');
+        screen.addScript(Rules as never);
+        expect(() => hud.open('pause')).toThrow(/screen/);
+    });
+});
+
+describe('@onPress', () => {
+    it('reaches a screen-hosted handler only for that screen’s own widgets', async () => {
+        const rt = clientWorld();
+        hud.open('shop').addScript(Menu as never);
+        hud.close('shop');
+        hud.open('shop');
+        hud.open('pause').addScript(OtherMenu as never);
+        hud.close('pause');
+        hud.open('pause');
+
+        const shop = [...rt.instances.forHost('screen:shop')][0]!.instance as Menu;
+        const pause = [...rt.instances.forHost('screen:pause')][0]!.instance as OtherMenu;
+
+        await pressWidget(rt, { widget: 'back', screen: 'shop' });
+        // Two menus with a `back` button do not collide.
+        expect(shop.pressed).toStrictEqual(['back']);
+        expect(pause.pressed).toStrictEqual([]);
+    });
+
+    it('reaches a handler off a screen whatever screen the press named', async () => {
+        const rt = clientWorld();
+        const player = rt.localPlayer!;
+        player.addScript(Shopper as never);
+        const shopper = [...rt.instances.forHost('player:p1')][0]!.instance as Shopper;
+
+        await pressWidget(rt, { widget: 'back', screen: 'shop', player });
+        await pressWidget(rt, { widget: 'back' });
+        expect(shopper.pressed).toStrictEqual(['back', 'back']);
     });
 });

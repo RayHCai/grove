@@ -7,14 +7,70 @@ import { createNullRenderer } from '@platform/renderer/null';
 import type { IRenderer } from '@platform/renderer';
 import { loopbackPair } from '@platform/transport';
 import type { LoopbackPair } from '@platform/transport';
-import { GameClient } from '../src/client.js';
-import { ACK_STALL_TICKS, MAX_WIRE_ITEMS, RING_TICKS } from '../src/constants.js';
+import { PROTOCOL_VERSION } from '@platform/protocol';
+import { GameClient, netId } from '../src/client.js';
+import {
+    ACK_STALL_TICKS,
+    BUNDLE_DEADLINE_SECONDS,
+    MAX_WIRE_ITEMS,
+    RING_TICKS,
+} from '../src/constants.js';
 import type { Binding } from '../src/bindings.js';
+import type { BundleSource } from '../src/bundle.js';
+import type { ClientProject } from '../src/handshake.js';
 import { ManualFrameSource, ScriptedInputDevice } from '../src/input.js';
 import { FakeServer, entity, transformDiff } from './fake-server.js';
 import type { FakeServerOptions } from './fake-server.js';
 
 const TICK = 1 / 60;
+
+/** Lets every pending microtask run, so a resolved fetch reaches its continuation. */
+function settle(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * A `BundleSource` whose fetch a test opens by hand.
+ *
+ * Gated rather than immediate, because the whole point of the pre-live state is what happens WHILE
+ * the fetch is outstanding — a source that resolved at once would never exercise it.
+ */
+class ScriptedBundle {
+    readonly fetched: string[] = [];
+    evaluated = 0;
+    readonly #bytes: ArrayBuffer;
+    readonly #digest: string;
+    readonly #gate: Promise<void>;
+    #open!: () => void;
+
+    constructor(digest: string, byteLength = 8) {
+        this.#digest = digest;
+        this.#bytes = new ArrayBuffer(byteLength);
+        this.#gate = new Promise<void>((resolve) => {
+            this.#open = resolve;
+        });
+    }
+
+    /** Answers the outstanding fetch. */
+    release(): void {
+        this.#open();
+    }
+
+    source(): BundleSource {
+        return {
+            fetch: async (url: string): Promise<ArrayBuffer> => {
+                this.fetched.push(url);
+                await this.#gate;
+                return this.#bytes;
+            },
+            hash: (): Promise<string> => Promise.resolve(this.#digest),
+            evaluate: (): Promise<unknown> => {
+                this.evaluated += 1;
+                return Promise.resolve({});
+            },
+        };
+    }
+}
 
 interface Harness {
     client: GameClient;
@@ -48,7 +104,13 @@ interface Harness {
 
 async function harness(
     opts: FakeServerOptions = {},
-    clientOpts: { bindings?: readonly Binding[]; latency?: number; start?: boolean } = {},
+    clientOpts: {
+        bindings?: readonly Binding[];
+        latency?: number;
+        start?: boolean;
+        project?: ClientProject;
+        bundle?: BundleSource;
+    } = {},
 ): Promise<Harness> {
     const pair = loopbackPair({ latency: clientOpts.latency ?? 1 });
     const server = new FakeServer(pair.server, opts);
@@ -68,6 +130,8 @@ async function harness(
         name: 'Ray',
         bindings: clientOpts.bindings ?? [],
         pump: () => pair.deliver(),
+        ...(clientOpts.project === undefined ? {} : { project: clientOpts.project }),
+        ...(clientOpts.bundle === undefined ? {} : { bundle: clientOpts.bundle }),
     });
 
     const simRate = opts.simRate ?? 60;
@@ -140,7 +204,7 @@ describe('the join sequence', () => {
         const h = await harness();
         h.run(1);
         expect(h.server.received[0]?.kind).toBe('join-request');
-        expect(h.server.joins).toEqual([{ name: 'Ray', protocolVersion: 1 }]);
+        expect(h.server.joins).toEqual([{ name: 'Ray', protocolVersion: PROTOCOL_VERSION }]);
     });
 
     it('registers handlers before sending, so the welcome is never lost to wiring order', async () => {
@@ -202,6 +266,204 @@ describe('the join sequence', () => {
     });
 });
 
+describe('a snapshot too big for one frame', () => {
+    it('reassembles the chunks ahead of the welcome and joins on the whole world', async () => {
+        const h = await harness({
+            snapshotTick: 10,
+            entities: [entity(1, 'wall'), entity(2, 'coin'), entity(3, 'wall'), entity(4, 'coin')],
+            snapshotChunks: 2,
+        });
+        untilLive(h);
+
+        expect(h.client.state).toBe('live');
+        // Every entity, from both the chunks and the welcome's own remainder — the session opens on
+        // one world, and chunking is invisible past the fold.
+        expect(h.client.mirror?.index.size).toBe(4);
+        expect(h.client.stats().nodeCount).toBe(4);
+    });
+
+    it('refuses a short set rather than opening a session on a partial world', async () => {
+        const h = await harness({
+            snapshotTick: 10,
+            entities: [entity(1, 'wall'), entity(2, 'coin')],
+            snapshotChunks: 2,
+            understateChunkCount: true,
+        });
+        h.run(3);
+
+        // A world missing entities the server believes it sent reads later as a mirror bug rather than
+        // as the truncated join it is, so it fails here and names the peer.
+        expect(h.client.state).toBe('failed');
+        expect(h.client.lifecycle.failure?.kind).toBe('peer');
+        expect(h.client.mirror).toBeUndefined();
+    });
+
+    it('leaves an unchunked welcome exactly as it was', async () => {
+        const h = await harness({ snapshotTick: 10, entities: [entity(1, 'wall')] });
+        untilLive(h);
+
+        expect(h.client.state).toBe('live');
+        expect(h.server.welcome?.snapshotChunks).toBeUndefined();
+        expect(h.client.mirror?.index.size).toBe(1);
+    });
+});
+
+describe('the script bundle is verified before it is run', () => {
+    const named = { url: '/bundle.js', hash: 'digest-1' };
+
+    it('declares the project on the join request, so the server can refuse a wrong build', async () => {
+        const project: ClientProject = {
+            projectId: 'arcade',
+            projectHash: 'build-7',
+            bundleHash: '',
+        };
+        const h = await harness({ project }, { project });
+        h.run(2);
+        expect(h.server.received[0]).toMatchObject({
+            kind: 'join-request',
+            projectId: 'arcade',
+            projectHash: 'build-7',
+            bundleHash: '',
+        });
+    });
+
+    it('holds the session pre-live while the bundle is in flight, and goes live after it', async () => {
+        const bundle = new ScriptedBundle(named.hash);
+        const h = await harness({ bundle: named }, { bundle: bundle.source() });
+        h.run(2);
+
+        expect(h.client.state).toBe('loading');
+        expect(h.client.mirror).toBeUndefined();
+        expect(bundle.fetched).toEqual(['/bundle.js']);
+
+        bundle.release();
+        await settle();
+
+        expect(h.client.state).toBe('live');
+        expect(bundle.evaluated).toBe(1);
+        expect(h.client.mirror).toBeDefined();
+    });
+
+    it('applies the envelopes that arrived during the fetch, in order, once the session opens', async () => {
+        const bundle = new ScriptedBundle(named.hash);
+        const h = await harness({ bundle: named }, { bundle: bundle.source() });
+        h.run(2);
+        expect(h.client.state).toBe('loading');
+
+        // At the snapshot's own tick, so the held envelope does not read as the server having run
+        // ahead of a counter that has not been seeded yet.
+        const tick = h.server.welcome!.snapshot.tick;
+        h.server.sendState([{ kind: 'spawn', snapshot: entity(7, 'held') }], [], { tick });
+        h.runSilent(1);
+        // Held, not dropped and not applied: there is no mirror for it to land in yet.
+        expect(h.client.mirror).toBeUndefined();
+
+        bundle.release();
+        await settle();
+        h.runSilent(1);
+
+        expect(h.client.state).toBe('live');
+        expect(h.client.mirror?.index.local(netId(7))).toBeDefined();
+    });
+
+    it('fails without evaluating when the bytes do not match the hash the server sent', async () => {
+        const bundle = new ScriptedBundle('some-other-digest');
+        const h = await harness({ bundle: named }, { bundle: bundle.source() });
+        h.run(2);
+        bundle.release();
+        await settle();
+
+        expect(h.client.state).toBe('failed');
+        expect(h.client.lifecycle.failure?.kind).toBe('bundle');
+        // The whole mechanism: a bundle that failed the comparison is never handed to `evaluate`.
+        expect(bundle.evaluated).toBe(0);
+        expect(h.client.mirror).toBeUndefined();
+    });
+
+    it('refuses a bundle url whose scheme this client did not choose, and fetches nothing', async () => {
+        const bundle = new ScriptedBundle(named.hash);
+        const h = await harness(
+            { bundle: { url: 'data:text/javascript,globalThis.x=1', hash: named.hash } },
+            { bundle: bundle.source() },
+        );
+        h.run(2);
+        await settle();
+
+        expect(h.client.state).toBe('failed');
+        expect(h.client.lifecycle.failure?.kind).toBe('bundle');
+        expect(bundle.fetched).toEqual([]);
+    });
+
+    it('fails rather than going live when the server names code and no loader was supplied', async () => {
+        const h = await harness({ bundle: named });
+        h.run(2);
+        expect(h.client.state).toBe('failed');
+        expect(h.client.lifecycle.failure?.kind).toBe('bundle');
+    });
+
+    it('skips the fetch when this client already holds those bytes, and says so on the join', async () => {
+        const bundle = new ScriptedBundle(named.hash);
+        const project: ClientProject = {
+            projectId: '',
+            projectHash: '',
+            bundleHash: named.hash,
+        };
+        const h = await harness({ bundle: named }, { bundle: bundle.source(), project });
+        h.run(2);
+
+        expect(h.client.state).toBe('live');
+        expect(bundle.fetched).toEqual([]);
+        expect(h.server.received[0]).toMatchObject({ bundleHash: named.hash });
+    });
+
+    it('fails a fetch that never answers, rather than holding envelopes for the tab’s lifetime', async () => {
+        const bundle = new ScriptedBundle(named.hash);
+        const h = await harness({ bundle: named }, { bundle: bundle.source() });
+        h.run(2);
+        expect(h.client.state).toBe('loading');
+
+        h.runSilent(Math.ceil(BUNDLE_DEADLINE_SECONDS / TICK) + 1);
+        expect(h.client.state).toBe('failed');
+        expect(h.client.lifecycle.failure?.kind).toBe('bundle');
+    });
+});
+
+describe('a template first used mid-session draws with its real visual', () => {
+    it('merges a manifest envelope into a session that joined before it existed', async () => {
+        const h = await harness();
+        untilLive(h);
+        // Nothing in the welcome — this client joined before the template came into use.
+        expect(h.client.stats().nodeCount).toBe(0);
+
+        h.server.sendRaw({
+            kind: 'manifest',
+            visuals: {
+                assets: [{ key: 'gem.png', kind: 'texture', url: '/gem.png' }],
+                templates: [{ template: 'gem', kind: 'group' }],
+            },
+        });
+        h.run(1);
+        // The spawn rides directly behind it, which is the ordering the server guarantees.
+        h.server.sendState([{ kind: 'spawn', snapshot: entity(3, 'gem') }]);
+        h.run(2);
+
+        expect(h.client.mirror!.index.local(netId(3))).toBeDefined();
+        const nodes = [...h.renderer.inspect().nodes.values()];
+        expect(nodes).toHaveLength(1);
+        // A group, not the sprite placeholder a template the client never heard of falls back to.
+        expect(nodes[0]?.kind).toBe('group');
+        expect(h.client.stats().assetLoadFailed).toBe(0);
+    });
+
+    it('drops an unusable manifest envelope without ending the session', async () => {
+        const h = await harness();
+        untilLive(h);
+        h.server.sendRaw({ kind: 'manifest', visuals: { assets: 'not an array' } });
+        h.run(2);
+        expect(h.client.state).toBe('live');
+    });
+});
+
 describe('a refusal is distinguishable from a drop', () => {
     it('reaches `failed` with a version reason, and builds no mirror', async () => {
         const h = await harness({ reject: 'version' });
@@ -210,7 +472,7 @@ describe('a refusal is distinguishable from a drop', () => {
         const failure = h.client.lifecycle.failure;
         expect(failure?.kind).toBe('rejected');
         // "update the game" rather than "try again" — which is what serverProtocolVersion buys.
-        expect(failure).toMatchObject({ serverProtocolVersion: 1 });
+        expect(failure).toMatchObject({ serverProtocolVersion: PROTOCOL_VERSION });
         expect(failure && 'reason' in failure && failure.reason).toContain('update');
         expect(h.client.mirror).toBeUndefined();
     });

@@ -146,6 +146,120 @@ describe('§3.2 — refusals are envelopes, never a bare close', () => {
         h.pumpTicks(6);
         expect(peer.welcome?.yourPlayerId).toBe('c1');
     });
+
+    it('a join request carrying no identity fields never reaches the join at all', () => {
+        const h = harness({ config: { gameScripts: [Rules] } });
+        const peer = h.connect();
+        // What an older client sends. The narrowing checks every field it claims to check, so this
+        // is malformed rather than an admitted frame with three fields defaulted to nothing.
+        peer.raw({
+            kind: 'join-request',
+            protocolVersion: PROTOCOL_VERSION,
+            name: 'old',
+            clientSentMs: 1,
+        });
+        h.pumpTicks(4);
+
+        expect(peer.received).toStrictEqual([]);
+        expect(h.server.runtime.playerManager?.players).toHaveLength(0);
+    });
+});
+
+describe('§3.2 — the handshake proves both ends run the same bytes', () => {
+    const project = {
+        projectId: 'arcade',
+        projectHash: 'build-7',
+        bundleHash: 'abc123',
+        bundleUrl: '/bundle.js',
+    };
+
+    it('welcomes a client running the same project, and names the bundle to fetch', () => {
+        const h = harness({ config: { project, gameScripts: [Rules] } });
+        const peer = h.connect();
+        peer.join('a', { projectId: 'arcade', projectHash: 'build-7' });
+        h.pumpTicks(6);
+
+        const welcome = peer.welcome;
+        expect(welcome?.projectId).toBe('arcade');
+        expect(welcome?.projectHash).toBe('build-7');
+        expect(welcome?.bundleHash).toBe('abc123');
+        expect(welcome?.bundleUrl).toBe('/bundle.js');
+    });
+
+    it('refuses another build with `identity`, before a Player is allocated', () => {
+        const h = harness({ config: { project, gameScripts: [Rules] } });
+        const peer = h.connect();
+        peer.join('stale', { projectId: 'arcade', projectHash: 'build-6' });
+        h.pumpTicks(6);
+
+        expect(peer.received).toHaveLength(1);
+        expect(peer.reject?.reason).toBe('identity');
+        expect(h.server.runtime.playerManager?.players).toHaveLength(0);
+    });
+
+    it('refuses another project the same way — the reason stays coarse', () => {
+        const h = harness({ config: { project, gameScripts: [Rules] } });
+        const peer = h.connect();
+        peer.join('elsewhere', { projectId: 'other', projectHash: 'build-7' });
+        h.pumpTicks(6);
+        expect(peer.reject?.reason).toBe('identity');
+    });
+
+    it('refuses identity ahead of capacity: a wrong build is not told to come back later', () => {
+        const h = harness({ config: { project, maxPlayers: 1, gameScripts: [Rules] } });
+        const first = h.connect();
+        first.join('a', { projectId: 'arcade', projectHash: 'build-7' });
+        h.pumpTicks(6);
+        expect(first.welcome).toBeDefined();
+
+        const second = h.connect();
+        second.join('b', { projectId: 'arcade', projectHash: 'nope' });
+        h.pumpTicks(6);
+        expect(second.reject?.reason).toBe('identity');
+    });
+
+    it('admits an empty bundleHash — a joiner holds none — and refuses a stale one', () => {
+        const h = harness({ config: { project, gameScripts: [Rules] } });
+        const fresh = h.connect();
+        fresh.join('fresh', { projectId: 'arcade', projectHash: 'build-7', bundleHash: '' });
+        h.pumpTicks(6);
+        expect(fresh.welcome).toBeDefined();
+
+        const stale = h.connect();
+        stale.join('stale', {
+            projectId: 'arcade',
+            projectHash: 'build-7',
+            bundleHash: 'held-from-a-previous-build',
+        });
+        h.pumpTicks(6);
+        expect(stale.reject?.reason).toBe('identity');
+    });
+
+    it('an unconfigured server admits a client that declares nothing, and only that', () => {
+        const h = harness({ config: { gameScripts: [Rules] } });
+        const blank = h.joined('blank');
+        expect(blank.welcome?.projectId).toBe('');
+
+        const declaring = h.connect();
+        declaring.join('declaring', { projectId: 'arcade', projectHash: 'build-7' });
+        h.pumpTicks(6);
+        // A one-sided declaration is a disagreement, not a pass: the two are not running the same
+        // thing and neither end can tell which of them is wrong.
+        expect(declaring.reject?.reason).toBe('identity');
+    });
+
+    it('re-checks on a resync, since a client may have loaded a bundle since it joined', () => {
+        const h = harness({ config: { project, gameScripts: [Rules] } });
+        const peer = h.connect();
+        peer.join('a', { projectId: 'arcade', projectHash: 'build-7' });
+        h.pumpTicks(6);
+        expect(peer.welcome).toBeDefined();
+        peer.clear();
+
+        peer.join('a', { projectId: 'arcade', projectHash: 'build-7', bundleHash: 'wrong' });
+        h.pumpTicks(6);
+        expect(peer.reject?.reason).toBe('identity');
+    });
 });
 
 describe('§3.3 — the join snapshot is a walk of the live world', () => {

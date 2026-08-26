@@ -2,7 +2,7 @@
 // and nothing writing outside apply.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { clearRuntime } from '@platform/core';
+import { Player, Scoreboard, clearRuntime } from '@platform/core';
 import type { NetId, StateEnvelope, WireStructuralOp } from '@platform/protocol';
 import { Mirror } from '../src/mirror.js';
 import { entity, transformDiff, wireTransform } from './fake-server.js';
@@ -59,7 +59,7 @@ describe('the script-less runtime', () => {
         // Each is present and inert: calling them must not throw and must not move anything.
         const e = m.runtime.entityManager.spawn('thing', 5, 7);
         passes?.movement(1 / 60, undefined);
-        passes?.countdowns();
+        passes?.countdowns({ activeLocations: new Set(), tick: 0 });
         expect(m.runtime.transforms.posX(e.entityId)).toBe(5);
     });
 
@@ -326,6 +326,58 @@ describe('@serverState lands in the host record', () => {
         m.applyState(stateEnvelope([], { state: [{ host: { kind: 'game' }, fields: { x: 1 } }] }));
         expect(m.runtime.channels.stateCount).toBe(0);
     });
+
+    it('rebuilds a wrapper from its payload, methods and all', () => {
+        const m = mirror();
+        m.applyState(
+            stateEnvelope([], {
+                state: [
+                    {
+                        host: { kind: 'game' },
+                        fields: {
+                            scores: {
+                                kind: 'Scoreboard',
+                                scores: [
+                                    ['p1', 4],
+                                    ['p2', 9],
+                                ],
+                            },
+                        },
+                    },
+                ],
+            }),
+        );
+
+        // The point: this client attaches no scripts, so nothing here ever constructed a Scoreboard
+        // — and a plain assignment would have left a decoded object with no `of` on it.
+        const scores = m.runtime.hosts.get('game')?.record.values.get('scores');
+        expect(scores).toBeInstanceOf(Scoreboard);
+        m.runtime.playerManager?.adopt(new Player(m.runtime, 'p2', 0, 'Two'));
+        expect((scores as Scoreboard).of(m.runtime.playerManager!.byId('p2')!)).toBe(9);
+    });
+
+    it('restores into the wrapper it already holds, so a later delta does not replace it', () => {
+        const m = mirror();
+        const diff = (score: number) =>
+            stateEnvelope([], {
+                state: [
+                    {
+                        host: { kind: 'game' },
+                        fields: { scores: { kind: 'Scoreboard', scores: [['p1', score]] } },
+                    },
+                ],
+            });
+
+        m.applyState(diff(1));
+        const first = m.runtime.hosts.get('game')?.record.values.get('scores');
+        m.applyState(diff(5));
+        const second = m.runtime.hosts.get('game')?.record.values.get('scores');
+
+        // One instance across both applies: a script attached later holds this identity.
+        expect(second).toBe(first);
+        m.runtime.playerManager?.adopt(new Player(m.runtime, 'p1', 0, 'One'));
+        expect((second as Scoreboard).of(m.runtime.playerManager!.byId('p1')!)).toBe(5);
+    });
 });
 
 describe('applying discards marks but not the render queue', () => {
@@ -401,6 +453,10 @@ describe('the snapshot is a delta through the same path', () => {
             protocolVersion: 1,
             yourPlayerId: 'p1',
             yourPlayerIndex: 0,
+            projectId: '',
+            projectHash: '',
+            bundleHash: '',
+            bundleUrl: '',
             simRate: 60,
             sendRate: 20,
             bounds: BOUNDS,

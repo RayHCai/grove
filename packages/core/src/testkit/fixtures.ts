@@ -1,19 +1,25 @@
 // tsc lowers standard decorators and the test runner's transform does not, so these fixtures
 // are compiled by the build and the tests import them from dist.
 
-import { ServerScript, SyncedScript } from '../script/bases.js';
+import { ClientScript, ServerScript, SyncedScript } from '../script/bases.js';
 import {
     onCollide,
+    onEnd,
+    onEnter,
     onEvent,
     onEventHold,
     onEventRelease,
+    onExit,
     onPlayerJoin,
     onPlayerLeave,
+    onPress,
     onRequest,
     onStart,
     serverState,
 } from '../script/decorators.js';
 import type { Entity } from '../runtime/entity.js';
+import type { HUDScreen } from '../runtime/hud.js';
+import { BaseMovement } from '../runtime/movement.js';
 import type { Ctx } from '../runtime/ctx.js';
 
 export class Wallet extends ServerScript {
@@ -145,6 +151,14 @@ export class Faulty extends SyncedScript<Entity> {
     }
 }
 
+// `accelerate` is the stage every movement subclass must supply, and the movement pass calls it
+// through `tick` with no dispatch — so this throws where the dispatcher's boundary does not reach.
+export class FaultyMovement extends BaseMovement {
+    protected accelerate(): void {
+        throw new Error('accelerate always throws');
+    }
+}
+
 // @onRequest is legal only on a ServerScript, which is why this fixture is one.
 export class Rules extends ServerScript {
     @serverState started = false;
@@ -198,6 +212,97 @@ export class Roll extends ServerScript {
     leave(ctx: Ctx): void {
         this.left.push((ctx.player as { id: string }).id);
         this.probe?.();
+    }
+}
+
+// The tick order's edges on one host: a region crossing, a contact's enter edge, and the host's end.
+export class Edges extends SyncedScript<Entity> {
+    entered: string[] = [];
+    exited: string[] = [];
+    contacts = 0;
+    ends = 0;
+    /** A callback, not a runtime read: dist fixtures and src tests hold different globals. */
+    probe: (() => void) | null = null;
+
+    @onEnter('arena')
+    arriveArena(): void {
+        this.entered.push('arena');
+    }
+
+    @onExit('arena')
+    leaveArena(): void {
+        this.exited.push('arena');
+    }
+
+    @onCollide('hazard')
+    touch(): void {
+        this.contacts += 1;
+    }
+
+    @onEnd
+    finish(): void {
+        this.ends += 1;
+        this.probe?.();
+    }
+}
+
+// @onEnd on a Player host means the session ended, which is a different moment from @onPlayerLeave.
+export class Session extends ServerScript {
+    ends = 0;
+    /** A callback, not a runtime read: dist fixtures and src tests hold different globals. */
+    probe: (() => void) | null = null;
+
+    @onEnd
+    finish(): void {
+        this.ends += 1;
+        this.probe?.();
+    }
+}
+
+// ClientScript is the only legal location on a screen host, so a screen fixture is one by necessity.
+export class Menu extends ClientScript<HUDScreen> {
+    starts = 0;
+    ends = 0;
+    pressed: string[] = [];
+
+    @onStart
+    begin(): void {
+        this.starts += 1;
+    }
+
+    @onEnd
+    finish(): void {
+        this.ends += 1;
+    }
+
+    @onPress('buy')
+    buy(): void {
+        this.pressed.push('buy');
+    }
+
+    @onPress('back')
+    back(): void {
+        this.pressed.push('back');
+    }
+}
+
+// The same `back` button name on a second screen: only the pressed screen's handler may fire.
+export class OtherMenu extends ClientScript<HUDScreen> {
+    pressed: string[] = [];
+
+    @onPress('back')
+    back(): void {
+        this.pressed.push('back');
+    }
+}
+
+// A press handler off a screen resolves the widget across the whole HUD, not one screen's buttons.
+export class Shopper extends ClientScript {
+    pressed: string[] = [];
+
+    @onPress('back')
+    back(): void {
+        this.pressed.push('back');
     }
 }
 

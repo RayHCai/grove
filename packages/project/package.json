@@ -1,9 +1,9 @@
 {
-    "name": "@platform/platform",
+    "name": "@platform/project",
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Platform services shared by the hosted apps.",
+    "description": "The authoring shape: the project manifest an editor saves, its validator and format migrations, and the adapters that narrow it to what a runtime and a renderer each need.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
@@ -22,7 +22,7 @@
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
-        "@platform/core": "workspace:*"
+        "@platform/transport": "workspace:*"
     },
     "devDependencies": {
         "typescript": "^7.0.2",

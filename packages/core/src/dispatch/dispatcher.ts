@@ -4,10 +4,10 @@
 import { BREAKER_THRESHOLD, MAX_DEDUP_KEYS, MAX_SEND_DEPTH } from '../config.js';
 import type { EventPhase, HandlerDecl, HandlerKind, ScriptLocation } from '../script/index.js';
 import { defaultConcurrency } from '../script/index.js';
-import type { HandlerErrorRecord } from '../errors.js';
+import type { BreakerTrip, HandlerErrorRecord } from '../errors.js';
 import { currentActingPlayer, setActingPlayer } from './acting-player.js';
 import { currentInvocation, setCurrentInvocation, resumeWith } from './ambient.js';
-import type { ScopeTree } from './scope-tree.js';
+import type { GuardOwner, ScopeTree } from './scope-tree.js';
 import type { BreakerCounters } from './breaker.js';
 import type { ScriptInstance } from './instances.js';
 
@@ -51,6 +51,16 @@ function matches(
     }
 }
 
+/** Where a contained throw happened, for the log record and the breaker key. */
+export interface GuardSite {
+    /** What the breaker disables, paired with the owner's id. Not always a method name. */
+    method: string;
+    hostId: string;
+    tick: number;
+    /** The engine-side event name, `@`-prefixed like `@update`. */
+    event: string;
+}
+
 export interface DispatchOptions {
     /** Which locations run on this machine. Server: server+synced; client: client+synced. */
     activeLocations: ReadonlySet<ScriptLocation>;
@@ -71,10 +81,44 @@ export class Dispatcher {
     /** Counts `class#method#message`. Nothing reads it yet, so no throw is actually suppressed. */
     readonly #dedup = new Map<string, number>();
 
+    #onTrip: ((trip: BreakerTrip) => void) | null = null;
+
     constructor(scopes: ScopeTree, breaker: BreakerCounters, log: DispatchLog) {
         this.#scopes = scopes;
         this.#breaker = breaker;
         this.#log = log;
+    }
+
+    /**
+     * Reports every breaker trip to the host. Diagnostics, not wire traffic — a disabled handler is
+     * something whoever runs the server needs to see, and nothing a player's client can act on.
+     */
+    onTrip(listener: ((trip: BreakerTrip) => void) | null): void {
+        this.#onTrip = listener;
+    }
+
+    /**
+     * Runs creator code that reaches the engine outside a handler invocation — a movement tick, a
+     * timer or tween callback, a countdown's completion — under the boundary a handler already gets.
+     *
+     * The same dedup, log and breaker as `#invoke`, because a second implementation of any of the
+     * three would diverge from it the first time one is tuned. Returns false when the breaker has
+     * already disabled this `(owner, method)` and `fn` was therefore not called.
+     */
+    guard(owner: GuardOwner | null, site: GuardSite, fn: () => void): boolean {
+        // An unowned callback cannot be disabled — there is no instance to charge — but it is still
+        // contained and logged, which is the half that keeps the tick alive.
+        if (owner !== null && this.#breaker.count(owner.id, site.method) >= BREAKER_THRESHOLD) {
+            return false;
+        }
+        try {
+            fn();
+        } catch (err) {
+            this.#recordThrow(owner, site, err);
+            return false;
+        }
+        if (owner !== null) this.#breaker.recordSuccess(owner.id, site.method);
+        return true;
     }
 
     /** Fires `kind`/`event` at every matching handler on `instances`, in attachment order. */
@@ -140,12 +184,8 @@ export class Dispatcher {
             // 'concurrent' has no branch on purpose: it starts a second invocation.
         }
 
-        const scope = this.#scopes.createInvocation(si.hostScopeId, tick, key);
-        const fn = (si.instance as Record<string, (c: DispatchCtx) => unknown>)[method];
-        if (typeof fn !== 'function') {
-            this.#scopes.completeInvocation(scope);
-            return null;
-        }
+        const scope = this.#scopes.createInvocation(si.hostScopeId, tick, key, si);
+        const site: GuardSite = { method, hostId, tick, event: decl.event };
 
         // Restored, not cleared: a nested synchronous send would otherwise return the outer handler
         // to its own body with no invocation, orphaning any timer it starts next.
@@ -156,10 +196,17 @@ export class Dispatcher {
         // covered, since a parked continuation resumes with no ambient of its own.
         setActingPlayer(ctx.player ?? null);
         let result: unknown;
+        let called = false;
         try {
-            result = fn.call(si.instance, ctx);
+            // Inside the try because the read itself can run creator code: a handler declared as a
+            // getter rather than a method invokes it here, and a throw would escape the boundary.
+            const fn = (si.instance as Record<string, (c: DispatchCtx) => unknown>)[method];
+            if (typeof fn === 'function') {
+                called = true;
+                result = fn.call(si.instance, ctx);
+            }
         } catch (err) {
-            this.#recordThrow(si, method, hostId, tick, decl.event, err);
+            this.#recordThrow(si, site, err);
             this.#scopes.completeInvocation(scope);
             setCurrentInvocation(outer);
             setActingPlayer(outerPlayer);
@@ -167,6 +214,11 @@ export class Dispatcher {
         }
         setCurrentInvocation(outer);
         setActingPlayer(outerPlayer);
+
+        if (!called) {
+            this.#scopes.completeInvocation(scope);
+            return null;
+        }
 
         if (!(result instanceof Promise)) {
             this.#breaker.recordSuccess(si.id, method);
@@ -183,24 +235,19 @@ export class Dispatcher {
             },
             (err: unknown) => {
                 if (!scope.dead) {
-                    this.#recordThrow(si, method, hostId, tick, decl.event, err);
+                    this.#recordThrow(si, site, err);
                     this.#scopes.completeInvocation(scope);
                 }
             },
         );
     }
 
-    #recordThrow(
-        si: ScriptInstance,
-        method: string,
-        hostId: string,
-        tick: number,
-        event: string,
-        err: unknown,
-    ): void {
+    #recordThrow(owner: GuardOwner | null, site: GuardSite, err: unknown): void {
+        const { method, hostId, tick, event } = site;
+        const scriptClass = owner?.className ?? '(engine)';
         const message = err instanceof Error ? err.message : String(err);
         const stack = err instanceof Error ? (err.stack ?? message) : message;
-        const dedupKey = `${si.className}#${method}#${message}`;
+        const dedupKey = `${scriptClass}#${method}#${message}`;
         const seen = (this.#dedup.get(dedupKey) ?? 0) + 1;
         // Bounded: a handler throwing with a fresh message each tick would otherwise grow this map
         // for the life of the process, and it exists only to keep the log readable.
@@ -209,19 +256,48 @@ export class Dispatcher {
 
         // One record per distinct class#method#message; the repeats are counted, not logged.
         if (seen === 1) {
-            this.#log.error({ scriptClass: si.className, method, hostId, tick, event, stack });
+            this.#log.error({ scriptClass, method, hostId, tick, event, stack });
         }
 
-        const consecutive = this.#breaker.recordThrow(si.id, method);
+        if (owner === null) return;
+        const consecutive = this.#breaker.recordThrow(owner.id, method);
         if (consecutive === BREAKER_THRESHOLD) {
+            const disabled = `handler disabled after ${BREAKER_THRESHOLD} consecutive throws`;
             this.#log.error({
-                scriptClass: si.className,
+                scriptClass,
                 method,
                 hostId,
                 tick,
                 event,
-                stack: `handler disabled after ${BREAKER_THRESHOLD} consecutive throws`,
+                stack: disabled,
                 disabled: true,
+            });
+            this.#reportTrip({
+                scriptClass,
+                instanceId: owner.id,
+                method,
+                hostId,
+                tick,
+                event,
+                stack,
+            });
+        }
+    }
+
+    /** The host's listener runs inside the tick, so its own throw is contained rather than fatal. */
+    #reportTrip(trip: BreakerTrip): void {
+        const listener = this.#onTrip;
+        if (listener === null) return;
+        try {
+            listener(trip);
+        } catch (err) {
+            this.#log.error({
+                scriptClass: '(host)',
+                method: 'onBreakerTrip',
+                hostId: trip.hostId,
+                tick: trip.tick,
+                event: trip.event,
+                stack: err instanceof Error ? (err.stack ?? err.message) : String(err),
             });
         }
     }

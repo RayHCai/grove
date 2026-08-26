@@ -114,9 +114,30 @@ body {
     color: var(--accent);
 }
 
-.badge--failed {
+.badge--live {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    color: var(--accent);
+}
+
+.badge--failed,
+.badge--stalled,
+.badge--disconnected {
     background: color-mix(in srgb, var(--danger) 22%, transparent);
     color: var(--danger);
+}
+
+.stage__me {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.stage__swatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 3px;
+    /* The tint multiplies a mid-green sprite, so the swatch is the nearer of the two to the truth. */
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
 }
 
 .stage__zoom {
@@ -177,11 +198,11 @@ body {
     font-size: 12px;
 }
 
-/* ── panels: render tree beside the game loop ──────────────────────── */
+/* ── panels: render tree beside the session ────────────────────────── */
 
 .stage__panels {
     display: grid;
-    /* Tree gets the slack; the loop panel is a fixed sidebar so its numbers do not reflow. */
+    /* Tree gets the slack; the session panel is a fixed sidebar so its numbers do not reflow. */
     grid-template-columns: minmax(0, 1fr) 260px;
     gap: 10px;
     align-items: start;
@@ -420,7 +441,7 @@ body {
     font-variant-numeric: tabular-nums;
 }
 
-/* ── game loop panel ───────────────────────────────────────────────── */
+/* ── session panel ─────────────────────────────────────────────────── */
 
 .loop {
     border: 1px solid var(--border);
@@ -452,12 +473,8 @@ body {
 }
 
 /* Pushes the poll-rate select to the right edge, matching the inspector bar. */
-.loop__pause {
+.loop__bar select {
     margin-left: auto;
-}
-
-.loop__bar select,
-.loop__bar button {
     padding: 3px 8px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -466,16 +483,6 @@ body {
     font: inherit;
     font-size: 12px;
     cursor: pointer;
-}
-
-.loop__bar button:hover:not(:disabled) {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-
-.loop__bar button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
 }
 
 .loop__empty {
@@ -516,29 +523,8 @@ body {
     font-size: 15px;
 }
 
-.loop__heartbeat-label {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 5px;
-    color: var(--muted);
-}
-
-.loop__meter {
-    height: 8px;
-    border-radius: 999px;
-    background: #1b241e;
-    overflow: hidden;
-}
-
-.loop__meter-fill {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 999px;
-    /* The accumulator fills each frame and snaps back to 0 on a tick — a short transition
-       reads as a heartbeat rather than a jitter, without lagging behind the real value. */
-    transition: width 80ms linear;
-}
-
-.loop__meter-fill--paused {
-    background: var(--muted);
+.loop__grid + .loop__grid {
+    /* The silent-failure counters, which only render when one of them is nonzero. */
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
 }

@@ -106,6 +106,16 @@ export const BUNDLE_DEADLINE_SECONDS = 30;
 export const MAX_WIRE_ITEMS = 65_536;
 
 /**
+ * Cardinality cap on the `snapshot-chunk` frames one join may be divided into.
+ *
+ * The same rule as `MAX_WIRE_ITEMS` applied to a count that arrives across frames rather than inside
+ * one: chunks are held until the `Welcome` names how many there were, so an unbounded promise is
+ * unbounded memory held before anything has been validated. At `MAX_WIRE_ITEMS` per chunk this is far
+ * above any world that could also fit in a browser.
+ */
+export const MAX_SNAPSHOT_CHUNKS = 256;
+
+/**
  * Levels of `children` below a template's root the client will build, and nodes in one such subtree.
  *
  * A child list is the one recursive shape on the wire, so `MAX_WIRE_ITEMS` bounds nothing on its own:

@@ -24,6 +24,7 @@
     "dependencies": {
         "@platform/core": "workspace:*",
         "@platform/math": "workspace:*",
+        "@platform/project": "workspace:*",
         "@platform/protocol": "workspace:*",
         "@platform/transport": "workspace:*"
     },

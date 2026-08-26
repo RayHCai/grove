@@ -3,6 +3,7 @@
 
 import { DEFAULT_SIM_RATE, MAX_LOG_RECORDS } from '../config.js';
 import { ScopeTree } from '../dispatch/scope-tree.js';
+import type { GuardOwner } from '../dispatch/scope-tree.js';
 import { BreakerCounters } from '../dispatch/breaker.js';
 import { Dispatcher } from '../dispatch/dispatcher.js';
 import type { DispatchLog } from '../dispatch/dispatcher.js';
@@ -18,8 +19,8 @@ import { ReplicationChannels } from '../state/channels.js';
 import type { HandlerErrorRecord } from '../errors.js';
 import { ENTITY_KEY_PREFIX, HostTable } from './hosts.js';
 import { PRNGStore } from './prng-store.js';
-import { ManualClock, MemoryKVStore, NullEffectSink } from './seams.js';
-import type { Clock, EffectSink, KVStore, PhysicsSink } from './seams.js';
+import { ManualClock, MemoryKVStore, NullEffectSink, NullHUDSink } from './seams.js';
+import type { Clock, EffectSink, HUDSink, KVStore, PhysicsSink } from './seams.js';
 import { NullPhysicsSink } from './physics.js';
 
 import type { DispatchOptions } from '../dispatch/dispatcher.js';
@@ -33,11 +34,13 @@ import type { Wiring } from './wiring.js';
 import type { LagRing } from './lag-ring.js';
 import type { Roster } from './roster.js';
 import type { Camera } from './camera.js';
-import type { Storage } from './wrappers.js';
+import type { Countdown, Storage } from './wrappers.js';
+import type { PersistedSource } from './persistence.js';
 import type { Random } from './random.js';
 import type { Assets } from './assets.js';
 import type { Game, WorldQuery } from './game.js';
 import type { RegionIndex } from './regions.js';
+import type { HUDState } from './hud.js';
 
 /** The per-tick passes the loop drives, in tick order. */
 export interface TickPasses {
@@ -45,7 +48,8 @@ export interface TickPasses {
     movement(dt: number, scope: ReadonlySet<EntityId> | undefined): void;
     contacts(dispatch: DispatchOptions): void;
     regions(dispatch: DispatchOptions): void;
-    countdowns(): void;
+    /** Takes the dispatch options for `replay` alone: a re-run tick must not spend a countdown twice. */
+    countdowns(dispatch: DispatchOptions): void;
     update(dispatch: DispatchOptions, dt: number, scope: ReadonlySet<EntityId> | undefined): void;
 }
 
@@ -87,6 +91,8 @@ export class Runtime {
     readonly breaker = new BreakerCounters();
     readonly timers = new TimerHeap();
     readonly tweens = new TweenEngine();
+    /** The running countdowns the countdowns pass advances; a Countdown enrols itself on `start`. */
+    readonly countdowns = new Set<Countdown>();
 
     readonly scopes = new ScopeTree();
     readonly hosts = new HostTable(this.scopes);
@@ -101,6 +107,7 @@ export class Runtime {
     physics: PhysicsSink = new NullPhysicsSink(this.transforms);
     kv: KVStore = new MemoryKVStore();
     effects: EffectSink = new NullEffectSink();
+    hudSink: HUDSink = new NullHUDSink();
 
     simRate = DEFAULT_SIM_RATE;
 
@@ -123,7 +130,7 @@ export class Runtime {
     /** The local player on a client runtime; undefined on the server. */
     localPlayer?: Player | null;
     /** Persisted @serverState from a previous session, keyed by (hostId, field). */
-    persisted?: { get(hostId: string, field: string): unknown };
+    persisted?: PersistedSource;
     /** Client→server request delivery; loadGame installs the loopback sink. */
     requestSink?: (name: string, payload?: Record<string, unknown>) => void;
     random?: Random;
@@ -134,6 +141,8 @@ export class Runtime {
     /** Broadphase over the live transform store, never a lag-ring buffer. */
     broadphase?: Broadphase;
     regions?: RegionIndex;
+    /** The screens and widgets the `hud` const is a facade over; one per world, built by loadGame. */
+    hud?: HUDState;
     worldBounds?: Bounds;
     passes?: TickPasses;
     /** For the host's accumulator to honour; `step` runs a tick regardless. */
@@ -151,6 +160,20 @@ export class Runtime {
         this.timers.setSimRate(this.simRate);
         this.tweens.setSimRate(this.simRate);
         this.timers.setScopeOwnerLookup((scopeId) => this.#entityForScope(scopeId));
+        // The heaps fire creator callbacks from inside a tick, so they run under the dispatcher's
+        // boundary or a throw escapes the loop and ends the session.
+        this.timers.setGuard((owner, method, fn) =>
+            this.guardCallback(owner, method, '@timer', fn),
+        );
+        this.tweens.setGuard((owner, method, fn) =>
+            this.guardCallback(owner, method, '@tween', fn),
+        );
+    }
+
+    /** Runs a creator callback that reaches the engine outside a handler under that same boundary. */
+    guardCallback(owner: GuardOwner | null, method: string, event: string, fn: () => void): void {
+        const hostId = owner === null ? '' : (this.hosts.keyForScope(owner.hostScopeId) ?? '');
+        this.dispatcher.guard(owner, { method, hostId, tick: this.tick, event }, fn);
     }
 
     setSimRate(rate: number): void {

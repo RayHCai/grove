@@ -15,7 +15,12 @@ export type { ClientStats, GameClientOptions } from './client.js';
 
 export { ManualFrameSource, ScriptedInputDevice } from './input.js';
 export type { EmittingInputDevice, FrameSource, InputDevice, RawInputEvent } from './input.js';
-export type { ClockSource } from './handshake.js';
+export type { ClientProject, ClockSource } from './handshake.js';
+export { BundleError, loadBundle } from './bundle.js';
+export type { BundleSource } from './bundle.js';
+
+export { ClientHUDSink } from './hud-sink.js';
+export type { HUDWidgetView } from './hud-sink.js';
 
 export { Mirror, wireBounds } from './mirror.js';
 export type {
@@ -56,10 +61,13 @@ export {
     rttSeconds,
     send,
     timeSync,
+    unidentifiedProject,
 } from './handshake.js';
 
 export {
     ACK_STALL_TICKS,
+    BUNDLE_DEADLINE_SECONDS,
+    MAX_BUNDLE_BYTES,
     AXIS_QUANTUM,
     CORRECTION_SMOOTH_SECONDS,
     CORRECTION_SNAP_DISTANCE_SQUARED,

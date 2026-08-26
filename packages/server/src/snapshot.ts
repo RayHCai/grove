@@ -11,7 +11,7 @@
 // behind at.
 
 import type { EntityId, Player, Runtime } from '@platform/core';
-import { GAME_KEY, NO_ENTITY, entityKey, playerKey } from '@platform/core';
+import { GAME_KEY, NO_ENTITY, entityKey, playerKey, serializeHostField } from '@platform/core';
 import type { EntitySnapshot, StateDiff, StateHostAddr, WorldSnapshot } from '@platform/protocol';
 import type { JsonValue } from '@platform/transport';
 import { RESERVED_KEYS } from '@platform/transport';
@@ -109,9 +109,11 @@ function collect(rt: Runtime, into: StateDiff[], hostKey: string, host: StateHos
     if (!record) return;
     const fields: { [field: string]: JsonValue } = {};
     let any = false;
-    for (const [field, value] of record.values) {
+    for (const field of record.values.keys()) {
         if (RESERVED_KEYS.has(field)) continue;
-        const encoded = encodeStateValue(value);
+        // The same read the per-tick diff uses, so a wrapper reaches a joiner in the form the
+        // steady-state path would have sent it — the baseline and the delta cannot disagree.
+        const encoded = encodeStateValue(serializeHostField(record, field));
         if (encoded === undefined) continue;
         fields[field] = encoded;
         any = true;

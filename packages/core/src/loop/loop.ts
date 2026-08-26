@@ -54,7 +54,7 @@ export class Loop {
 
         this.#rt.timers.advance();
         this.#rt.tweens.advance();
-        passes?.countdowns();
+        passes?.countdowns(dispatch);
 
         passes?.update(dispatch, dt, opts.scope);
 

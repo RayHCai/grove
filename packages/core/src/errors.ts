@@ -15,3 +15,13 @@ export interface HandlerErrorRecord {
     event: string;
     stack: string;
 }
+
+/**
+ * One `(instance, method)` disabled after `BREAKER_THRESHOLD` consecutive throws.
+ *
+ * The instance id rides alongside the class name because the class alone does not identify which of
+ * a template's copies stopped running, which is the first thing a host asks.
+ */
+export interface BreakerTrip extends HandlerErrorRecord {
+    instanceId: number;
+}

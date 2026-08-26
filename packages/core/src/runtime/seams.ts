@@ -2,6 +2,8 @@
 // Node with no browser and no network. The real owner swaps its implementation in.
 
 import type { EntityId } from '../ids.js';
+import type { AssetRef } from './assets.js';
+import type { Countdown } from './wrappers.js';
 
 /** The frame clock. Core is pumped, never self-driving. */
 export interface Clock {
@@ -45,7 +47,7 @@ export function noBlocked(): Blocked {
     return { up: false, down: false, left: false, right: false, forward: false, back: false };
 }
 
-/** Key-value store. Real owner: @platform/platform. */
+/** Key-value store. Real owner: the host app. */
 export interface KVStore {
     get(scope: string, key: string): Promise<unknown>;
     set(scope: string, key: string, value: unknown): Promise<void>;
@@ -83,4 +85,40 @@ export interface EffectSink {
 
 export class NullEffectSink implements EffectSink {
     play(): void {}
+}
+
+/**
+ * What one panel-authored widget currently shows.
+ *
+ * The `Countdown` travels rather than a sampled number of seconds: a bound timer counts down every
+ * tick with no further call from creator code, so a snapshot would freeze at whatever the last verb
+ * left it at. The presenter reads `remaining` when it draws.
+ */
+export interface HUDWidgetState {
+    text?: string;
+    number?: number;
+    /** 0..1 fill for a bar. */
+    fraction?: number;
+    icon?: AssetRef;
+    countdown?: Countdown;
+    visible: boolean;
+    enabled: boolean;
+}
+
+/**
+ * One player's interface, as the presentation layer sees it. Real owner: the client.
+ *
+ * Push, not pull: core holds the authored state and hands over whatever changed, so the presenter
+ * never has to walk the whole HUD to find the one widget a handler wrote.
+ */
+export interface HUDSink {
+    /** A widget changed; the whole record is handed over rather than a patch. */
+    widget(name: string, state: Readonly<HUDWidgetState>): void;
+    /** A screen opened or closed. */
+    screen(name: string, visible: boolean): void;
+}
+
+export class NullHUDSink implements HUDSink {
+    widget(): void {}
+    screen(): void {}
 }

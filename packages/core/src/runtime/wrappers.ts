@@ -3,8 +3,11 @@
 
 import type { HostRecord } from '../state/host-record.js';
 import { currentActingPlayer } from '../dispatch/acting-player.js';
+import { currentInvocation } from '../dispatch/ambient.js';
+import type { GuardOwner } from '../dispatch/scope-tree.js';
 import type { Player } from './player.js';
 import type { KVStore } from './seams.js';
+import type { Runtime } from './runtime.js';
 import { currentRuntime, hasRuntime } from './runtime.js';
 import { DEFAULT_SIM_RATE } from '../config.js';
 
@@ -194,7 +197,13 @@ export class Inventory extends StatefulWrapper {
     }
 
     serialize(): unknown {
-        return { kind: 'Inventory', items: [...this.#items.entries()] };
+        // The player rides along because it is a constructor argument, and a receiver holding no
+        // scripts has to rebuild this from the payload alone.
+        return {
+            kind: 'Inventory',
+            player: this.#player.id,
+            items: [...this.#items.entries()],
+        };
     }
 
     restore(data: unknown): void {
@@ -244,6 +253,76 @@ export class Team extends StatefulWrapper {
     }
 }
 
+let nextCountdownId = 1;
+
+/** The wrappers whose state replicates, named by the tag their serialized form carries. */
+export type WrapperKind = 'Scoreboard' | 'Leaderboard' | 'Inventory' | 'Team';
+
+/**
+ * A host field as the wire carries it: a bound wrapper's `serialize()`, everything else raw.
+ *
+ * What the record holds for a wrapper field is the wrapper OBJECT, and no codec represents a class
+ * instance — so without this the mark is dropped at the send boundary and counted, which is a silent
+ * loss by construction: the channel was marked, so everything upstream looks like it worked.
+ */
+export function serializeHostField(record: HostRecord, field: string): unknown {
+    const value = record.values.get(field);
+    return value instanceof StatefulWrapper ? value.serialize() : value;
+}
+
+/**
+ * Lands a replicated value on a host field.
+ *
+ * A wrapper already on the record is RESTORED in place rather than replaced, because a script may
+ * hold that same instance and assigning the decoded payload over it would leave a methodless object
+ * where a `Scoreboard` was. A receiver holding none — the ordinary client, which runs no scripts —
+ * revives one from the payload's own tag instead, so `of()` and `top()` work on both ends.
+ */
+export function restoreHostField(record: HostRecord, field: string, value: unknown): void {
+    const held = record.values.get(field);
+    if (held instanceof StatefulWrapper) {
+        held.restore(value);
+        return;
+    }
+    const revived = reviveWrapper(value);
+    if (revived === undefined) {
+        record.values.set(field, value);
+        return;
+    }
+    revived.bind(record, field);
+    revived.restore(value);
+    record.values.set(field, revived);
+    record.wrappers.add(field);
+}
+
+/**
+ * Rebuilds a wrapper from its serialized form, or `undefined` when the payload is not one.
+ *
+ * Keyed off the payload's own `kind`, since a receiver with no scripts has nothing else to go on —
+ * which is also why every constructor argument has to ride the wire. An `Inventory` naming a player
+ * this world does not know is left as the raw payload rather than attached to a guess.
+ */
+export function reviveWrapper(data: unknown): StatefulWrapper | undefined {
+    if (typeof data !== 'object' || data === null) return undefined;
+    const d = data as { kind?: unknown; order?: unknown; name?: unknown; player?: unknown };
+    switch (d.kind as WrapperKind) {
+        case 'Scoreboard':
+            return new Scoreboard();
+        case 'Leaderboard':
+            // The order decides what `top` means, so a default here would silently invert a
+            // low-is-better board on every client.
+            return new Leaderboard({ order: d.order === 'low' ? 'low' : 'high' });
+        case 'Team':
+            return typeof d.name === 'string' ? new Team(d.name) : undefined;
+        case 'Inventory': {
+            const player = typeof d.player === 'string' ? playerLookup()(d.player) : null;
+            return player === null ? undefined : new Inventory(player);
+        }
+        default:
+            return undefined;
+    }
+}
+
 type WirePayload = { kind?: string } & Record<string, unknown>;
 
 // A payload tagged with another wrapper's kind is left alone: the field it came from may since
@@ -268,11 +347,26 @@ export class Countdown {
     #fired = false;
     readonly #onZero: (() => void) | undefined;
     #simRate: number;
+    /**
+     * The runtime whose countdowns pass advances this one; null when built outside a loaded world.
+     *
+     * Captured rather than resolved per call, so a countdown built inside `withRuntime` still
+     * belongs to that world when a later tick reaches it.
+     */
+    readonly #rt: Runtime | null;
+
+    /** @internal — who registered it, so a throw in `onZero` is charged like a timer callback's. */
+    readonly owner: GuardOwner | null;
+    /** @internal — the breaker key, since `onZero` is a closure the breaker could not otherwise name. */
+    readonly guardKey: string;
 
     constructor(seconds: number, onZero?: () => void) {
+        this.owner = currentInvocation()?.owner ?? null;
+        this.guardKey = `countdown:${nextCountdownId++}`;
         // The live rate, not a hardcoded 60: a countdown built on a 30 Hz world would otherwise
         // hold twice the ticks it was asked for and report twice the seconds.
-        this.#simRate = hasRuntime() ? currentRuntime().simRate : DEFAULT_SIM_RATE;
+        this.#rt = hasRuntime() ? currentRuntime() : null;
+        this.#simRate = this.#rt?.simRate ?? DEFAULT_SIM_RATE;
         this.#remainingTicks = Math.max(0, Math.round(seconds * this.#simRate));
         this.#onZero = onZero;
     }
@@ -281,12 +375,20 @@ export class Countdown {
         return this.#remainingTicks / this.#simRate;
     }
 
+    get running(): boolean {
+        return this.#running;
+    }
+
+    // Registered on start rather than on construction: the set holds a strong reference, so a game
+    // minting one per round would otherwise grow it for the session.
     start(): void {
         this.#running = true;
+        this.#rt?.countdowns.add(this);
     }
 
     pause(): void {
         this.#running = false;
+        this.#rt?.countdowns.delete(this);
     }
 
     reset(seconds?: number): void {
@@ -302,6 +404,9 @@ export class Countdown {
         if (this.#remainingTicks <= 0 && !this.#fired) {
             this.#fired = true;
             this.#running = false;
+            // Deregistered before the callback, so an onZero that restarts it re-registers rather
+            // than having this line drop it again.
+            this.#rt?.countdowns.delete(this);
             this.#onZero?.();
         }
     }

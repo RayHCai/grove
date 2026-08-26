@@ -3,6 +3,7 @@
 // rate is the wrong wall-clock window at the other, in the checks that decide whether input counts.
 
 import { MAX_REWIND_MS } from '@platform/core';
+import { MAX_FRAME_BYTES } from '@platform/transport';
 
 /** Both sides of the tick window: a frame older than the rewind limit is unusable, and the client's own lead is capped at the same span. */
 export const INPUT_WINDOW_MS = MAX_REWIND_MS;
@@ -37,8 +38,17 @@ export const MAX_ACTION_NAME_LENGTH = 64;
 /** Distinct action names one connection may name: each one held costs a `hold` dispatch every tick until it is released. */
 export const MAX_ACTION_NAMES = 64;
 
+/** Interactions one frame may carry, so a single frame cannot buy an unbounded dispatch walk. */
+export const MAX_INTERACTIONS_PER_FRAME = 16;
+
+/** Longest accepted widget or screen name — each becomes the event name of a dispatch. */
+export const MAX_WIDGET_NAME_LENGTH = 64;
+
 /** Longest accepted display name. */
 export const MAX_NAME_LENGTH = 24;
+
+/** Longest accepted identity string — a hex digest and a panel-minted id both sit far under this. */
+export const MAX_IDENTITY_LENGTH = 128;
 
 /** Nesting past which a `@serverState` value is dropped, held far below the codec's own 128-level cap because a value `encode` refuses aborts the send for every connection. */
 export const MAX_STATE_DEPTH = 64;
@@ -48,6 +58,26 @@ export const MAX_UNJOINED_CONNECTIONS = 32;
 
 /** Ticks past the horizon that are clamped rather than refused — a healthy client at its deliberate lead, one tick of jitter early. */
 export const HORIZON_CLAMP_TICKS = 2;
+
+/**
+ * Structural ops one send may carry; the rest are held for the next, in order.
+ *
+ * The one bound on what the server PRODUCES. Nothing else limits a journal, so a script spawning in a
+ * loop mints an envelope past transport's frame cap — which every peer refuses before parsing, and a
+ * refused frame makes the client resync, which asks for a full snapshot and is bigger. Sized so a full
+ * budget of spawns stays an order of magnitude under `MAX_FRAME_BYTES`, and far above any legitimate
+ * interval: a wave spawner passes, an unbounded loop is spread over the sends it actually needs.
+ */
+export const MAX_STRUCTURAL_OPS_PER_SEND = 2_048;
+
+/**
+ * Bytes a server-minted frame targets, under transport's own cap.
+ *
+ * Derived from `MAX_FRAME_BYTES` rather than chosen, so the two cannot drift. The headroom covers the
+ * envelope around a chunk's payload — transport's cap stays where it is, and a producer approaching it
+ * chunks rather than asking for a bigger frame.
+ */
+export const MAX_FRAME_PAYLOAD_BYTES = Math.floor(MAX_FRAME_BYTES * 0.75);
 
 function ticksFor(ms: number, simRate: number): number {
     return Math.max(1, Math.ceil((ms / 1000) * simRate));

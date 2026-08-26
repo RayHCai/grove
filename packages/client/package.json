@@ -22,12 +22,13 @@
     "scripts": {
         "build": "tsc -b",
         "typecheck": "tsc -p tsconfig.test.json",
-        "test": "vitest run --passWithNoTests",
+        "test": "tsc -b && vitest run --passWithNoTests",
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
         "@platform/core": "workspace:*",
         "@platform/math": "workspace:*",
+        "@platform/project": "workspace:*",
         "@platform/protocol": "workspace:*",
         "@platform/renderer": "workspace:*",
         "@platform/transport": "workspace:*"

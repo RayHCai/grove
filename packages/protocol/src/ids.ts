@@ -15,3 +15,9 @@ export type NetId = number & { readonly __netId: unique symbol };
  * five fields that hold one say so, rather than reading as unrelated strings.
  */
 export type PlayerId = string;
+
+/**
+ * Which project a session is playing. Unbranded for {@link PlayerId}'s reason: the panel mints it
+ * and both ends carry it verbatim, so there is no local handle to confuse it with.
+ */
+export type ProjectId = string;

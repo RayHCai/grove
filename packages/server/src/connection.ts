@@ -6,7 +6,7 @@
 import type { Player } from '@platform/core';
 import { createActionStates } from '@platform/core';
 import type { ActionStates } from '@platform/core';
-import type { JoinRequest } from '@platform/protocol';
+import type { Interaction, JoinRequest } from '@platform/protocol';
 import type { Transport } from '@platform/transport';
 import {
     CONTROL_BUCKET_FRAMES,
@@ -205,6 +205,14 @@ export class Connection {
      * prediction mismatch debugged as a replication bug.
      */
     readonly actions: ActionStates = createActionStates();
+    /**
+     * HUD presses and pointer hits awaiting the next tick pass.
+     *
+     * A queue rather than an immediate dispatch, because a handler reached from a socket callback
+     * would run between ticks. It needs no depth of its own: the input bucket bounds how many frames
+     * reach it and the pass empties it every tick.
+     */
+    readonly interactions: Interaction[] = [];
 
     /** Null until the first valid `JoinRequest` allocates it. */
     player: Player | null = null;
@@ -234,6 +242,16 @@ export class Connection {
     get joined(): boolean {
         return this.player !== null;
     }
+
+    /**
+     * Structural ops still held over from before this connection's snapshot, which it must skip.
+     *
+     * A join snapshot is read from LIVE state, so it already contains the effect of every op waiting
+     * in the spill queue — replaying them would spawn a second copy of entities it already holds, and
+     * a duplicate spawn is not idempotent. Counted down as each send delivers part of the backlog,
+     * never cleared in one go: a spill deeper than one send's budget spans several sends.
+     */
+    structuralSkip = 0;
 
     /** Whether this connection is owed the current send: joined, live, and no longer awaiting a `Welcome`. */
     get wantsBroadcast(): boolean {
