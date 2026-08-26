@@ -24,6 +24,8 @@ export type {
     MirrorOptions,
     MirrorReparent,
     MirrorView,
+    ScriptClass,
+    TemplateScripts,
 } from './mirror.js';
 export { MirrorIndex } from './index-map.js';
 
@@ -36,6 +38,12 @@ export { InputRing } from './ring.js';
 export type { RingEntry } from './ring.js';
 
 export { RenderBridge } from './bridge.js';
+export type { Correction } from './bridge.js';
+
+export { Prediction } from './prediction.js';
+export type { PredictionCounters, PredictionOptions } from './prediction.js';
+export { clientPasses } from './passes.js';
+export type { ClientPassContext } from './passes.js';
 
 export { Lifecycle, acceptsInput, isTerminal } from './lifecycle.js';
 export type { FailureReason, SessionState } from './lifecycle.js';
@@ -53,12 +61,16 @@ export {
 export {
     ACK_STALL_TICKS,
     AXIS_QUANTUM,
+    CORRECTION_SMOOTH_SECONDS,
+    CORRECTION_SNAP_DISTANCE_SQUARED,
     DEFAULT_VIEWPORT,
     GAIN,
     HEADROOM_TARGET,
     LEAD_MAX_SECONDS,
     LEAD_MIN_TICKS,
     MAX_FRAME_DT,
+    MAX_INTERPOLATION_DELAY_SECONDS,
+    MAX_REPLAY_TICKS,
     NUDGE_MAX,
     RING_TICKS,
     STALL_SECONDS,

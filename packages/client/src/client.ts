@@ -43,7 +43,8 @@ import type { FrameSource, InputDevice, RawInputEvent } from './input.js';
 import { Lifecycle } from './lifecycle.js';
 import type { SessionState } from './lifecycle.js';
 import { Mirror, wireBounds } from './mirror.js';
-import type { MirrorDelta } from './mirror.js';
+import type { MirrorDelta, TemplateScripts } from './mirror.js';
+import { Prediction } from './prediction.js';
 import { InputRing } from './ring.js';
 
 const CAMERA_ORIGIN = { x: 0, y: 0, z: 0 } as const;
@@ -63,6 +64,14 @@ export interface GameClientOptions {
     pump?: () => void;
     /** Resolves the camera each frame from the local player. Defaults to the player's core `Camera`. */
     camera?: (player: Player | null) => CameraState;
+    /**
+     * Simulates the local player's own entities ahead of the server, replaying unacked input over every
+     * authoritative delta. Off by default: what it runs is the creator scripts attached to those
+     * entities, and a mirror holding none predicts an unchanged world at the cost of the replay.
+     */
+    predict?: boolean;
+    /** The scripts a spawned entity gets here, by template — what `predict` has to run. */
+    scripts?: TemplateScripts;
 }
 
 /** What a dev console asks about, which a tick count does not answer. */
@@ -80,6 +89,12 @@ export interface ClientStats {
     nodeCount: number;
     /** Manifest loads that rejected. Nonzero means some art is drawing as a placeholder. */
     assetLoadFailed: number;
+    /** Where the predicted world stands. Equal to `depictedTick` when nothing is predicted. */
+    predictedTick: number;
+    /** Rewind-and-replay cycles: one per frame that carried authoritative state. */
+    resimulations: number;
+    /** Replays that hit the tick cap, so the predicted world skipped ticks the server did not. */
+    cappedReplays: number;
 }
 
 export class GameClient {
@@ -94,6 +109,9 @@ export class GameClient {
     #bridge: RenderBridge | undefined;
     #clock: ClientClock | undefined;
     #welcome: Welcome | undefined;
+    #prediction: Prediction | undefined;
+    /** Authoritative state landed this frame, so the predicted span has to be re-run over it. */
+    #resimulate = false;
 
     readonly #disposers: Array<() => void> = [];
 
@@ -163,12 +181,19 @@ export class GameClient {
         return this.#mirror?.runtime.playerManager?.byId(id) ?? null;
     }
 
+    get prediction(): Prediction | undefined {
+        return this.#prediction;
+    }
+
     stats(): ClientStats {
         const counters = this.#mirror?.counters;
+        const predicted = this.#prediction;
+        const depictedTick = this.#mirror?.depictedTick ?? 0;
+        const predictedTick = predicted?.predictedTick ?? -1;
         return {
             state: this.#lifecycle.state,
             localTick: this.#clock?.localTick ?? 0,
-            depictedTick: this.#mirror?.depictedTick ?? 0,
+            depictedTick,
             rttSeconds: this.#rtt,
             targetLeadSeconds: this.#clock?.targetLeadSeconds ?? 0,
             currentLeadSeconds: this.#clock?.currentLeadSeconds ?? 0,
@@ -178,6 +203,9 @@ export class GameClient {
             outOfOrderParent: counters?.outOfOrderParent ?? 0,
             nodeCount: this.#bridge?.nodeCount ?? 0,
             assetLoadFailed: this.#assetLoadFailed,
+            predictedTick: predictedTick < 0 ? depictedTick : predictedTick,
+            resimulations: predicted?.counters.resimulations ?? 0,
+            cappedReplays: predicted?.counters.cappedReplays ?? 0,
         };
     }
 
@@ -220,15 +248,35 @@ export class GameClient {
             this.#flushInput(this.#ticks);
         }
 
+        // After the flush, so the tick just stamped can be replayed on the frame it was sent.
+        this.#predict();
+
         this.#checkNotBehind();
         this.#checkLiveness();
         this.#maybeSync();
 
         if (this.#bridge !== undefined) {
-            this.#bridge.pushTransforms();
+            this.#bridge.pushTransforms(nowSeconds);
             this.#bridge.pushCamera(this.#cameraState());
         }
         this.#opts.renderer.render();
+    }
+
+    /**
+     * Carries the predicted world up to the local tick.
+     *
+     * Only while `live`: `stalled` refuses input, and simulating on through it would run the avatar off
+     * held keys with nothing arriving to correct it — ghost gameplay by another route. A `resimulate`
+     * dropped here is not lost, because the next envelope raises it again.
+     */
+    #predict(): void {
+        const resimulate = this.#resimulate;
+        this.#resimulate = false;
+        const prediction = this.#prediction;
+        const clock = this.#clock;
+        if (prediction === undefined || clock === undefined) return;
+        if (this.#lifecycle.state !== 'live') return;
+        prediction.advance(clock.localTick, resimulate);
     }
 
     #receive(message: Message): void {
@@ -243,6 +291,13 @@ export class GameClient {
         if (this.#inbox.length === 0) return;
         const batch = this.#inbox.splice(0);
         this.#lastEnvelopeAt = this.#now;
+
+        // Once, ahead of the batch's first authoritative write rather than inside it: a delta names only
+        // what changed, so a field it does not mention would keep its predicted value and never converge.
+        if (this.#prediction !== undefined && batch.some(isAuthoritative)) {
+            this.#prediction.rewind();
+            this.#resimulate = true;
+        }
 
         for (const envelope of batch) {
             // Nothing after a terminal failure can matter, and applying into a half-torn session is how a
@@ -313,8 +368,11 @@ export class GameClient {
             simRate: welcome.simRate,
             bounds: wireBounds(welcome.bounds),
             regions: welcome.regions.map((r) => ({ name: r.name, bounds: wireBounds(r.bounds) })),
+            ...(this.#opts.scripts === undefined ? {} : { scripts: this.#opts.scripts }),
         });
-        this.#bridge = new RenderBridge(this.#opts.renderer, this.#mirror.view());
+        // `sendRate` is the interval between transforms, and so the interval the render path buffers over:
+        // without it an entity nothing local predicts holds its pose until the next envelope.
+        this.#bridge = new RenderBridge(this.#opts.renderer, this.#mirror.view(), welcome.sendRate);
         // Started, not awaited: the template table fills synchronously, so the snapshot below resolves
         // every template. A rejection means missing art, which the renderer already draws as a
         // placeholder — so it is counted rather than allowed to become an unhandled rejection.
@@ -333,6 +391,22 @@ export class GameClient {
 
         this.#apply(this.#mirror.applySnapshot(welcome));
         this.#mirror.runtime.localPlayer = this.localPlayer;
+
+        if (this.#opts.predict === true) {
+            this.#prediction = new Prediction({
+                mirror: this.#mirror,
+                ring: this.#ring,
+                bridge: this.#bridge,
+                playerId: welcome.yourPlayerId,
+            });
+            this.#mirror.simulate(this.#prediction.context);
+            // Handed over live: the scope is refilled in place whenever authoritative state lands, and an
+            // entity this replays is one the buffer must leave alone — two smoothers rubber-band.
+            this.#bridge.setPredicted(this.#prediction.scope);
+            // The snapshot is authoritative state, so this frame already has a baseline to replay over.
+            this.#resimulate = true;
+        }
+
         this.#lastSyncAt = this.#now;
         // Both liveness clocks start at the welcome, not at time zero: a join that took a moment must not
         // be charged against the first ack's deadline.
@@ -552,6 +626,9 @@ export class GameClient {
         this.#mirror = undefined;
         this.#bridge = undefined;
         this.#clock = undefined;
+        // Dropped with the runtime it belongs to: a baseline holds handles that mean nothing in the next.
+        this.#prediction = undefined;
+        this.#resimulate = false;
         // The new session will hold nothing, so what is physically held has to be said again.
         this.#rejoined = true;
 
@@ -574,17 +651,14 @@ export class GameClient {
 
         const camera = player.camera;
         const target = camera.followTarget;
-        const rt = this.#mirror?.runtime;
-        if (target !== null && rt !== undefined && 'entityId' in target) {
+        const bridge = this.#bridge;
+        if (target !== null && bridge !== undefined && 'entityId' in target) {
             const local: EntityId = target.entityId;
-            return {
-                position: {
-                    x: rt.transforms.posX(local),
-                    y: rt.transforms.posY(local),
-                    z: 0,
-                },
-                zoom: camera.zoom,
-            };
+            // The drawn position, not the simulated one: a camera locked to the exact answer slides its
+            // target across the screen — while a predicted avatar eases towards a correction, and by a
+            // whole send interval for a target the interpolation buffer draws.
+            const drawn = bridge.drawnPosition(local);
+            return { position: { x: drawn.x, y: drawn.y, z: 0 }, zoom: camera.zoom };
         }
         return { position: camera.position, zoom: camera.zoom };
     }
@@ -609,6 +683,7 @@ export class GameClient {
         if (opts.ownsRenderer === true) this.#opts.renderer.destroy();
         this.#mirror = undefined;
         this.#bridge = undefined;
+        this.#prediction = undefined;
 
         // Only if the slot still holds ours: core keeps one module-global, and a second client — or a server
         // in this process — would otherwise lose its own to our teardown.
@@ -634,4 +709,9 @@ export class GameClient {
 /** A netId as the wire spells it — for tests and a `FakeServer`, which mint them. */
 export function netId(n: number): NetId {
     return n as NetId;
+}
+
+/** The two envelopes that write the world. Everything else leaves a predicted pose standing. */
+function isAuthoritative(envelope: ServerToClient): boolean {
+    return envelope.kind === 'state' || envelope.kind === 'transform';
 }
