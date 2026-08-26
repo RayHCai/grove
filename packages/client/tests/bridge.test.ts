@@ -625,20 +625,23 @@ describe('the manifest and the template table', () => {
             .inspect()
             .nodes.get(renderer.inspect().nodes.get(root)!.children[1]!)!.children[0]!;
 
+        bridge.pushTransforms(0);
         mirror.applyState(stateEnvelope([], 2));
         mirror.applyTransforms({
             kind: 'transform',
             tick: 2,
             transform: [transformDiff(1, { posX: 200, posY: 50, rot: 90 })],
         });
-        bridge.pushTransforms();
+        // Two intervals on, the drawn moment has reached the newest sample exactly.
+        bridge.pushTransforms(SEND_INTERVAL);
+        bridge.pushTransforms(SEND_INTERVAL * 2);
 
         const resolved = renderer.resolvedTransformOf(barrel)!;
         // 12 up for the pivot, 6 more for the barrel: the offsets composed onto the entity's move.
-        expect(resolved.position.x).toBe(200);
-        expect(resolved.position.y).toBe(68);
+        expect(resolved.position.x).toBeCloseTo(200, 6);
+        expect(resolved.position.y).toBeCloseTo(68, 6);
         expect(resolved.rotation).toBe(0);
-        expect(renderer.localTransformOf(root)?.rotation).toBe(90);
+        expect(renderer.localTransformOf(root)?.rotation).toBeCloseTo(90, 6);
     });
 
     it('culls a descendant that leaves the viewport while its parent is still inside', async () => {
@@ -658,7 +661,7 @@ describe('the manifest and the template table', () => {
             stateEnvelope([{ kind: 'spawn', snapshot: entity(1, 'banner') }]),
         );
         bridge.reconcile(delta);
-        bridge.pushTransforms();
+        bridge.pushTransforms(0);
         renderer.render();
 
         const root = bridge.nodeFor(delta.added[0]!)!;
@@ -673,7 +676,8 @@ describe('the manifest and the template table', () => {
             tick: 2,
             transform: [transformDiff(1, { posX: -5000 })],
         });
-        bridge.pushTransforms();
+        bridge.pushTransforms(SEND_INTERVAL);
+        bridge.pushTransforms(SEND_INTERVAL * 2);
         renderer.render();
         expect(renderer.inspect().nodes.get(child)?.culled).toBe(false);
     });

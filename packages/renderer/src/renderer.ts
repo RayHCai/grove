@@ -161,6 +161,18 @@ export interface TextNodeDesc extends NodeBase {
 
 export type NodeDesc = SpriteNodeDesc | GroupNodeDesc | TextNodeDesc;
 
+/** A {@link NodeDesc} whose parent may be a node the same batch is about to create. */
+export type SubtreeNodeDesc = NodeDesc & {
+    /**
+     * Position in the batch of this node's parent, which must be SMALLER than this desc's own.
+     *
+     * Parents before children, so one forward pass resolves every reference and no cycle is
+     * expressible. It overrides `parent`, and a desc that omits `surface` takes the batch parent's
+     * — the `'world'` default would otherwise be a cross-surface throw for every UI subtree.
+     */
+    parentInBatch?: number;
+};
+
 /** An `undefined` field means unchanged. Nothing is retained past the call. */
 export interface NodePatch {
     id: NodeId;
@@ -308,6 +320,13 @@ export interface IRenderer {
     /** Synchronous by design: `game.spawn` is specified sync and always safe. */
     createNode(desc: NodeDesc): NodeId;
     createNodes(descs: readonly NodeDesc[], out?: NodeId[]): NodeId[];
+    /**
+     * Creates a parented subtree in one call, each `parentInBatch` resolved inside the batch.
+     *
+     * All or nothing: a desc that throws takes the batch's already-created nodes with it, since the
+     * caller holds no handle yet and a half-built subtree could never be destroyed.
+     */
+    createSubtree(descs: readonly SubtreeNodeDesc[], out?: NodeId[]): NodeId[];
     createNodeAsync(desc: NodeDesc): Promise<{ id: NodeId } & AssetInfo>;
     /** Cascades to children, matching `Entity.destroy()`. */
     destroyNode(id: NodeId): void;

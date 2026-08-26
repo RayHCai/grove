@@ -252,7 +252,9 @@ export type WireAssetKind = 'texture' | 'atlas' | 'audio' | 'font' | 'clip' | 'e
  * How to draw the entities of one template.
  *
  * It deliberately carries NO transform: those fields are per-entity and authoritative from the
- * simulation, so carrying them here too would give the client two sources for one value.
+ * simulation, so carrying them here too would give the client two sources for one value. A
+ * {@link TemplateChild} is the one thing beneath it that does carry one, because nothing simulates
+ * a child and its offset therefore has no other source.
  */
 export type TemplateVisual = SpriteTemplateVisual | GroupTemplateVisual;
 
@@ -269,8 +271,67 @@ export type SpriteTemplateVisual = {
     neverCull?: boolean;
 };
 
-/** A template whose entities are positional pivots with no art of their own. */
-export type GroupTemplateVisual = { template: string; kind: 'group' };
+/** A template whose entities are positional pivots, drawing whatever `children` hangs beneath them. */
+export type GroupTemplateVisual = {
+    template: string;
+    kind: 'group';
+    /**
+     * The art every entity of this template draws, as a subtree the client builds in one call.
+     *
+     * ABSENT for a bare pivot, never `undefined`. Recursive, so a receiver has to bound depth and
+     * total node count as well as each level's cardinality — one number per level bounds neither.
+     */
+    children?: TemplateChild[];
+};
+
+/**
+ * One node inside a group template's subtree: art the TEMPLATE owns, not an entity.
+ *
+ * This is the one place a visual carries a transform, and the reason the rule differs here is that
+ * nothing simulates a child — no `WireTransform` will ever name it, so its offset from the parent
+ * node has no second source to disagree with. Every field is local to the parent node, and only
+ * the offset reaches descendants: the renderer composes position and visibility and nothing else.
+ */
+export type TemplateChild = SpriteTemplateChild | GroupTemplateChild;
+
+/** Art under a template's root. `texture` keys into {@link WireAssetRef}, as a sprite visual's does. */
+export type SpriteTemplateChild = {
+    kind: 'sprite';
+    texture: string;
+    /** Local to the parent node, in world units. Absent = 0, never `undefined`. */
+    offsetX?: number;
+    offsetY?: number;
+    offsetZ?: number;
+    /** Degrees. Does not inherit, so a badge over a spinning parent stays upright at 0. */
+    rotation?: number;
+    /** Uniform, as {@link WireTransform.scale} is. */
+    scale?: number;
+    alpha?: number;
+    /** 0..1 pivot inside the art. Absent = centered, the renderer's own default. */
+    anchorX?: number;
+    anchorY?: number;
+    tint?: number;
+    /** Draw order among siblings. */
+    layer?: number;
+    /** For visuals that exceed their bounds — glow, thick stroke, emitter. */
+    neverCull?: boolean;
+};
+
+/**
+ * A pivot under a template's root, and the arm that nests.
+ *
+ * It carries the offset and `layer` and nothing else: a group has no art, so rotation, scale and
+ * alpha would be inert on it, and omitting them is what stops an author reading one as "rotates
+ * its children".
+ */
+export type GroupTemplateChild = {
+    kind: 'group';
+    offsetX?: number;
+    offsetY?: number;
+    offsetZ?: number;
+    layer?: number;
+    children?: TemplateChild[];
+};
 
 /**
  * What the renderer needs to draw a `netId` at all. The client runs no scripts and holds no panel

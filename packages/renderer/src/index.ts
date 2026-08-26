@@ -24,6 +24,7 @@ export type {
     SpriteNodeDesc,
     GroupNodeDesc,
     TextNodeDesc,
+    SubtreeNodeDesc,
     NodePatch,
     Transform,
     NodeSnapshot,
