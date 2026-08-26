@@ -12,6 +12,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { IRenderer, NodeDesc, Surface } from '../../src/renderer.js';
+import type { NodeId } from '../../src/node-id.js';
 import { NO_NODE } from '../../src/node-id.js';
 import { RendererError } from '../../src/errors.js';
 
@@ -500,6 +501,111 @@ export function runRendererContract(
                 const [a, b] = renderer.createNodes([sprite({ parent }), sprite({ parent })]);
 
                 expect(renderer.childrenOf(parent)).toEqual([a, b]);
+                renderer.destroy();
+            });
+        });
+
+        describe('createSubtree resolves parents inside the batch', () => {
+            it('parents a child to a node the same call created', async () => {
+                const renderer = await ready();
+                const [root, child] = renderer.createSubtree([
+                    { kind: 'group', surface: 'world' },
+                    { ...sprite(), parentInBatch: 0 },
+                ]);
+
+                expect(renderer.parentOf(child!)).toBe(root);
+                renderer.destroy();
+            });
+
+            it('resolves a grandchild against a parent created moments earlier', async () => {
+                // The case a committed-node lookup cannot serve: entry 2's parent did not exist when
+                // the call began, and a flat scene looks right until something reparents.
+                const renderer = await ready();
+                const [root, mid, leaf] = renderer.createSubtree([
+                    { kind: 'group', surface: 'world' },
+                    { kind: 'group', surface: 'world', parentInBatch: 0 },
+                    { ...sprite(), parentInBatch: 1 },
+                ]);
+
+                expect(renderer.parentOf(leaf!)).toBe(mid);
+                expect(renderer.parentOf(mid!)).toBe(root);
+                renderer.destroy();
+            });
+
+            it('composes position down the subtree, and rotation not at all', async () => {
+                const renderer = await ready();
+                const [root, badge] = renderer.createSubtree([
+                    { kind: 'group', surface: 'world', position: { x: 100, y: 0 } },
+                    { ...sprite(), parentInBatch: 0, position: { x: 0, y: 20 }, rotation: 0 },
+                ]);
+                renderer.updateNodes([{ id: root!, position: { x: 140, y: 5 }, rotation: 45 }]);
+
+                const resolved = renderer.resolvedTransformOf(badge!)!;
+                expect(resolved.position.x).toBe(140);
+                expect(resolved.position.y).toBe(25);
+                // Rides upright over a tumbling parent: rotation stops at the node declaring it.
+                expect(resolved.rotation).toBe(0);
+                renderer.destroy();
+            });
+
+            it("takes the batch parent's surface when a child names none", async () => {
+                const renderer = await ready();
+                const [root, child] = renderer.createSubtree([
+                    { kind: 'group', surface: 'ui' },
+                    { kind: 'sprite', texture: image.name, parentInBatch: 0 },
+                ]);
+
+                expect(renderer.surfaceOf(child!)).toBe('ui');
+                expect(renderer.parentOf(child!)).toBe(root);
+                renderer.destroy();
+            });
+
+            it('refuses a parentInBatch that does not name an EARLIER desc', async () => {
+                const renderer = await ready();
+                for (const parentInBatch of [1, 0, -1, 1.5]) {
+                    expect(() =>
+                        renderer.createSubtree([
+                            { kind: 'group', surface: 'world', parentInBatch },
+                            { ...sprite(), parentInBatch: 0 },
+                        ]),
+                    ).toThrow(RendererError);
+                }
+                renderer.destroy();
+            });
+
+            it('creates nothing at all when a later desc throws', async () => {
+                // The caller holds no handles yet, so a half-built subtree could never be destroyed.
+                const renderer = await ready();
+                const before = renderer.inspect().counts.nodes;
+
+                expect(() =>
+                    renderer.createSubtree([
+                        { kind: 'group', surface: 'world' },
+                        { ...sprite(), parentInBatch: 0 },
+                        { kind: 'sprite', texture: '', surface: 'world', parentInBatch: 1 },
+                    ]),
+                ).toThrow(RendererError);
+
+                expect(renderer.inspect().counts.nodes).toBe(before);
+                renderer.destroy();
+            });
+
+            it('fills and returns the out array, and destroying the root cascades', async () => {
+                const renderer = await ready();
+                const out: NodeId[] = [];
+                const ids = renderer.createSubtree(
+                    [
+                        { kind: 'group', surface: 'world' },
+                        { ...sprite(), parentInBatch: 0 },
+                        { ...sprite(), parentInBatch: 1 },
+                    ],
+                    out,
+                );
+
+                expect(ids).toBe(out);
+                expect(ids).toHaveLength(3);
+                renderer.destroyNode(ids[0]!);
+                for (const id of ids) expect(renderer.isAlive(id)).toBe(false);
                 renderer.destroy();
             });
         });

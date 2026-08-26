@@ -22,10 +22,13 @@ export type {
 
 export type {
     EntitySnapshot,
+    GroupTemplateChild,
     GroupTemplateVisual,
     PlayerSnapshot,
     RenderManifest,
+    SpriteTemplateChild,
     SpriteTemplateVisual,
+    TemplateChild,
     TemplateVisual,
     WireAssetKind,
     WireAssetRef,

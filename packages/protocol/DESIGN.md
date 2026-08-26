@@ -46,7 +46,8 @@ accept a frame it minted.
 `leave-interest`, `player-join`, `player-leave`, `attach`) and `WireStructuralOpKind`; `StateHostAddr`,
 `StateDiff`; `WireTransform`, `TransformDiff`; `EntitySnapshot`, `PlayerSnapshot`, `WorldSnapshot`;
 `WireBounds`, `WireRegion`; `RenderManifest`, `WireAssetRef`, `WireAssetKind`, `TemplateVisual`
-(`SpriteTemplateVisual` | `GroupTemplateVisual`); `InputAction`, `InputPhase`.
+(`SpriteTemplateVisual` | `GroupTemplateVisual`), `TemplateChild` (`SpriteTemplateChild` |
+`GroupTemplateChild`); `InputAction`, `InputPhase`.
 
 ## 3. Three type-level rules
 
@@ -56,10 +57,11 @@ Every envelope must be assignable to transport's `Message` (`JsonValue`). All th
 1. **`type`, never `interface`** — an `interface` gets no implicit index signature.
 2. **No `readonly` fields or arrays** — `readonly string[]` is not assignable to `JsonValue[]`.
 3. **Optional means absent, never `undefined`** — `exactOptionalPropertyTypes` rejects it at compile time, and
-   `jsonCodec.encode` throws at runtime for the value a socket actually produces. Nine fields carry it:
+   `jsonCodec.encode` throws at runtime for the value a socket actually produces. The carriers:
    `JoinRequest.token`, `Welcome.reconnectToken`, `StateEnvelope.earliestHeadroom`, `WireAssetRef.meta` (and
-   its three members), `SpriteTemplateVisual`'s `anchorX` / `anchorY` / `tint` / `neverCull`, and
-   `InputAction.value`.
+   its three members), `SpriteTemplateVisual`'s `anchorX` / `anchorY` / `tint` / `neverCull`,
+   `InputAction.value`, `GroupTemplateVisual.children`, and every `TemplateChild` field but `kind` and a
+   sprite child's `texture`.
 
 Branded numbers, unions of `type` aliases, and intersections all pass — which is what makes `NetId` and the
 flattened `TransformDiff` free.
@@ -103,7 +105,9 @@ flattened `TransformDiff` free.
   allocates; the server bounds the unauthenticated client → server surface (`MAX_ACTIONS_PER_FRAME`,
   `MAX_ACTION_NAME_LENGTH`, `MAX_ACTION_NAMES`, `MAX_NAME_LENGTH`, `maxSeqGap`); the client bounds every array
   it walks at `MAX_WIRE_ITEMS` and refuses a `netId` that could not name a server handle. A `kind` check that
-  narrows and then trusts is the shape of the bug.
+  narrows and then trusts is the shape of the bug. `TemplateChild` is the one recursive shape here, so a
+  cardinality cap bounds nothing on its own — a receiver caps depth and total node count as well, or a peer
+  spends the per-level cap to the power of the nesting.
 - **`WireAssetRef.url` is an outbound fetch at an address the peer chooses**, and the only wire field that makes
   the client act on the network rather than just parse. `bridge.ts` copies it verbatim into the renderer's
   manifest, so a hostile `Welcome` would otherwise get a browser to fetch an arbitrary URL at join, before a

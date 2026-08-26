@@ -186,6 +186,15 @@ const INERT_CASES: readonly InertCase[] = [
         call: (r) => r.createNodes([{ kind: 'group', surface: 'world' }]),
         expected: [],
     },
+    {
+        member: 'createSubtree',
+        call: (r) =>
+            r.createSubtree([
+                { kind: 'group', surface: 'world' },
+                { kind: 'group', surface: 'world', parentInBatch: 0 },
+            ]),
+        expected: [],
+    },
     { member: 'destroyNode', call: (r) => r.destroyNode(NO_NODE), expected: undefined },
     { member: 'destroyNodes', call: (r) => r.destroyNodes([NO_NODE]), expected: undefined },
     {
