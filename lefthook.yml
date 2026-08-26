@@ -21,7 +21,8 @@ pre-push:
 
 commit-msg:
     jobs:
+        # Single quotes only: on Windows lefthook re-quotes a multi-line `run` for sh.exe and eats inner double quotes.
         - name: conventional-commit
           run: |
               head -1 {1} | grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9/-]+\))?!?: .{1,}' \
-                || { echo "Commit message must follow Conventional Commits, e.g. 'feat(core): add dispatcher'"; exit 1; }
+                || { echo 'Commit message must follow Conventional Commits, e.g. feat(core): add dispatcher'; exit 1; }
