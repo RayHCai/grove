@@ -3,6 +3,7 @@
 // `@platform/server` never opens a socket and `@platform/transport` is a leaf with no dependencies,
 // so standing up a listener and handing it a transport per connection is this file's whole job.
 
+import type { IncomingMessage } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import { GameServer } from '@platform/server';
@@ -22,6 +23,21 @@ if (!Number.isInteger(port) || port <= 0) {
 // oxlint-disable-next-line no-console
 const log = (line: string): void => void console.log(line);
 
+/**
+ * Who the server should think this socket is — a toy's answer, taken from the peer's own query.
+ *
+ * A real host reads a cookie or an auth header here. This one believes the claim, so anyone may
+ * name themselves anyone; the server keys persisted `@serverState` by it, so on a real deployment
+ * that is a read-and-overwrite of another player's save. Kept visible here rather than on the wire,
+ * which is the whole reason the server takes identity from its host and never from a frame.
+ */
+function playerIdentity(request: IncomingMessage): string {
+    const claimed = new URL(request.url ?? '/', 'ws://placeholder').searchParams.get('player');
+    return claimed !== null && claimed !== '' ? claimed : `anon-${anonCount++}`;
+}
+
+let anonCount = 0;
+
 // The store is injected HERE and not in `serverConfig()`, which describes the world rather than how
 // it is hosted: the session suite boots the same config over a loopback pair and must not write to
 // anyone's disk to do it.
@@ -39,7 +55,7 @@ wss.on('error', (cause: Error) => {
     shutdown();
 });
 
-wss.on('connection', (socket: WebSocket) => {
+wss.on('connection', (socket: WebSocket, request: IncomingMessage) => {
     // Synchronously, before any await: the transport registers the socket's message listener in its
     // constructor and `ws` resumes the stream on the next tick, so a frame that arrives before that
     // listener exists is simply gone — retention covers a late handler, not a late transport.
@@ -50,7 +66,9 @@ wss.on('connection', (socket: WebSocket) => {
             },
         });
         // `null` means refused, and the server has already closed the transport.
-        if (server.accept(transport) === null) log('[game] refused a connection');
+        if (server.accept(transport, playerIdentity(request)) === null) {
+            log('[game] refused a connection');
+        }
     } catch (cause) {
         log(`[game] could not accept a connection: ${(cause as Error).message}`);
         socket.close(1011);
