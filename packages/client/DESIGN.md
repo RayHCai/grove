@@ -144,7 +144,9 @@ Three wire write paths, and outside them only a prediction step:
 
 Structural ops: `spawn`/`enter-interest` share one applier over `EntitySnapshot` (template, owner, parent,
 tags, all transform fields — a static entity is dirty exactly once, so `spawn`'s position-only write would
-strand scale/layer — then `overrides.scripts`, the baseline for the `attach` ops a joiner was not there for);
+strand scale/layer — then `overrides.scripts`, the baseline for the `attach` ops a joiner was not there for
+— `tags` bounded at `MAX_WIRE_ITEMS` and the attachment list at the smaller `MAX_ENTITY_SCRIPTS`, since each
+entry there mints an instance that outlives the frame);
 `destroy`/`leave-interest`; `reparent` (**also reported on the delta**, since the
 render tree cannot infer it); `tag`; `player-join` (mints a `Player` and `playerManager.adopt`s it, keeping
 the **wire's** index); `player-leave`; `attach`, resolved through the script registry; and `group`, whose
@@ -169,8 +171,8 @@ wrapper: one already on the record is `restore()`d in place, since a script may 
 one the client does not have is revived from the payload's own tag — a `Scoreboard` arrives with its methods,
 not as a decoded blob. `channels.clear()` discards structural and state marks (no consumer here) but
 provably **not** the transform dirty set, which is the render bridge's work queue. Unknown `netId`s,
-out-of-order parents, and a spawn whose `netId` is not a plausible server handle (not a non-negative safe
-integer) are dropped/rooted and **counted** (`MirrorCounters`), never thrown. `#spawn` is the only place a
+out-of-order parents, a list past the cap for its kind, and a spawn whose `netId` is not a plausible server
+handle (not a non-negative safe integer) are dropped/rooted and **counted** (`MirrorCounters`), never thrown. `#spawn` is the only place a
 peer-chosen `netId` enters the map, so it is the only place that has to check.
 
 ## Prediction ([src/prediction.ts](src/prediction.ts), [src/passes.ts](src/passes.ts))

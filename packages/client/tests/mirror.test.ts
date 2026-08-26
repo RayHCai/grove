@@ -11,6 +11,7 @@ import type {
     WireStructuralOp,
     WireStructuralOpKind,
 } from '@platform/protocol';
+import { MAX_ENTITY_SCRIPTS, MAX_WIRE_ITEMS } from '../src/constants.js';
 import type { ScriptClass, ScriptIndex } from '../src/mirror.js';
 import { Mirror } from '../src/mirror.js';
 import { entity, transformDiff, wireTransform } from './fake-server.js';
@@ -46,6 +47,21 @@ function registry(): ScriptIndex {
     return {
         resolve: (id) => classes[id]?.ctor,
         locationOf: (id) => classes[id]?.location,
+    };
+}
+
+/** Distinct classes per id, since a saved file refuses the same class twice on one host. */
+function wideRegistry(n: number): { index: ScriptIndex; ids: ScriptId[] } {
+    const ids = Array.from({ length: n }, (_, i) => `s${i}` as ScriptId);
+    const classes = new Map<string, ScriptClass>(
+        ids.map((id) => [id, class extends SyncedScript {} as unknown as ScriptClass]),
+    );
+    return {
+        ids,
+        index: {
+            resolve: (id) => classes.get(id),
+            locationOf: (id) => (classes.has(id) ? 'synced' : undefined),
+        },
     };
 }
 
@@ -337,6 +353,82 @@ describe('attach resolves a ScriptId through the one registry', () => {
             ]),
         );
         expect([...m.runtime.instances.all()].map((si) => si.className)).toStrictEqual(['Runner']);
+    });
+});
+
+describe('every array from the wire is bounded before its walk', () => {
+    it('refuses an attachment list past the cap without reading it as a missing class', () => {
+        const m = mirror({ scripts: registry() });
+        m.applyState(
+            stateEnvelope([
+                {
+                    kind: 'spawn',
+                    snapshot: entity(1, 'thing', {
+                        overrides: {
+                            scripts: Array.from({ length: MAX_ENTITY_SCRIPTS + 1 }, () => ({
+                                script: RUNNER,
+                            })),
+                        },
+                    }),
+                },
+            ]),
+        );
+        expect([...m.runtime.instances.all()]).toHaveLength(0);
+        expect(m.counters.oversizedList).toBe(1);
+        // A bounds breach must not read as a build mismatch, which is what droppedAttach means.
+        expect(m.counters.droppedAttach).toBe(0);
+    });
+
+    it('applies an attachment list exactly at the cap', () => {
+        const wide = wideRegistry(MAX_ENTITY_SCRIPTS);
+        const m = mirror({ scripts: wide.index });
+        m.applyState(
+            stateEnvelope([
+                {
+                    kind: 'spawn',
+                    snapshot: entity(1, 'thing', {
+                        overrides: { scripts: wide.ids.map((script) => ({ script })) },
+                    }),
+                },
+            ]),
+        );
+        expect([...m.runtime.instances.all()]).toHaveLength(MAX_ENTITY_SCRIPTS);
+        expect(m.counters.oversizedList).toBe(0);
+    });
+
+    it('refuses a tag list past the cap and still spawns the entity', () => {
+        const m = mirror();
+        const delta = m.applyState(
+            stateEnvelope([
+                {
+                    kind: 'spawn',
+                    snapshot: entity(1, 'thing', {
+                        tags: Array.from({ length: MAX_WIRE_ITEMS + 1 }, (_, i) => `t${i}`),
+                    }),
+                },
+            ]),
+        );
+        expect(delta.added).toHaveLength(1);
+        expect(m.runtime.tags.tagsOf(delta.added[0]!)).toEqual([]);
+        expect(m.counters.oversizedList).toBe(1);
+    });
+
+    it('refuses a group past the cap rather than applying part of it', () => {
+        const m = mirror();
+        m.applyState(stateEnvelope([{ kind: 'spawn', snapshot: entity(1) }]));
+        m.applyState(
+            stateEnvelope([
+                {
+                    kind: 'group',
+                    ops: Array.from({ length: MAX_WIRE_ITEMS + 1 }, () => ({
+                        kind: 'destroy' as const,
+                        netId: 1 as NetId,
+                    })),
+                },
+            ]),
+        );
+        expect(m.view().entityFor(1 as NetId)).toBeDefined();
+        expect(m.counters.oversizedList).toBe(1);
     });
 });
 

@@ -35,7 +35,7 @@ import type {
     WireStructuralOp,
     WireTransform,
 } from '@platform/protocol';
-import { MAX_WIRE_ITEMS } from './constants.js';
+import { MAX_ENTITY_SCRIPTS, MAX_WIRE_ITEMS } from './constants.js';
 import { MirrorIndex } from './index-map.js';
 
 /** One applied reparent, in local handles. `parent` is null for a detach to the root. */
@@ -76,6 +76,8 @@ export interface MirrorCounters {
     supersededTransforms: number;
     /** A spawn whose `netId` was not a plausible server handle, so it never entered the map. */
     invalidNetId: number;
+    /** An array from the wire past the cap for its kind, refused whole before the element walk. */
+    oversizedList: number;
 }
 
 /**
@@ -159,6 +161,7 @@ export class Mirror {
         droppedAttach: 0,
         invalidNetId: 0,
         supersededTransforms: 0,
+        oversizedList: 0,
     };
 
     constructor(opts: MirrorOptions) {
@@ -335,7 +338,10 @@ export class Mirror {
             // Verbatim and in order, exactly as the outer journal is: the boundary says these ops
             // are one instantiation, not that they may be reordered or applied selectively. Bounded
             // before the walk, since the count is peer-chosen and the work behind it is linear.
-            if (op.ops.length > MAX_WIRE_ITEMS) return;
+            if (op.ops.length > MAX_WIRE_ITEMS) {
+                this.counters.oversizedList++;
+                return;
+            }
             for (const single of op.ops) this.#applySingle(single, delta);
             return;
         }
@@ -444,11 +450,20 @@ export class Mirror {
             }
         }
 
-        for (const tag of snapshot.tags) entity.tag(tag);
+        // Refused whole rather than half-applied: the count is peer-chosen and the work behind it is real.
+        if (snapshot.tags.length > MAX_WIRE_ITEMS) {
+            this.counters.oversizedList++;
+        } else {
+            for (const tag of snapshot.tags) entity.tag(tag);
+        }
+
+        const attachments = snapshot.overrides?.scripts ?? [];
         // Before the state diffs of this same envelope: attaching hoists `@serverState` onto the host
         // record, and the wire's values have to land on the hoisted accessors rather than under them.
-        for (const attachment of snapshot.overrides?.scripts ?? []) {
-            this.#attach(local, attachment);
+        if (attachments.length > MAX_ENTITY_SCRIPTS) {
+            this.counters.oversizedList++;
+        } else {
+            for (const attachment of attachments) this.#attach(local, attachment);
         }
         // `spawn` sets position only, so a wall authored at scale 3 on layer 2 would render at scale 1 on
         // layer 0 forever — a static entity is dirty exactly once.
