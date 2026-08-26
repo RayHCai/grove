@@ -88,15 +88,25 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
 
 ```
 1  adopt tick        rt.tick = the argument, NOT an increment
-2-3 input            passes.input  — stub in core; installed by the endpoint
-4  movement          per player with a movement instance, live avatars only
-5  contacts          ContactSource.entered() → @onCollide per tag, both directions
-6  regions           RegionIndex.crossings() → @onEnter / @onExit per entity
-7  timers & tweens   TimerHeap.advance(), TweenEngine.advance(), then every running Countdown
-8  @onUpdate         server + synced locations only
-9  destroy drain     @onEnd at every doomed entity, then EntityManager.drainDestroyed()
-10 replicate         server only: LagRing.capture(tick)
+2  starts            passes.starts — @onStart for everything attached since the last tick
+3-4 input            passes.input  — stub in core; installed by the endpoint
+5  movement          per player with a movement instance, live avatars only
+6  contacts          ContactSource.entered() → @onCollide per tag, both directions
+7  regions           RegionIndex.crossings() → @onEnter / @onExit per entity
+8  timers & tweens   TimerHeap.advance(), TweenEngine.advance(), then every running Countdown
+9  @onUpdate         server + synced locations only
+10 destroy drain     @onEnd at every doomed entity, then EntityManager.drainDestroyed()
+11 replicate         server only: LagRing.capture(tick)
 ```
+
+- **Attaching queues a start; the starts pass fires it.** `addScript` from a player-join handler runs
+  between ticks, so a `@onStart` dispatched at the attach would run against whatever tick the loop last
+  adopted. `InstanceRegistry` keeps the queue in attachment order and `removeHost` drops a torn-down
+  host's entries, so a script on an entity destroyed the same tick never starts — the destroy drain has
+  already run `@onEnd` there. It is the FIRST pass, so a script is running before anything can dispatch
+  to it, and the drain is once-only, so a replayed tick cannot spend it twice. A screen is the one host
+  that dispatches its own and drops the queued entries: a menu that appeared but ran nothing until the
+  next tick reads as a dropped frame.
 
 - `opts.replay` makes the dispatcher skip client-located handlers and the countdowns pass skip its whole
   advance, since no store rewinds a countdown for a re-run; `EffectSink` is the drop point for one-shot
@@ -130,6 +140,13 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   own property and installs an accessor pair that reads a redirectable target symbol at call time. Wiring
   points that target at the host record's `values` map, installs the mark closure, and defines the same
   accessor on the host object — so `this.credits` and `player.credits` are one value and one mark per write.
+- **Ctor props land between construction and the hoist**, and that ordering is the whole correctness
+  argument: the hoist moves each field's authored value into the host record, so a prop written after it
+  would be overwritten by the initializer it exists to override. Written there it goes through the accessor
+  into the backing map the hoist then reads, so the record — which is what replicates — holds the
+  inspector's value. The constructor receives the same map, for a class deriving something that is not a
+  field; the engine's write is authoritative for any field the props name. A reserved key is skipped rather
+  than assigned, since assigning one rewrites the instance instead of a field.
 - **Seeding:** `rt.persisted?.get(hostId, field)` wins over the authored value only when its type tag matches
   (primitive kind, or a one-level shape hash for objects/arrays); otherwise the initializer wins.
 - **Host records** live in `HostTable` keyed `game` | `player:<id>` | `entity:<id>` | `camera:<playerId>` |
@@ -218,7 +235,7 @@ simulation code inside a tick never has to consult the ambient slot at all.
 
 `loadGame(manifest, opts)` → build world (bounds, regions, assets, template registry, collaborators,
 `passes`) → attach Game scripts (wire + hoist, **no** `@onStart`) → instantiate the placed `entities` →
-`startGame(rt)` runs Game `@onStart` to its first await →
+`startGame(rt)` drains the first batch of deferred `@onStart`s to each handler's first await →
 `joinPlayer` / `leavePlayer` release and end sessions → `endGame(rt)` runs `@onEnd` at every attached
 instance, because the world ending ends every host under it. `GameManifest` is `@platform/project`'s
 validated narrowing rather than a parallel declaration — `role`, `simRate`, `bounds`, `regions`, `assets`,
@@ -234,7 +251,8 @@ drops both hosts — so every handler can still read the player; `PlayerManager.
 top, and one record per widget a verb has written — so it is per-world like `game` rather than a process
 singleton. A verb writes the record and pushes the whole of it at the `HUDSink`; `hud.player` is
 `rt.localPlayer` and **throws** where there is none, which is any server runtime. `open(name)` mints the
-screen on first mention, attaches its registered classes, then marks it visible and dispatches `@onStart`;
+screen on first mention, attaches its registered classes with the props they were registered with, then
+marks it visible, drops their queued starts and dispatches `@onStart` itself;
 `close(name)` dispatches `@onEnd` and then drops the instances and the host record, so a reopen builds fresh
 client state. Both are idempotent, and a screen dispatch names `client` locations explicitly because a
 screen exists on one machine whatever role built the runtime. `pressWidget` fires `@onPress` at every

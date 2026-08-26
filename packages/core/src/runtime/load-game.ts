@@ -1,6 +1,6 @@
 // Every collaborator the facades reach for is constructed here, so runtime.ts stays declarations.
 
-import type { GameManifest as ProjectGameManifest, ScriptId } from '@platform/project';
+import type { GameManifest as ProjectGameManifest, ScriptId, ScriptProps } from '@platform/project';
 import type { EntityId } from '../ids.js';
 import type { HandlerKind, ScriptLocation } from '../script/index.js';
 import { Broadphase } from '../world/broadphase.js';
@@ -44,8 +44,15 @@ import { liveTransformView } from './transform-view.js';
  */
 export type GameManifest = Partial<Omit<ProjectGameManifest, 'gameScripts'>> & {
     /** Panel-authored Game-hosted script classes. */
-    gameScripts?: readonly AnyScriptClass[];
+    gameScripts?: readonly GameScriptSpec[];
 };
+
+/**
+ * A Game-hosted class to attach, or one with the props its inspector configured.
+ *
+ * The bare class is the props-free form, which is what most Game scripts are and what a test writes.
+ */
+export type GameScriptSpec = AnyScriptClass | { klass: AnyScriptClass; props?: ScriptProps };
 
 /** What a world needs that a manifest cannot hold, because it names code rather than data. */
 export interface LoadOptions {
@@ -98,8 +105,10 @@ export function loadGame(manifest: GameManifest = {}, opts: LoadOptions = {}): R
     rt.passes = makePasses(rt);
 
     // Wire and hoist only; @onStart waits for startGame, so a handler sees a built world.
-    for (const klass of manifest.gameScripts ?? []) {
-        rt.wiring.attachToGame(rt.gameInstance, klass as never);
+    for (const spec of manifest.gameScripts ?? []) {
+        const { klass, props } =
+            typeof spec === 'function' ? { klass: spec, props: undefined } : spec;
+        rt.wiring.attachToGame(rt.gameInstance, klass as never, props);
     }
 
     // After the Game scripts are hoisted and before any @onStart: the placed world is what a start
@@ -109,9 +118,30 @@ export function loadGame(manifest: GameManifest = {}, opts: LoadOptions = {}): R
     return rt;
 }
 
-/** Runs @onStart to its first await; a join can land before a Game @onStart resumes. */
+/**
+ * Drains the first batch of deferred `@onStart`s — the Game scripts and the placed world.
+ *
+ * Not "run every instance's start": attaching queues, and the starts pass drains, so this is the
+ * one drain that happens before the loop has stepped at all. It runs to each handler's first await;
+ * a join can land before a Game `@onStart` resumes.
+ */
 export function startGame(rt: Runtime): Promise<void> {
-    return dispatchLifecycle(rt, 'onStart', '@start');
+    return drainStarts(rt, {
+        activeLocations: roleLocations(rt),
+        replay: false,
+        tick: rt.tick,
+    });
+}
+
+/** Dispatches `@onStart` at everything attached since the last drain, in attachment order. */
+function drainStarts(rt: Runtime, dispatch: DispatchOptions): Promise<void> {
+    const pending = rt.instances.takePendingStarts();
+    if (pending.length === 0) return Promise.resolve();
+    return Promise.all(
+        pending.map(({ hostKey, inst }) =>
+            rt.dispatcher.dispatch([inst], 'onStart', '@start', hostKey, tickCtx(rt), dispatch),
+        ),
+    ).then(() => undefined);
 }
 
 /** The world stopped existing, so every attached script's @onEnd runs — the mirror of startGame. */
@@ -217,7 +247,7 @@ function roleLocations(rt: Runtime): ReadonlySet<ScriptLocation> {
     return activeLocationsFor(rt.isServer ? 'server' : 'client');
 }
 
-function dispatchLifecycle(rt: Runtime, kind: 'onStart' | 'onEnd', event: string): Promise<void> {
+function dispatchLifecycle(rt: Runtime, kind: 'onEnd', event: string): Promise<void> {
     const pending: Promise<void>[] = [];
     for (const si of rt.instances.all()) {
         pending.push(
@@ -302,6 +332,9 @@ function makePasses(rt: Runtime): TickPasses {
     const posY = (id: EntityId): number => rt.transforms.posY(id);
 
     return {
+        starts(dispatch) {
+            void drainStarts(rt, dispatch);
+        },
         input() {
             // Core owns no input source; the client and tests dispatch input events themselves.
         },

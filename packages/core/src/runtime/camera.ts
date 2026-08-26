@@ -3,6 +3,7 @@
 
 import type { Bounds, Easing, Vec3 } from '@platform/math';
 import { bounds as makeBounds, vec3 } from '@platform/math';
+import type { ScriptProps } from '@platform/project';
 import type { BaseScript } from '../script/bases.js';
 import type { Runtime } from './runtime.js';
 import type { Entity } from './entity.js';
@@ -60,8 +61,8 @@ export class Camera {
         return Promise.resolve();
     }
 
-    addScript(script: new () => BaseScript<Camera>): this {
-        this.#rt.wiring?.attachToCamera(this, script as never);
+    addScript(script: new (props?: ScriptProps) => BaseScript<Camera>, props?: ScriptProps): this {
+        this.#rt.wiring?.attachToCamera(this, script as never, props);
         return this;
     }
 }
