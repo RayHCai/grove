@@ -5,6 +5,7 @@
 // client, and it is what `@platform/server` can later run against to prove the two halves agree — the
 // acceptance test for the pair, which neither package can write alone.
 
+import type { TemplateId } from '@platform/project';
 import type {
     ClientToServer,
     EntitySnapshot,
@@ -312,11 +313,12 @@ export function entity(
 ): EntitySnapshot {
     return {
         netId: netId as NetId,
-        template,
+        template: template as TemplateId,
         parent: over.parent ?? null,
         owner: over.owner ?? null,
         tags: over.tags ?? [],
         transform: over.transform ?? wireTransform(),
+        ...(over.overrides === undefined ? {} : { overrides: over.overrides }),
     };
 }
 

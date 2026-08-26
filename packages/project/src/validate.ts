@@ -32,6 +32,15 @@ const RESERVED_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 
 /** Nesting a `props` value may reach. The walk below recurses, so this bound is a stack bound. */
 const MAX_PROP_DEPTH = 32;
 
+/**
+ * Levels a template subtree may nest.
+ *
+ * A child names a template, so the graph is a reference graph and one instantiation can be far
+ * deeper than any single record looks — which is why the bound is here, on the graph, rather than on
+ * a per-record child count that bounds nothing on its own.
+ */
+const MAX_TEMPLATE_DEPTH = 8;
+
 const ASSET_KINDS: ReadonlySet<string> = new Set([
     'texture',
     'atlas',
@@ -161,20 +170,70 @@ function readTemplates(
     assets: ReadonlySet<string>,
     hosts: ReadonlyMap<string, ScriptHost>,
 ): ReadonlySet<string> {
+    const entries = readArray(value, path);
+
+    // Ids first, because a child may name a template declared further down the array — unlike an
+    // entity's parent, which is ordered so a loader builds the hierarchy in one pass. A template
+    // graph has no such order to impose: two templates may legally reference each other's siblings.
     const ids = new Set<string>();
-    for (const [index, entry] of readArray(value, path).entries()) {
+    for (const [index, entry] of entries.entries()) {
         const at = `${path}[${index}]`;
-        const template = readObject(entry, at);
-        const id = readKey(template['id'], `${at}.id`);
+        const id = readKey(readObject(entry, at)['id'], `${at}.id`);
         if (ids.has(id)) fail(`${at}.id`, `duplicate template id "${id}"`);
         ids.add(id);
+    }
 
+    const children = new Map<string, string[]>();
+    for (const [index, entry] of entries.entries()) {
+        const at = `${path}[${index}]`;
+        const template = readObject(entry, at);
         readVisual(template['visual'], `${at}.visual`, assets);
         // Entity-hosted: a template configures entities, and the tray drop reaches every instance
         // spawned from it and nothing else.
         readAttachments(template['scripts'], `${at}.scripts`, hosts, 'entity');
+        children.set(
+            template['id'] as string,
+            readTemplateChildren(template['children'], `${at}.children`, ids),
+        );
     }
+
+    for (const id of ids) closeSubtree(id, children, path);
     return ids;
+}
+
+/** The templates one record hangs beneath itself, in order. Each names a declared template. */
+function readTemplateChildren(value: unknown, path: string, ids: ReadonlySet<string>): string[] {
+    if (value === undefined) return [];
+    const out: string[] = [];
+    for (const [index, entry] of readArray(value, path).entries()) {
+        const at = `${path}[${index}]`;
+        const child = readObject(entry, at);
+        const key = readKey(child['template'], `${at}.template`);
+        if (!ids.has(key)) fail(`${at}.template`, `no template named "${key}"`);
+        readTransform(child['transform'], `${at}.transform`);
+        out.push(key);
+    }
+    return out;
+}
+
+/**
+ * Refuses a subtree that reaches itself or nests past the bound.
+ *
+ * Both are the same fault seen from either end: instantiating either one mints entities until
+ * something else stops it, and the thing that would stop it is memory. Checked once per template
+ * against a path set, so a diamond — two children naming one leaf template — stays legal.
+ */
+function closeSubtree(root: string, children: ReadonlyMap<string, string[]>, path: string): void {
+    const walk = (id: string, open: Set<string>): void => {
+        if (open.has(id)) fail(path, `template "${id}" contains itself`);
+        if (open.size >= MAX_TEMPLATE_DEPTH) {
+            fail(path, `template "${root}" nests deeper than ${MAX_TEMPLATE_DEPTH}`);
+        }
+        open.add(id);
+        for (const child of children.get(id) ?? []) walk(child, open);
+        open.delete(id);
+    };
+    walk(root, new Set());
 }
 
 function readVisual(value: unknown, path: string, assets: ReadonlySet<string>): void {

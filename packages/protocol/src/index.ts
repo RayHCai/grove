@@ -10,11 +10,15 @@ export type { ClientToServer, Envelope, EnvelopeKind, ServerToClient } from './e
 export type { JoinRequest, Reject, RejectReason, SnapshotChunk, Welcome } from './envelopes.js';
 
 export type {
+    EntityOverrides,
     StateDiff,
     StateEnvelope,
     StateHostAddr,
     TransformDiff,
     TransformEnvelope,
+    WireScriptAttachment,
+    WireSingleStructuralOp,
+    WireStructuralGroup,
     WireStructuralOp,
     WireStructuralOpKind,
     WireTransform,

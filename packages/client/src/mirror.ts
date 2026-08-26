@@ -5,7 +5,7 @@
 // private stores, so a hand-rolled mirror would be thrown away to get it. Idle, every pass is a no-op:
 // simulating is something the client may do only over an authoritative baseline it can rewind to.
 
-import type { EntityId, Runtime, TickPasses } from '@platform/core';
+import type { EntityId, Runtime, ScriptLocation, TickPasses } from '@platform/core';
 import {
     GAME_KEY,
     Loop,
@@ -19,6 +19,7 @@ import { clientPasses } from './passes.js';
 import type { ClientPassContext } from './passes.js';
 import type { Bounds } from '@platform/math';
 import { bounds as makeBounds } from '@platform/math';
+import type { ScriptId } from '@platform/project';
 import type {
     EntitySnapshot,
     NetId,
@@ -29,9 +30,12 @@ import type {
     TransformEnvelope,
     Welcome,
     WireBounds,
+    WireScriptAttachment,
+    WireSingleStructuralOp,
     WireStructuralOp,
     WireTransform,
 } from '@platform/protocol';
+import { MAX_WIRE_ITEMS } from './constants.js';
 import { MirrorIndex } from './index-map.js';
 
 /** One applied reparent, in local handles. `parent` is null for a detach to the root. */
@@ -61,7 +65,12 @@ export interface MirrorCounters {
     unknownNetId: number;
     /** A child applied before its parent, which the wire makes the server's obligation. */
     outOfOrderParent: number;
-    /** `attach` ops, which the MVP instantiates no scripts for. */
+    /**
+     * `attach` ops naming a `ScriptId` this process holds no class for.
+     *
+     * Zero is the healthy reading, and what the handshake's `projectHash` is for: both ends running
+     * the same build means every id the authority names is one this bundle registered.
+     */
     droppedAttach: number;
     /** A transform envelope superseded while held for its state envelope. */
     supersededTransforms: number;
@@ -86,20 +95,24 @@ export interface MirrorView {
 export type ScriptClass = new () => object;
 
 /**
- * The scripts to attach to a mirrored entity, keyed by the template it spawned from.
+ * The classes this process's bundle registered, by the id the wire names them with.
  *
- * The wire's `attach` op names a class this runtime has no registry to resolve, so the host supplies
- * the table instead — it already holds the game's code. Only what a prediction step may run belongs
- * here: a `ServerScript` is filtered out of a client tick and would never be dispatched to.
+ * Declared structurally rather than imported, so `@platform/scripting`'s `ScriptRegistry` satisfies
+ * it without this package taking that dependency. It is the ONE table: the wire's `attach` op and a
+ * spawn's overrides both name a `ScriptId`, so nothing here is keyed by template or by class name.
  */
-export type TemplateScripts = Readonly<Record<string, readonly ScriptClass[]>>;
+export interface ScriptIndex {
+    resolve(id: ScriptId): ScriptClass | undefined;
+    /** Where the class runs. A `ServerScript` is filtered out of a client tick, so it is not attached. */
+    locationOf(id: ScriptId): ScriptLocation | undefined;
+}
 
 /** What `Welcome` supplies that the mirror needs to build its runtime. */
 export interface MirrorOptions {
     simRate: number;
     bounds: Bounds;
     regions: Array<{ name: string; bounds: Bounds }>;
-    scripts?: TemplateScripts;
+    scripts?: ScriptIndex;
 }
 
 function emptyDelta(): MirrorDelta {
@@ -122,7 +135,7 @@ export class Mirror {
     readonly #rt: Runtime;
     readonly #loop: Loop;
     readonly #index = new MirrorIndex();
-    readonly #scripts: TemplateScripts | undefined;
+    readonly #scripts: ScriptIndex | undefined;
     /** The table `loadGame` built, kept so simulating can install over it rather than rebuild it. */
     readonly #simPasses: TickPasses;
     /**
@@ -317,6 +330,18 @@ export class Mirror {
     }
 
     #applyStructural(op: WireStructuralOp, delta: MirrorDelta): void {
+        if (op.kind === 'group') {
+            // Verbatim and in order, exactly as the outer journal is: the boundary says these ops
+            // are one instantiation, not that they may be reordered or applied selectively. Bounded
+            // before the walk, since the count is peer-chosen and the work behind it is linear.
+            if (op.ops.length > MAX_WIRE_ITEMS) return;
+            for (const single of op.ops) this.#applySingle(single, delta);
+            return;
+        }
+        this.#applySingle(op, delta);
+    }
+
+    #applySingle(op: WireSingleStructuralOp, delta: MirrorDelta): void {
         switch (op.kind) {
             case 'spawn':
             case 'enter-interest':
@@ -373,11 +398,19 @@ export class Mirror {
                 return;
             }
 
-            case 'attach':
-                // Dropped, with a counter: the op names a script class, and this runtime holds no
-                // registry that resolves a name to one.
-                this.counters.droppedAttach++;
+            case 'attach': {
+                const local = this.#resolve(op.netId);
+                if (local === undefined) return;
+                this.#attach(local, op);
                 return;
+            }
+
+            default: {
+                // `noImplicitReturns` is off, so an arm added to the union without one here would
+                // fall through and no-op in silence — the shape of the bug this whole file counts.
+                const unreachable: never = op;
+                return unreachable;
+            }
         }
     }
 
@@ -413,17 +446,36 @@ export class Mirror {
         for (const tag of snapshot.tags) entity.tag(tag);
         // Before the state diffs of this same envelope: attaching hoists `@serverState` onto the host
         // record, and the wire's values have to land on the hoisted accessors rather than under them.
-        this.#attachScripts(local, snapshot.template);
+        for (const attachment of snapshot.overrides?.scripts ?? []) {
+            this.#attach(local, attachment);
+        }
         // `spawn` sets position only, so a wall authored at scale 3 on layer 2 would render at scale 1 on
         // layer 0 forever — a static entity is dirty exactly once.
         this.#writeTransform(local, t);
         delta.added.push(local);
     }
 
-    #attachScripts(local: EntityId, template: string): void {
-        const classes = this.#scripts?.[template];
-        if (classes === undefined) return;
-        for (const klass of classes) this.#rt.wiring?.attachToEntity(local, klass as never);
+    /**
+     * Attaches one script named by the wire, or counts the miss.
+     *
+     * A `ServerScript` is skipped rather than counted: the authority runs it and a client tick
+     * filters it out of every dispatch, so attaching it here would build an instance nothing could
+     * ever reach. A location this process cannot name at all is a class it does not hold, which is
+     * the miss the counter is for.
+     */
+    #attach(local: EntityId, attachment: WireScriptAttachment): void {
+        const registry = this.#scripts;
+        if (registry === undefined) {
+            this.counters.droppedAttach++;
+            return;
+        }
+        if (registry.locationOf(attachment.script) === 'server') return;
+        const klass = registry.resolve(attachment.script);
+        if (klass === undefined) {
+            this.counters.droppedAttach++;
+            return;
+        }
+        this.#rt.wiring?.attachToEntity(local, klass as never, attachment.props);
     }
 
     #destroy(netId: NetId, delta: MirrorDelta): void {

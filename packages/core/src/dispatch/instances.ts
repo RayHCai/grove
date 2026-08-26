@@ -1,6 +1,7 @@
 // Each instance carries a stable id because concurrency locks are keyed per instance —
 // keyed by method alone, one player's cooldown would gate every other player's.
 
+import type { ScriptProps } from '@platform/project';
 import type { HandlerDecl, ScriptLocation } from '../script/index.js';
 import { getMetadata } from '../script/index.js';
 import type { GuardOwner, ScopeId } from './scope-tree.js';
@@ -13,6 +14,13 @@ export interface ScriptInstance extends GuardOwner {
     readonly location: ScriptLocation;
     /** Handlers this class declares, resolved from prototype-chain metadata. */
     readonly handlers: readonly HandlerDecl[];
+    /**
+     * What this attachment was configured with, kept so a join snapshot can restate it.
+     *
+     * The `attach` op carries it to a client already connected; a joiner was not there for that op,
+     * and nothing else on the entity records what an inspector chose.
+     */
+    readonly props?: ScriptProps;
 }
 
 /** Reads the location a script class declares via its base (`__location`). */
@@ -24,6 +32,7 @@ export function makeInstance(
     instance: object,
     klass: abstract new (...args: never[]) => object,
     hostScopeId: ScopeId,
+    props?: ScriptProps,
 ): ScriptInstance {
     const meta = getMetadata(klass);
     return {
@@ -34,6 +43,7 @@ export function makeInstance(
         location: locationOf(klass),
         handlers: meta?.handlers ?? [],
         hostScopeId,
+        ...(props === undefined ? {} : { props }),
     };
 }
 

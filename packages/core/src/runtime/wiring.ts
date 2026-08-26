@@ -1,3 +1,4 @@
+import type { ScriptProps } from '@platform/project';
 import type { EntityId } from '../ids.js';
 import { LoadError } from '../errors.js';
 import type { BaseScript, ScriptLocation } from '../script/index.js';
@@ -26,9 +27,26 @@ export class Wiring {
         this.#rt = rt;
     }
 
-    attachToEntity(id: EntityId, klass: AnyScriptClass): object {
+    /**
+     * Attaches to an entity and journals it: which scripts run on which entity is a structural fact,
+     * and the wire carries it nowhere else.
+     *
+     * A class the bundle never stamped with an id is attached locally and journaled not at all —
+     * the op names an id, and nothing on the wire can name a class.
+     */
+    attachToEntity(id: EntityId, klass: AnyScriptClass, props?: ScriptProps): object {
         const entity = this.#rt.entityManager.facade(id);
-        return this.#attach(entityKey(id as number), entity, klass, undefined);
+        const instance = this.#attach(entityKey(id as number), entity, klass, undefined, props);
+        const script = this.#rt.scriptIdOf?.(klass);
+        if (script !== undefined) {
+            this.#rt.channels.markStructural({
+                kind: 'attach',
+                id,
+                script,
+                ...(props === undefined ? {} : { props }),
+            });
+        }
+        return instance;
     }
 
     attachToPlayer(player: Player, klass: AnyScriptClass): object {
@@ -71,15 +89,12 @@ export class Wiring {
         return this.attachToEntity(avatar.entityId, klass);
     }
 
-    attachTemplateScripts(_avatar: Entity): void {
-        // No template script registry exists, so there is nothing to attach.
-    }
-
     #attach(
         hostKey: string,
         host: object,
         klass: AnyScriptClass,
         localPlayer: Player | undefined,
+        props?: ScriptProps,
     ): object {
         const location = (klass as unknown as { __location: ScriptLocation }).__location;
         this.#reject(klass, hostKey, location);
@@ -105,7 +120,7 @@ export class Wiring {
             );
         }
 
-        const si = makeInstance(instance, klass, entry.scopeId);
+        const si = makeInstance(instance, klass, entry.scopeId, props);
         this.#rt.instances.attach(hostKey, si);
 
         return instance;

@@ -1,6 +1,7 @@
-// Spawning an avatar mints an entity from the Player template, owned by the player, and
-// attaches the template's scripts including the movement class.
+// Spawning an avatar instantiates the Player template, owned by the player, and attaches the
+// movement class over whatever that template already carries.
 
+import { instantiate } from '../world/templates.js';
 import type { Runtime } from './runtime.js';
 import type { Player } from './player.js';
 import type { BaseMovement } from './movement.js';
@@ -27,9 +28,14 @@ export class Roster {
 
     spawnAvatar(player: Player): void {
         const cp = this.#checkpoints.get(player.id) ?? this.defaultSpawn;
-        const avatar = this.#rt.entityManager.spawn(this.avatarTemplate, cp.x, cp.y, player.id);
+        // Through `instantiate`, so the Player template's own scripts and subtree are what an
+        // avatar is — the roster configures the movement class and nothing else about it.
+        const avatar = instantiate(this.#rt, this.avatarTemplate, {
+            x: cp.x,
+            y: cp.y,
+            ownerId: player.id,
+        });
         player.setAvatar(avatar);
-        this.#rt.wiring?.attachTemplateScripts(avatar);
         if (this.movementClass) this.setMovement(player, this.movementClass);
     }
 

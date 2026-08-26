@@ -120,6 +120,17 @@ export function tintCss(playerIndex: number): string {
  */
 export const AVATAR_TEMPLATE = 'player';
 
+/**
+ * The ids the two halves name each other's script classes by.
+ *
+ * The wire's `attach` op carries one of these, never a class name: this app's browser half is
+ * minified by Vite and its Node half is not, so `klass.name` agrees across the two only by accident.
+ * Both registries are keyed by these, which is why there is one table and not one per template.
+ */
+export const SCRIPT_RUNNER = 'runner';
+export const SCRIPT_RULES = 'rules';
+export const SCRIPT_CLICKER = 'clicker';
+
 /** World units one held tick moves the avatar. Constant, so both ends land on the same number. */
 export const AVATAR_STEP = 4;
 
@@ -140,10 +151,11 @@ export const PROJECT_ID = 'grove-playground';
  * The build of the contract in this file, bumped by hand when it changes incompatibly.
  *
  * A tab left open across a `dev` restart holds the old bundle, and the constants below — action
- * names, templates, tints, the world extent — are what both ends agree on. A mismatch used to show
- * up as leaves drawn in the wrong place; now the server refuses the join and the tab says to reload.
+ * names, templates, script ids, tints, the world extent — are what both ends agree on. A mismatch
+ * used to show up as leaves drawn in the wrong place; now the server refuses the join and the tab
+ * says to reload.
  */
-export const PROJECT_HASH = '1';
+export const PROJECT_HASH = '2';
 
 /** The authoritative world, and the stage the browser draws it on. */
 export const WORLD = { left: -480, right: 480, top: 270, bottom: -270 } as const;

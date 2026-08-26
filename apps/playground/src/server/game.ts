@@ -27,7 +27,6 @@ import {
     decodeAim,
     markerTemplate,
 } from '../shared.js';
-import { Runner } from '../synced/runner.js';
 import {
     LEAF_LAYER,
     LEAF_SCALE,
@@ -96,9 +95,9 @@ export class Rules extends ServerScript<Game> {
      * Input reaches a player host and an avatar host, never the Game host, so the click handler
      * has to be attached per player rather than declared here.
      *
-     * The avatar is minted here rather than by the roster's template scripts, which resolve no class:
-     * `spawn()` owns it to this player, which is what puts it inside that client's predicted scope and
-     * what makes `GameServer` reap it when the tab closes.
+     * `spawn()` instantiates the Player template, which is where `Runner` is declared: it owns the
+     * avatar to this player, which is what puts it inside that client's predicted scope and what
+     * makes `GameServer` reap it when the tab closes.
      */
     @onPlayerJoin
     join(ctx: Ctx): void {
@@ -107,7 +106,6 @@ export class Rules extends ServerScript<Game> {
         player.addScript(Clicker);
         player.spawn();
         player.teleportTo(avatarX(player.index), AVATAR_Y);
-        player.avatar.addScript(Runner);
     }
 
     @onUpdate

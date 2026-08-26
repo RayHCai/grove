@@ -7,20 +7,26 @@
 // declaration, which is what lets the two collapse into these without either shape being authored
 // twice.
 
-import type { ScriptId } from './ids.js';
+import type { ScriptId, TemplateId } from './ids.js';
 import type {
     AssetKind,
     AssetMeta,
     AssetRecord,
+    EntityRecord,
+    EntityRecordId,
+    EntityTransform,
     ProjectBounds,
     ProjectManifest,
     RegionRecord,
     ScriptAttachment,
+    TemplateChildRecord,
+    TemplateRecord,
     TemplateVisual,
 } from './manifest.js';
+import type { ScriptProps } from './props.js';
 
-/** A creator script class, as a host holds one. */
-export type ScriptClass = new () => object;
+/** A creator script class, as a host holds one. Props are optional, so a props-free class fits. */
+export type ScriptClass = new (props?: ScriptProps) => object;
 
 /**
  * Resolves an attached script id to the class the host loaded for it.
@@ -31,7 +37,33 @@ export type ScriptClass = new () => object;
  */
 export type ScriptResolver = (id: ScriptId) => ScriptClass | undefined;
 
-/** What a runtime is built from: the world's fixed shape, plus the Game-hosted classes to wire. */
+/**
+ * One attachment with its class already resolved.
+ *
+ * It keeps the `ScriptId` alongside the class rather than replacing it, because a runtime needs both
+ * and for different reasons: the class is what it constructs, and the id is what names that class on
+ * a wire, where a minified class name is no contract.
+ */
+export type ResolvedAttachment = { script: ScriptId; klass: ScriptClass; props?: ScriptProps };
+
+/** A template as a runtime holds it: what to attach to every instance, and what to mint beneath it. */
+export type ResolvedTemplate = {
+    id: TemplateId;
+    scripts: ResolvedAttachment[];
+    children: TemplateChildRecord[];
+};
+
+/** One placed entity as a runtime builds it. A parent's record comes before its children's. */
+export type PlacedEntity = {
+    id: EntityRecordId;
+    template: TemplateId | null;
+    parent: EntityRecordId | null;
+    transform?: EntityTransform;
+    tags: string[];
+    scripts: ResolvedAttachment[];
+};
+
+/** What a runtime is built from: the world's fixed shape, its templates, and the world as placed. */
 export type GameManifest = {
     /** The location filter — which handlers this runtime dispatches, and so its trust boundary. */
     role: 'server' | 'client';
@@ -40,7 +72,10 @@ export type GameManifest = {
     regions: RegionRecord[];
     /** No `url`: a runtime loads nothing, so an address it cannot act on is not its to hold. */
     assets: Array<{ key: string; kind: AssetKind; meta?: AssetMeta }>;
-    gameScripts: ScriptClass[];
+    templates: ResolvedTemplate[];
+    /** The placed world, parents before children — `validate` is what makes that hold. */
+    entities: PlacedEntity[];
+    gameScripts: ResolvedAttachment[];
 };
 
 export type GameManifestOptions = { role: 'server' | 'client'; scripts: ScriptResolver };
@@ -54,6 +89,8 @@ export function toGameManifest(project: ProjectManifest, opts: GameManifestOptio
         bounds: settings.bounds,
         regions: settings.regions.map((region) => ({ name: region.name, bounds: region.bounds })),
         assets: project.assets.map(toRuntimeAsset),
+        templates: project.templates.map((template) => toResolvedTemplate(template, opts.scripts)),
+        entities: project.entities.map((entity) => toPlacedEntity(entity, opts.scripts)),
         gameScripts: resolveAll(project.gameScripts, opts.scripts),
     };
 }
@@ -91,11 +128,38 @@ function metaOf(asset: AssetRecord): { meta?: AssetMeta } {
     return asset.meta === undefined ? {} : { meta: asset.meta };
 }
 
-function resolveAll(attachments: ScriptAttachment[], resolve: ScriptResolver): ScriptClass[] {
-    const classes: ScriptClass[] = [];
+function toResolvedTemplate(template: TemplateRecord, resolve: ScriptResolver): ResolvedTemplate {
+    return {
+        id: template.id,
+        scripts: resolveAll(template.scripts, resolve),
+        children: template.children ?? [],
+    };
+}
+
+function toPlacedEntity(entity: EntityRecord, resolve: ScriptResolver): PlacedEntity {
+    return {
+        id: entity.id,
+        template: entity.template,
+        parent: entity.parent,
+        ...(entity.transform === undefined ? {} : { transform: entity.transform }),
+        tags: entity.tags,
+        scripts: resolveAll(entity.scripts, resolve),
+    };
+}
+
+function resolveAll(
+    attachments: ScriptAttachment[],
+    resolve: ScriptResolver,
+): ResolvedAttachment[] {
+    const out: ResolvedAttachment[] = [];
     for (const attachment of attachments) {
         const klass = resolve(attachment.script);
-        if (klass !== undefined) classes.push(klass);
+        if (klass === undefined) continue;
+        out.push({
+            script: attachment.script,
+            klass,
+            ...(attachment.props === undefined ? {} : { props: attachment.props }),
+        });
     }
-    return classes;
+    return out;
 }

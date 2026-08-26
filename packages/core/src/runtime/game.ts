@@ -5,6 +5,7 @@ import type { Bounds, Vec3 } from '@platform/math';
 import { bounds as makeBounds } from '@platform/math';
 import type { EntityId } from '../ids.js';
 import type { BaseScript } from '../script/bases.js';
+import { instantiate } from '../world/templates.js';
 import type { Runtime } from './runtime.js';
 import { currentRuntime } from './runtime.js';
 import type { Entity } from './entity.js';
@@ -42,8 +43,9 @@ export abstract class Game {
         return this.rt.worldBounds ?? makeBounds(-1000, 1000, 1000, -1000);
     }
 
+    /** Instantiates a template: its scripts and its subtree, journaled as one. */
     spawn(template: string, x?: number, y?: number): Entity {
-        return this.rt.entityManager.spawn(template, x ?? 0, y ?? 0);
+        return instantiate(this.rt, template, { x: x ?? 0, y: y ?? 0 });
     }
 
     find(query: FindQuery): Entity[] {

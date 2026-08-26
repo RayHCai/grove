@@ -1,9 +1,11 @@
 // Every collaborator the facades reach for is constructed here, so runtime.ts stays declarations.
 
-import type { Bounds } from '@platform/math';
+import type { GameManifest as ProjectGameManifest, ScriptId } from '@platform/project';
 import type { EntityId } from '../ids.js';
 import type { HandlerKind, ScriptLocation } from '../script/index.js';
 import { Broadphase } from '../world/broadphase.js';
+import { TemplateRegistry, instantiatePlaced } from '../world/templates.js';
+import type { AnyScriptClass, TemplateDef } from '../world/templates.js';
 import { ContactSource } from './contacts.js';
 import { RuntimeGame, WorldQuery } from './game.js';
 import { LagRing } from './lag-ring.js';
@@ -16,7 +18,6 @@ import { Storage } from './wrappers.js';
 import { Camera } from './camera.js';
 import { Entity } from './entity.js';
 import { Asset, AssetRegistry } from './assets.js';
-import type { AssetKind } from './assets.js';
 import { tickMovement } from './movement-pass.js';
 import { Wiring, activeLocationsFor } from './wiring.js';
 import { createRuntime } from './runtime.js';
@@ -33,23 +34,33 @@ import {
 import { HUDState } from './hud.js';
 import { liveTransformView } from './transform-view.js';
 
-export interface GameManifest {
-    role?: 'server' | 'client';
-    simRate?: number;
-    bounds?: Bounds;
-    regions?: Array<{ name: string; bounds: Bounds }>;
-    /** Panel-loaded assets, referenced by key. */
-    assets?: Array<{
-        key: string;
-        kind: AssetKind;
-        meta?: { width?: number; height?: number; duration?: number };
-    }>;
+/**
+ * What builds a world.
+ *
+ * Every field is `@platform/project`'s already-validated narrowing rather than a parallel
+ * declaration here, so a field added to the authoring shape cannot reach a runtime without passing
+ * through this one type. `validate` is the SERVER's to call — core takes the result and never the
+ * file. Optional only so a store-level test can build a bare world; the server hands the whole of it.
+ */
+export type GameManifest = Partial<Omit<ProjectGameManifest, 'gameScripts'>> & {
     /** Panel-authored Game-hosted script classes. */
-    gameScripts?: Array<new () => object>;
+    gameScripts?: readonly AnyScriptClass[];
+};
+
+/** What a world needs that a manifest cannot hold, because it names code rather than data. */
+export interface LoadOptions {
+    /**
+     * The id the running bundle stamped on a class.
+     *
+     * Handed in rather than looked up, because the registry that holds it imports core: an
+     * `attach` op names an id, so a class this cannot name is attached locally and journaled
+     * nowhere.
+     */
+    scriptIdOf?: (klass: abstract new (...args: never[]) => object) => ScriptId | undefined;
 }
 
 /** Builds and wires a runtime for `manifest`, returning it live. */
-export function loadGame(manifest: GameManifest = {}): Runtime {
+export function loadGame(manifest: GameManifest = {}, opts: LoadOptions = {}): Runtime {
     const rt = createRuntime();
     const role = manifest.role ?? 'server';
     rt.isServer = role === 'server';
@@ -59,6 +70,8 @@ export function loadGame(manifest: GameManifest = {}): Runtime {
     rt.regions = new RegionIndex();
     for (const r of manifest.regions ?? []) rt.regions.define(r.name, r.bounds);
     rt.hud = new HUDState();
+    if (opts.scriptIdOf !== undefined) rt.scriptIdOf = opts.scriptIdOf;
+    rt.templates = TemplateRegistry.from((manifest.templates ?? []) as TemplateDef[]);
 
     rt.entityManager.makeFacade = (id: EntityId) => new Entity(id, rt);
     rt.entityManager.dispatchEnd = (id: EntityId) => {
@@ -88,6 +101,10 @@ export function loadGame(manifest: GameManifest = {}): Runtime {
     for (const klass of manifest.gameScripts ?? []) {
         rt.wiring.attachToGame(rt.gameInstance, klass as never);
     }
+
+    // After the Game scripts are hoisted and before any @onStart: the placed world is what a start
+    // handler expects to find, and a script hoisted after it would miss its own record's seeding.
+    instantiatePlaced(rt, manifest.entities ?? []);
 
     return rt;
 }

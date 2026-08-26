@@ -46,8 +46,10 @@ A message not in one of the two unions is not on the wire.
 `Envelope` is both unions; `EnvelopeKind` is every `kind`. The unions are **disjoint**, so neither end can
 accept a frame it minted.
 
-**Payload types.** `WireStructuralOp` (nine arms: `spawn`, `destroy`, `reparent`, `tag`, `enter-interest`,
-`leave-interest`, `player-join`, `player-leave`, `attach`) and `WireStructuralOpKind`; `StateHostAddr`,
+**Payload types.** `WireSingleStructuralOp` (nine arms: `spawn`, `destroy`, `reparent`, `tag`,
+`enter-interest`, `leave-interest`, `player-join`, `player-leave`, `attach`), `WireStructuralGroup`, their
+union `WireStructuralOp` and `WireStructuralOpKind`; `WireScriptAttachment`, `EntityOverrides`;
+`StateHostAddr`,
 `StateDiff`; `WireTransform`, `TransformDiff`; `EntitySnapshot`, `PlayerSnapshot`, `WorldSnapshot`;
 `WireBounds`, `WireRegion`; `WireWrapperKind` and `WireWrapperState` (four arms: `Scoreboard`,
 `Leaderboard`, `Inventory`, `Team`); `RenderManifest`, `WireAssetRef`, `WireAssetKind`, `TemplateVisual`
@@ -82,6 +84,18 @@ flattened `TransformDiff` free.
   worse than a lost update — `initSlot` zeroes the write but does not clear the dirty bit, so the renderer gets
   a visible snap to the origin at scale 1.
 - **The structural array is applied verbatim.** The ops do not commute; never group by kind.
+- **A `group` is a boundary, not permission to reorder.** It carries every op one template instantiation
+  produced, in journal order, parents ahead of children; the group itself sits in journal order among the
+  rest. It is flat — one level, never a group inside a group — because a recursive shape is one a cardinality
+  cap does not bound, and a receiver would have to cap depth before it could walk it at all. A sender that
+  cannot convert the whole of one drops the whole of one: a partial group tells the receiver a subtree
+  arrived complete when the entity its children hang off never existed. A budget counts a group by what it
+  holds rather than as one op, or a single instantiation spends the cap the cap exists to hold.
+- **`attach` names a `ScriptId`, never a class.** A minifier rewrites `klass.name` and rewrites neither the
+  manifest nor the wire, so the name is no contract across a build, let alone across two processes. Its
+  snapshot baseline is `EntitySnapshot.overrides.scripts`: the op is a delta, and a joiner holds no earlier
+  state to apply one against. A receiver resolves the id through the registry its own bundle built and
+  attaches nothing for a `ServerScript`, which a client tick filters out of every dispatch anyway.
 - **A `StateDiff` names its host once and carries that host's fields as a map.** Field names are
   therefore KEYS, which puts them under the codec's reserved-key check — so a sender must drop a field
   named `__proto__` / `constructor` / `prototype` rather than emit it, and a receiver never sees one.
@@ -103,7 +117,11 @@ flattened `TransformDiff` free.
   `leave-interest`; the arms are declared so interest management costs no breaking change to the union.
 - **`spawn` and `enter-interest` carry a full `EntitySnapshot`** — all seven transform fields, `parent`,
   `owner`, `tags` — because transform is dropped first under backpressure and a static entity is dirty exactly
-  once. The duplicate transform in the same tick's `transform` envelope is deliberate.
+  once. The duplicate transform in the same tick's `transform` envelope is deliberate. `template` is a
+  `TemplateId` rather than a free string: it keys the render manifest on one end and a saved file on the
+  other, and a rename that misses one of them should not typecheck. `overrides` is absent for an entity its
+  template describes whole, which is why `template` earns its place — an ordinary spawn is one id and a
+  transform.
 - **Every array and string arriving from a peer is bounded by the receiver**, cardinality and length both, and
   bounded _before_ the element walk — the count is peer-chosen and both validation and the work behind it are
   linear in it. No type here expresses a cap, because a cap is a receiver's policy and not a shape. Three layers
@@ -170,6 +188,7 @@ mutually in both directions, so core widening _or_ narrowing breaks the build. `
 relation — core's `EntityId` must _not_ be assignable to it — and `WireBounds` locks nothing, because four named
 edges is a shape that does not grow.
 
-`@platform/project`'s three authoring ids — `TemplateId`, `ScriptId`, `AssetId` — are the deliberate exception
-to the table: they are imported rather than restated, because an id exists to name one thing in a saved file,
-in an editor and on the wire, and a second copy defeats the only job it has.
+`@platform/project`'s three authoring ids — `TemplateId`, `ScriptId`, `AssetId` — and `ScriptProps` are the
+deliberate exception to the table: they are imported rather than restated, because an id exists to name one
+thing in a saved file, in an editor and on the wire, and a second copy defeats the only job it has.
+`ScriptProps` rides along for the same reason — it is the inspector's own map, saved as it is sent.

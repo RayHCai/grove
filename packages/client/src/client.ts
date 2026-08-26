@@ -59,7 +59,7 @@ import { ClientHUDSink } from './hud-sink.js';
 import { Lifecycle } from './lifecycle.js';
 import type { SessionState } from './lifecycle.js';
 import { Mirror, wireBounds } from './mirror.js';
-import type { MirrorDelta, TemplateScripts } from './mirror.js';
+import type { MirrorDelta, ScriptIndex } from './mirror.js';
 import { Prediction } from './prediction.js';
 import { InputRing } from './ring.js';
 
@@ -93,8 +93,13 @@ export interface GameClientOptions {
      * entities, and a mirror holding none predicts an unchanged world at the cost of the replay.
      */
     predict?: boolean;
-    /** The scripts a spawned entity gets here, by template — what `predict` has to run. */
-    scripts?: TemplateScripts;
+    /**
+     * The classes this process's bundle registered, by the id the wire names them with.
+     *
+     * What `predict` has to run, and the only thing that resolves an `attach` op. Without it every
+     * attach is dropped and counted, so a predicting client that supplies none simulates nothing.
+     */
+    scripts?: ScriptIndex;
     /**
      * What this build is, proved against the server's before a `Player` is allocated. Omitted, this
      * client declares no project — which only an equally undeclared server admits.
