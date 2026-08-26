@@ -106,6 +106,16 @@ export const BUNDLE_DEADLINE_SECONDS = 30;
 export const MAX_WIRE_ITEMS = 65_536;
 
 /**
+ * Scripts one entity's spawn snapshot may carry, checked before any of them is attached.
+ *
+ * Smaller than `MAX_WIRE_ITEMS` because the work differs in kind: an entry mints a script instance
+ * and hoists its `@serverState` onto the host record, and that instance lives for the session rather
+ * than for the frame it arrived in. Far above any authored entity — a saved file refuses the same
+ * class twice on one host, so the count is the number of distinct classes an inspector put there.
+ */
+export const MAX_ENTITY_SCRIPTS = 64;
+
+/**
  * Cardinality cap on the `snapshot-chunk` frames one join may be divided into.
  *
  * The same rule as `MAX_WIRE_ITEMS` applied to a count that arrives across frames rather than inside
