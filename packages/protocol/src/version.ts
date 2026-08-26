@@ -5,4 +5,4 @@
  * It lives here rather than in each endpoint because two hard-coded copies are exactly the drift
  * this package exists to end.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;

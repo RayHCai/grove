@@ -3,8 +3,8 @@
 // This is the untrusted, adversarial boundary: everything here is a check the server performs
 // because a client's frame cannot be trusted.
 
-import type { DispatchOptions, Player, Runtime } from '@platform/core';
-import { entityKey, playerKey } from '@platform/core';
+import type { DispatchOptions, EntityId, PointerEdge, Player, Runtime } from '@platform/core';
+import { entityKey, playerKey, pointerHit, pressWidget } from '@platform/core';
 import type { InputFrame, InputPhase } from '@platform/protocol';
 import type { Connection, RefusalReason } from './connection.js';
 import {
@@ -203,8 +203,42 @@ export function runInputPass(ctx: InputPassContext, dispatch: DispatchOptions): 
             conn.actions.axis(MOVE_AXES[0]),
             conn.actions.axis(MOVE_AXES[1]),
         );
+
+        // After the action edges, so a press that opened a menu and a press on that menu's button
+        // arriving in one wake still resolve in the order the player made them.
+        drainInteractions(rt, conn, player);
     }
 }
+
+/**
+ * Dispatches this connection's queued HUD presses and pointer hits.
+ *
+ * Through core's own entry points, not a second dispatch here: the screen-scoping rule for a press
+ * and the liveness check for a pointer hit are the same on both endpoints, and a copy would drift.
+ * The player comes from the connection, never from the frame.
+ */
+function drainInteractions(rt: Runtime, conn: Connection, player: Player): void {
+    if (conn.interactions.length === 0) return;
+    for (const event of conn.interactions.splice(0)) {
+        if (event.kind === 'press') {
+            void pressWidget(rt, {
+                widget: event.widget,
+                ...(event.screen === undefined ? {} : { screen: event.screen }),
+                player,
+            });
+            continue;
+        }
+        // A NetId IS the server's EntityId, cast at the boundary; `pointerHit` drops a dead one.
+        void pointerHit(rt, POINTER_EDGE[event.kind], event.netId as unknown as EntityId, player);
+    }
+}
+
+/** The wire's pointer kinds to core's handler kinds. */
+const POINTER_EDGE = {
+    click: 'onClick',
+    'hover-enter': 'onHoverEnter',
+    'hover-exit': 'onHoverExit',
+} as const satisfies Record<string, PointerEdge>;
 
 /**
  * Every action a synthesized `hold` is owed: held buttons union non-neutral axes.

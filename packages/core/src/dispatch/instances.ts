@@ -3,20 +3,16 @@
 
 import type { HandlerDecl, ScriptLocation } from '../script/index.js';
 import { getMetadata } from '../script/index.js';
-import type { ScopeId } from './scope-tree.js';
+import type { GuardOwner, ScopeId } from './scope-tree.js';
 
 let nextInstanceId = 1;
 
-export interface ScriptInstance {
-    readonly id: number;
+export interface ScriptInstance extends GuardOwner {
     readonly instance: object;
     readonly klass: abstract new (...args: never[]) => object;
-    readonly className: string;
     readonly location: ScriptLocation;
     /** Handlers this class declares, resolved from prototype-chain metadata. */
     readonly handlers: readonly HandlerDecl[];
-    /** The host's scope-tree id, for cancellation and timer/tween ownership. */
-    readonly hostScopeId: ScopeId;
 }
 
 /** Reads the location a script class declares via its base (`__location`). */
@@ -45,6 +41,8 @@ export function makeInstance(
 export class InstanceRegistry {
     /** hostKey → its instances in attachment order, which is dispatch order. */
     readonly #byHost = new Map<string, ScriptInstance[]>();
+    /** The reverse edge, for engine code holding a script object and needing its identity. */
+    readonly #byInstance = new WeakMap<object, ScriptInstance>();
 
     attach(hostKey: string, inst: ScriptInstance): void {
         let list = this.#byHost.get(hostKey);
@@ -53,10 +51,21 @@ export class InstanceRegistry {
             this.#byHost.set(hostKey, list);
         }
         list.push(inst);
+        this.#byInstance.set(inst.instance, inst);
     }
 
     forHost(hostKey: string): readonly ScriptInstance[] {
         return this.#byHost.get(hostKey) ?? EMPTY;
+    }
+
+    /**
+     * The registration for a script object, or undefined for one never attached.
+     *
+     * A pass that holds the instance — movement is the one — otherwise has no way back to the id a
+     * breaker entry is keyed by, short of scanning its host's list for object identity.
+     */
+    forInstance(instance: object): ScriptInstance | undefined {
+        return this.#byInstance.get(instance);
     }
 
     removeHost(hostKey: string): void {
@@ -66,6 +75,19 @@ export class InstanceRegistry {
     *all(): IterableIterator<ScriptInstance> {
         for (const list of this.#byHost.values()) {
             yield* list;
+        }
+    }
+
+    /**
+     * Every instance paired with the host key it hangs off.
+     *
+     * A whole-world dispatch that has to branch on WHICH host — a widget press, which a screen-hosted
+     * handler answers only for its own screen — cannot get that from `all()`, and re-deriving it by
+     * scanning `forHost` per candidate key is quadratic in the registry.
+     */
+    *entries(): IterableIterator<readonly [string, ScriptInstance]> {
+        for (const [hostKey, list] of this.#byHost) {
+            for (const inst of list) yield [hostKey, inst];
         }
     }
 

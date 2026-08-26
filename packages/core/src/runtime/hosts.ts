@@ -70,6 +70,7 @@ export class HostTable {
 }
 
 export const ENTITY_KEY_PREFIX = 'entity:';
+export const SCREEN_KEY_PREFIX = 'screen:';
 
 export function entityKey(id: number): string {
     return `${ENTITY_KEY_PREFIX}${id}`;
@@ -77,6 +78,14 @@ export function entityKey(id: number): string {
 
 export function playerKey(id: string): string {
     return `player:${id}`;
+}
+
+export function cameraKey(playerId: string): string {
+    return `camera:${playerId}`;
+}
+
+export function screenKey(name: string): string {
+    return `${SCREEN_KEY_PREFIX}${name}`;
 }
 
 export const GAME_KEY = 'game';

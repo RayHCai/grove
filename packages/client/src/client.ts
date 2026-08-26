@@ -4,15 +4,25 @@
 // with no rAF, no canvas and no socket. A React app composes rather than competes: a hook that owns the
 // renderer's lifecycle calls `client.frame(now)` from its own rAF loop, so the hook is the `FrameSource`.
 
-import type { ActionStates, EntityId, Player } from '@platform/core';
-import { clearRuntime, createActionStates, currentRuntime, hasRuntime } from '@platform/core';
+import type { ActionStates, EntityId, PointerEdge, Player } from '@platform/core';
+import {
+    clearRuntime,
+    createActionStates,
+    currentRuntime,
+    hasRuntime,
+    pointerHit as dispatchPointer,
+    pressWidget as dispatchPress,
+} from '@platform/core';
 import type { CameraState, IRenderer } from '@platform/renderer';
 import type {
     InputAction,
     InputFrame,
+    Interaction,
+    InteractionFrame,
     NetId,
     RateChange,
     ServerToClient,
+    SnapshotChunk,
     StateEnvelope,
     TimeSyncReply,
     Welcome,
@@ -21,7 +31,9 @@ import type { Message, Transport } from '@platform/transport';
 import { TransportError } from '@platform/transport';
 import {
     ACK_STALL_TICKS,
+    BUNDLE_DEADLINE_SECONDS,
     DEFAULT_VIEWPORT,
+    MAX_SNAPSHOT_CHUNKS,
     STALL_SECONDS,
     SYNC_INTERVAL_SECONDS,
 } from './constants.js';
@@ -38,8 +50,12 @@ import {
     send,
     timeSync,
 } from './handshake.js';
-import type { ClockSource } from './handshake.js';
+import type { ClientProject, ClockSource } from './handshake.js';
+import { unidentifiedProject } from './handshake.js';
+import type { BundleSource } from './bundle.js';
+import { BundleError, loadBundle } from './bundle.js';
 import type { FrameSource, InputDevice, RawInputEvent } from './input.js';
+import { ClientHUDSink } from './hud-sink.js';
 import { Lifecycle } from './lifecycle.js';
 import type { SessionState } from './lifecycle.js';
 import { Mirror, wireBounds } from './mirror.js';
@@ -48,6 +64,13 @@ import { Prediction } from './prediction.js';
 import { InputRing } from './ring.js';
 
 const CAMERA_ORIGIN = { x: 0, y: 0, z: 0 } as const;
+
+/** Core's pointer handler kinds to the wire's. */
+const POINTER_WIRE_KIND = {
+    onClick: 'click',
+    onHoverEnter: 'hover-enter',
+    onHoverExit: 'hover-exit',
+} as const satisfies Record<PointerEdge, Interaction['kind']>;
 
 export interface GameClientOptions {
     transport: Transport;
@@ -72,6 +95,16 @@ export interface GameClientOptions {
     predict?: boolean;
     /** The scripts a spawned entity gets here, by template — what `predict` has to run. */
     scripts?: TemplateScripts;
+    /**
+     * What this build is, proved against the server's before a `Player` is allocated. Omitted, this
+     * client declares no project — which only an equally undeclared server admits.
+     */
+    project?: ClientProject;
+    /**
+     * Fetches and evaluates the script bundle a `Welcome` names. Needed only when the server names
+     * one; absent, a welcome carrying a `bundleUrl` fails the session rather than skipping the load.
+     */
+    bundle?: BundleSource;
 }
 
 /** What a dev console asks about, which a tick count does not answer. */
@@ -95,6 +128,8 @@ export interface ClientStats {
     resimulations: number;
     /** Replays that hit the tick cap, so the predicted world skipped ticks the server did not. */
     cappedReplays: number;
+    /** Snapshot chunks refused: over the cap, or arriving for a join already answered. */
+    snapshotChunksDropped: number;
 }
 
 export class GameClient {
@@ -104,6 +139,8 @@ export class GameClient {
     readonly #ring = new InputRing();
     /** The local player's live action state — what a resync rebuilds the horizon from. */
     readonly #actions: ActionStates = createActionStates();
+    /** Core's HUD seam, filled here: the HUD is one client's, so this is where it exists at all. */
+    readonly #hud = new ClientHUDSink();
 
     #mirror: Mirror | undefined;
     #bridge: RenderBridge | undefined;
@@ -118,9 +155,21 @@ export class GameClient {
     /** Envelopes delivered since the last frame — drained in arrival order. */
     readonly #inbox: ServerToClient[] = [];
 
+    /**
+     * Snapshot chunks held for the `Welcome` that names how many there are.
+     *
+     * Held rather than applied: a chunk carries no tick and describes a world the client has not been
+     * told it is joining, so a set with no `Welcome` behind it is never written anywhere.
+     */
+    readonly #chunks: SnapshotChunk[] = [];
+    /** Chunks refused as unusable — over the cap, or arriving for a join already answered. */
+    #chunksDropped = 0;
+
     #seq = 0;
     /** Edges resolved but not yet framed: coalesced per (action, tick) at flush. */
     readonly #pending: ResolvedEdge[] = [];
+    /** HUD presses and pointer hits owed to the authority, flushed with this frame's input. */
+    readonly #interactions: Interaction[] = [];
 
     #rtt = 0;
     /** Our own send stamps, in the injected clock's ms — never the value the server echoed back. */
@@ -137,6 +186,22 @@ export class GameClient {
     #rejoined = false;
     #torn = false;
 
+    /**
+     * The frame time the bundle fetch started, or undefined when nothing is being awaited.
+     *
+     * While it is set the inbox drain holds everything: a welcome that has not opened its session
+     * yet has no mirror, clock or bridge for a later envelope to land in.
+     */
+    #loadingSince: number | undefined;
+    /**
+     * The bundle already fetched, verified and evaluated in this process.
+     *
+     * Survives a resync deliberately — the code is loaded, and re-fetching it on every reconnect
+     * would re-evaluate a module the page still holds. It is also what the next `JoinRequest`
+     * reports, so a server that has since moved on refuses rather than letting the two diverge.
+     */
+    #bundleHash: string;
+
     /** Scratch for the tick indices one frame advanced. */
     readonly #ticks: number[] = [];
     readonly #edges: ResolvedEdge[] = [];
@@ -144,6 +209,7 @@ export class GameClient {
     constructor(opts: GameClientOptions) {
         this.#opts = opts;
         this.#bindings = new BindingTable(opts.bindings ?? []);
+        this.#bundleHash = opts.project?.bundleHash ?? '';
     }
 
     get state(): SessionState {
@@ -172,6 +238,56 @@ export class GameClient {
 
     get actions(): ActionStates {
         return this.#actions;
+    }
+
+    /** The local player's HUD, as the host's UI layer reads it. */
+    get hud(): ClientHUDSink {
+        return this.#hud;
+    }
+
+    /**
+     * A HUD widget press: the local handlers run now, and the authority is told.
+     *
+     * The local half is unconditional — hover, press animation, selection and disabled styling are
+     * client state and must not go dead because the session stalled — while the wire half is gated
+     * like input, since a press the server would refuse as stale is worse than one never sent.
+     * `screen` names the screen the widget belongs to, which is what scopes a `ClientScript<HUDScreen>`
+     * handler to its own buttons.
+     */
+    pressWidget(widget: string, screen?: string): void {
+        const rt = this.#mirror?.runtime;
+        if (rt !== undefined) {
+            const player = this.localPlayer;
+            void dispatchPress(rt, {
+                widget,
+                ...(screen === undefined ? {} : { screen }),
+                ...(player === null ? {} : { player }),
+            });
+        }
+        if (!this.#lifecycle.acceptsInput) return;
+        this.#interactions.push({
+            kind: 'press',
+            widget,
+            ...(screen === undefined ? {} : { screen }),
+        });
+    }
+
+    /**
+     * A pointer hit on a mirrored entity, addressed by the LOCAL handle the render layer holds.
+     *
+     * The netId mapping happens here and nowhere above, so the layer that hit-tests never learns
+     * there is a network; an entity with no mapping is local-only and reaches no authority.
+     */
+    pointer(edge: PointerEdge, local: EntityId): void {
+        const rt = this.#mirror?.runtime;
+        if (rt !== undefined) {
+            const player = this.localPlayer;
+            void dispatchPointer(rt, edge, local, player === null ? undefined : player);
+        }
+        if (!this.#lifecycle.acceptsInput) return;
+        const net = this.#mirror?.index.net(local);
+        if (net === undefined) return;
+        this.#interactions.push({ kind: POINTER_WIRE_KIND[edge], netId: net });
     }
 
     /** The local player, once the roster carries them. */
@@ -206,6 +322,7 @@ export class GameClient {
             predictedTick: predictedTick < 0 ? depictedTick : predictedTick,
             resimulations: predicted?.counters.resimulations ?? 0,
             cappedReplays: predicted?.counters.cappedReplays ?? 0,
+            snapshotChunksDropped: this.#chunksDropped,
         };
     }
 
@@ -222,12 +339,27 @@ export class GameClient {
         );
         this.#disposers.push(device.onRaw((event) => this.#onRaw(event)));
 
-        this.#joinSentMs = this.#opts.clock.nowSeconds() * 1000;
-        this.#guard(() =>
-            send(transport, joinRequest(this.#opts.name, this.#joinSentMs, this.#opts.token)),
-        );
+        this.#guard(() => send(transport, this.#joinFrame()));
 
         frames.start((now) => this.frame(now));
+    }
+
+    /**
+     * The join request, stamped now and carrying the bundle this client currently holds.
+     *
+     * Built here rather than at each call site so the resync sends the same claim the first join
+     * did — with one difference that matters: a bundle loaded since then rides it, and a server that
+     * has moved on refuses rather than letting the two run different code.
+     */
+    #joinFrame(): ReturnType<typeof joinRequest> {
+        this.#joinSentMs = this.#opts.clock.nowSeconds() * 1000;
+        const declared = this.#opts.project ?? unidentifiedProject();
+        return joinRequest(
+            this.#opts.name,
+            this.#joinSentMs,
+            { ...declared, bundleHash: this.#bundleHash },
+            this.#opts.token,
+        );
     }
 
     /** One display frame: drain inbound, step the clock, enqueue outbound, push to the renderer. */
@@ -246,11 +378,13 @@ export class GameClient {
         if (this.#lifecycle.state !== 'failed' && this.#clock !== undefined) {
             this.#clock.advance(nowSeconds, this.#ticks);
             this.#flushInput(this.#ticks);
+            this.#flushInteractions();
         }
 
         // After the flush, so the tick just stamped can be replayed on the frame it was sent.
         this.#predict();
 
+        this.#checkBundleDeadline();
         this.#checkNotBehind();
         this.#checkLiveness();
         this.#maybeSync();
@@ -288,6 +422,9 @@ export class GameClient {
     }
 
     #drainInbox(): void {
+        // Held, never dropped: the server broadcasts from the moment it sends the `Welcome`, and
+        // those envelopes describe the world the pending snapshot is about to open.
+        if (this.#loadingSince !== undefined) return;
         if (this.#inbox.length === 0) return;
         const batch = this.#inbox.splice(0);
         this.#lastEnvelopeAt = this.#now;
@@ -299,12 +436,12 @@ export class GameClient {
             this.#resimulate = true;
         }
 
-        for (const envelope of batch) {
+        for (let at = 0; at < batch.length; at++) {
             // Nothing after a terminal failure can matter, and applying into a half-torn session is how a
             // second fault gets reported instead of the first.
             if (this.#lifecycle.state === 'failed') return;
             try {
-                this.#dispatch(envelope);
+                this.#dispatch(batch[at] as ServerToClient);
             } catch (error) {
                 // An envelope that passed the boundary narrowing and still threw is malformed deeper than
                 // depth-one checks reach. Failing here names the peer; letting it unwind would escape
@@ -316,6 +453,12 @@ export class GameClient {
                 this.#opts.frames.stop();
                 return;
             }
+            // A `Welcome` that opened a bundle fetch suspends the batch here rather than racing it:
+            // the rest is put back at the FRONT, so arrival order survives the wait.
+            if (this.#loadingSince !== undefined) {
+                this.#inbox.unshift(...batch.slice(at + 1));
+                return;
+            }
         }
     }
 
@@ -323,6 +466,9 @@ export class GameClient {
         switch (envelope.kind) {
             case 'welcome':
                 this.#onWelcome(envelope);
+                return;
+            case 'snapshot-chunk':
+                this.#onSnapshotChunk(envelope);
                 return;
             case 'reject':
                 this.#lifecycle.fail({
@@ -338,6 +484,14 @@ export class GameClient {
             case 'transform':
                 this.#mirror?.applyTransforms(envelope);
                 return;
+            case 'manifest':
+                // Additive, and started rather than awaited for the reason the welcome's is: the
+                // template half of the merge runs before the first `await`, so the spawn arriving
+                // behind this envelope already resolves its visual.
+                this.#bridge?.loadManifest(envelope.visuals).catch(() => {
+                    this.#assetLoadFailed++;
+                });
+                return;
             case 'time-sync-reply':
                 this.#onTimeSyncReply(envelope);
                 return;
@@ -347,10 +501,26 @@ export class GameClient {
         }
     }
 
+    /**
+     * Accepts a `Welcome` and decides whether a session can open now or has to wait for code.
+     *
+     * The RTT is measured HERE rather than after any load: it seeds the lead, and a fetch folded into
+     * it would size the lead to the download instead of to the round trip.
+     */
     #onWelcome(welcome: Welcome): void {
         // No envelope is accepted before the Welcome, and a second one is ignored: the mirror it would
         // rebuild is the resync path's, which goes through `#resync`.
-        if (this.#welcome !== undefined) return;
+        if (this.#welcome !== undefined || this.#loadingSince !== undefined) return;
+        // Folded in before anything reads the snapshot, so every path below sees one whole world and
+        // chunking stays invisible past this line.
+        if (!this.#foldChunks(welcome)) {
+            this.#lifecycle.fail({
+                kind: 'peer',
+                message: 'the snapshot chunks did not add up to the set the Welcome named',
+            });
+            this.#opts.frames.stop();
+            return;
+        }
         if (!isUsableWelcome(welcome)) {
             // A `Welcome` the client cannot use means the server does not speak this client's JSON —
             // terminal, and distinct from a `Reject`, which carries a reason.
@@ -359,10 +529,67 @@ export class GameClient {
             return;
         }
 
-        this.#welcome = welcome;
         // Measured against the stamp we recorded at send, on the clock that produced it: the echoed
         // `clientSentMs` is peer-controlled, and reading it would let a server dictate our lead.
         this.#rtt = rttSeconds(this.#opts.clock.nowSeconds() * 1000, this.#joinSentMs);
+
+        // Nothing to fetch, or this process already holds exactly these bytes: the session opens on
+        // this frame, and the pre-live state is never entered.
+        if (welcome.bundleUrl === '' || welcome.bundleHash === this.#bundleHash) {
+            this.#openSession(welcome);
+            return;
+        }
+
+        const source = this.#opts.bundle;
+        if (source === undefined) {
+            // Never silently skipped: a client with no loader cannot run what the server is running,
+            // and going live anyway is the divergence the hash exists to catch.
+            this.#lifecycle.fail({
+                kind: 'bundle',
+                message: 'the server sent game code this client has no way to load',
+            });
+            this.#opts.frames.stop();
+            return;
+        }
+
+        this.#loadingSince = this.#now;
+        this.#lifecycle.to('loading');
+        void this.#load(source, welcome);
+    }
+
+    /**
+     * Fetches, verifies and evaluates the bundle, then opens the session — or fails, terminally.
+     *
+     * A mismatch is not a retry: the bytes that arrived are not the bytes the authority simulates
+     * with, and running them anyway is exactly the silent divergence this whole path exists to stop.
+     */
+    async #load(source: BundleSource, welcome: Welcome): Promise<void> {
+        try {
+            await loadBundle(source, welcome.bundleUrl, welcome.bundleHash);
+        } catch (error) {
+            if (this.#torn) return;
+            this.#loadingSince = undefined;
+            this.#lifecycle.fail({
+                kind: 'bundle',
+                message:
+                    error instanceof BundleError || error instanceof Error
+                        ? error.message
+                        : String(error),
+            });
+            this.#opts.frames.stop();
+            return;
+        }
+        // The session may have been torn down or resynced while the fetch was in flight; either way
+        // this welcome is no longer the one being answered.
+        if (this.#torn || this.#loadingSince === undefined) return;
+        this.#bundleHash = welcome.bundleHash;
+        this.#loadingSince = undefined;
+        this.#openSession(welcome);
+    }
+
+    /** Builds the mirror, bridge and clock, applies the snapshot, and goes `live`. */
+    #openSession(welcome: Welcome): void {
+        this.#welcome = welcome;
 
         this.#mirror = new Mirror({
             simRate: welcome.simRate,
@@ -388,6 +615,10 @@ export class GameClient {
             snapshotTick: welcome.snapshot.tick,
             rttSeconds: this.#rtt,
         });
+
+        // Before the snapshot: a script attached during it may write a widget on its way up, and a
+        // runtime still holding core's null sink would drop that write silently.
+        this.#mirror.runtime.hudSink = this.#hud;
 
         this.#apply(this.#mirror.applySnapshot(welcome));
         this.#mirror.runtime.localPlayer = this.localPlayer;
@@ -442,6 +673,47 @@ export class GameClient {
 
         // The behind-check and stall recovery deliberately do not run here, though this is where the
         // depicted tick changes: see `#checkNotBehind` and `#checkLiveness`.
+    }
+
+    /**
+     * Buffers one chunk of a snapshot too big for a single frame.
+     *
+     * Bounded on arrival rather than at the fold: the count the `Welcome` will name has not been seen
+     * yet, so this is the only place that can refuse to keep growing. A chunk for a join already
+     * answered is dropped — a live session's world comes from deltas, never from a chunk.
+     */
+    #onSnapshotChunk(chunk: SnapshotChunk): void {
+        if (this.#welcome !== undefined || this.#chunks.length >= MAX_SNAPSHOT_CHUNKS) {
+            this.#chunksDropped++;
+            return;
+        }
+        this.#chunks.push(chunk);
+    }
+
+    /**
+     * Prepends every held chunk to the welcome's own snapshot, in index order.
+     *
+     * False when the set does not match what the `Welcome` named — a short set would open a session
+     * on a world missing entities the server believes it sent, which reads later as a mirror bug
+     * rather than as the truncated join it is.
+     */
+    #foldChunks(welcome: Welcome): boolean {
+        const expected = welcome.snapshotChunks ?? 0;
+        if (this.#chunks.length !== expected) return false;
+        const held = this.#chunks.splice(0);
+        if (expected === 0) return true;
+
+        // The wire is FIFO, so arrival order is already emission order; sorting states the invariant
+        // the fold depends on rather than trusting it, and a duplicate index shows up as a gap.
+        held.sort((a, b) => a.index - b.index);
+        if (held.some((chunk, at) => chunk.index !== at)) return false;
+
+        const snapshot = welcome.snapshot;
+        // Ahead of the welcome's own, because `entities` is parents-before-children across the whole
+        // set and the chunks carry the earlier half of that order.
+        snapshot.entities = [...held.flatMap((c) => c.entities), ...snapshot.entities];
+        snapshot.state = [...held.flatMap((c) => c.state), ...snapshot.state];
+        return true;
     }
 
     #onTimeSyncReply(reply: TimeSyncReply): void {
@@ -524,6 +796,28 @@ export class GameClient {
     }
 
     /**
+     * Sends this frame's interactions, stamped with the tick they happened on.
+     *
+     * No `seq` and no ring: an interaction is one discrete event, so there is nothing to re-derive
+     * from a later sample and nothing to replay — which is also why it is not folded into the input
+     * frame, where every field exists to make edges replayable.
+     */
+    #flushInteractions(): void {
+        const clock = this.#clock;
+        if (clock === undefined || this.#interactions.length === 0) return;
+        if (!this.#lifecycle.acceptsInput) {
+            this.#interactions.length = 0;
+            return;
+        }
+        const frame: InteractionFrame = {
+            kind: 'interaction',
+            tick: clock.localTick,
+            events: this.#interactions.splice(0),
+        };
+        this.#guard(() => send(this.#opts.transport, frame));
+    }
+
+    /**
      * Input resumed, so what the wire believes is stale: nothing was sent while it was refused.
      *
      * An axis re-asserts unconditionally, because a `hold` is idempotent. A press re-asserts only after a
@@ -554,6 +848,25 @@ export class GameClient {
         if (clock === undefined || mirror === undefined) return;
         if (this.#lifecycle.state !== 'live' && this.#lifecycle.state !== 'stalled') return;
         if (clock.isBehind(mirror.depictedTick)) this.#resync();
+    }
+
+    /**
+     * Fails a session whose bundle never arrives.
+     *
+     * It bounds the held inbox as much as the wait: the server broadcasts from the moment it sent the
+     * `Welcome`, and a fetch that hangs would otherwise queue envelopes for as long as the tab lives.
+     * `stalled` cannot cover this — that is a decision about a live session's connection, and there is
+     * no session yet.
+     */
+    #checkBundleDeadline(): void {
+        const since = this.#loadingSince;
+        if (since === undefined || this.#now - since < BUNDLE_DEADLINE_SECONDS) return;
+        this.#loadingSince = undefined;
+        this.#lifecycle.fail({
+            kind: 'bundle',
+            message: `the game code did not arrive within ${BUNDLE_DEADLINE_SECONDS} seconds`,
+        });
+        this.#opts.frames.stop();
     }
 
     /**
@@ -618,11 +931,18 @@ export class GameClient {
         // session's clock did.
         this.#ring.reset(this.#actions);
         this.#pending.length = 0;
+        // The HUD belongs to the world being discarded, and the interactions name netIds the next
+        // session will not hold.
+        this.#hud.clear();
+        this.#interactions.length = 0;
         this.#ackSeq = -1;
         this.#ackSeqStillAt = this.#now;
         this.#lastEnvelopeAt = this.#now;
         this.#lastSyncSentMs = undefined;
         this.#welcome = undefined;
+        // The next join answers with its own set; a chunk held from this one describes a world at a
+        // tick the new session will not be seeded from.
+        this.#chunks.length = 0;
         this.#mirror = undefined;
         this.#bridge = undefined;
         this.#clock = undefined;
@@ -631,14 +951,11 @@ export class GameClient {
         this.#resimulate = false;
         // The new session will hold nothing, so what is physically held has to be said again.
         this.#rejoined = true;
+        // Any bundle fetch belongs to a welcome that will never open its session now. The loaded
+        // hash is deliberately kept: the code is in this process, and the new join declares it.
+        this.#loadingSince = undefined;
 
-        this.#joinSentMs = this.#opts.clock.nowSeconds() * 1000;
-        this.#guard(() =>
-            send(
-                this.#opts.transport,
-                joinRequest(this.#opts.name, this.#joinSentMs, this.#opts.token),
-            ),
-        );
+        this.#guard(() => send(this.#opts.transport, this.#joinFrame()));
     }
 
     /** Core's `Camera` holds the intent; this resolves it per frame; the renderer draws it. */

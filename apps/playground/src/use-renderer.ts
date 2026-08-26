@@ -1,19 +1,16 @@
-// The React <-> IRenderer seam: mount, init, frame loop, teardown.
+// The React <-> IRenderer seam: mount, init, asset load, teardown.
 //
 // THE RENDERER LIVES IN A REF, NEVER IN STATE. It is a mutable GPU-backed object whose identity
 // never changes; putting it in state would re-render every consumer for nothing, and — worse —
 // invite React to treat it as a value to be copied. State here carries only what the UI actually
 // draws: the load phase and any error.
 //
-// `render()` is explicit and takes no `dt`, because the renderer owns no clock (§11.1). This hook
-// is that clock.
+// There is no frame loop here any more. `GameClient` owns the frame and calls `render()` itself, so
+// a loop here would present every frame twice; `use-game.ts` is the seam that drives it.
 
 import { useEffect, useRef, useState } from 'react';
 import type { IRenderer, RendererInitOptions } from '@platform/renderer';
 import { createPixiRenderer } from '@platform/renderer/pixi';
-
-/** Frame callback. `dt` is seconds since the previous frame, already clamped. */
-export type FrameHandler = (dt: number, renderer: IRenderer) => void;
 
 export type RendererPhase = 'idle' | 'initializing' | 'ready' | 'failed';
 
@@ -30,23 +27,11 @@ export interface UseRendererOptions {
     /** Everything but `container`, which the hook supplies from its own ref. */
     init: Omit<RendererInitOptions, 'container'>;
     /**
-     * Called once after `init()` resolves, before the first frame — load assets and build the
-     * initial scene here. An async return is awaited, and the hook stays `'initializing'` until it
-     * settles.
+     * Called once after `init()` resolves and before the phase turns `'ready'` — load assets here.
+     * An async return is awaited, and the hook stays `'initializing'` until it settles.
      */
     onReady?: (renderer: IRenderer) => void | Promise<void>;
-    /** Called once per animation frame, before `render()`. */
-    onFrame?: FrameHandler;
 }
-
-/**
- * The largest `dt` a frame may report, in seconds.
- *
- * A backgrounded tab resumes with a multi-second gap; propagating it would teleport every drifter
- * across the stage at once. Clamping makes the sim behave as if the hidden time did not pass,
- * which for a harness is the honest interpretation.
- */
-const MAX_FRAME_DT = 1 / 15;
 
 export function useRenderer(options: UseRendererOptions): UseRendererResult {
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -55,15 +40,11 @@ export function useRenderer(options: UseRendererOptions): UseRendererResult {
     const [phase, setPhase] = useState<RendererPhase>('idle');
     const [error, setError] = useState<Error | null>(null);
 
-    // The callbacks are read through refs so a consumer may pass fresh closures every render
-    // without tearing down the GPU context. The effect below therefore depends on NEITHER.
-    const onFrameRef = useRef(options.onFrame);
+    // Read through a ref so a consumer may pass a fresh closure every render without tearing down
+    // the GPU context. The effect below therefore depends on neither it nor the init options.
     const onReadyRef = useRef(options.onReady);
-    onFrameRef.current = options.onFrame;
     onReadyRef.current = options.onReady;
 
-    // Same reasoning for the init options: they are consumed exactly once, at init, so a caller
-    // that inlines the object literal must not thereby re-create the renderer.
     const initRef = useRef(options.init);
     initRef.current = options.init;
 
@@ -76,8 +57,6 @@ export function useRenderer(options: UseRendererOptions): UseRendererResult {
         // runs again; without this the first pass would keep initializing and then render into a
         // container the second pass already owns.
         let cancelled = false;
-        let frame = 0;
-        let last = 0;
 
         // Whether `init()` has settled. Cleanup CANNOT safely destroy before it has: `init()`
         // appends its canvas after an internal `await`, and a `destroy()` arriving in that window
@@ -88,19 +67,6 @@ export function useRenderer(options: UseRendererOptions): UseRendererResult {
 
         setPhase('initializing');
         setError(null);
-
-        const loop = (now: number): void => {
-            if (cancelled) return;
-            frame = requestAnimationFrame(loop);
-
-            // The first frame has no predecessor, so it reports dt 0 rather than the time since
-            // the timer origin — which would otherwise be a multi-hundred-ms jump.
-            const dt = last === 0 ? 0 : Math.min((now - last) / 1000, MAX_FRAME_DT);
-            last = now;
-
-            onFrameRef.current?.(dt, renderer);
-            renderer.render();
-        };
 
         void (async () => {
             try {
@@ -113,15 +79,14 @@ export function useRenderer(options: UseRendererOptions): UseRendererResult {
                     return;
                 }
 
-                rendererRef.current = renderer;
                 await onReadyRef.current?.(renderer);
                 if (cancelled) {
                     renderer.destroy();
                     return;
                 }
 
+                rendererRef.current = renderer;
                 setPhase('ready');
-                frame = requestAnimationFrame(loop);
             } catch (cause) {
                 // A rejected `init()` built nothing, but `onReady` may have thrown after it
                 // succeeded — so destroy unconditionally. It is idempotent.
@@ -135,7 +100,6 @@ export function useRenderer(options: UseRendererOptions): UseRendererResult {
 
         return () => {
             cancelled = true;
-            if (frame !== 0) cancelAnimationFrame(frame);
             rendererRef.current = null;
             // Only destroy once `init()` has settled — otherwise the canvas it is about to append
             // would outlive this effect. The init path handles the cancelled-mid-init case.
@@ -151,12 +115,6 @@ export function useRenderer(options: UseRendererOptions): UseRendererResult {
         phase,
         error,
     };
-}
-
-/** A stable `dt`-clamping helper, exported so tests can assert the same bound the loop uses. */
-export function clampFrameDt(seconds: number): number {
-    if (!Number.isFinite(seconds) || seconds <= 0) return 0;
-    return Math.min(seconds, MAX_FRAME_DT);
 }
 
 /** Reads `phase`/`error` into a single line for the HUD. */

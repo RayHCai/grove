@@ -22,8 +22,7 @@
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
-        "@platform/engine": "workspace:*",
-        "@platform/platform": "workspace:*"
+        "@platform/engine": "workspace:*"
     },
     "devDependencies": {
         "typescript": "^7.0.2",

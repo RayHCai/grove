@@ -9,7 +9,7 @@
 export const PACKAGE_NAME = '@platform/server';
 
 export { GameServer } from './server.js';
-export type { GameServerOptions, ServerConfig } from './server.js';
+export type { GameServerOptions, ProjectIdentity, ServerConfig } from './server.js';
 
 export { AdmissionState, Connection } from './connection.js';
 export type { AckReport, RefusalReason } from './connection.js';
@@ -33,6 +33,8 @@ export {
 export type { RosterOps, SendSet } from './broadcast.js';
 
 export { ancestorsFirst, buildSnapshot } from './snapshot.js';
+
+export { ManifestStore } from './manifest.js';
 
 export {
     CONTROL_BUCKET_FRAMES,

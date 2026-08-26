@@ -157,12 +157,20 @@ export class Wiring {
         });
     }
 
+    // The wrapper goes into `values` alongside every other field: it IS the field's value, and the
+    // replication path reads that map — a wrapper left out of it marks a channel whose drain then
+    // finds nothing and drops the write.
     #bindWrappers(instance: object, record: HostRecord): void {
         for (const [field, value] of Object.entries(instance)) {
-            if (value instanceof StatefulWrapper) {
-                value.bind(record, field);
-                record.wrappers.add(field);
-            }
+            if (!(value instanceof StatefulWrapper)) continue;
+            value.bind(record, field);
+            record.wrappers.add(field);
+            record.values.set(field, value);
+            // Seeded like a decorated field, and for the same reason: the initializer built an empty
+            // wrapper, and a previous session's contents are exactly what the host record holds.
+            // `restore` already ignores a payload tagged with another class, so a stale one is inert.
+            const persisted = this.#rt.persisted?.get(record.hostId, field);
+            if (persisted !== undefined) value.restore(persisted);
         }
     }
 

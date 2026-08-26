@@ -15,7 +15,7 @@ import type {
     SubtreeNodeDesc,
     AssetManifestEntry,
 } from '@platform/renderer';
-import { NO_NODE, REMOTE_ASSET_SCHEMES, isAllowedAssetUrl } from '@platform/renderer';
+import { AssetQueue, NO_NODE, REMOTE_ASSET_SCHEMES, isAllowedAssetUrl } from '@platform/renderer';
 import type {
     GroupTemplateVisual,
     RenderManifest,
@@ -95,6 +95,14 @@ export class RenderBridge {
      */
     readonly #nodeFor = new Map<EntityId, NodeId>();
     readonly #templates = new Map<string, TemplateVisual>();
+    /**
+     * Every asset name this bridge has declared to the renderer, as the renderer's own intent map.
+     *
+     * A manifest update is additive, so this is what makes a re-declared entry cost nothing — and it
+     * is the renderer's structure rather than a second table here, since "already declared" has to
+     * have one answer.
+     */
+    readonly #assets = new AssetQueue();
 
     /**
      * The group templates that draw a subtree, flattened once into a `createSubtree` batch.
@@ -178,10 +186,15 @@ export class RenderBridge {
     }
 
     /**
-     * Assets to `renderer.loadAssets`, templates into the table a spawn consults.
+     * Merges a manifest in: assets to `renderer.loadAssets`, templates into the table a spawn consults.
      *
-     * The template loop runs before the first `await`, so a caller may start this and reconcile the join
-     * snapshot without waiting; moving it after would draw a whole join as placeholders.
+     * ADDITIVE, because the welcome's copy is a baseline rather than the whole session — a template
+     * first used mid-session arrives on its own envelope, and replacing the table would drop
+     * everything the join established.
+     *
+     * The template loop still runs before the first `await`, so a caller may start this and reconcile the join
+     * snapshot without waiting; moving it after would draw a whole join as placeholders. That holds for a
+     * mid-session update too: the spawn using the new template rides the envelope directly behind it.
      */
     async loadManifest(manifest: RenderManifest): Promise<void> {
         for (const t of manifest.templates) {
@@ -195,7 +208,15 @@ export class RenderBridge {
             }
             this.#templates.set(t.template, t);
         }
-        const entries = manifest.assets.flatMap(toManifestEntry);
+
+        // Deduped through the renderer's own per-name intent map rather than a second table here:
+        // one answer to "is this name already declared", and a re-declared asset is not re-fetched.
+        const entries: AssetManifestEntry[] = [];
+        for (const entry of manifest.assets.flatMap(toManifestEntry)) {
+            if (this.#assets.intentFor(entry.name) !== undefined) continue;
+            this.#assets.load(entry);
+            entries.push(entry);
+        }
         if (entries.length > 0) await this.#renderer.loadAssets(entries);
     }
 

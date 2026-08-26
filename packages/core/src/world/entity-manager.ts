@@ -18,6 +18,9 @@ export class EntityManager {
         throw new Error('EntityManager.makeFacade not wired');
     };
 
+    /** Fires @onEnd at a doomed entity's scripts; set by the runtime wiring, since world/ owns no dispatch. */
+    dispatchEnd: (id: EntityId) => void = () => {};
+
     constructor(rt: Runtime) {
         this.#rt = rt;
     }
@@ -60,6 +63,9 @@ export class EntityManager {
     drainDestroyed(): void {
         if (this.#pendingDestroy.length === 0) return;
         const doomed = this.#pendingDestroy.splice(0);
+        // Every @onEnd before any teardown, so a handler on one doomed entity still finds the rest
+        // of its subtree addressable rather than half-released.
+        for (const id of doomed) this.dispatchEnd(id);
         for (const id of doomed) {
             const record = this.#rt.entities.record(id);
             if (record) {

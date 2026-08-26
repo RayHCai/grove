@@ -60,6 +60,13 @@ export class InputRing {
         return this.#entries.filter((e) => e.frame.tick >= tick).map((e) => e.frame);
     }
 
+    /** Every retained frame, oldest-first, into a caller-owned array — a replay reads this per frame. */
+    frames(out: InputFrame[] = []): InputFrame[] {
+        out.length = 0;
+        for (const entry of this.#entries) out.push(entry.frame);
+        return out;
+    }
+
     /** Valid for any tick in `[horizonTick, horizonValidUntil)` — an interval, never an equality. */
     get heldAtHorizon(): ActionStates {
         return this.#heldAtHorizon;

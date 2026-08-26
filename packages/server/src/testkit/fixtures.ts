@@ -7,16 +7,57 @@
 
 import type { Ctx, Entity, Player } from '@platform/core';
 import {
+    Scoreboard,
     ServerScript,
     SyncedScript,
+    Team,
+    onClick,
     onEvent,
     onEventHold,
     onEventRelease,
+    onHoverEnter,
+    onHoverExit,
     onPlayerJoin,
     onPlayerLeave,
+    onPress,
     onStart,
+    onUpdate,
     serverState,
 } from '@platform/core';
+
+/** The authoritative half of a HUD press: the client resolved the widget, the server decides on it. */
+export class Storekeeper extends ServerScript {
+    @serverState credits = 0;
+    presses: string[] = [];
+
+    @onPress('buy')
+    buy(ctx: Ctx): void {
+        this.presses.push((ctx.player as Player | undefined)?.id ?? '(none)');
+        this.credits += 1;
+    }
+}
+
+/** Pointer hits, which land on the entity the client's own hit test named. */
+export class Touchable extends SyncedScript<Entity> {
+    clicks = 0;
+    hoverEnters = 0;
+    hoverExits = 0;
+
+    @onClick
+    clicked(): void {
+        this.clicks += 1;
+    }
+
+    @onHoverEnter
+    entered(): void {
+        this.hoverEnters += 1;
+    }
+
+    @onHoverExit
+    exited(): void {
+        this.hoverExits += 1;
+    }
+}
 
 /** Every input phase on one action, so a phase-filter test can tell them apart. */
 export class Recorder extends SyncedScript<Entity> {
@@ -62,6 +103,22 @@ export class Wallet extends ServerScript<Player> {
     @serverState credits = 10;
 }
 
+/**
+ * Game-hosted wrapper state: authoritative with no `@serverState`, marked by the wrapper itself.
+ *
+ * The field initializer is what binds it — wiring walks the instance's own properties — so a wrapper
+ * whose constructor needs the host cannot be declared this way, which is why this one is a
+ * `Scoreboard` and not an `Inventory`.
+ */
+export class Standings extends ServerScript {
+    readonly scores = new Scoreboard();
+}
+
+/** Player-hosted wrapper state: a `Team` takes only a name, so a field initializer can build one. */
+export class Squad extends ServerScript<Player> {
+    readonly team = new Team('red');
+}
+
 /** The Game-hosted `ServerScript` the roster events are declarable on, and nowhere else. */
 export class Rules extends ServerScript {
     @serverState round = 1;
@@ -94,5 +151,18 @@ export class Spectators extends ServerScript {
     @onPlayerJoin
     join(ctx: Ctx): void {
         (ctx.player as Player | undefined)?.spectate();
+    }
+}
+
+/**
+ * A Game script that throws every tick, so the breaker trips off nothing but a pump.
+ *
+ * `@onUpdate` needs no dispatch to provoke it, which is what makes a trip reachable from a test that
+ * only advances the clock.
+ */
+export class FaultyRules extends ServerScript {
+    @onUpdate
+    update(): void {
+        throw new Error('update always throws');
     }
 }

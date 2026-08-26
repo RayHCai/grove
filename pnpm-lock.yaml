@@ -35,9 +35,6 @@ importers:
       '@platform/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@platform/platform':
-        specifier: workspace:*
-        version: link:../../packages/platform
     devDependencies:
       typescript:
         specifier: ^7.0.2
@@ -51,9 +48,6 @@ importers:
       '@platform/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@platform/platform':
-        specifier: workspace:*
-        version: link:../../packages/platform
     devDependencies:
       typescript:
         specifier: ^7.0.2
@@ -64,21 +58,36 @@ importers:
 
   apps/playground:
     dependencies:
+      '@platform/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@platform/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@platform/math':
         specifier: workspace:*
         version: link:../../packages/math
+      '@platform/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@platform/renderer':
         specifier: workspace:*
         version: link:../../packages/renderer
+      '@platform/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      '@platform/transport':
+        specifier: workspace:*
+        version: link:../../packages/transport
       react:
         specifier: ^19.2.8
         version: 19.2.8
       react-dom:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
     devDependencies:
       '@types/react':
         specifier: ^19.2.18
@@ -86,6 +95,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.4
         version: 19.2.4(@types/react@19.2.18)
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       '@vitejs/plugin-react':
         specifier: ^6.0.5
         version: 6.0.5(vite@8.2.0(@types/node@26.1.2))
@@ -120,6 +132,9 @@ importers:
       '@platform/math':
         specifier: workspace:*
         version: link:../math
+      '@platform/project':
+        specifier: workspace:*
+        version: link:../project
       '@platform/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -142,6 +157,9 @@ importers:
       '@platform/math':
         specifier: workspace:*
         version: link:../math
+      '@platform/project':
+        specifier: workspace:*
+        version: link:../project
     devDependencies:
       typescript:
         specifier: ^7.0.2
@@ -161,6 +179,9 @@ importers:
       '@platform/math':
         specifier: workspace:*
         version: link:../math
+      '@platform/project':
+        specifier: workspace:*
+        version: link:../project
       '@platform/renderer':
         specifier: workspace:*
         version: link:../renderer
@@ -187,11 +208,11 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.2)(vite@8.2.0(@types/node@26.1.2))
 
-  packages/platform:
+  packages/project:
     dependencies:
-      '@platform/core':
+      '@platform/transport':
         specifier: workspace:*
-        version: link:../core
+        version: link:../transport
     devDependencies:
       typescript:
         specifier: ^7.0.2
@@ -202,6 +223,9 @@ importers:
 
   packages/protocol:
     dependencies:
+      '@platform/project':
+        specifier: workspace:*
+        version: link:../project
       '@platform/transport':
         specifier: workspace:*
         version: link:../transport
@@ -240,6 +264,9 @@ importers:
       '@platform/math':
         specifier: workspace:*
         version: link:../math
+      '@platform/project':
+        specifier: workspace:*
+        version: link:../project
       '@platform/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -568,6 +595,9 @@ packages:
   '@types/react@19.2.18':
     resolution: {integrity: sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w==}
 
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
     engines: {node: '>=16.20.0'}
@@ -736,6 +766,7 @@ packages:
   '@xmldom/xmldom@0.8.13':
     resolution: {integrity: sha512-KRYzxepc14G/CEpEGc3Yn+JKaAeT63smlDr+vjB8jRfgTBBI9wRj/nkQEO+ucV8p8I9bfKLWp37uHgFrbntPvw==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   assertion-error@2.0.1:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
@@ -1125,6 +1156,18 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
+  ws@8.21.3:
+    resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
 snapshots:
 
   '@emnapi/core@2.0.0-alpha.3':
@@ -1311,6 +1354,10 @@ snapshots:
   '@types/react@19.2.18':
     dependencies:
       csstype: 3.2.3
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 26.1.2
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -1740,3 +1787,5 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  ws@8.21.3: {}

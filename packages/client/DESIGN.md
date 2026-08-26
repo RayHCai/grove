@@ -29,13 +29,15 @@ Deps: `core`, `math`, `protocol`, `renderer`, `transport`. Never `server`. No Re
 | [src/bindings.ts](src/bindings.ts)     | `BindingTable` — raw event → action edges, axis quantizer, held codes                 |
 | [src/input.ts](src/input.ts)           | Seams: `RawInputEvent`, `InputDevice`, `FrameSource` + scripted implementations       |
 | [src/handshake.ts](src/handshake.ts)   | Join/time-sync builders, envelope narrowing, welcome validation, reject text          |
+| [src/bundle.ts](src/bundle.ts)         | `BundleSource` seam, and the fetch → bound → hash → compare → evaluate order          |
 | [src/lifecycle.ts](src/lifecycle.ts)   | `Lifecycle` — `SessionState`, `FailureReason`, input gating                           |
 | [src/bridge.ts](src/bridge.ts)         | `RenderBridge` — `EntityId → NodeId`, manifest, dirty-set push, interpolation, camera |
+| [src/hud-sink.ts](src/hud-sink.ts)     | `ClientHUDSink` — core's HUD seam: widget records and the open screen stack           |
 | [src/constants.ts](src/constants.ts)   | Engine constants, each stating its unit                                               |
 | [src/browser/](src/browser/)           | DOM adapters behind the `./browser` subpath                                           |
 
 Two exports: `.` (no DOM) and `./browser` (`createRafFrameSource`, `createPerformanceClock`,
-`createDomInputDevice`, `pollGamepads`). `tsconfig.json` adds `lib: DOM` package-wide, since a project
+`createDomInputDevice`, `pollGamepads`, `createBrowserBundleSource`). `tsconfig.json` adds `lib: DOM` package-wide, since a project
 reference cannot cover one subdirectory; the boundary is held by a `no-restricted-globals` override in
 `.oxlintrc.json` denying `window`/`document`/`navigator`/`performance`/rAF outside `src/browser/`.
 
@@ -51,11 +53,14 @@ browser passes rAF and a headless host drives it by hand.
    arrival order too; a set-union would create a node for a dead entity. Each dispatch is wrapped: an
    envelope that throws deeper than `asServerEnvelope` reaches fails the session as `peer`, because an
    exception escaping here unwinds through the frame source and ends the session with no state to show a
-   person.
+   person. While a bundle is in flight the drain **holds** instead: it returns before splicing, and a
+   `Welcome` that opens a fetch mid-batch pushes the rest of that batch back onto the FRONT of the inbox, so
+   arrival order survives the wait and nothing is dropped into a session that does not exist yet.
 3. `clock.advance(now)` → 0..N tick indices (dt clamped inside), then flush one input frame per tick.
 4. `#predict()` — carry the predicted world to `localTick`. After the flush, so the tick just stamped is
    replayed on the frame it was sent; only while `live`.
-5. `#checkNotBehind()` → resync; `#checkLiveness()` → `stalled` in **both** directions; `#maybeSync()`.
+5. `#checkBundleDeadline()` → `bundle` failure; `#checkNotBehind()` → resync; `#checkLiveness()` → `stalled`
+   in **both** directions; `#maybeSync()`.
 6. `bridge.pushTransforms(now)`, `bridge.pushCamera()`, `renderer.render()`.
 
 The push is after tick advance, not inside it: a frame that advanced three ticks still pushes once.
@@ -68,11 +73,15 @@ and each `TimeSync`, so the two time bases never meet in one subtraction.
 
 ## Handshake ([src/handshake.ts](src/handshake.ts))
 
-The client speaks first: `JoinRequest { protocolVersion, name, clientSentMs, token? }`. `Welcome` supplies
+The client speaks first: `JoinRequest { protocolVersion, name, clientSentMs, projectId, projectHash,
+bundleHash, token? }`. The three identity fields are the client's claim about what it is running, built from
+`GameClientOptions.project` with `bundleHash` overridden by whatever this process has actually verified — so
+a resync after a load declares the newer bundle and a server that has moved on refuses. `Welcome` supplies
 `simRate`, `sendRate` (the interval the render path interpolates over), `yourPlayerId`, `bounds`, `regions`,
-`visuals`, and `snapshot` (whose `tick` seeds the clock). `isUsableWelcome` structurally validates **every
-field the join path dereferences** before trusting it — including `bounds`, `regions`, `visuals` and
-`snapshot.state`, which are read unguarded — and
+`visuals`, the server's own identity plus `bundleUrl`, and `snapshot` (whose `tick` seeds the clock).
+`isUsableWelcome` structurally validates **every
+field the join path dereferences** before trusting it — including `bounds`, `regions`, `visuals`,
+`snapshot.state` and the four identity strings, which are read unguarded — and
 a `Welcome` that fails it is terminal and distinct from a `Reject`. `rttSeconds` differences **the stamp the
 client recorded at send**, never the value the server echoed back, which is peer-controlled; a `TimeSync`
 reply whose echo does not match the outstanding stamp is not ours and is dropped. `serverSentMs` is
@@ -82,6 +91,35 @@ absent is dropped at the boundary rather than throwing inside the mirror. Every 
 also bounded at `MAX_WIRE_ITEMS` before the walk, since the count is peer-chosen and the work is linear
 in it. `TimeSync` refreshes every
 `SYNC_INTERVAL_SECONDS` and is diagnostic after the seed.
+
+**A snapshot arriving in pieces is reassembled here, not in the mirror.** `snapshot-chunk` envelopes precede
+their `Welcome`, which names how many there were; `GameClient` holds them — bounded at
+`MAX_SNAPSHOT_CHUNKS`, because they are memory kept before anything has been validated — and folds them onto
+`snapshot.entities` / `snapshot.state` **ahead** of the welcome's own remainder, since `entities` is
+parents-before-children across the whole set. The fold runs before `isUsableWelcome`, so every path below it
+sees one whole world and chunking is invisible past that line. A set that does not match the count fails the
+session as `peer`: a world missing entities the server believes it sent reads later as a mirror bug rather
+than as the truncated join it is. A chunk arriving for a join already answered is dropped and counted, and a
+resync discards what it held — the next join answers with its own set, at its own tick.
+
+## The bundle ([src/bundle.ts](src/bundle.ts))
+
+A `Welcome` naming a `bundleUrl` is answered by **fetch → bound → hash → compare → evaluate**, and the order
+is the mechanism: a bundle is executable, so evaluating before comparing would be running the peer's code to
+decide whether to run the peer's code. `BundleSource` is three primitives rather than one `load(url, hash)`
+precisely so the comparison stays here — a host handed the whole job could skip it and nothing would know.
+The url is scheme-checked with the renderer's `isAllowedAssetUrl` against `REMOTE_ASSET_SCHEMES`, the same
+policy `WireAssetRef.url` gets, and unlike an asset a refusal **fails the session**: there is no placeholder
+for missing code. The bytes are bounded at `MAX_BUNDLE_BYTES` before the digest, and `evaluate` is handed the
+bytes that were hashed, never the url again — a second fetch is a second answer.
+
+The session therefore has a pre-`live` state. `#onWelcome` measures the RTT **before** branching, since the
+lead seeds from it and folding a download into it would size the lead to the download; then it either opens
+the session at once (`bundleUrl === ''`, or this process already holds that hash) or enters `loading`.
+A missing `GameClientOptions.bundle` against a server that names one is a `bundle` failure, never a silent
+skip. `BUNDLE_DEADLINE_SECONDS` bounds the wait and, with it, the held inbox. The verified hash **survives a
+resync** — the code is in this process — while any in-flight load does not, since its welcome will never be
+answered.
 
 ## The mirror ([src/mirror.ts](src/mirror.ts))
 
@@ -110,11 +148,14 @@ strand scale/layer); `destroy`/`leave-interest`; `reparent` (**also reported on 
 render tree cannot infer it); `tag`; `player-join` (mints a `Player` and `playerManager.adopt`s it, keeping
 the **wire's** index); `player-leave`; `attach` dropped and counted.
 
-`@serverState` arrives as one `StateDiff` per host carrying a `fields` bag, and lands directly in
-`hosts.ensure(key).record.values` — one `StateDiff` per host, its `fields` map walked with
-`Object.entries` — keyed with core's own `GAME_KEY` /
+`@serverState` arrives as one `StateDiff` per host carrying a `fields` bag, and lands in
+`hosts.ensure(key).record` through core's `restoreHostField` — one `StateDiff` per host, its `fields` map
+walked with `Object.entries` — keyed with core's own `GAME_KEY` /
 `playerKey` / `entityKey` helpers — with no scripts there is no hoisted accessor, and the record is the one a
-hoist would land on. `channels.clear()` discards structural and state marks (no consumer here) but
+hoist would land on. `restoreHostField` rather than a bare `set`, because a wrapper field's value is a
+wrapper: one already on the record is `restore()`d in place, since a script may hold that same instance, and
+one the client does not have is revived from the payload's own tag — a `Scoreboard` arrives with its methods,
+not as a decoded blob. `channels.clear()` discards structural and state marks (no consumer here) but
 provably **not** the transform dirty set, which is the render bridge's work queue. Unknown `netId`s,
 out-of-order parents, and a spawn whose `netId` is not a plausible server handle (not a non-negative safe
 integer) are dropped/rooted and **counted** (`MirrorCounters`), never thrown. `#spawn` is the only place a
@@ -161,8 +202,29 @@ and its order is the contract: one `advanceTick` before any edge lands, then the
 synthesized `hold` per held button **union** non-neutral axis, then `fillIntent` ahead of the movement pass.
 A sampled `hold` in a frame updates the axis and dispatches nothing; the synthesized one is the only `hold`.
 The fold is seeded from `InputRing.heldAtHorizon` and then walked forward over every frame the authority has
-already simulated, because the horizon is an interval and not a tick. `contacts` is dropped outright: a
-contact is a consequence, and consequences are the authority's.
+already simulated, because the horizon is an interval and not a tick. `contacts` and `regions` are both
+dropped outright: each is a consequence of a position this client only predicted, and consequences are the
+authority's — and each diffs against a previous tick no snapshot store holds, so a rewind would leave the
+edge describing a tick that was taken back. `countdowns` stays core's, because a countdown is host-local
+display timing with no authoritative counterpart, and core's own pass already skips a replayed tick.
+
+## HUD ([src/hud-sink.ts](src/hud-sink.ts))
+
+`ClientHUDSink` is core's `HUDSink`, installed on the mirror's runtime **before** the join snapshot is
+applied — a script attached during it may write a widget on the way up, and core's null sink would drop that
+write in silence. It holds one record per widget under its name and the open screen stack bottom to top, and
+notifies subscribers; each pushed record is copied so a reader holds a value core's next write cannot change
+under it, and shallowly, which keeps a bound `Countdown` the live object a timer widget needs. A listener's
+throw is contained, so a UI bug cannot unwind into the handler that wrote the widget. A resync clears it: the
+HUD belongs to the world being discarded.
+
+`GameClient.pressWidget(widget, screen?)` and `.pointer(edge, local)` are the two ways in. Each dispatches
+locally **unconditionally** — hover, press animation, selection and disabled styling are client state and
+must not go dead because the session stalled — and queues an `interaction` event for the authority only while
+input is accepted, since a press the server would refuse as stale is worse than one never sent. The queue
+flushes once per frame as one `InteractionFrame` stamped with `localTick`; it never enters `InputRing`,
+because an interaction carries no `seq`, is not acked and is not replayed. `pointer` takes the **local**
+`EntityId` and maps it to a `netId` here, so the layer that hit-tests never learns there is a network.
 
 **A correction is eased on screen and exact in the simulation.** What the authority disagreed with is
 measured across the rewind — from the **drawn** pose, not the simulated one, because the offset replaces
@@ -238,6 +300,11 @@ map keys on the **local `EntityId`**, so the render layer never learns there is 
   the server chose; a refused entry is skipped, not fatal.
   The template half fills **before the first `await`**, so the caller may start it and reconcile the join
   snapshot without waiting. A rejection is counted (`ClientStats.assetLoadFailed`), never left unhandled.
+  The merge is **additive**: the welcome's manifest is a baseline, and a `manifest` envelope carries the
+  templates that came into use since — so replacing the table would drop everything the join established.
+  The same before-the-`await` rule carries the additive case, since the spawn using a new template rides the
+  envelope directly behind it. Asset names dedupe through the renderer's own `AssetQueue`, not a second table
+  here, so "already declared" has one answer and a re-declared entry is not re-fetched.
   A group template's `children` is flattened **here, once** into a `createSubtree` batch — the recursive
   wire shape is walked at join, never per spawn — bounded by `MAX_WIRE_ITEMS` per level, `MAX_TEMPLATE_DEPTH`
   and `MAX_TEMPLATE_NODES`, since one per-level cap raised to the nesting is not a bound. A list that
@@ -278,18 +345,21 @@ map keys on the **local `EntityId`**, so the render layer never learns there is 
 
 ## Lifecycle ([src/lifecycle.ts](src/lifecycle.ts))
 
-| State          | Entered when                                            | Input |
-| -------------- | ------------------------------------------------------- | ----- |
-| `connecting`   | `JoinRequest` sent, no `Welcome` yet                    | no    |
-| `live`         | `Welcome` applied, clock seeded                         | yes   |
-| `stalled`      | no envelope for `STALL_SECONDS`, **or** `ackSeq` frozen | no    |
-| `resyncing`    | `localTick < depictedTick`, or a `RateChange`           | no    |
-| `disconnected` | `onClose` fired                                         | no    |
-| `failed`       | `Reject`, unusable `Welcome`, or a `TransportError`     | no    |
+| State          | Entered when                                                      | Input |
+| -------------- | ----------------------------------------------------------------- | ----- |
+| `connecting`   | `JoinRequest` sent, no `Welcome` yet                              | no    |
+| `loading`      | `Welcome` accepted, its bundle still fetching                     | no    |
+| `live`         | `Welcome` applied, clock seeded                                   | yes   |
+| `stalled`      | no envelope for `STALL_SECONDS`, **or** `ackSeq` frozen           | no    |
+| `resyncing`    | `localTick < depictedTick`, or a `RateChange`                     | no    |
+| `disconnected` | `onClose` fired                                                   | no    |
+| `failed`       | `Reject`, unusable `Welcome`, a bad bundle, or a `TransportError` | no    |
 
 `failed` is terminal and absorbs later transitions. `FailureReason` distinguishes `rejected` (with phrased
-reason + `serverProtocolVersion`), `undecodable`, `internal` (`encode-rejected` — our bug) and `peer`
-(a malformed or hostile frame, including an envelope that threw while applying). Both stall triggers are
+reason + `serverProtocolVersion`), `undecodable`, `internal` (`encode-rejected` — our bug), `peer`
+(a malformed or hostile frame, including an envelope that threw while applying) and `bundle` (code that would
+not load, or was not the code the server said it would be). `loading` refuses input for the reason `stalled`
+does not cover: there is no session yet, so there is nothing for a tick to be stamped against. Both stall triggers are
 evidence about the _connection_; ring occupancy deliberately is not, or an energetic player could disable
 their own controls. `RateChange` resyncs rather than retuning, because core does not retune pending timers,
 the lag ring, or already-stamped input frames. A listener's throw is contained, so a UI bug cannot unwind
@@ -305,8 +375,9 @@ Each constant states its unit in its own doc line, because mixing them is the fa
 | `HEADROOM_TARGET` 2 · `LEAD_MIN_TICKS` 1 | `LEAD_MAX_SECONDS` .25 · `SYNC_INTERVAL_SECONDS` 2 · `MAX_FRAME_DT` .1 · `STALL_SECONDS` 1 · `CORRECTION_SMOOTH_SECONDS` .1 · `MAX_INTERPOLATION_DELAY_SECONDS` .1 | `GAIN` .25 · `NUDGE_MAX` .02 · `AXIS_QUANTUM` 1/64 |
 
 Plus, in the session's own ticks: `ACK_STALL_TICKS` 60, `RING_TICKS` 48, `MAX_REPLAY_TICKS` 48. In world
-units squared, `CORRECTION_SNAP_DISTANCE_SQUARED` 64². And `DEFAULT_VIEWPORT`, the extent the cursor quantum
-falls back to before the first `Welcome`.
+units squared, `CORRECTION_SNAP_DISTANCE_SQUARED` 64². In seconds, `BUNDLE_DEADLINE_SECONDS` 30; in bytes,
+`MAX_BUNDLE_BYTES` 8 MiB. In frames, `MAX_SNAPSHOT_CHUNKS` 256. And `DEFAULT_VIEWPORT`, the extent the
+cursor quantum falls back to before the first `Welcome`.
 
 ## Traps
 

@@ -5,23 +5,30 @@
     "type": "module",
     "description": "Multi-pane test harness.",
     "scripts": {
-        "dev": "vite",
-        "build": "vite build",
+        "dev": "tsc -p tsconfig.server.json && vite",
+        "dev:server": "tsc -p tsconfig.server.json && node dist/server/main.js",
+        "build": "tsc -p tsconfig.server.json && vite build",
         "preview": "vite preview",
-        "typecheck": "tsc -p tsconfig.test.json",
-        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc -p tsconfig.server.json && tsc -p tsconfig.test.json",
+        "test": "tsc -p tsconfig.server.json && vitest run --passWithNoTests",
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
+        "@platform/client": "workspace:*",
         "@platform/core": "workspace:*",
         "@platform/math": "workspace:*",
+        "@platform/protocol": "workspace:*",
         "@platform/renderer": "workspace:*",
+        "@platform/server": "workspace:*",
+        "@platform/transport": "workspace:*",
         "react": "^19.2.8",
-        "react-dom": "^19.2.8"
+        "react-dom": "^19.2.8",
+        "ws": "^8.21.3"
     },
     "devDependencies": {
         "@types/react": "^19.2.18",
         "@types/react-dom": "^19.2.4",
+        "@types/ws": "^8.18.1",
         "@vitejs/plugin-react": "^6.0.5",
         "typescript": "^7.0.2",
         "vite": "^8.2.0",

@@ -8,24 +8,24 @@ an authoritative CPU-side scene graph, so the backend's display objects are deri
 
 ## Layout
 
-| File                     | Owns                                                                                           |
-| ------------------------ | ---------------------------------------------------------------------------------------------- |
-| `index.ts`               | Public barrel — types, `IRenderer`, pure math, the url-scheme check. **Must not import pixi.** |
-| `renderer.ts`            | `IRenderer`, options, node descs, patches, snapshots, events                                   |
-| `node-id.ts`             | `NodeId` brand and `NO_NODE` over math's packed handle                                         |
-| `errors.ts`              | `RendererError` + `RendererErrorCode`                                                          |
-| `surfaces.ts`            | Surface order, camera-transformed / screen-space / clipped predicates                          |
-| `viewport.ts`            | `fitScale`, `stageRect`, `visibleRect`, `worldViewport`, DPR cap                               |
-| `projection.ts`          | world↔screen, the y-flip, deg→rad, UI anchors                                                  |
-| `transform-store.ts`     | SoA transform graph, resolve, the two dirty sets                                               |
-| `node-store.ts`          | `NodeRecord` over math's `SlotTable`, labelled `NodeStore`                                     |
-| `bounds.ts`              | Local bounds, rotated world AABB, cull test                                                    |
-| `asset-queue.ts`         | Per-name asset intent map, manifest merge, entry validation, the two url-scheme policies       |
-| `core/renderer-core.ts`  | The backend-independent scene and frame logic, in one copy                                     |
-| `core/renderer-shell.ts` | `RendererShell` — `IRenderer`'s backend-independent half, plus the fonts-last unload           |
-| `core/scene-sink.ts`     | `SceneSink` — the seam a backend implements                                                    |
-| `null/`                  | `createNullRenderer()`, `NullRenderer`, `NullSink`                                             |
-| `pixi/`                  | `createPixiRenderer()` + the PixiJS backend (8 files, below)                                   |
+| File                     | Owns                                                                                                                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `index.ts`               | Public barrel — types, `IRenderer`, pure math, `AssetQueue`, the url-scheme check. **Must not import pixi.**                                                                              |
+| `renderer.ts`            | `IRenderer`, options, node descs, patches, snapshots, events                                                                                                                              |
+| `node-id.ts`             | `NodeId` brand and `NO_NODE` over math's packed handle                                                                                                                                    |
+| `errors.ts`              | `RendererError` + `RendererErrorCode`                                                                                                                                                     |
+| `surfaces.ts`            | Surface order, camera-transformed / screen-space / clipped predicates                                                                                                                     |
+| `viewport.ts`            | `fitScale`, `stageRect`, `visibleRect`, `worldViewport`, DPR cap                                                                                                                          |
+| `projection.ts`          | world↔screen, the y-flip, deg→rad, UI anchors                                                                                                                                             |
+| `transform-store.ts`     | SoA transform graph, resolve, the two dirty sets                                                                                                                                          |
+| `node-store.ts`          | `NodeRecord` over math's `SlotTable`, labelled `NodeStore`                                                                                                                                |
+| `bounds.ts`              | Local bounds, rotated world AABB, cull test                                                                                                                                               |
+| `asset-queue.ts`         | Per-name asset intent map, manifest merge, entry validation, the two url-scheme policies — exported, since `@platform/client` merges a mid-session manifest addition against the same map |
+| `core/renderer-core.ts`  | The backend-independent scene and frame logic, in one copy                                                                                                                                |
+| `core/renderer-shell.ts` | `RendererShell` — `IRenderer`'s backend-independent half, plus the fonts-last unload                                                                                                      |
+| `core/scene-sink.ts`     | `SceneSink` — the seam a backend implements                                                                                                                                               |
+| `null/`                  | `createNullRenderer()`, `NullRenderer`, `NullSink`                                                                                                                                        |
+| `pixi/`                  | `createPixiRenderer()` + the PixiJS backend (8 files, below)                                                                                                                              |
 
 Everything above `core/` is pure: no DOM import, runs in plain Node. That is what keeps the
 sign-bearing math reachable without a browser.

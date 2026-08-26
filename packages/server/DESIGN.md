@@ -20,6 +20,8 @@ which `accept` is shaped for.
 | `driver.ts`     | `Driver`: accumulator, step cap + shed, send cadence, `deliver`→step, self-driven `start` |
 | `broadcast.ts`  | the three drains → `SendSet`, wire retyping, `encodeStateValue`, per-connection fan-out   |
 | `snapshot.ts`   | `buildSnapshot` — the join-time world walk; `ancestorsFirst`                              |
+| `chunk.ts`      | `splitSnapshot` — dividing a join snapshot one frame cannot carry                         |
+| `manifest.ts`   | `ManifestStore` — the live render manifest, its join payload and its pending additions    |
 | `constants.ts`  | engine constants, in ms with per-`simRate` tick conversions                               |
 
 ---
@@ -34,7 +36,7 @@ the post-step drain of core's three channels into tick-stamped envelopes.
 
 **Does not own.** Encoding (an injected `Codec`) or envelope shapes (`@platform/protocol`); the
 simulation (core); a frame's reliability class or byte movement (transport); prediction and interpolation
-(client). Depends on `core`, `protocol`, `transport`, `math`. Never imports `client` or `renderer`.
+(client). Depends on `core`, `project`, `protocol`, `transport`, `math`. Never imports `client` or `renderer`.
 
 ---
 
@@ -51,7 +53,7 @@ Core exports no `createWorld` / `step(tick, inputs)` / `collectChanges`; this is
 | "collect changes"   | three drains: `channels.drainStructural()`, `channels.drainState()`, `transforms.consumeDirty()` |
 | roster              | `joinPlayer(rt, id, name)` / `leavePlayer(rt, id)`, `rt.playerManager.players`                   |
 | reads for snapshots | `entities.liveIds()`/`record`/`idAt`, `tags.tagsOf`, `transforms.*`, `hosts.get`                 |
-| services            | left at core's null seams (`ManualClock`, `MemoryKVStore`, `NullPhysicsSink`, …)                 |
+| services            | left at core's null seams, except `kv` / `persisted`, which this package fills (§7)              |
 
 ---
 
@@ -73,17 +75,29 @@ observes it — the injected clock's epoch is unknown), and `closed`.
 
 `accept` mints the id, registers `onMessage`/`onClose` **before** any state mutation, enforces
 `MAX_UNJOINED_CONNECTIONS`, and sends nothing. The first valid `JoinRequest` then: checks
-`protocolVersion`, checks `maxPlayers`, calls `joinPlayer` (which fires `@onPlayerJoin`, whose handler
+`protocolVersion`, checks **identity**, checks `maxPlayers`, calls `joinPlayer` (which fires `@onPlayerJoin`, whose handler
 spawns or spectates), sanitizes the name (NFC, Unicode control **and format** characters stripped, ≤24
 **code points**, blank → `player`), stores `pendingJoin`, and queues a `player-join` roster op. The
 `Welcome` itself is built at the next send-tick (§5.1). `index` is assigned by core's `PlayerManager`,
 never by the server.
 
+**Identity is checked above capacity**, because a client running other code is refused whether or not there
+is room and `full` would send it back to retry a refusal that is not about room. `ProjectIdentity` is
+compared, never computed — whoever built the project knows what went into it, and a server deriving its own
+hashes would be checking itself. `projectId` and `projectHash` must agree exactly; a `bundleHash` of `''`
+means the joiner holds no bundle yet and will fetch the one `Welcome` names, so it is the one legal
+asymmetry, while a non-empty mismatch is a client running stale code and rejects as `identity`. An omitted
+`config.project` declares every field empty, which is what a client declaring none sends — so agreement, not
+absence, is what passes, and a one-sided declaration is a mismatch. The resync path re-checks, since a client
+may have loaded a bundle since it joined.
+
 A refusal is `Reject { reason, serverProtocolVersion }` **then** `close()` — a bare close is
-indistinguishable from a drop, and `version` must never be retried while `full` is not a network error at
-all. `maxPlayers` is deliberately absent from `Welcome`. Inbound frames are narrowed structurally, not
-cast (`join-request`, `input`, `time-sync` only); anything unrecognized is ignored and the connection
-survives. A **resync** re-sends `JoinRequest` on a joined connection: it re-arms `pendingJoin` and
+indistinguishable from a drop, and `version` and `identity` must never be retried while `full` is not a
+network error at all. `maxPlayers` is deliberately absent from `Welcome`. Inbound frames are narrowed
+structurally, not cast (`join-request`, `input`, `time-sync` only), against **every** field the type
+declares rather than a `Partial` of it — so a frame missing the identity fields is malformed like any other,
+ignored, and closed by the join deadline; the `version` reject can only refuse a peer whose frames still
+parse. A **resync** re-sends `JoinRequest` on a joined connection: it re-arms `pendingJoin` and
 allocates no second `Player`, and it spends a control token (§4.3) — a resync is the most expensive thing
 a single frame can ask for.
 
@@ -93,7 +107,8 @@ A joiner holds nothing, so it needs a complete picture; core's channels are delt
 is the private rewind form. `buildSnapshot(rt, forPlayer)` therefore reads live structures: `tick`,
 entities in `ancestorsFirst` order, the roster, and `@serverState` from **three** sources — all
 game-record fields, this player's own player-record fields (player-hosted state is scoped to its owner),
-and every live entity's entity-record fields.
+and every live entity's entity-record fields — read through the same `serializeHostField` the per-tick diff
+uses, so a joiner's baseline and the deltas that follow it cannot describe a wrapper differently.
 
 `ancestorsFirst` is a real topological emit, not core's slot order: parenting is a post-hoc mutation, so
 `spawn(child); spawn(parent); child.attachTo(parent)` leaves the child in the lower slot, and the wire
@@ -113,11 +128,18 @@ and a handler awaiting a timer cannot complete until the loop steps, so awaiting
 against its own driver. The synchronous run to each first `await` is the guarantee that matters; `server.started`
 exposes the promise for a host that wants it. `ServerConfig` extends `Partial<EngineConfig>` and adds
 `bounds`, `regions`, `visuals` (`RenderManifest` → `Welcome.visuals`; core's asset registry holds no
-`url`) and `gameScripts`. Defaults: `simRate` 60, `sendRate` 20, `maxPlayers` 8, bounds ±400 × ±300 —
+`url`), `project` (`ProjectIdentity` → the handshake comparison and `Welcome`'s four identity fields) and
+`gameScripts`. Defaults: `simRate` 60, `sendRate` 20, `maxPlayers` 8, bounds ±400 × ±300 —
 and both rates and `maxPlayers` are **validated** here, because `resolveConfig` fills defaults without
 checking and a `simRate` of 0 makes `dt` infinite, so the accumulator never reaches it and the world steps
 zero times forever. A missing `rt.passes` throws for the same reason: silently keeping core's stub leaves
 every input unapplied, which reads as a dead game rather than a wiring fault.
+
+`GameServerOptions.onBreakerTrip` is the dev channel: core hands it every handler or callback the breaker
+disabled, and it is registered before `startGame` so a Game `@onStart` that trips on its first tick is still
+reported. Not an envelope — a disabled handler is something whoever runs the server has to see, while a
+player's client can neither act on it nor be trusted with a stack, and a wire arm would put it under
+protocol's receiver-bounds rules for no benefit.
 
 ---
 
@@ -146,6 +168,14 @@ core's `applyEdge` and dispatched, then per connection the stale-hold backstop, 
 - **`fillIntent` runs here**, ahead of movement's step 4; without it `intent` stays zero and nothing moves.
 - **Identity comes from the connection**, never the frame; dispatch targets `playerKey(player.id)` and the
   avatar's entity host (absent for a spectator, whose `player.avatar` throws).
+- **Interactions drain here too**, after the action edges, so a press that opened a menu and a press on that
+  menu's button arriving in one wake resolve in the order the player made them. They are queued on the
+  `Connection` at receive and dispatched in the pass, because a handler reached from a socket callback would
+  run between ticks against whatever tick the loop last adopted. Dispatch goes through core's `pressWidget` /
+  `pointerHit`, never a second copy: the screen-scoping rule for a press and the liveness check for a pointer
+  hit are the same on both endpoints. The entity a hit names is the peer's claim — it was resolved against a
+  camera the server does not hold — so it is checked for liveness and nothing more, and a handler that grants
+  something must check reach itself.
 - **Stale-hold backstop:** after `holdStaleTicks(simRate)` with no traffic, every held action is released and every
   axis returned to neutral — the crash / killed tab / yanked cable a client blur handler cannot cover. **Any**
   well-formed frame counts as traffic, because edges-only input means a player holding one button sends
@@ -176,7 +206,12 @@ its seq stalls the ack like a frame that never arrived until `abandonStale` rele
 
 `join-request` and `time-sync` draw on a **second, far shallower bucket** (`CONTROL_BUCKET_FRAMES`, one
 token per `CONTROL_REFILL_MS`) that the input bucket does not cover: a resync buys a full world walk and a
-`time-sync` buys a reply, and nothing else rate-limits either.
+`time-sync` buys a reply, and nothing else rate-limits either. `interaction` draws on the **input** bucket
+instead — it is the same shape of cost as an input frame, one per tick with bounded contents, and one
+bucket is what keeps a peer's _total_ per-tick work bounded rather than letting a second channel double it.
+Its narrowing caps `events[]` at `MAX_INTERACTIONS_PER_FRAME` and each widget or screen name at
+`MAX_WIDGET_NAME_LENGTH`; there is no distinct-name cap, because a press buys one dispatch and is gone,
+where a held action buys one every tick until it is released.
 
 Two more bounds, on state a frame is not needed to open: `JOIN_DEADLINE_MS` (swept after each `pump`,
 against the pump's own clock, since `TimerSource` schedules but does not tell time) and
@@ -215,6 +250,30 @@ holds. A duplicate `spawn` is not idempotent: the client mints a second entity a
 is one send interval of join latency. Drains are on the send-tick, not every tick, because core's channels
 accumulating between sends _is_ the net-change accumulation.
 
+**Ops held over are the same hazard.** A snapshot reads live state, so it already contains the effect of
+everything still in the spill queue (§5.3) — a joiner is therefore stamped with
+`Connection.structuralSkip = spill.length` when its `Welcome` goes out, and drops that many ops off the
+front of the envelopes that follow. Counted down rather than cleared, since a spill deeper than one send's
+budget spans several sends.
+
+**A `Welcome` over `MAX_FRAME_PAYLOAD_BYTES` is divided** (`chunk.ts`): the snapshot's `entities` and
+`state` move into `snapshot-chunk` envelopes sent **before** it, and the `Welcome` carries
+`snapshotChunks` naming how many. Encoded once and measured, then sent as the frame that was measured
+through `sendEncoded`, so a world that fits pays nothing for the check. `splitSnapshot` sizes groups by
+**measuring** each element rather than counting them — `template`, `tags` and a `@serverState` value are
+all creator-authored, so element count says little about bytes — and an element no frame could carry alone
+is dropped and counted, like an unrepresentable mark. The tick and the roster stay on the `Welcome`: one is
+a scalar and the other is bounded by `maxPlayers`.
+
+**The render manifest is live, not captured.** `ManifestStore` holds every visual declared so far, keyed by
+name so a re-declaration costs nothing, and queues whatever is genuinely new. `declareVisuals(manifest)` is
+how a template comes into use mid-session; the additions go out as a `manifest` envelope **before** the
+fan-out on the next send-tick, because that same send's journal may carry the first spawn of one and a node
+created against a table that lacks the template draws the placeholder and keeps it. A connection still
+awaiting its `Welcome` is skipped, since `snapshot()` already gives it the whole manifest — so a joiner and
+an already-connected peer cannot end up able to draw different things. Assets are defined on core's registry
+alongside, or `assets.get` answers `null` for a key the wire is already carrying.
+
 ### 5.2 Two envelopes, both tick-stamped
 
 Protocol's types, split by reliability class and joined by an equal `tick`:
@@ -228,7 +287,17 @@ Protocol's types, split by reliability class and joined by an equal `tick`:
 
 Nothing sits between the drain and the envelope. `drainOnce` runs once per send-tick (each drain clears what
 it consumes, so a per-connection drain would starve every connection but the first) and its `SendSet` lives
-for exactly one send.
+for exactly one send — except the spill queue, which is the one thing carried between them.
+
+**The structural budget is the only bound on what the server produces.** Everything else here bounds what it
+_accepts_; nothing limited a journal, so a script spawning in a loop minted an envelope past transport's
+frame cap — refused by every peer before parsing, and the client's answer to a broken session is a resync,
+which asks for a full snapshot and is bigger. So `MAX_STRUCTURAL_OPS_PER_SEND` caps one send and the
+remainder goes to `GameServer.#spill`, at the **front** of the next send's ops and ahead of anything new.
+Strictly ordered: the ops do not commute and the journal is applied verbatim, so a reordered spill creates a
+node for a dead entity — worse than no cap at all. Ops are converted to wire form **before** they can be
+held over, because a `spawn`'s snapshot is read from live state and an entity destroyed while its op waited
+would go out with an empty `template`.
 
 - **Roster ops core's journal has no arm for:** `player-join` is **prepended** (it must precede the spawns
   its own handler produced), `player-leave` **appended** (it must follow the destroys of that player's
@@ -251,7 +320,11 @@ for exactly one send.
   fields it wrote. Anything unrepresentable is **dropped and counted** (`server.droppedMarks`) rather than
   thrown — including a field named `__proto__` / `constructor` / `prototype`, transport's `RESERVED_KEYS`
   rather than a second copy of the set, since the grouped shape makes the name a KEY and assigning one would
-  set the bucket's prototype rather than add it.
+  set the bucket's prototype rather than add it — checked at **every** level of a value, not only the top,
+  since a serialized wrapper is a nested object and a reserved key inside one would set the copy's prototype
+  and ship the field silently short a member. Values are read through core's `serializeHostField`, so a
+  wrapper field crosses as its `serialize()` form: read raw it is a class instance, which `encodeStateValue`
+  refuses, and every scoreboard write would be dropped and counted here.
 
 ### 5.4 Fan-out
 
@@ -321,7 +394,18 @@ registry so the next broadcast skips it, drop the connection's buffered frames, 
 then release the player: **destroy its owned entities first** (found by scanning `liveIds()` for
 `record.ownerId`, never `player.avatar`, which throws for a spectator), then `leavePlayer(rt, id)` — which
 dispatches `@onPlayerLeave` at the Game host **before** `PlayerManager.remove`, so the handler can still
-read the player — then queue the `player-leave` op. No grace period and no reconnect.
+read the player — then **persist** that player's host record, then queue the `player-leave` op. No grace
+period and no reconnect.
+
+Persistence is the seam's two missing halves, filled here: `ServerConfig.kv` is assigned to `rt.kv` and a
+`PersistedState` over it becomes `rt.persisted`, which is what wiring's seeding has always read and nothing
+ever produced. The record reference is taken **before** `leavePlayer` and read **after** it — the leave
+handler may write a last value, and `PlayerManager.remove` then drops the record from the host table, so
+neither order alone works. The write is fire-and-forget with the failure routed to `rt.log.warn`: the trigger
+is a socket that has already closed, and making the close path async to carry a promise would push one up
+through `transport.onClose` and `GameServer.close()`, neither of which has anywhere to put it. `PersistedState`
+captures synchronously into its cache for exactly that reason, so a rejoin under the same host id reads the
+value back whether or not the store write has landed.
 
 `GameServer.close()` is the whole-server form: stop the driver, then run that path **inline** for every
 connection rather than waiting on each transport's `onClose`, which arrives on the next delivery — and after
@@ -338,23 +422,28 @@ cycles. The exported barrel drives core only as values (`loadGame`, `Loop`, `Run
 script, so nothing on this package's surface carries a decorator. Engine constants live in `constants.ts`,
 grouped by unit, never on the creator surface:
 
-| Constant                   | Value                 | Bounds                                                 |
-| -------------------------- | --------------------- | ------------------------------------------------------ |
-| `INPUT_WINDOW_MS`          | `MAX_REWIND_MS` (250) | both sides of the tick window (§4.3)                   |
-| `JOIN_DEADLINE_MS`         | 5 000                 | silence before an unjoined connection is closed        |
-| `HOLD_STALE_MS`            | 5 000                 | silence before held actions are released server-side   |
-| `MAX_CATCHUP_MS`           | 250                   | wall-clock one wake may catch up before shedding       |
-| `INPUT_BUCKET_FRAMES`      | 8                     | input-frame token depth, one refilled per stepped tick |
-| `RATE_BREACH_CLOSE`        | 64                    | cumulative rate refusals before the connection closes  |
-| `CONTROL_BUCKET_FRAMES`    | 4                     | `join-request` + `time-sync` token depth               |
-| `CONTROL_REFILL_MS`        | 1 000                 | wall-clock per control token                           |
-| `MAX_ACTIONS_PER_FRAME`    | 32                    | actions one input frame may carry                      |
-| `MAX_ACTION_NAME_LENGTH`   | 64                    | longest accepted action name                           |
-| `MAX_ACTION_NAMES`         | 64                    | distinct action names one connection may open          |
-| `MAX_NAME_LENGTH`          | 24                    | longest accepted display name, in code points          |
-| `MAX_STATE_DEPTH`          | 64                    | `@serverState` nesting past which a value is dropped   |
-| `MAX_UNJOINED_CONNECTIONS` | 32                    | unjoined sockets held at once                          |
-| `HORIZON_CLAMP_TICKS`      | 2                     | ticks past the horizon clamped rather than refused     |
+| Constant                      | Value                 | Bounds                                                 |
+| ----------------------------- | --------------------- | ------------------------------------------------------ |
+| `INPUT_WINDOW_MS`             | `MAX_REWIND_MS` (250) | both sides of the tick window (§4.3)                   |
+| `JOIN_DEADLINE_MS`            | 5 000                 | silence before an unjoined connection is closed        |
+| `HOLD_STALE_MS`               | 5 000                 | silence before held actions are released server-side   |
+| `MAX_CATCHUP_MS`              | 250                   | wall-clock one wake may catch up before shedding       |
+| `INPUT_BUCKET_FRAMES`         | 8                     | input-frame token depth, one refilled per stepped tick |
+| `RATE_BREACH_CLOSE`           | 64                    | cumulative rate refusals before the connection closes  |
+| `CONTROL_BUCKET_FRAMES`       | 4                     | `join-request` + `time-sync` token depth               |
+| `CONTROL_REFILL_MS`           | 1 000                 | wall-clock per control token                           |
+| `MAX_ACTIONS_PER_FRAME`       | 32                    | actions one input frame may carry                      |
+| `MAX_ACTION_NAME_LENGTH`      | 64                    | longest accepted action name                           |
+| `MAX_ACTION_NAMES`            | 64                    | distinct action names one connection may open          |
+| `MAX_INTERACTIONS_PER_FRAME`  | 16                    | interactions one frame may carry                       |
+| `MAX_WIDGET_NAME_LENGTH`      | 64                    | longest accepted widget or screen name                 |
+| `MAX_NAME_LENGTH`             | 24                    | longest accepted display name, in code points          |
+| `MAX_IDENTITY_LENGTH`         | 128                   | longest accepted `projectId` / hash on a join request  |
+| `MAX_STATE_DEPTH`             | 64                    | `@serverState` nesting past which a value is dropped   |
+| `MAX_UNJOINED_CONNECTIONS`    | 32                    | unjoined sockets held at once                          |
+| `HORIZON_CLAMP_TICKS`         | 2                     | ticks past the horizon clamped rather than refused     |
+| `MAX_STRUCTURAL_OPS_PER_SEND` | 2 048                 | structural ops one send carries; the rest spill        |
+| `MAX_FRAME_PAYLOAD_BYTES`     | ¾ `MAX_FRAME_BYTES`   | bytes a server-minted frame targets, under the cap     |
 
 `pastGraceTicks` / `futureHorizonTicks` / `holdStaleTicks` / `controlRefillTicks` / `maxStepsPerWake` /
 `ticksPerSend` convert these to ticks of the session's own rate, and `maxSeqGap` composes the first two with
