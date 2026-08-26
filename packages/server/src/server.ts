@@ -346,8 +346,17 @@ export class GameServer {
      * unjoined sockets cannot lock out real players, and handing back an id for a socket this call just
      * closed reads at the composition root as a connection that is still live. A connection offered
      * before the world is built is refused the same way — a joiner's snapshot is its whole baseline.
+     *
+     * `playerId` is what makes `@serverState` survive a rejoin: the host names the peer, that name
+     * becomes `player.id`, and the persisted record is read under it before the join handlers run.
+     * The server never takes it from a frame, so whatever the host trusts is what the game trusts —
+     * it must be a per-game id and not an account key, because `player.id` reaches every other peer
+     * on the wire. Omitted, the connection is anonymous and persists nothing across processes.
      */
-    accept(transport: Transport): string | null {
+    accept(transport: Transport, playerId?: string): string | null {
+        if (playerId !== undefined && playerId === '') {
+            throw new TypeError('playerId must be a non-empty string, or omitted');
+        }
         if (!this.#booted || this.#closed || this.#unjoinedCount() >= MAX_UNJOINED_CONNECTIONS) {
             transport.close();
             return null;
@@ -359,6 +368,7 @@ export class GameServer {
         // against it would expire every connection accepted before the loop started.
         const conn = new Connection(
             connectionId,
+            playerId ?? null,
             transport,
             this.#driver.hasReading ? this.#driver.nowSeconds : null,
         );
@@ -573,7 +583,8 @@ export class GameServer {
 
     /**
      * The join sequence, in the order the checks must run: version, then identity — both before
-     * anything is built — then capacity before anything is allocated, and a `Reject` before the close.
+     * anything is built — then, once this player's persisted record is in the cache, capacity before
+     * anything is allocated, and a `Reject` before the close.
      *
      * Identity sits above capacity because a client running other code is refused whether or not
      * there is room, and "full" would send it away to retry a refusal that is not about room.
@@ -602,15 +613,60 @@ export class GameServer {
             this.#reject(conn, 'identity');
             return;
         }
+        if (conn.admitting) return;
+
+        // Before `joinPlayer`, not after: wiring seeds a field synchronously at the hoist and
+        // `@onPlayerJoin` attaches this player's own scripts inside that call, so a record arriving
+        // later seeds nothing until the session after. A host the cache already holds is not re-read.
+        if (conn.identity !== null && !this.#persisted.has(playerKey(conn.playerId))) {
+            conn.admitting = true;
+            void this.#persisted
+                .load(playerKey(conn.playerId))
+                // Admitted anyway, seeded with nothing: a store that cannot be read is a degraded
+                // session rather than a refused one, and the cache stays empty for this host — which
+                // is what stops the leave writing this session's initializers over the unread save.
+                .catch((error: unknown) => {
+                    this.#rt.log.warn(
+                        `reading ${conn.playerId} failed: ${error instanceof Error ? error.message : String(error)}`,
+                    );
+                })
+                .then(() => {
+                    conn.admitting = false;
+                    this.#admit(conn, request);
+                })
+                .catch((error: unknown) => {
+                    conn.admitting = false;
+                    this.#rt.log.warn(
+                        `admitting ${conn.playerId} failed: ${error instanceof Error ? error.message : String(error)}`,
+                    );
+                });
+            return;
+        }
+        this.#admit(conn, request);
+    }
+
+    /** Allocates the Player, once this connection's persisted record is in the cache. */
+    #admit(conn: Connection, request: JoinRequest): void {
+        if (conn.closed || this.#closed || conn.joined) return;
+
+        // Tested here rather than at the request: an identified join waits on the persisted read and
+        // the roster can fill while it does.
         const roster = this.#rt.playerManager?.players.length ?? 0;
         if (roster >= this.#config.maxPlayers) {
+            this.#reject(conn, 'full');
+            return;
+        }
+        // Two live connections under one id share a host record, and the second to leave would write
+        // its own values over the first's.
+        if ((this.#rt.playerManager?.byId(conn.playerId) ?? null) !== null) {
+            this.#rt.log.warn(`refusing a second connection claiming ${conn.playerId}`);
             this.#reject(conn, 'full');
             return;
         }
 
         // The index is the PlayerManager's to assign, never the server's, so the client mirrors it off
         // the wire rather than renumbering from its own arrival order.
-        const player = joinPlayer(this.#rt, conn.connectionId, sanitizeName(request.name));
+        const player = joinPlayer(this.#rt, conn.playerId, sanitizeName(request.name));
         conn.player = player;
         conn.admission.noteTraffic(this.#rt.tick);
 
@@ -741,7 +797,14 @@ export class GameServer {
         // table — so the reference has to be captured first, and the fields read second.
         const record = this.#rt.hosts.get(playerKey(player.id))?.record;
         leavePlayer(this.#rt, player.id);
-        if (record !== undefined) this.#persist(record);
+        // A read that failed must not be answered by writing this session's initializers over the
+        // save it failed to read; a connection the host named nobody for was never read at all.
+        if (
+            record !== undefined &&
+            (conn.identity === null || this.#persisted.has(record.hostId))
+        ) {
+            this.#persist(record);
+        }
         this.#roster.leaves.push(player.id);
     }
 
