@@ -52,6 +52,10 @@ export interface ClientPassContext {
  */
 export function clientPasses(base: TickPasses, ctx: ClientPassContext): TickPasses {
     return {
+        // Core's, unchanged: a script the wire told this client to attach is owed its `@onStart`
+        // on the same pass the authority ran it, and the drain is once-only so a replayed tick
+        // cannot spend it twice.
+        starts: base.starts,
         input: (dispatch) => runInputPass(ctx, dispatch),
         movement: (dt, scope) => runMovementPass(ctx.rt, dt, scope),
         contacts: () => {},

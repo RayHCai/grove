@@ -2,6 +2,7 @@
 // screens are the hosts a ClientScript<HUDScreen> attaches to. Client-side by construction — `hud`
 // resolves the current runtime's state, and a server runtime simply has no local player.
 
+import type { ScriptProps } from '@platform/project';
 import type { AssetRef } from './assets.js';
 import type { BaseScript } from '../script/bases.js';
 import type { Countdown } from './wrappers.js';
@@ -12,12 +13,15 @@ import { currentRuntime, hasRuntime } from './runtime.js';
 import { screenKey } from './hosts.js';
 
 /** A creator script class, as a screen holds one until it is opened. */
-type ScreenScript = new () => BaseScript<HUDScreen>;
+type ScreenScript = new (props?: ScriptProps) => BaseScript<HUDScreen>;
+
+/** One registered class and the props it was configured with, held until the open that wires it. */
+type ScreenAttachment = { klass: ScreenScript; props?: ScriptProps };
 
 export class HUDScreen {
     readonly name: string;
     /** Attached at open and discarded at close, so a menu reopens with fresh client state. */
-    readonly #scripts: ScreenScript[] = [];
+    readonly #scripts: ScreenAttachment[] = [];
     #visible = false;
 
     constructor(name: string) {
@@ -34,7 +38,7 @@ export class HUDScreen {
     }
 
     /** @internal — the classes to attach on the next open, in declaration order. */
-    get scripts(): readonly ScreenScript[] {
+    get scripts(): readonly ScreenAttachment[] {
         return this.#scripts;
     }
 
@@ -48,8 +52,8 @@ export class HUDScreen {
 
     // Registered rather than attached: a screen never opened has no script instances, so the class
     // is held until the open that wires it.
-    addScript(script: ScreenScript): this {
-        this.#scripts.push(script);
+    addScript(script: ScreenScript, props?: ScriptProps): this {
+        this.#scripts.push({ klass: script, ...(props === undefined ? {} : { props }) });
         return this;
     }
 }
@@ -145,12 +149,18 @@ export class HUD {
 
         // Wired first: a script's location is rejected at attach time, and a LoadError thrown after
         // the screen was marked visible would leave one open that nothing ever put on screen.
-        for (const klass of found.scripts) rt.wiring?.attachToScreen(found, klass as never);
+        for (const attachment of found.scripts) {
+            rt.wiring?.attachToScreen(found, attachment.klass as never, attachment.props);
+        }
 
         found.setVisible(true);
         rt.hud?.openOrder.push(screen);
         rt.hudSink.screen(screen, true);
-        // Last, so a handler that opens a second screen from its own @onStart sees this one open.
+        // Immediate rather than deferred to the starts pass, and then dropped from its queue: a
+        // menu that appeared but ran nothing until the next tick reads as a dropped frame, and
+        // starting twice is worse. Last, so a handler that opens a second screen from its own
+        // @onStart sees this one open.
+        rt.instances.dropPendingStarts(screenKey(screen));
         void dispatchScreen(rt, screen, 'onStart', '@start');
         return found;
     }

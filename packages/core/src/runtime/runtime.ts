@@ -46,6 +46,12 @@ import type { HUDState } from './hud.js';
 
 /** The per-tick passes the loop drives, in tick order. */
 export interface TickPasses {
+    /**
+     * `@onStart` for everything attached since the last tick — first, so a script is running before
+     * anything can dispatch to it, and after the previous tick's destroy drain, so one attached to
+     * an entity that then died never starts at all.
+     */
+    starts(dispatch: DispatchOptions): void;
     input(dispatch: DispatchOptions): void;
     movement(dt: number, scope: ReadonlySet<EntityId> | undefined): void;
     contacts(dispatch: DispatchOptions): void;

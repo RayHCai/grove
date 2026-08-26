@@ -4,6 +4,7 @@
 import type { Bounds, Vec3 } from '@platform/math';
 import { bounds as makeBounds } from '@platform/math';
 import type { EntityId } from '../ids.js';
+import type { ScriptProps } from '@platform/project';
 import type { BaseScript } from '../script/bases.js';
 import { instantiate } from '../world/templates.js';
 import type { Runtime } from './runtime.js';
@@ -60,8 +61,8 @@ export abstract class Game {
         this.rt.paused = false;
     }
 
-    addScript(script: new () => BaseScript<Game>): this {
-        this.rt.wiring?.attachToGame(this, script as unknown as new () => BaseScript<never>);
+    addScript(script: new (props?: ScriptProps) => BaseScript<Game>, props?: ScriptProps): this {
+        this.rt.wiring?.attachToGame(this, script as never, props);
         return this;
     }
 }

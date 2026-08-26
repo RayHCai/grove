@@ -44,6 +44,8 @@ export class Loop {
         const passes = this.#rt.passes;
 
         // Pass order is part of the simulation contract; reordering changes results.
+        passes?.starts(dispatch);
+
         passes?.input(dispatch);
 
         passes?.movement(dt, opts.scope);

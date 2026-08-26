@@ -122,6 +122,7 @@ function emptyDelta(): MirrorDelta {
 /** Every pass a no-op, so a `step` taken without a baseline behind it moves nothing. */
 function inertPasses(): TickPasses {
     return {
+        starts() {},
         input() {},
         movement() {},
         contacts() {},

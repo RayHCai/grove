@@ -17,9 +17,11 @@ import {
     onStart,
     serverState,
 } from '../script/decorators.js';
+import type { ScriptProps } from '@platform/project';
 import type { Entity } from '../runtime/entity.js';
 import type { HUDScreen } from '../runtime/hud.js';
 import { BaseMovement } from '../runtime/movement.js';
+import type { Player } from '../runtime/player.js';
 import type { Ctx } from '../runtime/ctx.js';
 
 export class Wallet extends ServerScript {
@@ -311,5 +313,42 @@ export class SyncedWithRequest extends SyncedScript<Entity> {
     @onRequest('illegal')
     handle(): void {
         /* the location, not the body, is what wire time rejects */
+    }
+}
+
+/**
+ * Ctor props: a class that reads them at construction and two `@serverState` fields.
+ *
+ * `speed` is what an inspector configures; `label` is what it leaves alone. The engine writes both
+ * kinds of field, so a props-free attach must still land the initializer.
+ */
+export class Configured extends ServerScript<Entity> {
+    @serverState speed = 1;
+    @serverState label = 'default';
+
+    /** Derived at construction, before the engine writes anything — never a field props name. */
+    readonly configuredKeys: string[];
+
+    constructor(props?: ScriptProps) {
+        super();
+        this.configuredKeys = Object.keys(props ?? {}).toSorted();
+    }
+}
+
+/** Attached from a player-join handler, which runs between ticks — so its @onStart is deferred. */
+export class LateJoiner extends ServerScript<Player> {
+    @serverState greeted = false;
+
+    @onStart
+    begin(): void {
+        this.greeted = true;
+    }
+}
+
+/** The case a deferred start exists for: a script attached from outside any tick. */
+export class Greeter extends ServerScript {
+    @onPlayerJoin
+    join(ctx: Ctx): void {
+        ctx.player?.addScript(LateJoiner);
     }
 }

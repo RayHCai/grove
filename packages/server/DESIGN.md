@@ -165,7 +165,8 @@ press-before-release. `dropConnection` clears a closed peer's pending frames.
 
 ### 4.2 The input pass
 
-Installed over core's stub, it runs at tick order step 2–3: `advanceTick()` once per connection (so
+Installed over core's stub, it runs at tick order step 3–4, after the starts pass: `advanceTick()` once
+per connection (so
 one-tick-wide `pressed`/`released` clear even on a quiet tick), then the drained frames are folded through
 core's `applyEdge` and dispatched, then per connection the stale-hold backstop, the synthesized `hold`, and
 `movement.fillIntent(moveX, moveY)`.
