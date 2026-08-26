@@ -217,6 +217,8 @@ dropped outright: each is a consequence of a position this client only predicted
 authority's — and each diffs against a previous tick no snapshot store holds, so a rewind would leave the
 edge describing a tick that was taken back. `countdowns` stays core's, because a countdown is host-local
 display timing with no authoritative counterpart, and core's own pass already skips a replayed tick.
+`starts` stays core's too: a script the wire told this client to attach is owed its `@onStart` on the same
+pass the authority ran it, and the drain is once-only, so a replayed tick cannot spend it twice.
 
 ## HUD ([src/hud-sink.ts](src/hud-sink.ts))
 

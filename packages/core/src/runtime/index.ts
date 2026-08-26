@@ -71,7 +71,13 @@ export {
     pressWidget,
     pointerHit,
 } from './load-game.js';
-export type { GameManifest, LoadOptions, PointerEdge, WidgetPress } from './load-game.js';
+export type {
+    GameManifest,
+    GameScriptSpec,
+    LoadOptions,
+    PointerEdge,
+    WidgetPress,
+} from './load-game.js';
 
 export { Roster } from './roster.js';
 export { RegionIndex } from './regions.js';

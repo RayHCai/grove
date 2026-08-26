@@ -3,6 +3,7 @@
 
 import type { Vec3 } from '@platform/math';
 import { vec3 } from '@platform/math';
+import type { ScriptProps } from '@platform/project';
 import type { BaseScript } from '../script/bases.js';
 import type { Runtime } from './runtime.js';
 import type { Entity } from './entity.js';
@@ -153,8 +154,8 @@ export class Player {
         return this;
     }
 
-    addScript(script: new () => BaseScript<Player>): this {
-        this.#rt.wiring?.attachToPlayer(this, script);
+    addScript(script: new (props?: ScriptProps) => BaseScript<Player>, props?: ScriptProps): this {
+        this.#rt.wiring?.attachToPlayer(this, script, props);
         return this;
     }
 }

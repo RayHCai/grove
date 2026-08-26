@@ -5,6 +5,7 @@ import type { Vec3, Easing, Bounds } from '@platform/math';
 import { atan2, vec3, vec3Dist, RAD2DEG } from '@platform/math';
 import type { EntityId } from '../ids.js';
 import { NO_ENTITY } from '../ids.js';
+import type { ScriptProps } from '@platform/project';
 import type { BaseScript } from '../script/bases.js';
 import type { Runtime } from './runtime.js';
 import { entityKey } from './hosts.js';
@@ -333,8 +334,8 @@ export class Entity {
         return this.#rt.entities.isAlive(this.#id);
     }
 
-    addScript(script: new () => BaseScript<Entity>): this {
-        this.#rt.wiring?.attachToEntity(this.#id, script as never);
+    addScript(script: new (props?: ScriptProps) => BaseScript<Entity>, props?: ScriptProps): this {
+        this.#rt.wiring?.attachToEntity(this.#id, script as never, props);
         return this;
     }
 

@@ -47,12 +47,26 @@ export function makeInstance(
     };
 }
 
+/** One instance owed its `@onStart`, with the host key that dispatch addresses. */
+export interface PendingStart {
+    hostKey: string;
+    inst: ScriptInstance;
+}
+
 /** The script instances attached to each host. */
 export class InstanceRegistry {
     /** hostKey → its instances in attachment order, which is dispatch order. */
     readonly #byHost = new Map<string, ScriptInstance[]>();
     /** The reverse edge, for engine code holding a script object and needing its identity. */
     readonly #byInstance = new WeakMap<object, ScriptInstance>();
+    /**
+     * Attached but not yet started, in attachment order.
+     *
+     * Attaching does not dispatch: `addScript` from a player-join handler runs between ticks, so a
+     * `@onStart` fired there would run against whatever tick the loop last adopted. The starts pass
+     * drains this at a defined point instead.
+     */
+    readonly #pendingStart: PendingStart[] = [];
 
     attach(hostKey: string, inst: ScriptInstance): void {
         let list = this.#byHost.get(hostKey);
@@ -62,6 +76,16 @@ export class InstanceRegistry {
         }
         list.push(inst);
         this.#byInstance.set(inst.instance, inst);
+        this.#pendingStart.push({ hostKey, inst });
+    }
+
+    /** Everything attached since the last drain, in attachment order. Empties the queue. */
+    takePendingStarts(): PendingStart[] {
+        return this.#pendingStart.splice(0);
+    }
+
+    get pendingStartCount(): number {
+        return this.#pendingStart.length;
     }
 
     forHost(hostKey: string): readonly ScriptInstance[] {
@@ -80,6 +104,22 @@ export class InstanceRegistry {
 
     removeHost(hostKey: string): void {
         this.#byHost.delete(hostKey);
+        // A script on a torn-down host never starts: the destroy drain has already run `@onEnd`
+        // for that host, and starting after ending is the one order a handler cannot be written
+        // against.
+        this.dropPendingStarts(hostKey);
+    }
+
+    /**
+     * Forgets one host's queued starts, for a caller that has already dispatched them itself.
+     *
+     * A screen is the one host whose open is immediate — a menu that appeared but ran nothing until
+     * the next tick would read as a dropped frame — so it dispatches its own and drops these.
+     */
+    dropPendingStarts(hostKey: string): void {
+        for (let i = this.#pendingStart.length - 1; i >= 0; i--) {
+            if (this.#pendingStart[i]?.hostKey === hostKey) this.#pendingStart.splice(i, 1);
+        }
     }
 
     *all(): IterableIterator<ScriptInstance> {
@@ -103,6 +143,7 @@ export class InstanceRegistry {
 
     clear(): void {
         this.#byHost.clear();
+        this.#pendingStart.length = 0;
     }
 }
 

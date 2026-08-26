@@ -18,7 +18,7 @@ import type { Entity } from './entity.js';
 import { entityKey, playerKey, GAME_KEY } from './hosts.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- attach accepts any host-typed class
-type AnyScriptClass = new () => BaseScript<any>;
+type AnyScriptClass = new (props?: ScriptProps) => BaseScript<any>;
 
 export class Wiring {
     readonly #rt: Runtime;
@@ -49,24 +49,25 @@ export class Wiring {
         return instance;
     }
 
-    attachToPlayer(player: Player, klass: AnyScriptClass): object {
-        return this.#attach(playerKey(player.id), player, klass, player);
+    attachToPlayer(player: Player, klass: AnyScriptClass, props?: ScriptProps): object {
+        return this.#attach(playerKey(player.id), player, klass, player, props);
     }
 
-    attachToGame(game: object, klass: AnyScriptClass): object {
-        return this.#attach(GAME_KEY, game, klass, undefined);
+    attachToGame(game: object, klass: AnyScriptClass, props?: ScriptProps): object {
+        return this.#attach(GAME_KEY, game, klass, undefined, props);
     }
 
-    attachToCamera(camera: Camera, klass: AnyScriptClass): object {
-        return this.#attach(`camera:${camera.player.id}`, camera, klass, camera.player);
+    attachToCamera(camera: Camera, klass: AnyScriptClass, props?: ScriptProps): object {
+        return this.#attach(`camera:${camera.player.id}`, camera, klass, camera.player, props);
     }
 
-    attachToScreen(screen: HUDScreen, klass: AnyScriptClass): object {
+    attachToScreen(screen: HUDScreen, klass: AnyScriptClass, props?: ScriptProps): object {
         return this.#attach(
             `screen:${screen.name}`,
             screen,
             klass,
             this.#rt.localPlayer ?? undefined,
+            props,
         );
     }
 
@@ -105,12 +106,17 @@ export class Wiring {
 
         let instance: BaseScript<object>;
         try {
-            instance = new klass() as BaseScript<object>;
+            instance = new klass(props) as BaseScript<object>;
             (instance as { host: object }).host = host;
             setScriptRuntime(instance, this.#rt);
             if (localPlayer && location === 'client') {
                 (instance as { localPlayer?: Player }).localPlayer = localPlayer;
             }
+            // BETWEEN construction and the hoist, and that ordering is the whole correctness
+            // argument: the hoist moves each `@serverState` field's authored value into the host
+            // record, so a prop written after it would be overwritten by the initializer it is
+            // there to override. Written here it lands in the backing map the hoist then reads.
+            applyProps(instance, props);
             this.#hoistState(instance, host, entry.record);
             this.#bindWrappers(instance, entry.record);
         } catch (err) {
@@ -210,6 +216,29 @@ export class Wiring {
         if (hasRoster && !(kind === 'game' && location === 'server')) {
             throw new LoadError('@onPlayerJoin / @onPlayerLeave are Game-hosted ServerScript only');
         }
+    }
+}
+
+/**
+ * Object keys a prop may not name, because assigning one rewrites the instance rather than a field.
+ *
+ * `validate` already refuses them in a saved file and the codec refuses them as wire keys, so this
+ * is the third layer — and the one that runs against a value a peer chose.
+ */
+const RESERVED_PROPS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Writes each configured prop onto the instance.
+ *
+ * Authoritative for any field it names: a `@serverState` field is an accessor by now, so this lands
+ * in the backing map the hoist reads, and a plain field is a plain write. A constructor that wants
+ * to DERIVE something from a prop writes to a different field — this one is the inspector's.
+ */
+function applyProps(instance: object, props: ScriptProps | undefined): void {
+    if (props === undefined) return;
+    for (const [key, value] of Object.entries(props)) {
+        if (RESERVED_PROPS.has(key)) continue;
+        (instance as Record<string, unknown>)[key] = value;
     }
 }
 
