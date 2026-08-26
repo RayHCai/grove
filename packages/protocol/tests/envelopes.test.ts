@@ -9,8 +9,10 @@ import { jsonCodec } from '@platform/transport';
 // `tsconfig.test.json` only, so the parity checks below pin the restated types without core
 // appearing in any shipped module graph.
 import type { AssetKind, EntityId, EventPhase, TransformBuffer, WrapperKind } from '@platform/core';
+import type { ScriptId, TemplateId } from '@platform/project';
 import type {
     ClientToServer,
+    EntityOverrides,
     EntitySnapshot,
     Envelope,
     InputFrame,
@@ -34,6 +36,9 @@ import type {
     TransformEnvelope,
     Welcome,
     WireAssetKind,
+    WireScriptAttachment,
+    WireSingleStructuralOp,
+    WireStructuralGroup,
     WireStructuralOp,
     WireStructuralOpKind,
     WireTransform,
@@ -59,6 +64,8 @@ type Assert<T extends true> = T;
 type Empty<T extends never> = T;
 
 const netId = (n: number): NetId => n as NetId;
+const templateId = (key: string): TemplateId => key as TemplateId;
+const scriptId = (key: string): ScriptId => key as ScriptId;
 
 const transform: WireTransform = {
     posX: 1,
@@ -72,11 +79,28 @@ const transform: WireTransform = {
 
 const entity: EntitySnapshot = {
     netId: netId(16_777_216),
-    template: 'wall',
+    template: templateId('wall'),
     parent: null,
     owner: null,
     tags: ['solid'],
     transform,
+};
+
+/** One turret and its barrel: the shape a template subtree produces on the wire. */
+const turretGroup: WireStructuralGroup = {
+    kind: 'group',
+    ops: [
+        {
+            kind: 'spawn',
+            snapshot: { ...entity, netId: netId(20), template: templateId('turret') },
+        },
+        { kind: 'attach', netId: netId(20), script: scriptId('aim'), props: { range: 120 } },
+        {
+            kind: 'spawn',
+            snapshot: { ...entity, netId: netId(21), template: templateId('barrel') },
+        },
+        { kind: 'reparent', netId: netId(21), parent: netId(20) },
+    ],
 };
 
 const snapshot: WorldSnapshot = {
@@ -136,7 +160,7 @@ const stateEnvelope: StateEnvelope = {
     kind: 'state',
     tick: 4821,
     ackSeq: 337,
-    structural: [{ kind: 'spawn', snapshot: entity }],
+    structural: [{ kind: 'spawn', snapshot: entity }, turretGroup],
     state: [{ host: { kind: 'player', id: 'p1' }, fields: { coins: 7, lives: 3 } }],
 };
 
@@ -487,6 +511,7 @@ type SnapshotBaseline =
     | 'entities[].parent'
     | 'entities[].tags'
     | 'entities[].transform'
+    | 'entities[].overrides'
     | 'players'
     | 'state'
     | null;
@@ -500,9 +525,10 @@ const SNAPSHOT_COVERAGE: Record<WireStructuralOpKind, SnapshotBaseline> = {
     tag: 'entities[].tags',
     'player-join': 'players',
     'player-leave': 'players',
-    // The client instantiates no scripts yet. When it does, this null is what says
-    // `EntitySnapshot` needs a `scripts: string[]` — the same omission, caught by the same rule.
-    attach: null,
+    attach: 'entities[].overrides',
+    // A group holds ops that each have one, and a joiner receives the world those ops built rather
+    // than the ops — so the boundary itself is the one arm with nothing of its own to restate.
+    group: null,
 };
 
 describe('the snapshot supplies a baseline for every channel steady state modifies', () => {
@@ -510,7 +536,7 @@ describe('the snapshot supplies a baseline for every channel steady state modifi
         const uncovered = Object.entries(SNAPSHOT_COVERAGE)
             .filter(([, field]) => field === null)
             .map(([kind]) => kind);
-        expect(uncovered).toStrictEqual(['attach']);
+        expect(uncovered).toStrictEqual(['group']);
     });
 
     it('every named baseline is a field the snapshot actually has', () => {
@@ -523,6 +549,12 @@ describe('the snapshot supplies a baseline for every channel steady state modifi
             'tags',
             'transform',
         ]);
+        // Absent above, because the ordinary entity carries exactly what its template describes.
+        const scripted: EntitySnapshot = {
+            ...entity,
+            overrides: { scripts: [{ script: 'aim' as ScriptId }] },
+        };
+        expect(Object.keys(scripted)).toContain('overrides');
     });
 
     it('ownership has a baseline, so `Entity.owner` resolves on a joiner', () => {
@@ -537,6 +569,71 @@ describe('the snapshot supplies a baseline for every channel steady state modifi
         // A spawn that left scale/rot/opacity/layer to the transform channel loses them permanently
         // for a static entity, whose one dirty tick is the spawn itself.
         expect(Object.keys(entity.transform)).toHaveLength(7);
+    });
+});
+
+// `SNAPSHOT_COVERAGE` is keyed by ARM, so it sees neither the narrowing of `template` nor the
+// addition of `overrides` — both are fields on an arm that already existed. Each gets its own.
+
+type _GroupIsMessage = Assignable<WireStructuralGroup, Message>;
+type _ScriptAttachmentIsMessage = Assignable<WireScriptAttachment, Message>;
+/** A group holds indivisible ops and never another group: one level, so a receiver bounds it. */
+type _GroupHoldsSingleOps = Assert<
+    IsMutual<WireStructuralGroup['ops'][number], WireSingleStructuralOp>
+>;
+type _SingleIsAStructuralOp = Assignable<WireSingleStructuralOp, WireStructuralOp>;
+
+describe('a template instantiation crosses as one boundary', () => {
+    it('holds its ops flat, parents ahead of children, and never nests a second group', () => {
+        // @ts-expect-error — a nested group would make the shape recursive, and a cardinality cap
+        // bounds nothing on a recursive shape without a depth cap beside it.
+        const nested: WireStructuralGroup = { kind: 'group', ops: [turretGroup] };
+        expect(nested.kind).toBe('group');
+
+        const spawns = turretGroup.ops.filter((op) => op.kind === 'spawn');
+        expect(spawns.map((op) => op.snapshot.netId)).toStrictEqual([20, 21]);
+        // The reparent that hangs the barrel off the turret comes after both spawns, or the client
+        // would parent to a netId it does not hold.
+        expect(turretGroup.ops.at(-1)?.kind).toBe('reparent');
+    });
+
+    it('encodes, so the boundary costs one nesting level and no more', () => {
+        expect(() => jsonCodec.encode(turretGroup)).not.toThrow();
+    });
+});
+
+describe('a spawn names its template by authoring id, and what it overrides', () => {
+    it('refuses a bare string where a TemplateId belongs', () => {
+        // @ts-expect-error — a free string is what `template` used to be, and it is exactly what a
+        // renamed template leaves behind: the brand is what makes the rename a compile error.
+        const loose: EntitySnapshot = { ...entity, template: 'wall' };
+        expect(loose.template).toBe('wall');
+        // At runtime it is the same string the render manifest is keyed by, and nothing more.
+        expect(jsonCodec.encode({ template: entity.template })).toBe('{"template":"wall"}');
+    });
+
+    it('omits `overrides` for an entity its template describes whole', () => {
+        expect('overrides' in entity).toBe(false);
+        // Absent, never explicitly undefined — the codec refuses the latter.
+        const dynamic = { ...entity, overrides: undefined } as unknown as Message;
+        expect(() => jsonCodec.encode(dynamic)).toThrow();
+    });
+
+    it('carries the attachments a joiner cannot infer, with the props they were configured with', () => {
+        const overrides: EntityOverrides = {
+            scripts: [{ script: scriptId('aim'), props: { range: 120 } }],
+        };
+        const scripted: EntitySnapshot = { ...entity, overrides };
+        expect(String(jsonCodec.encode(scripted))).toContain('"script":"aim"');
+        expect(String(jsonCodec.encode(scripted))).toContain('"range":120');
+    });
+
+    it('names a script by the id the bundle stamped, never by a class name', () => {
+        // A minifier rewrites `class Aim` and rewrites neither the manifest nor the wire, so the
+        // name is no contract across a build — let alone across two processes.
+        const attach = turretGroup.ops.find((op) => op.kind === 'attach');
+        expect(attach && 'script' in attach).toBe(true);
+        expect(attach && 'scriptClass' in attach).toBe(false);
     });
 });
 

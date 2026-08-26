@@ -9,6 +9,8 @@ export { assetId, scriptId, templateId } from './ids.js';
 
 export { PROJECT_FORMAT_VERSION } from './manifest.js';
 
+export type { ScriptProps } from './props.js';
+
 export type {
     AssetKind,
     AssetMeta,
@@ -27,6 +29,7 @@ export type {
     ScriptLocation,
     ScriptModule,
     SpriteVisual,
+    TemplateChildRecord,
     TemplateRecord,
     TemplateVisual,
 } from './manifest.js';
@@ -39,9 +42,12 @@ export { MIGRATIONS, migrate } from './migrate.js';
 export type {
     GameManifest,
     GameManifestOptions,
+    PlacedEntity,
     RenderAssetRef,
     RenderManifest,
     RenderTemplateVisual,
+    ResolvedAttachment,
+    ResolvedTemplate,
     ScriptClass,
     ScriptResolver,
 } from './adapters.js';

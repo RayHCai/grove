@@ -2,15 +2,51 @@
 // and nothing writing outside apply.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { Player, Scoreboard, clearRuntime } from '@platform/core';
-import type { NetId, StateEnvelope, WireStructuralOp } from '@platform/protocol';
+import type { ScriptLocation } from '@platform/core';
+import { Player, Scoreboard, ServerScript, SyncedScript, clearRuntime } from '@platform/core';
+import type { ScriptId } from '@platform/project';
+import type {
+    NetId,
+    StateEnvelope,
+    WireStructuralOp,
+    WireStructuralOpKind,
+} from '@platform/protocol';
+import type { ScriptClass, ScriptIndex } from '../src/mirror.js';
 import { Mirror } from '../src/mirror.js';
 import { entity, transformDiff, wireTransform } from './fake-server.js';
 
 const BOUNDS = { left: -400, right: 400, top: 300, bottom: -300 };
 
-function mirror(simRate = 60): Mirror {
-    return new Mirror({ simRate, bounds: BOUNDS, regions: [] });
+function mirror(over: { simRate?: number; scripts?: ScriptIndex } = {}): Mirror {
+    return new Mirror({
+        simRate: over.simRate ?? 60,
+        bounds: BOUNDS,
+        regions: [],
+        ...(over.scripts === undefined ? {} : { scripts: over.scripts }),
+    });
+}
+
+class Runner extends SyncedScript {}
+class Rules extends ServerScript {}
+
+const RUNNER = 'runner' as ScriptId;
+const RULES = 'rules' as ScriptId;
+
+/**
+ * The one table the wire's ids resolve through, as `@platform/scripting`'s registry answers it.
+ *
+ * Declared here rather than imported: the client depends on the shape and not on the package, which
+ * is what lets a host build the registry from its own chunk.
+ */
+function registry(): ScriptIndex {
+    const classes: Record<string, { ctor: ScriptClass; location: ScriptLocation }> = {
+        [RUNNER]: { ctor: Runner as unknown as ScriptClass, location: 'synced' },
+        [RULES]: { ctor: Rules as unknown as ScriptClass, location: 'server' },
+    };
+    return {
+        resolve: (id) => classes[id]?.ctor,
+        locationOf: (id) => classes[id]?.location,
+    };
 }
 
 function stateEnvelope(
@@ -248,16 +284,115 @@ describe('apply order and the envelope pairing', () => {
         expect(m.runtime.transforms.posX(delta.added[0]!)).toBe(3);
     });
 
-    it('drops attach with a counter, instantiating no scripts', () => {
+    it('drops attach with a counter when the bundle registered no class for the id', () => {
         const m = mirror();
         m.applyState(
             stateEnvelope([
                 { kind: 'spawn', snapshot: entity(1) },
-                { kind: 'attach', netId: 1 as NetId, scriptClass: 'PlayerController' },
+                { kind: 'attach', netId: 1 as NetId, script: 'ghost' as ScriptId },
             ]),
         );
         expect(m.counters.droppedAttach).toBe(1);
         expect([...m.runtime.instances.all()]).toHaveLength(0);
+    });
+});
+
+describe('attach resolves a ScriptId through the one registry', () => {
+    it('attaches a synced class and leaves the dropped counter at zero', () => {
+        const m = mirror({ scripts: registry() });
+        m.applyState(
+            stateEnvelope([
+                { kind: 'spawn', snapshot: entity(1) },
+                { kind: 'attach', netId: 1 as NetId, script: RUNNER },
+            ]),
+        );
+        expect(m.counters.droppedAttach).toBe(0);
+        expect([...m.runtime.instances.all()].map((si) => si.className)).toStrictEqual(['Runner']);
+    });
+
+    it('never attaches a ServerScript, which a client tick filters out of every dispatch', () => {
+        const m = mirror({ scripts: registry() });
+        m.applyState(
+            stateEnvelope([
+                { kind: 'spawn', snapshot: entity(1) },
+                { kind: 'attach', netId: 1 as NetId, script: RULES },
+            ]),
+        );
+        // Skipped, not counted: the authority runs it, so its absence here is correct rather than
+        // a miss the handshake should have caught.
+        expect(m.counters.droppedAttach).toBe(0);
+        expect([...m.runtime.instances.all()]).toHaveLength(0);
+    });
+
+    it('rebuilds a joiner’s attachments from the spawn snapshot, which the ops never restated', () => {
+        const m = mirror({ scripts: registry() });
+        m.applyState(
+            stateEnvelope([
+                {
+                    kind: 'spawn',
+                    snapshot: entity(1, 'thing', {
+                        overrides: { scripts: [{ script: RUNNER }, { script: RULES }] },
+                    }),
+                },
+            ]),
+        );
+        expect([...m.runtime.instances.all()].map((si) => si.className)).toStrictEqual(['Runner']);
+    });
+});
+
+describe('the structural applier is exhaustive', () => {
+    it('refuses an op kind the union does not declare', () => {
+        // Half of the guarantee. The other half is the `never` default in `#applySingle`:
+        // `noImplicitReturns` is off, so an arm added to the union and not handled there would
+        // fall through and no-op in silence for the whole session.
+        // @ts-expect-error — there is no `teleport` arm, so nothing can hand the applier one.
+        const bogus: WireStructuralOp = { kind: 'teleport', netId: 1 as NetId };
+        expect(bogus.kind).toBe('teleport');
+    });
+
+    it('names a branch for every kind the wire declares', () => {
+        // Fails to compile when an arm is added, at the moment the omission is cheapest to fix.
+        const HANDLED: Record<WireStructuralOpKind, true> = {
+            spawn: true,
+            'enter-interest': true,
+            destroy: true,
+            'leave-interest': true,
+            reparent: true,
+            tag: true,
+            'player-join': true,
+            'player-leave': true,
+            attach: true,
+            group: true,
+        };
+        expect(Object.keys(HANDLED)).toHaveLength(10);
+    });
+});
+
+describe('a template instantiation arrives as one group', () => {
+    it('applies its ops verbatim and in order, parents ahead of children', () => {
+        const m = mirror({ scripts: registry() });
+        const delta = m.applyState(
+            stateEnvelope([
+                {
+                    kind: 'group',
+                    ops: [
+                        { kind: 'spawn', snapshot: entity(10, 'turret') },
+                        { kind: 'attach', netId: 10 as NetId, script: RUNNER },
+                        { kind: 'spawn', snapshot: entity(11, 'barrel') },
+                        { kind: 'reparent', netId: 11 as NetId, parent: 10 as NetId },
+                    ],
+                },
+            ]),
+        );
+
+        expect(delta.added).toHaveLength(2);
+        expect(m.counters.outOfOrderParent).toBe(0);
+        expect(m.counters.droppedAttach).toBe(0);
+        // The reparent is reported on the delta, since the render tree cannot infer it.
+        expect(delta.reparented).toStrictEqual([
+            { local: delta.added[1]!, parent: delta.added[0]! },
+        ]);
+        expect(m.runtime.entities.record(delta.added[1]!)?.parent).toBe(delta.added[0]);
     });
 });
 

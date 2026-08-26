@@ -27,7 +27,9 @@ import type { DispatchOptions } from '../dispatch/dispatcher.js';
 import type { EntityId } from '../ids.js';
 import { entityIndex } from '../ids.js';
 import type { Bounds } from '@platform/math';
+import type { ScriptId } from '@platform/project';
 import type { Broadphase } from '../world/broadphase.js';
+import type { TemplateRegistry } from '../world/templates.js';
 import type { PlayerManager, Player } from './player.js';
 import type { ContactSource } from './contacts.js';
 import type { Wiring } from './wiring.js';
@@ -141,6 +143,15 @@ export class Runtime {
     /** Broadphase over the live transform store, never a lag-ring buffer. */
     broadphase?: Broadphase;
     regions?: RegionIndex;
+    /** What a spawn key means; a key it does not hold spawns one bare entity. */
+    templates?: TemplateRegistry;
+    /**
+     * The id the bundle stamped on a class, for the `attach` op that names it on the wire.
+     *
+     * A function rather than the registry itself: core mints no ids and must not import the package
+     * that builds one, which imports core.
+     */
+    scriptIdOf?: (klass: abstract new (...args: never[]) => object) => ScriptId | undefined;
     /** The screens and widgets the `hud` const is a facade over; one per world, built by loadGame. */
     hud?: HUDState;
     worldBounds?: Bounds;

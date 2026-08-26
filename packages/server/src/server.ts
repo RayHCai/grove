@@ -27,6 +27,7 @@ import {
     resolveConfig,
     startGame,
 } from '@platform/core';
+import type { ScriptId } from '@platform/project';
 import type {
     ClientToServer,
     InputAction,
@@ -99,6 +100,16 @@ const UNIDENTIFIED: ProjectIdentity = {
 };
 
 /**
+ * The class → id edge core needs, as `@platform/scripting`'s `ScriptRegistry` already provides it.
+ *
+ * Declared structurally rather than imported: that package imports core, and the server needs one
+ * method off whatever registry a host built.
+ */
+export interface ScriptIndex {
+    idOf(klass: abstract new (...args: never[]) => object): ScriptId | undefined;
+}
+
+/**
  * The server's own load-time input, carrying what core's manifest cannot: `sendRate` and `maxPlayers`
  * have no reader in core, and the render manifest has no source there at all.
  */
@@ -109,6 +120,22 @@ export interface ServerConfig extends Partial<EngineConfig> {
     visuals?: RenderManifest;
     /** Game-hosted `ServerScript` classes, forwarded to `loadGame`. */
     gameScripts?: GameManifest['gameScripts'];
+    /**
+     * What every spawn key means, from `toGameManifest(validate(file), …)`.
+     *
+     * Built before the scene, because instantiating one is what puts a template's scripts and
+     * subtree on an entity — a world built against an empty registry is a world of bare entities.
+     */
+    templates?: GameManifest['templates'];
+    /** The placed world, parents before children — instantiated before the first `accept`. */
+    entities?: GameManifest['entities'];
+    /**
+     * Names a script class on the wire, from the registry this process loaded its bundle into.
+     *
+     * Without it no `attach` op is journaled at all: the op names an id, and a class name is no
+     * contract across a minifier or a process boundary.
+     */
+    scripts?: ScriptIndex;
     /** What this build is. Omitted, every joiner declaring nothing is admitted and nothing else. */
     project?: ProjectIdentity;
     /**
@@ -172,20 +199,33 @@ export class GameServer {
     /** Marks and ops dropped as unrepresentable, cumulative. */
     #dropped = 0;
     #closed = false;
+    /** False until the world exists; `accept` refuses while it is. */
+    #booted = false;
 
     constructor(opts: GameServerOptions = {}) {
         const config = opts.config ?? {};
         this.#config = resolveConfig(config);
-        // `resolveConfig` fills defaults without validating, and the failures are silent: a `simRate`
-        // of 0 makes `dt` infinite, so the accumulator never reaches it and the world never steps.
-        assertRate('simRate', this.#config.simRate);
-        assertRate('sendRate', this.#config.sendRate);
         if (!Number.isInteger(this.#config.maxPlayers) || this.#config.maxPlayers < 1) {
             throw new RangeError(
                 `maxPlayers must be a positive integer, received ${this.#config.maxPlayers}`,
             );
         }
         this.#codec = opts.codec ?? jsonCodec;
+
+        // Built first, and the only thing that checks the two rates: `resolveConfig` fills defaults
+        // without validating, and a `simRate` of 0 makes `dt` infinite, so the accumulator never
+        // reaches it and the world steps zero times forever. Ahead of `loadGame` so a bad rate
+        // refuses before a world is built rather than after.
+        this.#driver = new Driver(
+            { stepOnce: () => this.#stepOnce(), send: () => this.#send() },
+            {
+                simRate: this.#config.simRate,
+                sendRate: this.#config.sendRate,
+                ...(opts.deliver === undefined ? {} : { deliver: opts.deliver }),
+                ...(opts.timer === undefined ? {} : { timer: opts.timer }),
+                ...(opts.now === undefined ? {} : { now: opts.now }),
+            },
+        );
 
         const bounds = config.bounds ?? { left: -400, right: 400, top: 300, bottom: -300 };
         this.#bounds = toWireBounds(bounds);
@@ -199,16 +239,27 @@ export class GameServer {
         // `role: 'server'` is the location filter: it makes the loop dispatch only server and synced
         // handlers, so client-only scripts are inert here, which is the trust boundary. Every other
         // seam is left at core's null default.
-        this.#rt = loadGame({
-            role: 'server',
-            simRate: this.#config.simRate,
-            bounds,
-            ...(config.regions === undefined ? {} : { regions: config.regions }),
-            ...(config.visuals === undefined
+        //
+        // Boot order lives inside this one call: the template registry is built, the Game scripts
+        // are wired, and the placed scene is instantiated against that registry — so nothing can
+        // observe a world whose spawn keys mean nothing yet.
+        this.#rt = loadGame(
+            {
+                role: 'server',
+                simRate: this.#config.simRate,
+                bounds,
+                ...(config.regions === undefined ? {} : { regions: config.regions }),
+                ...(config.visuals === undefined
+                    ? {}
+                    : { assets: config.visuals.assets.map((a) => assetManifestEntry(a)) }),
+                ...(config.templates === undefined ? {} : { templates: config.templates }),
+                ...(config.entities === undefined ? {} : { entities: config.entities }),
+                ...(config.gameScripts === undefined ? {} : { gameScripts: config.gameScripts }),
+            },
+            config.scripts === undefined
                 ? {}
-                : { assets: config.visuals.assets.map((a) => assetManifestEntry(a)) }),
-            ...(config.gameScripts === undefined ? {} : { gameScripts: config.gameScripts }),
-        });
+                : { scriptIdOf: (klass) => config.scripts?.idOf(klass) },
+        );
         this.#loop = new Loop(this.#rt);
 
         // The persistence seam's two missing halves. Core declares `kv` and reads `persisted`, and
@@ -244,22 +295,16 @@ export class GameServer {
                 ),
         };
 
-        this.#driver = new Driver(
-            { stepOnce: () => this.#stepOnce(), send: () => this.#send() },
-            {
-                simRate: this.#config.simRate,
-                sendRate: this.#config.sendRate,
-                ...(opts.deliver === undefined ? {} : { deliver: opts.deliver }),
-                ...(opts.timer === undefined ? {} : { timer: opts.timer }),
-                ...(opts.now === undefined ? {} : { now: opts.now }),
-            },
-        );
-
         // Not awaited. This promise settles when every Game start handler completes, and a handler
         // awaiting a timer cannot complete until the loop steps — so awaiting it here deadlocks the
         // server against its own driver. It runs to each handler's first await synchronously, which is
         // the guarantee that matters: world construction that must precede a join belongs before it.
         this.#started = startGame(this.#rt);
+
+        // Last, so `accept` refuses until every step above has run. A connection admitted earlier
+        // would be answered with a `Welcome` whose snapshot is a world still being built, and a
+        // joiner's baseline is the one thing no later delta repairs.
+        this.#booted = true;
     }
 
     /** Settles when every Game start handler has finished, for a host that wants to know. */
@@ -286,6 +331,11 @@ export class GameServer {
         return [...this.#connections.values()];
     }
 
+    /** Whether the world is built, and so whether `accept` will admit anything. */
+    get booted(): boolean {
+        return this.#booted;
+    }
+
     /**
      * Registers one established connection and returns its id, or `null` if it was refused and closed.
      *
@@ -294,10 +344,11 @@ export class GameServer {
      *
      * The refusal is `null` rather than an id: the unjoined cap is distinct from `maxPlayers` so that
      * unjoined sockets cannot lock out real players, and handing back an id for a socket this call just
-     * closed reads at the composition root as a connection that is still live.
+     * closed reads at the composition root as a connection that is still live. A connection offered
+     * before the world is built is refused the same way — a joiner's snapshot is its whole baseline.
      */
     accept(transport: Transport): string | null {
-        if (this.#closed || this.#unjoinedCount() >= MAX_UNJOINED_CONNECTIONS) {
+        if (!this.#booted || this.#closed || this.#unjoinedCount() >= MAX_UNJOINED_CONNECTIONS) {
             transport.close();
             return null;
         }

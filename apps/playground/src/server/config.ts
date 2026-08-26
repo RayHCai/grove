@@ -1,6 +1,7 @@
 // What this world is, separate from how it is hosted — so a test can boot the same game over a
 // loopback pair that `main.ts` boots over a socket.
 
+import { scriptId, templateId } from '@platform/project';
 import type { RenderManifest } from '@platform/protocol';
 import type { ServerConfig } from '@platform/server';
 import {
@@ -15,10 +16,12 @@ import {
     PLAYER_TINTS,
     PROJECT_HASH,
     PROJECT_ID,
+    SCRIPT_RUNNER,
     WORLD,
     markerTemplate,
 } from '../shared.js';
 import { Rules } from './game.js';
+import { SERVER_SCRIPTS } from './scripts.js';
 
 /** Ticks per simulated second. */
 export const SIM_RATE = 60;
@@ -68,6 +71,23 @@ export function serverConfig(): ServerConfig {
         maxPlayers: MAX_PLAYERS,
         bounds: WORLD,
         visuals: VISUALS,
+        // What `player.spawn()` mints. `Runner` rides the template rather than an `addScript` in the
+        // join handler, so the avatar is running it before that handler returns — and the resulting
+        // `attach` op is what tells the browser to attach its own copy and predict.
+        templates: [
+            {
+                id: templateId(AVATAR_TEMPLATE),
+                scripts: [
+                    {
+                        script: scriptId(SCRIPT_RUNNER),
+                        klass: SERVER_SCRIPTS.resolve(scriptId(SCRIPT_RUNNER))!,
+                    },
+                ],
+                children: [],
+            },
+        ],
+        entities: [],
+        scripts: SERVER_SCRIPTS,
         gameScripts: [Rules],
         project: {
             projectId: PROJECT_ID,

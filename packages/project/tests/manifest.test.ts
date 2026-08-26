@@ -124,6 +124,39 @@ describe('validate', () => {
         expect(refusal(dangling).path).toBe('entities[1].template');
     });
 
+    it('accepts a subtree naming a template declared further down the array', () => {
+        // Unlike an entity's parent, which is ordered so a loader builds the hierarchy in one pass:
+        // a template graph has no such order, and two templates may name each other's siblings.
+        const forward = draft();
+        forward.templates[0]!.children = [{ template: templateId('spawner') }];
+        expect(() => validate(forward)).not.toThrow();
+    });
+
+    it('refuses a subtree child naming no template', () => {
+        const dangling = draft();
+        dangling.templates[0]!.children = [{ template: templateId('ghost') }];
+        expect(refusal(dangling).path).toBe('templates[0].children[0].template');
+    });
+
+    it('refuses a template that reaches itself, however long the loop is', () => {
+        const looped = draft();
+        looped.templates[0]!.children = [{ template: templateId('spawner') }];
+        looped.templates[1]!.children = [{ template: templateId('coin') }];
+        // Instantiating either mints entities until memory stops it, which is not an error a
+        // runtime can report usefully.
+        expect(refusal(looped).message).toContain('contains itself');
+    });
+
+    it('accepts a diamond, where two children name one leaf template', () => {
+        // Not a cycle: the walk tracks the path it is on, not every template it has ever seen.
+        const shared = draft();
+        shared.templates[1]!.children = [
+            { template: templateId('coin') },
+            { template: templateId('coin'), transform: { x: 8 } },
+        ];
+        expect(() => validate(shared)).not.toThrow();
+    });
+
     it('refuses a script attached to the wrong kind of host', () => {
         const mishosted = draft();
         mishosted.templates[1]!.scripts = [{ script: scriptId('Rules') }];
@@ -178,8 +211,54 @@ describe('toGameManifest', () => {
                 { key: 'coin-art', kind: 'texture', meta: { width: 16, height: 16 } },
                 { key: 'chime', kind: 'audio' },
             ],
-            gameScripts: [Rules],
+            // No visual: a runtime draws nothing, so the art is `toRenderManifest`'s alone.
+            templates: [
+                { id: 'coin', scripts: [], children: [] },
+                { id: 'spawner', scripts: [], children: [] },
+            ],
+            entities: [
+                {
+                    id: 'e-root',
+                    template: 'spawner',
+                    parent: null,
+                    tags: ['spawner'],
+                    scripts: [],
+                },
+                {
+                    id: 'e-coin',
+                    template: 'coin',
+                    parent: 'e-root',
+                    transform: { x: 32, y: 8, layer: 2 },
+                    tags: ['pickup'],
+                    scripts: [],
+                },
+            ],
+            // The id rides alongside the class: a runtime constructs the class and the wire names
+            // the id, and dropping either would cost the other's job.
+            gameScripts: [{ script: 'Rules', klass: Rules }],
         });
+    });
+
+    it('resolves a template attachment to its class and keeps the props it was configured with', () => {
+        const withPickup = toGameManifest(project, {
+            role: 'server',
+            scripts: (id) => (id === 'Pickup' ? Rules : undefined),
+        });
+        expect(withPickup.templates[0]?.scripts).toEqual([
+            { script: 'Pickup', klass: Rules, props: { value: 10 } },
+        ]);
+    });
+
+    it('carries a template subtree through as the reference graph it is', () => {
+        const nested = draft();
+        nested.templates[1] = {
+            ...nested.templates[1]!,
+            children: [{ template: templateId('coin'), transform: { y: 12 } }],
+        };
+        const manifest = toGameManifest(validate(nested), { role: 'server', scripts: resolve });
+        expect(manifest.templates[1]?.children).toEqual([
+            { template: 'coin', transform: { y: 12 } },
+        ]);
     });
 
     it('leaves an absent meta an absent KEY, never an explicit undefined', () => {

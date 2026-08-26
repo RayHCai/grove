@@ -4,7 +4,14 @@
 // cannot be run per connection — the first would take the marks and the rest would get nothing. The
 // resulting set lives for one send and is not state the server carries between ticks.
 
-import type { EntityId, HostRecord, Runtime, StateMark, StructuralOp } from '@platform/core';
+import type {
+    EntityId,
+    HostRecord,
+    Runtime,
+    SingleStructuralOp,
+    StateMark,
+    StructuralOp,
+} from '@platform/core';
 import {
     Entity,
     GAME_KEY,
@@ -14,7 +21,9 @@ import {
     playerKey,
     serializeHostField,
 } from '@platform/core';
+import type { ScriptId, TemplateId } from '@platform/project';
 import type {
+    EntityOverrides,
     EntitySnapshot,
     NetId,
     PlayerSnapshot,
@@ -25,6 +34,8 @@ import type {
     StateHostAddr,
     TransformDiff,
     TransformEnvelope,
+    WireScriptAttachment,
+    WireSingleStructuralOp,
     WireStructuralOp,
     WireTransform,
 } from '@platform/protocol';
@@ -81,13 +92,39 @@ export function readEntitySnapshot(
     const parent = opts.hierarchy && record.parent !== NO_ENTITY ? toNetId(record.parent) : null;
     return {
         netId: toNetId(id),
-        template: record.template,
+        // Cast at the boundary, as `toNetId` is: core's record holds whatever key `spawn` was
+        // handed, and the wire's is the authoring id the manifest declared.
+        template: record.template as TemplateId,
         parent,
         owner: record.ownerId === '' ? null : record.ownerId,
         // A mutable copy: the wire boundary refuses a `readonly` array.
         tags: opts.hierarchy ? [...rt.tags.tagsOf(id)] : [],
         transform: readTransform(rt, id),
+        // Only on the hierarchy form: at spawn time nothing is attached yet, and the attachments
+        // that follow ride their own ops. A joiner has no earlier state for those to apply against.
+        ...(opts.hierarchy ? overridesOf(rt, id) : {}),
     };
+}
+
+/**
+ * The scripts on one entity, as a joiner needs them — absent when it carries none.
+ *
+ * Read back through the instance registry rather than from the template, because `addScript` puts
+ * classes on an entity that no template names, and those are exactly the ones a joiner cannot infer.
+ */
+function overridesOf(rt: Runtime, id: EntityId): { overrides?: EntityOverrides } {
+    const scripts: WireScriptAttachment[] = [];
+    for (const instance of rt.instances.forHost(entityKey(id as number))) {
+        const script: ScriptId | undefined = rt.scriptIdOf?.(instance.klass);
+        // A class the bundle never stamped is named by nothing on the wire, so it is left out here
+        // for the same reason its `attach` op is never journaled.
+        if (script === undefined) continue;
+        scripts.push({
+            script,
+            ...(instance.props === undefined ? {} : { props: instance.props }),
+        });
+    }
+    return scripts.length === 0 ? {} : { overrides: { scripts } };
 }
 
 /** One player as a joiner must receive it, with the roster-assigned index. */
@@ -171,9 +208,10 @@ export function drainOnce(
     // A script spawning in a loop mints more ops in one interval than a frame can carry, and a peer
     // refuses an over-cap frame before parsing it — then resyncs, which asks for something bigger.
     // Capped and carried instead, so the journal arrives whole across as many sends as it takes.
-    if (ordered.length > budget) {
-        set.structural = ordered.slice(0, budget);
-        spill.push(...ordered.slice(budget));
+    const cut = budgetCut(ordered, budget);
+    if (cut < ordered.length) {
+        set.structural = ordered.slice(0, cut);
+        spill.push(...ordered.slice(cut));
     } else {
         set.structural = ordered;
     }
@@ -214,6 +252,22 @@ export function drainOnce(
 }
 
 /**
+ * How many ops fit in this send, counting a group by what it holds rather than as one.
+ *
+ * A group is indivisible — it is the boundary that says a subtree arrived whole — so one that
+ * exceeds the budget on its own still goes, at index zero and alone. Counting it as a single op
+ * instead would let one instantiation spend the cap the cap exists to hold.
+ */
+function budgetCut(ordered: readonly WireStructuralOp[], budget: number): number {
+    let weight = 0;
+    for (const [index, op] of ordered.entries()) {
+        weight += op.kind === 'group' ? op.ops.length : 1;
+        if (weight > budget) return index === 0 ? 1 : index;
+    }
+    return ordered.length;
+}
+
+/**
  * Ids spawned and released inside this one journal, whose ops are dropped as a pair.
  *
  * A released entity has no record for the spawn's snapshot to read, so its template would go out as
@@ -223,7 +277,11 @@ export function drainOnce(
 function ephemeralIds(rt: Runtime, journal: readonly StructuralOp[]): Set<number> {
     const gone = new Set<number>();
     for (const op of journal) {
-        if (op.kind === 'spawn' && rt.entities.record(op.id) === null) gone.add(op.id as number);
+        for (const single of op.kind === 'group' ? op.ops : [op]) {
+            if (single.kind === 'spawn' && rt.entities.record(single.id) === null) {
+                gone.add(single.id as number);
+            }
+        }
     }
     return gone;
 }
@@ -233,6 +291,24 @@ function toWireStructural(
     op: StructuralOp,
     ephemeral: Set<number>,
 ): WireStructuralOp | undefined {
+    if (op.kind !== 'group') return toWireSingle(rt, op, ephemeral);
+    // The boundary survives the conversion whole or not at all: a group whose spawns were all
+    // ephemeral has nothing left to bound, and a partial one would tell the client a subtree
+    // arrived complete when the entity its children hang off never existed.
+    const ops: WireSingleStructuralOp[] = [];
+    for (const single of op.ops) {
+        const wire = toWireSingle(rt, single, ephemeral);
+        if (wire !== undefined) ops.push(wire);
+    }
+    if (ops.length === 0) return undefined;
+    return ops.length === 1 ? (ops[0] as WireSingleStructuralOp) : { kind: 'group', ops };
+}
+
+function toWireSingle(
+    rt: Runtime,
+    op: SingleStructuralOp,
+    ephemeral: Set<number>,
+): WireSingleStructuralOp | undefined {
     if (ephemeral.has(op.id as number)) return undefined;
     switch (op.kind) {
         case 'spawn': {
@@ -255,7 +331,18 @@ function toWireStructural(
             if (op.tag.startsWith(SAY_PREFIX)) return undefined;
             return { kind: 'tag', netId: toNetId(op.id), tag: op.tag, added: op.added };
         case 'attach':
-            return { kind: 'attach', netId: toNetId(op.id), scriptClass: op.scriptClass };
+            return {
+                kind: 'attach',
+                netId: toNetId(op.id),
+                script: op.script,
+                ...(op.props === undefined ? {} : { props: op.props }),
+            };
+        default: {
+            // `noImplicitReturns` is off, so an unhandled arm would return `undefined` and be
+            // counted as an unrepresentable op — a new arm silently dropped for the session.
+            const unreachable: never = op;
+            return unreachable;
+        }
     }
 }
 

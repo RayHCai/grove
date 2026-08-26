@@ -4,6 +4,7 @@
 // because they bound how MANY frames arrive rather than what one frame is allowed to contain.
 
 import { describe, expect, it } from 'vitest';
+import { templateId } from '@platform/project';
 import type { EncodedFrame, Message, Transport } from '@platform/transport';
 import { jsonCodec } from '@platform/transport';
 import { PROTOCOL_VERSION } from '@platform/protocol';
@@ -244,6 +245,45 @@ describe('§7 — shutdown', () => {
         h.connect();
         expect(h.lastAcceptId).toBeNull();
         expect(h.server.connections).toHaveLength(MAX_UNJOINED_CONNECTIONS);
+    });
+});
+
+describe('§3.4 — the world is built before anything is admitted', () => {
+    it('is booted by the time any caller holds it, so `accept` never sees a half-world', () => {
+        // The whole boot is the constructor — registry, Game scripts, scene, `@onStart` to its
+        // first await — and `booted` is set after all of it. There is no window a caller can
+        // observe, which is the guarantee: a joiner's snapshot is its entire baseline, and no
+        // later delta repairs one taken of a world still being assembled.
+        const server = new GameServer({
+            config: {
+                gameScripts: [Rules],
+                templates: [{ id: templateId('probe'), scripts: [], children: [] }],
+            },
+        });
+        expect(server.booted).toBe(true);
+        server.close();
+    });
+
+    it('builds the placed world before any Game @onStart could look for it', () => {
+        const h = harness({
+            config: {
+                gameScripts: [Rules],
+                templates: [{ id: templateId('crate'), scripts: [], children: [] }],
+                entities: [
+                    {
+                        id: 'e1',
+                        template: templateId('crate'),
+                        parent: null,
+                        transform: { x: 7 },
+                        tags: ['placed'],
+                        scripts: [],
+                    },
+                ],
+            },
+        });
+        const placed = h.server.runtime.gameInstance!.find({ tag: 'placed' });
+        expect(placed).toHaveLength(1);
+        expect(placed[0]?.position.x).toBe(7);
     });
 });
 
