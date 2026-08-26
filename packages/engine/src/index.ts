@@ -1,19 +1,20 @@
 // @platform/engine
-// Public @platform/engine entry point. Re-exports the creator API.
+// The one import a creator's script sees: the runtime API core owns, and the primitives math owns.
+//
+// The composition roots that stand a game up are behind `@platform/engine/host`, so a chunk that
+// resolves this specifier never reaches the server, the client or the renderer through it.
 
-// Shell package: the public surface lands here.
 export const PACKAGE_NAME = '@platform/engine';
 
-// The primitives are IMPLEMENTED in @platform/math and re-exported here, so the
-// creator-facing names in api_spec.ts (`Vec3` at :48, `Bounds` at :57, `clamp` at :82,
-// `lerp` at :83) each resolve to exactly one type. A creator has one import; the split is
-// internal (api_design.md §11.1).
-export type { Vec3, Vec3Like, Bounds, Size, Easing } from '@platform/math';
+// The primitives are IMPLEMENTED in @platform/math and re-exported here, so each creator-facing
+// name resolves to exactly one type. A creator has one import; the split is internal.
+export type { Vec3, Bounds, Easing } from '@platform/math';
 export { clamp, lerp } from '@platform/math';
 
-// Deterministic replacements for the approximated Math functions (§9.1). Creators
-// reach for these through the one engine import; a SyncedScript must, since Math.* is
-// a load-time error there.
+// Deterministic replacements for the Math functions every engine approximates. A SyncedScript must
+// reach them through this import, since Math.* is a load-time error there. These 22 names in this
+// order are pinned against @platform/math and .oxlintrc.json, so editing the block is a
+// cross-package change.
 export {
     sin,
     cos,
