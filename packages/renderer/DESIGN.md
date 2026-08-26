@@ -193,7 +193,9 @@ kill a level load; unknown unload names are reported, not thrown.
   grow the rect without bound.
 - World text is an **asset first**: `createTextAsset` then a sprite node. `kind: 'text'` is UI-only, so
   `setNodeText` is UI-only too. Measurement uses a 2D canvas, so it works mid-context-loss.
-- `destroyNode` cascades. `createNodes` has no intra-batch parenting — a `parent` must already exist.
+- `destroyNode` cascades. `createNodes` has no intra-batch parenting — a `parent` must already exist;
+  `createSubtree` has it, through a `parentInBatch` that must name an EARLIER desc, and it rolls the
+  whole batch back if one desc throws, since the caller holds no handle to a half-built subtree.
 - A group has no `art`: its rotation/scale/alpha/tint are stored and queryable but inert.
 - `inspect()` is the only tooling method, and the only one that allocates **per node** — a fully
   copied `SceneSnapshot`, because bounds come from reused scratch rects and handing them out would

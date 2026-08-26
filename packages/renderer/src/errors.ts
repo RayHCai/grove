@@ -16,7 +16,10 @@ export type RendererErrorCode =
     | 'cycle'
     /** `kind: 'text'` on a camera-transformed surface — use `createTextAsset` instead. */
     | 'text-node-on-world-surface'
-    /** A node descriptor was structurally invalid — a sprite with no texture name. */
+    /**
+     * A node descriptor was structurally invalid — a sprite with no texture name, or a
+     * `parentInBatch` naming anything but an earlier desc of the same `createSubtree` call.
+     */
     | 'invalid-node-desc'
     /** An asset manifest entry was structurally invalid. */
     | 'invalid-asset-entry';

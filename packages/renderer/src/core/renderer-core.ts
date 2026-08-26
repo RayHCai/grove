@@ -29,6 +29,7 @@ import type {
     RendererInitOptions,
     SceneSnapshot,
     ScaleMode,
+    SubtreeNodeDesc,
     Surface,
     Transform,
     UiAnchor,
@@ -433,6 +434,46 @@ export class RendererCore {
         out.length = 0;
         for (const desc of descs) out.push(this.createNode(desc));
         return out;
+    }
+
+    /**
+     * Creates a whole subtree, resolving each `parentInBatch` against the nodes this call made.
+     *
+     * Rolled back rather than pre-validated on a throw: the checks and their order belong to
+     * {@link createNode}, and a second copy here would answer differently the day one moves.
+     */
+    createSubtree(descs: readonly SubtreeNodeDesc[], out: NodeId[] = []): NodeId[] {
+        out.length = 0;
+        try {
+            for (let at = 0; at < descs.length; at++) {
+                out.push(this.#createInBatch(descs[at] as SubtreeNodeDesc, at, out));
+            }
+        } catch (error) {
+            // Deepest first, so a released slot is never a live node's parent.
+            for (let i = out.length - 1; i >= 0; i--) this.destroyNode(out[i] as NodeId);
+            out.length = 0;
+            throw error;
+        }
+        return out;
+    }
+
+    /** One desc of a {@link createSubtree} batch, its parent read out of `created`. */
+    #createInBatch(desc: SubtreeNodeDesc, at: number, created: readonly NodeId[]): NodeId {
+        const parentAt = desc.parentInBatch;
+        if (parentAt === undefined) return this.createNode(desc);
+        if (!Number.isInteger(parentAt) || parentAt < 0 || parentAt >= at) {
+            rendererError(
+                'invalid-node-desc',
+                `parentInBatch ${String(parentAt)} must name an earlier desc in the same batch`,
+            );
+        }
+        const parent = created[parentAt] as NodeId;
+        const child: NodeDesc = { ...desc };
+        child.parent = parent;
+        // Inherited rather than defaulted to `'world'`, which would be a cross-surface throw for
+        // every subtree that is not on the world surface.
+        child.surface = desc.surface ?? this.surfaceOf(parent) ?? 'world';
+        return this.createNode(child);
     }
 
     attachAt(index: number, parent: NodeId, keepResolvedPosition: boolean): void {

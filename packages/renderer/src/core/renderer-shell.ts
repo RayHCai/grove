@@ -21,6 +21,7 @@ import type {
     RendererEvents,
     RendererInitOptions,
     SceneSnapshot,
+    SubtreeNodeDesc,
     Surface,
     TextStyle,
     Transform,
@@ -119,6 +120,10 @@ export abstract class RendererShell implements IRenderer {
 
     createNodes(descs: readonly NodeDesc[], out: NodeId[] = []): NodeId[] {
         return this.live()?.createNodes(descs, out) ?? ((out.length = 0), out);
+    }
+
+    createSubtree(descs: readonly SubtreeNodeDesc[], out: NodeId[] = []): NodeId[] {
+        return this.live()?.createSubtree(descs, out) ?? ((out.length = 0), out);
     }
 
     async createNodeAsync(desc: NodeDesc): Promise<{ id: NodeId } & AssetInfo> {

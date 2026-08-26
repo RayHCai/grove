@@ -21,6 +21,8 @@ import type {
     Reject,
     ServerToClient,
     StateEnvelope,
+    TemplateChild,
+    TemplateVisual,
     TimeSync,
     TimeSyncReply,
     TransformDiff,
@@ -96,6 +98,19 @@ const welcome: Welcome = {
         templates: [
             { template: 'coin', kind: 'sprite', texture: 'coin', anchorX: 0.5, anchorY: 0.5 },
             { template: 'spawner', kind: 'group' },
+            // Nested, so the recursive arm rides the same encode and round-trip as everything else.
+            {
+                template: 'turret',
+                kind: 'group',
+                children: [
+                    { kind: 'sprite', texture: 'coin', offsetY: -4 },
+                    {
+                        kind: 'group',
+                        offsetY: 12,
+                        children: [{ kind: 'sprite', texture: 'coin', rotation: 90, layer: 1 }],
+                    },
+                ],
+            },
         ],
     },
 };
@@ -165,6 +180,10 @@ type _ClientToServerIsMessage = Assignable<ClientToServer, Message>;
 type _StructuralOpIsMessage = Assignable<WireStructuralOp, Message>;
 type _TransformDiffIsMessage = Assignable<TransformDiff, Message>;
 type _SnapshotIsMessage = Assignable<WorldSnapshot, Message>;
+// The one recursive shape on the wire, so it is the one that can lose assignability at a depth
+// nothing else reaches.
+type _TemplateChildIsMessage = Assignable<TemplateChild, Message>;
+type _TemplateVisualIsMessage = Assignable<TemplateVisual, Message>;
 
 const serverFrames: ServerToClient[] = [
     welcome,
