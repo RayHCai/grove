@@ -193,10 +193,13 @@ export class Harness {
     }
 
     /** A new connection: the harness plays the composition root wiring a factory into `accept`. */
-    connect(): Peer {
+    connect(playerId?: string): Peer {
         const pair = loopbackPair({ latency: this.#latency, codec: jsonCodec });
         this.#pairs.push(pair);
-        this.#lastAcceptId = this.server.accept(pair.server);
+        this.#lastAcceptId =
+            playerId === undefined
+                ? this.server.accept(pair.server)
+                : this.server.accept(pair.server, playerId);
         return new Peer(pair.client);
     }
 
@@ -270,6 +273,23 @@ export class Harness {
         peer.join(name);
         for (let i = 0; i < limit; i++) {
             this.pumpTicks(1);
+            if (peer.welcome !== undefined || peer.reject !== undefined) return peer;
+        }
+        throw new Error(`no Welcome or Reject within ${limit} ticks`);
+    }
+
+    /**
+     * `joined`, for a host-named peer — whose admission waits on a persisted read.
+     *
+     * Flushes a macrotask per tick rather than only a microtask, so it settles against a `KVStore`
+     * that answers on a timer as well as one that resolves immediately.
+     */
+    async joinedAs(playerId: string, name = playerId, limit = 32): Promise<Peer> {
+        const peer = this.connect(playerId);
+        peer.join(name);
+        for (let i = 0; i < limit; i++) {
+            this.pumpTicks(1);
+            await new Promise((resolve) => setTimeout(resolve, 0));
             if (peer.welcome !== undefined || peer.reject !== undefined) return peer;
         }
         throw new Error(`no Welcome or Reject within ${limit} ticks`);

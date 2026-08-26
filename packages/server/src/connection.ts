@@ -194,6 +194,13 @@ export class AdmissionState {
 /** A live connection: the transport to one peer, the Player it was allocated, and its admission bookkeeping. */
 export class Connection {
     readonly connectionId: string;
+    /**
+     * The stable player id the host named this peer, or null when it named none.
+     *
+     * The host's claim and never the peer's: a wire field here would be a read-and-overwrite
+     * capability over any saved player, since the leave path writes the record back.
+     */
+    readonly identity: string | null;
     readonly transport: Transport;
     readonly admission = new AdmissionState();
     /** Disposers from `transport.onMessage` / `onClose`, run once on drop. */
@@ -224,6 +231,8 @@ export class Connection {
      * request is held rather than a flag because only it carries the `clientSentMs` to echo.
      */
     pendingJoin: JoinRequest | null = null;
+    /** True while this connection's persisted record is being read, so a second request cannot race it. */
+    admitting = false;
     /**
      * The pump clock reading at `accept`, against which the join deadline is measured.
      *
@@ -233,14 +242,25 @@ export class Connection {
     acceptedAtSeconds: number | null;
     closed = false;
 
-    constructor(connectionId: string, transport: Transport, acceptedAtSeconds: number | null) {
+    constructor(
+        connectionId: string,
+        identity: string | null,
+        transport: Transport,
+        acceptedAtSeconds: number | null,
+    ) {
         this.connectionId = connectionId;
+        this.identity = identity;
         this.transport = transport;
         this.acceptedAtSeconds = acceptedAtSeconds;
     }
 
     get joined(): boolean {
         return this.player !== null;
+    }
+
+    /** What this connection's Player is keyed by: the host's id when it named one, else the connection's. */
+    get playerId(): string {
+        return this.identity ?? this.connectionId;
     }
 
     /**
