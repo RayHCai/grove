@@ -64,5 +64,14 @@ export {
 export { DEFAULT_CULL_MARGIN } from './bounds.js';
 
 // The client validates a server-supplied manifest before it reaches the renderer; a second copy of
-// the scheme check is how the two policies drift apart.
-export { isAllowedAssetUrl, LOADER_ASSET_SCHEMES, REMOTE_ASSET_SCHEMES } from './asset-queue.js';
+// the scheme check is how the two policies drift apart. `AssetQueue` is exported for the same
+// reason: it is the per-name intent map a mid-session manifest addition merges against, and a
+// second one written in `@platform/client` would be a second answer to "is this already loaded".
+export {
+    AssetQueue,
+    isAllowedAssetUrl,
+    validateAssetEntry,
+    LOADER_ASSET_SCHEMES,
+    REMOTE_ASSET_SCHEMES,
+} from './asset-queue.js';
+export type { AssetIntent, MergedAssetWork } from './asset-queue.js';

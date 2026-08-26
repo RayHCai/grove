@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { GAME_KEY, clearRuntime } from '@platform/core';
 import type { WireStructuralOp } from '@platform/protocol';
-import { Health, Rules, Wallet } from '../dist/testkit/fixtures.js';
+import { Health, Rules, Squad, Standings, Wallet } from '../dist/testkit/fixtures.js';
 import { CountingCodec, harness } from './harness.js';
 import type { Peer } from './harness.js';
 
@@ -352,6 +352,89 @@ describe('§5.3 — state is addressed by host and scoped per player', () => {
 
         const diff = peer.states.flatMap((s) => s.state).find((d) => 'round' in d.fields);
         expect(diff?.fields['round']).toBe(crate.entityId as unknown as number);
+    });
+});
+
+describe('§5.3 — wrapper state crosses as its wire form, not as a class', () => {
+    it('replicates a scoreboard write, and drops nothing doing it', () => {
+        const h = harness({ config: { gameScripts: [Rules, Standings] } });
+        const peer = h.joined('a');
+        h.settle([peer]);
+
+        const rt = h.server.runtime;
+        const standings = [...rt.instances.forHost('game')]
+            .map((si) => si.instance)
+            .find((i): i is Standings => i instanceof Standings)!;
+        standings.scores.add(7, rt.playerManager!.byId('c1')!);
+        h.pumpTicks(6);
+
+        const diff = peer.states.flatMap((s) => s.state).find((d) => 'scores' in d.fields);
+        expect(diff?.fields['scores']).toStrictEqual({
+            kind: 'Scoreboard',
+            scores: [['c1', 7]],
+        });
+        // Read raw, the field's value is a class instance — which `encodeStateValue` refuses, so
+        // every write would land here instead, silently.
+        expect(h.server.droppedMarks).toBe(0);
+    });
+
+    it('gives a joiner the same wire form in its snapshot as the deltas will carry', () => {
+        const h = harness({ config: { gameScripts: [Rules, Standings] } });
+        const first = h.joined('a');
+        const rt = h.server.runtime;
+        const standings = [...rt.instances.forHost('game')]
+            .map((si) => si.instance)
+            .find((i): i is Standings => i instanceof Standings)!;
+        standings.scores.add(3, rt.playerManager!.byId('c1')!);
+        h.pumpTicks(4);
+
+        const snapshot = h.joined('b').welcome?.snapshot;
+        const diff = (snapshot?.state ?? []).find((d) => 'scores' in d.fields);
+        expect(diff?.fields['scores']).toStrictEqual({
+            kind: 'Scoreboard',
+            scores: [['c1', 3]],
+        });
+        expect(first.welcome).toBeDefined();
+    });
+
+    it('persists a departing player’s wrapper state at the leave, through the KV store', async () => {
+        const h = harness({ config: { gameScripts: [Rules] } });
+        const peer = h.joined('a');
+        const rt = h.server.runtime;
+        // `addScript` returns the player for chaining, so the instance comes off the registry.
+        rt.playerManager!.byId('c1')!.addScript(Squad as never);
+        const squad = [...rt.instances.forHost('player:c1')]
+            .map((si) => si.instance)
+            .find((i): i is Squad => i instanceof Squad)!;
+        squad.team.add(rt.playerManager!.byId('c1')!);
+        h.pumpTicks(4);
+
+        peer.close();
+        h.pumpTicks(2);
+
+        // The record is gone from the host table by now — `PlayerManager.remove` drops it — so this
+        // is the store answering, not the world.
+        const stored = await rt.kv.get('serverState', 'player:c1');
+        expect(stored).toStrictEqual({ team: { kind: 'Team', name: 'red', members: ['c1'] } });
+        expect(rt.hosts.get('player:c1')).toBeUndefined();
+    });
+
+    it('drops a reserved key nested inside a value, rather than shipping a short object', () => {
+        const h = harness({ config: { gameScripts: [Rules] } });
+        const peer = h.joined('a');
+        h.settle([peer]);
+
+        const rt = h.server.runtime;
+        const rules = [...rt.instances.forHost('game')][0]?.instance as Rules;
+        // `JSON.parse` is how a reserved key becomes a real own property; a literal would set the
+        // prototype instead. Nested, which is where a serialized wrapper puts its keys.
+        (rules as unknown as { round: unknown }).round = {
+            inner: JSON.parse('{"__proto__": {"polluted": true}}') as unknown,
+        };
+        h.pumpTicks(6);
+
+        expect(peer.states.flatMap((s) => s.state).some((d) => 'round' in d.fields)).toBe(false);
+        expect(h.server.droppedMarks).toBeGreaterThan(0);
     });
 });
 

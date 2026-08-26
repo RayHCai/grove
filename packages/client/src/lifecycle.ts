@@ -9,11 +9,18 @@ export type FailureReason =
     /** `encode-rejected` — our bug, and it must surface loudly. */
     | { kind: 'internal'; message: string }
     /** A malformed or hostile peer: bad frames, or an envelope that threw while applying. */
-    | { kind: 'peer'; message: string };
+    | { kind: 'peer'; message: string }
+    /** The script bundle would not load, or was not the bundle the server said it would be. */
+    | { kind: 'bundle'; message: string };
 
 export type SessionState =
     /** `JoinRequest` sent, no `Welcome` yet. Input refused. */
     | 'connecting'
+    /**
+     * `Welcome` accepted, its script bundle still fetching. Input refused, and every envelope behind
+     * the welcome is HELD rather than applied — there is no session for one to land in yet.
+     */
+    | 'loading'
     /** `Welcome` applied, clock seeded. Input accepted. */
     | 'live'
     /** No envelope for `STALL_SECONDS`, or `ackSeq` frozen. Input refused; the world holds its pose. */
@@ -28,9 +35,9 @@ export type SessionState =
 /**
  * Whether input may be captured and sent in this state.
  *
- * `stalled` refuses it so a player cannot accumulate ghost gameplay: without prediction the world freezes,
- * so mashing keys would fill the ring with inputs the server will refuse as too old. Synthetic releases are
- * exempt at the call site — a release can only ever end ghost gameplay.
+ * `stalled` refuses it so a player cannot accumulate ghost gameplay: prediction stops with it, so the world
+ * freezes and mashing keys would fill the ring with inputs the server will refuse as too old. Synthetic
+ * releases are exempt at the call site — a release can only ever end ghost gameplay.
  */
 export function acceptsInput(state: SessionState): boolean {
     return state === 'live';

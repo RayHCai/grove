@@ -2,8 +2,8 @@
 
 **TL;DR** — the shared wire vocabulary, and nothing else. It declares every message that crosses the wire as
 a TypeScript `type`, so `@platform/server` and `@platform/client` narrow to one definition instead of two that
-drift. Types only: no bytes move here, no frame is validated here. It sits above `@platform/transport` (its
-only dependency) and below both endpoints.
+drift. Types only: no bytes move here, no frame is validated here. It sits above `@platform/transport` and
+`@platform/project` — its two dependencies — and below both endpoints.
 
 **Authoritative for the wire** where this and the transport, server, or client design disagree.
 
@@ -11,33 +11,37 @@ only dependency) and below both endpoints.
 
 ## 1. Contents
 
-| File               | Holds                                                        |
-| ------------------ | ------------------------------------------------------------ |
-| `src/ids.ts`       | `NetId`, `PlayerId`                                          |
-| `src/version.ts`   | `PROTOCOL_VERSION = 1`                                       |
-| `src/envelopes.ts` | all nine messages, both direction unions, every payload type |
-| `src/index.ts`     | the barrel, grouped by concern; `PACKAGE_NAME`               |
+| File               | Holds                                                          |
+| ------------------ | -------------------------------------------------------------- |
+| `src/ids.ts`       | `NetId`, `PlayerId`, `ProjectId`                               |
+| `src/version.ts`   | `PROTOCOL_VERSION = 2`                                         |
+| `src/envelopes.ts` | all eleven messages, both direction unions, every payload type |
+| `src/index.ts`     | the barrel, grouped by concern; `PACKAGE_NAME`                 |
 
 Runtime values exported: `PACKAGE_NAME`, `PROTOCOL_VERSION`. Everything else is a type.
 
-Dependencies: `@platform/transport` — `src` imports exactly one type from it, `JsonValue`. `@platform/core` is
+Dependencies: `@platform/transport` — `src` imports exactly one type from it, `JsonValue` — and
+`@platform/project`, whose authoring ids are exempt from the restatement rule in §5. `@platform/core` is
 a **devDependency**, reachable only from the dev-only reference, so it cannot enter the shipped module graph.
 
-## 2. The nine messages
+## 2. The eleven messages
 
 A message not in one of the two unions is not on the wire.
 
-| `kind`            | Union            | Notes                                                                      |
-| ----------------- | ---------------- | -------------------------------------------------------------------------- |
-| `join-request`    | `ClientToServer` | first frame on a connection; carries `protocolVersion`, `name`             |
-| `welcome`         | `ServerToClient` | rates, `bounds`, `regions`, `snapshot`, `visuals`; tick is in the snapshot |
-| `reject`          | `ServerToClient` | `reason: 'version' \| 'full'`, then `close()`                              |
-| `state`           | `ServerToClient` | **reliable**: `structural[]`, `state[]`, `ackSeq`, `earliestHeadroom?`     |
-| `transform`       | `ServerToClient` | **droppable**: `transform[]`, joined to `state` by `tick`                  |
-| `time-sync`       | `ClientToServer` | `clientSentMs`                                                             |
-| `time-sync-reply` | `ServerToClient` | echoes the client stamp, adds `serverSentMs`, `serverTick`                 |
-| `rate-change`     | `ServerToClient` | `tick`, `simRate`; the client resyncs rather than retunes                  |
-| `input`           | `ClientToServer` | one frame per tick, `seq` + batched `actions[]`                            |
+| `kind`            | Union            | Notes                                                                     |
+| ----------------- | ---------------- | ------------------------------------------------------------------------- |
+| `join-request`    | `ClientToServer` | first frame; `protocolVersion`, `name`, `projectId` + the two hashes      |
+| `welcome`         | `ServerToClient` | rates, `bounds`, `regions`, `snapshot`, `visuals`, identity + `bundleUrl` |
+| `snapshot-chunk`  | `ServerToClient` | part of a snapshot one frame cannot carry; `index`, sent ahead of it      |
+| `reject`          | `ServerToClient` | `reason: 'version' \| 'full' \| 'identity'`, then `close()`               |
+| `state`           | `ServerToClient` | **reliable**: `structural[]`, `state[]`, `ackSeq`, `earliestHeadroom?`    |
+| `transform`       | `ServerToClient` | **droppable**: `transform[]`, joined to `state` by `tick`                 |
+| `time-sync`       | `ClientToServer` | `clientSentMs`                                                            |
+| `time-sync-reply` | `ServerToClient` | echoes the client stamp, adds `serverSentMs`, `serverTick`                |
+| `manifest`        | `ServerToClient` | render-manifest **additions**, ahead of the spawn that first needs one    |
+| `rate-change`     | `ServerToClient` | `tick`, `simRate`; the client resyncs rather than retunes                 |
+| `input`           | `ClientToServer` | one frame per tick, `seq` + batched `actions[]`                           |
+| `interaction`     | `ClientToServer` | one frame per tick, `tick` + batched `events[]`; no `seq`, so no ack      |
 
 `Envelope` is both unions; `EnvelopeKind` is every `kind`. The unions are **disjoint**, so neither end can
 accept a frame it minted.
@@ -45,9 +49,11 @@ accept a frame it minted.
 **Payload types.** `WireStructuralOp` (nine arms: `spawn`, `destroy`, `reparent`, `tag`, `enter-interest`,
 `leave-interest`, `player-join`, `player-leave`, `attach`) and `WireStructuralOpKind`; `StateHostAddr`,
 `StateDiff`; `WireTransform`, `TransformDiff`; `EntitySnapshot`, `PlayerSnapshot`, `WorldSnapshot`;
-`WireBounds`, `WireRegion`; `RenderManifest`, `WireAssetRef`, `WireAssetKind`, `TemplateVisual`
+`WireBounds`, `WireRegion`; `WireWrapperKind` and `WireWrapperState` (four arms: `Scoreboard`,
+`Leaderboard`, `Inventory`, `Team`); `RenderManifest`, `WireAssetRef`, `WireAssetKind`, `TemplateVisual`
 (`SpriteTemplateVisual` | `GroupTemplateVisual`), `TemplateChild` (`SpriteTemplateChild` |
-`GroupTemplateChild`); `InputAction`, `InputPhase`.
+`GroupTemplateChild`); `InputAction`, `InputPhase`; `Interaction` (four arms: `press`, `click`,
+`hover-enter`, `hover-exit`) and `InteractionKind`.
 
 ## 3. Three type-level rules
 
@@ -60,8 +66,8 @@ Every envelope must be assignable to transport's `Message` (`JsonValue`). All th
    `jsonCodec.encode` throws at runtime for the value a socket actually produces. The carriers:
    `JoinRequest.token`, `Welcome.reconnectToken`, `StateEnvelope.earliestHeadroom`, `WireAssetRef.meta` (and
    its three members), `SpriteTemplateVisual`'s `anchorX` / `anchorY` / `tint` / `neverCull`,
-   `InputAction.value`, `GroupTemplateVisual.children`, and every `TemplateChild` field but `kind` and a
-   sprite child's `texture`.
+   `InputAction.value`, the `press` arm's `screen`, `GroupTemplateVisual.children`, and every
+   `TemplateChild` field but `kind` and a sprite child's `texture`.
 
 Branded numbers, unions of `type` aliases, and intersections all pass — which is what makes `NetId` and the
 flattened `TransformDiff` free.
@@ -103,11 +109,41 @@ flattened `TransformDiff` free.
   linear in it. No type here expresses a cap, because a cap is a receiver's policy and not a shape. Three layers
   hold one each: transport refuses a frame over `MAX_FRAME_BYTES` before parsing it, since parsing is what
   allocates; the server bounds the unauthenticated client → server surface (`MAX_ACTIONS_PER_FRAME`,
-  `MAX_ACTION_NAME_LENGTH`, `MAX_ACTION_NAMES`, `MAX_NAME_LENGTH`, `maxSeqGap`); the client bounds every array
+  `MAX_ACTION_NAME_LENGTH`, `MAX_ACTION_NAMES`, `MAX_INTERACTIONS_PER_FRAME`, `MAX_WIDGET_NAME_LENGTH`,
+  `MAX_NAME_LENGTH`, `maxSeqGap`); the client bounds every array
   it walks at `MAX_WIRE_ITEMS` and refuses a `netId` that could not name a server handle. A `kind` check that
   narrows and then trusts is the shape of the bug. `TemplateChild` is the one recursive shape here, so a
   cardinality cap bounds nothing on its own — a receiver caps depth and total node count as well, or a peer
-  spends the per-level cap to the power of the nesting.
+  spends the per-level cap to the power of the nesting. `Welcome.snapshotChunks` is a count that arrives
+  across frames rather than inside one, so it is bounded too (`MAX_SNAPSHOT_CHUNKS`): every chunk it promises
+  is memory the receiver holds before anything is applied.
+- **A sender at the frame cap chunks; it never asks for a bigger frame.** The cap bounds what one parse
+  allocates, which is the receiver's protection and not the sender's to spend — and a refused frame is
+  unrecoverable on its own, since the client answers a broken session with a resync that asks for the same
+  snapshot again. `snapshot-chunk` carries no tick and is never applied alone: chunks precede their
+  `Welcome`, which names how many there were, and a set that does not add up is refused rather than
+  half-applied. Their `entities` keep the whole snapshot's parents-before-children order, and entity chunks
+  precede state chunks, since a `StateDiff` addressing an entity needs that entity to exist.
+- **An `interaction` is a claim the authority cannot recompute, and is not input.** A widget's hit box is
+  panel layout the server does not hold and a cursor position is meaningless without that client's camera,
+  so both arrive already resolved — by widget name, and by `netId`. The receiver checks the entity is alive
+  and nothing further; a handler that grants something must check reach itself. It carries no `seq`, so it
+  is neither acked nor replayed: an interaction is one discrete event, not an edge of a sustained input, and
+  a lost one is lost rather than re-derivable from the next sample. That is why it is its own frame — in
+  `actions[]` every one of those rules would become conditional on a name.
+- **`Welcome.visuals` is a baseline, not a session's whole manifest.** A template first used after a client
+  joined reaches it on a `manifest` arm, which carries ADDITIONS the receiver merges — never a replacement,
+  which would drop what the join established. It is sent _before_ the `state` envelope whose journal first
+  spawns an entity of that template: a node created against a table that does not hold it draws the
+  placeholder and keeps it for the session. It carries no `tick`, because a visual is not tick-ordered state.
+- **The handshake proves both ends run the same bytes.** `projectId` and `projectHash` must agree, and a
+  `JoinRequest.bundleHash` that is not `''` must match the server's — a client holding stale code is refused
+  rather than left to diverge, since prediction replays its own input through that code and a divergence
+  reads as jitter rather than as a fault. All three disagreements reject as `identity`.
+- **`Welcome.bundleUrl` is executable**, so the client verifies `bundleHash` against the fetched bytes _before_
+  evaluating them and evaluates the bytes it hashed rather than re-fetching the url, which could answer twice.
+  The scheme is constrained exactly as `WireAssetRef.url`'s is; unlike an asset, a refused bundle fails the
+  session rather than being skipped. `''` means the client's own build already holds the code.
 - **`WireAssetRef.url` is an outbound fetch at an address the peer chooses**, and the only wire field that makes
   the client act on the network rather than just parse. `bridge.ts` copies it verbatim into the renderer's
   manifest, so a hostile `Welcome` would otherwise get a browser to fetch an arbitrary URL at join, before a
@@ -133,3 +169,7 @@ flattened `TransformDiff` free.
 mutually in both directions, so core widening _or_ narrowing breaks the build. `NetId` locks the opposite
 relation — core's `EntityId` must _not_ be assignable to it — and `WireBounds` locks nothing, because four named
 edges is a shape that does not grow.
+
+`@platform/project`'s three authoring ids — `TemplateId`, `ScriptId`, `AssetId` — are the deliberate exception
+to the table: they are imported rather than restated, because an id exists to name one thing in a saved file,
+in an editor and on the wire, and a second copy defeats the only job it has.

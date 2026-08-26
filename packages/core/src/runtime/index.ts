@@ -17,7 +17,7 @@ export type { Collider, Animation } from './entity.js';
 
 export { Camera } from './camera.js';
 
-export { HUD, HUDScreen, hud } from './hud.js';
+export { HUD, HUDScreen, HUDState, hud } from './hud.js';
 
 export { Player, PlayerManager } from './player.js';
 export type { Cursor, InputBindings, ActionState } from './player.js';
@@ -38,10 +38,18 @@ export {
     Leaderboard,
     Inventory,
     Team,
+    restoreHostField,
+    reviveWrapper,
+    serializeHostField,
 } from './wrappers.js';
+export type { WrapperKind } from './wrappers.js';
+
+export { PERSISTENCE_SCOPE, PersistedState } from './persistence.js';
+export type { PersistedFields, PersistedSource } from './persistence.js';
 
 export { BaseMovement, TopDownMovement, PlatformerMovement } from './movement.js';
 export type { Movement } from './movement.js';
+export { tickMovement } from './movement-pass.js';
 
 export {
     Runtime,
@@ -54,18 +62,35 @@ export {
 } from './runtime.js';
 export type { EngineLog, TickPasses } from './runtime.js';
 
-export { loadGame, startGame, joinPlayer, leavePlayer } from './load-game.js';
-export type { GameManifest } from './load-game.js';
+export {
+    loadGame,
+    startGame,
+    endGame,
+    joinPlayer,
+    leavePlayer,
+    pressWidget,
+    pointerHit,
+} from './load-game.js';
+export type { GameManifest, PointerEdge, WidgetPress } from './load-game.js';
 
 export { Roster } from './roster.js';
 export { RegionIndex } from './regions.js';
+export type { RegionCrossing } from './regions.js';
 export { ContactSource } from './contacts.js';
 export { LagRing } from './lag-ring.js';
 export { Wiring, activeLocationsFor } from './wiring.js';
-export { HostTable, entityKey, playerKey, GAME_KEY } from './hosts.js';
+export { HostTable, entityKey, playerKey, cameraKey, screenKey, GAME_KEY } from './hosts.js';
 
-export { ManualClock, MemoryKVStore, NullEffectSink, noBlocked } from './seams.js';
-export type { Clock, PhysicsSink, KVStore, EffectSink, Blocked } from './seams.js';
+export { ManualClock, MemoryKVStore, NullEffectSink, NullHUDSink, noBlocked } from './seams.js';
+export type {
+    Clock,
+    PhysicsSink,
+    KVStore,
+    EffectSink,
+    HUDSink,
+    HUDWidgetState,
+    Blocked,
+} from './seams.js';
 export { NullPhysicsSink } from './physics.js';
 export { PRNGStore } from './prng-store.js';
 export type { PRNGBuffer } from './prng-store.js';

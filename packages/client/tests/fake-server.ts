@@ -44,6 +44,17 @@ export interface FakeServerOptions {
     answerTimeSync?: boolean;
     /** The welcome's `RenderManifest`. Defaults to empty, which asks the renderer for nothing. */
     visuals?: RenderManifest;
+    /** What this peer claims to be running. Defaults to declaring nothing, which the client matches. */
+    project?: { projectId: string; projectHash: string };
+    /** Names a script bundle in the welcome, so the client fetches before it goes live. */
+    bundle?: { url: string; hash: string };
+    /**
+     * Divides the snapshot's entities across this many `snapshot-chunk` frames sent ahead of the
+     * `Welcome` — what a real server does for a world one frame cannot carry.
+     */
+    snapshotChunks?: number;
+    /** Sends a count the chunks do not add up to, for the short-set refusal. */
+    understateChunkCount?: boolean;
 }
 
 /** Every input frame this peer received, with the tick it arrived on — for headroom arithmetic. */
@@ -66,6 +77,7 @@ export class FakeServer {
     tick = 0;
     #ackSeq = -1;
     #welcomed = false;
+    #welcome: Welcome | undefined;
 
     constructor(transport: Transport, opts: FakeServerOptions = {}) {
         this.#transport = transport;
@@ -89,6 +101,11 @@ export class FakeServer {
 
     get welcomed(): boolean {
         return this.#welcomed;
+    }
+
+    /** The welcome this peer sent, so a test can name the tick the client's counter seeded from. */
+    get welcome(): Welcome | undefined {
+        return this.#welcome;
     }
 
     get ackSeq(): number {
@@ -151,6 +168,10 @@ export class FakeServer {
             protocolVersion: PROTOCOL_VERSION,
             yourPlayerId: 'p1',
             yourPlayerIndex: 0,
+            projectId: this.#opts.project?.projectId ?? '',
+            projectHash: this.#opts.project?.projectHash ?? '',
+            bundleHash: this.#opts.bundle?.hash ?? '',
+            bundleUrl: this.#opts.bundle?.url ?? '',
             simRate: this.simRate,
             sendRate: this.sendRate,
             bounds: { left: -400, right: 400, top: 300, bottom: -300 },
@@ -169,8 +190,34 @@ export class FakeServer {
             },
             visuals: this.#opts.visuals ?? { assets: [], templates: [] },
         };
+        this.#chunkSnapshot(welcome);
         this.#welcomed = true;
+        this.#welcome = welcome;
         this.#send(welcome);
+    }
+
+    /**
+     * Moves the snapshot's entities into `snapshot-chunk` frames sent ahead of the `Welcome`.
+     *
+     * Chunks first and the count on the `Welcome`, which is the wire order: a receiver holding a
+     * partial set has not been told a join happened, so it cannot apply half a world.
+     */
+    #chunkSnapshot(welcome: Welcome): void {
+        const count = this.#opts.snapshotChunks ?? 0;
+        if (count <= 0) return;
+
+        const all = welcome.snapshot.entities;
+        const per = Math.ceil(all.length / count);
+        welcome.snapshot.entities = [];
+        for (let index = 0; index < count; index++) {
+            this.#send({
+                kind: 'snapshot-chunk',
+                index,
+                entities: all.slice(index * per, (index + 1) * per),
+                state: [],
+            });
+        }
+        welcome.snapshotChunks = this.#opts.understateChunkCount === true ? count - 1 : count;
     }
 
     /** Sends a frame this peer would never build, for the client's boundary checks. */

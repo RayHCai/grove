@@ -127,6 +127,9 @@ describe('§4.3 — what one frame is allowed to contain', () => {
             protocolVersion: PROTOCOL_VERSION,
             name: 'a',
             clientSentMs: 1,
+            projectId: '',
+            projectHash: '',
+            bundleHash: '',
         });
         for (let i = 1; i <= 8; i++) server.pump(i / 60);
 

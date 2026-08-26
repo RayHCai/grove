@@ -8,18 +8,23 @@ import { jsonCodec } from '@platform/transport';
 // Type-only, and reachable from tests alone: `@platform/core` is a devDependency and a reference of
 // `tsconfig.test.json` only, so the parity checks below pin the restated types without core
 // appearing in any shipped module graph.
-import type { AssetKind, EntityId, EventPhase, TransformBuffer } from '@platform/core';
+import type { AssetKind, EntityId, EventPhase, TransformBuffer, WrapperKind } from '@platform/core';
 import type {
     ClientToServer,
     EntitySnapshot,
     Envelope,
     InputFrame,
     InputPhase,
+    Interaction,
+    InteractionFrame,
     JoinRequest,
+    ManifestUpdate,
     NetId,
     RateChange,
     Reject,
+    RejectReason,
     ServerToClient,
+    SnapshotChunk,
     StateEnvelope,
     TemplateChild,
     TemplateVisual,
@@ -32,6 +37,8 @@ import type {
     WireStructuralOp,
     WireStructuralOpKind,
     WireTransform,
+    WireWrapperKind,
+    WireWrapperState,
     WorldSnapshot,
 } from '../src/index.js';
 import { PROTOCOL_VERSION } from '../src/index.js';
@@ -84,6 +91,10 @@ const welcome: Welcome = {
     protocolVersion: PROTOCOL_VERSION,
     yourPlayerId: 'p1',
     yourPlayerIndex: 0,
+    projectId: 'arcade',
+    projectHash: 'a1b2c3',
+    bundleHash: 'd4e5f6',
+    bundleUrl: '/bundle.js',
     simRate: 60,
     sendRate: 20,
     bounds: { left: -100, right: 100, top: 100, bottom: -100 },
@@ -149,6 +160,10 @@ const joinRequest: JoinRequest = {
     protocolVersion: PROTOCOL_VERSION,
     name: 'Ray',
     clientSentMs: 1,
+    projectId: 'arcade',
+    projectHash: 'a1b2c3',
+    // A joiner holds no bundle yet, which is what the empty string means and why it is not optional.
+    bundleHash: '',
 };
 
 const inputFrame: InputFrame = {
@@ -160,18 +175,30 @@ const inputFrame: InputFrame = {
 
 const timeSync: TimeSync = { kind: 'time-sync', clientSentMs: 9 };
 
+const interactionFrame: InteractionFrame = {
+    kind: 'interaction',
+    tick: 4821,
+    events: [
+        { kind: 'press', widget: 'buy', screen: 'shop' },
+        { kind: 'click', netId: netId(16_777_216) },
+    ],
+};
+
 // The rule that makes the whole vocabulary usable, and the one whose failures read like nothing to
 // do with design: they surface at the `send` call as assignability errors.
 
 type _JoinRequestIsMessage = Assignable<JoinRequest, Message>;
 type _WelcomeIsMessage = Assignable<Welcome, Message>;
+type _SnapshotChunkIsMessage = Assignable<SnapshotChunk, Message>;
 type _RejectIsMessage = Assignable<Reject, Message>;
 type _StateIsMessage = Assignable<StateEnvelope, Message>;
 type _TransformIsMessage = Assignable<TransformEnvelope, Message>;
 type _TimeSyncIsMessage = Assignable<TimeSync, Message>;
 type _TimeSyncReplyIsMessage = Assignable<TimeSyncReply, Message>;
+type _ManifestUpdateIsMessage = Assignable<ManifestUpdate, Message>;
 type _RateChangeIsMessage = Assignable<RateChange, Message>;
 type _InputFrameIsMessage = Assignable<InputFrame, Message>;
+type _InteractionFrameIsMessage = Assignable<InteractionFrame, Message>;
 type _ServerToClientIsMessage = Assignable<ServerToClient, Message>;
 type _ClientToServerIsMessage = Assignable<ClientToServer, Message>;
 
@@ -185,15 +212,32 @@ type _SnapshotIsMessage = Assignable<WorldSnapshot, Message>;
 type _TemplateChildIsMessage = Assignable<TemplateChild, Message>;
 type _TemplateVisualIsMessage = Assignable<TemplateVisual, Message>;
 
+const snapshotChunk: SnapshotChunk = {
+    kind: 'snapshot-chunk',
+    index: 0,
+    entities: [entity],
+    state: [{ host: { kind: 'game' }, fields: { round: 3 } }],
+};
+
+const manifestUpdate: ManifestUpdate = {
+    kind: 'manifest',
+    visuals: {
+        assets: [{ key: 'gem', kind: 'texture', url: 'gem.png' }],
+        templates: [{ template: 'gem', kind: 'sprite', texture: 'gem' }],
+    },
+};
+
 const serverFrames: ServerToClient[] = [
     welcome,
+    snapshotChunk,
     reject,
     stateEnvelope,
     transformEnvelope,
+    manifestUpdate,
     timeSyncReply,
     rateChange,
 ];
-const clientFrames: ClientToServer[] = [joinRequest, inputFrame, timeSync];
+const clientFrames: ClientToServer[] = [joinRequest, inputFrame, interactionFrame, timeSync];
 
 describe('every envelope is assignable to transport Message', () => {
     it('encodes through jsonCodec, which is the runtime half of the same rule', () => {
@@ -203,7 +247,7 @@ describe('every envelope is assignable to transport Message', () => {
         for (const frame of frames) {
             expect(() => jsonCodec.encode(frame)).not.toThrow();
         }
-        expect(frames).toHaveLength(9);
+        expect(frames).toHaveLength(12);
     });
 
     it('round-trips an envelope to a structurally equal value', () => {
@@ -213,18 +257,22 @@ describe('every envelope is assignable to transport Message', () => {
 
 // What the discriminant buys: narrowing is a compiler-checked exhaustive switch, and an unknown
 // message is a clean rejection rather than a misparse. The `never` in each default is the assertion
-// — add a tenth message and the arm stops compiling.
+// — add another message and the arm stops compiling.
 
 function narrowServerToClient(frame: ServerToClient): string {
     switch (frame.kind) {
         case 'welcome':
             return `welcome@${frame.snapshot.tick}`;
+        case 'snapshot-chunk':
+            return `chunk#${frame.index}x${frame.entities.length}`;
         case 'reject':
             return `reject:${frame.reason}`;
         case 'state':
             return `state@${frame.tick}/${frame.ackSeq}`;
         case 'transform':
             return `transform@${frame.tick}`;
+        case 'manifest':
+            return `manifest+${frame.visuals.templates.length}`;
         case 'time-sync-reply':
             return `sync@${frame.serverTick}`;
         case 'rate-change':
@@ -242,6 +290,8 @@ function narrowClientToServer(frame: ClientToServer): string {
             return `join:${frame.name}`;
         case 'input':
             return `input@${frame.tick}/${frame.seq}`;
+        case 'interaction':
+            return `interaction@${frame.tick}x${frame.events.length}`;
         case 'time-sync':
             return `sync@${frame.clientSentMs}`;
         default: {
@@ -255,9 +305,11 @@ describe('the discriminant narrows both unions exhaustively', () => {
     it('narrows every server-to-client arm', () => {
         expect(serverFrames.map(narrowServerToClient)).toStrictEqual([
             'welcome@4821',
+            'chunk#0x1',
             'reject:version',
             'state@4821/337',
             'transform@4821',
+            'manifest+1',
             'sync@3',
             'rate@30',
         ]);
@@ -267,6 +319,7 @@ describe('the discriminant narrows both unions exhaustively', () => {
         expect(clientFrames.map(narrowClientToServer)).toStrictEqual([
             'join:Ray',
             'input@4821/337',
+            'interaction@4821x2',
             'sync@9',
         ]);
     });
@@ -279,7 +332,82 @@ describe('the discriminant narrows both unions exhaustively', () => {
         const serverKinds = serverFrames.map((f) => f.kind);
         const clientKinds: string[] = clientFrames.map((f) => f.kind);
         expect(serverKinds.filter((k) => clientKinds.includes(k))).toStrictEqual([]);
-        expect(new Set([...serverKinds, ...clientKinds]).size).toBe(9);
+        expect(new Set([...serverKinds, ...clientKinds]).size).toBe(12);
+    });
+});
+
+describe('the interaction arm carries what the authority cannot recompute', () => {
+    it('names a widget by name and a pointer hit by netId, never by coordinate', () => {
+        // A widget's hit box is panel layout the server does not hold and a cursor position is
+        // meaningless without that client's camera, so both arrive already resolved.
+        const encoded = String(jsonCodec.encode(interactionFrame));
+        expect(encoded).not.toContain('"x"');
+        expect(encoded).toContain('"widget":"buy"');
+        expect(encoded).toContain('"netId":16777216');
+    });
+
+    it('omits `screen` for a widget outside every screen, rather than sending undefined', () => {
+        const loose: Interaction = { kind: 'press', widget: 'pause' };
+        expect('screen' in loose).toBe(false);
+        expect(jsonCodec.encode(loose)).toBe('{"kind":"press","widget":"pause"}');
+    });
+
+    it('is its own frame, so nothing folds an interaction into action state', () => {
+        // The arm carries no `on` phase and no `seq`: an interaction is one discrete event, not an
+        // edge of a sustained input, and it is neither acked nor replayed.
+        const exactFields: Assert<IsMutual<keyof InteractionFrame, 'kind' | 'tick' | 'events'>> =
+            true;
+        expect(exactFields).toBe(true);
+        expect('seq' in interactionFrame).toBe(false);
+    });
+});
+
+// The coverage Record below is keyed by STRUCTURAL OP, so it sees neither a new reject reason nor a
+// new field on an existing arm. Both arrived with session identity, so both get an assertion here.
+
+/** What a client may do about a refusal — the decision a new reason forces someone to make. */
+type RejectResponse = 'never-retry' | 'retry-later';
+
+const REJECT_COVERAGE: Record<RejectReason, RejectResponse> = {
+    version: 'never-retry',
+    // The peer is running other code, so the same client reconnecting reaches the same refusal.
+    identity: 'never-retry',
+    full: 'retry-later',
+};
+
+/** The three fields that must ride BOTH handshake frames, or the comparison has one side only. */
+type HandshakeIdentity = 'projectId' | 'projectHash' | 'bundleHash';
+type _JoinCarriesIdentity = Assert<
+    IsMutual<Extract<keyof JoinRequest, HandshakeIdentity>, HandshakeIdentity>
+>;
+type _WelcomeCarriesIdentity = Assert<
+    IsMutual<Extract<keyof Welcome, HandshakeIdentity>, HandshakeIdentity>
+>;
+
+describe('the handshake proves both ends run the same bytes', () => {
+    it('every reject reason names whether retrying could ever help', () => {
+        // Add a fourth reason and this Record fails to compile, which is the assertion; the values
+        // are the human decision it forces, and a client phrases its message from them.
+        expect(Object.keys(REJECT_COVERAGE).toSorted()).toStrictEqual([
+            'full',
+            'identity',
+            'version',
+        ]);
+        expect(REJECT_COVERAGE.identity).toBe('never-retry');
+    });
+
+    it('the identity fields are required, so a hash-less frame is not a JoinRequest', () => {
+        // @ts-expect-error — omitting one is the shape an older client sends, and it must not pass.
+        const hashless: JoinRequest = { ...joinRequest, projectHash: undefined };
+        expect(hashless.kind).toBe('join-request');
+        expect(Object.keys(joinRequest)).toContain('bundleHash');
+    });
+
+    it('only the server names where the bundle is fetched from', () => {
+        // The client fetches an address the server chose; the reverse would be a client telling a
+        // server to load code, which nothing here has any reason to allow.
+        expect('bundleUrl' in joinRequest).toBe(false);
+        expect(welcome.bundleUrl).toBe('/bundle.js');
     });
 });
 
@@ -409,6 +537,68 @@ describe('the snapshot supplies a baseline for every channel steady state modifi
         // A spawn that left scale/rot/opacity/layer to the transform channel loses them permanently
         // for a static entity, whose one dirty tick is the spawn itself.
         expect(Object.keys(entity.transform)).toHaveLength(7);
+    });
+});
+
+// Wrapper state is not a structural op, so `SNAPSHOT_COVERAGE` is blind to it — a fifth wrapper
+// would replicate through `state` with nobody having decided how it crosses. This is the same rule
+// in the shape wrapper payloads have: exhaustive over the kinds, with the answer written down.
+
+/** What a receiver holding no scripts must be able to rebuild the class from. */
+type WrapperRebuild = 'tag alone' | 'tag + order' | 'tag + name' | 'tag + player';
+
+const WRAPPER_COVERAGE: Record<WireWrapperKind, WrapperRebuild> = {
+    Scoreboard: 'tag alone',
+    // The order decides what `top` means, so defaulting it inverts a low-is-better board.
+    Leaderboard: 'tag + order',
+    Team: 'tag + name',
+    // Resolved through the roster; an inventory naming a player this world lacks stays raw.
+    Inventory: 'tag + player',
+};
+
+type _WrapperKindMatchesCore = Assert<IsMutual<WireWrapperKind, WrapperKind>>;
+/** Every arm of the payload union is one of the declared kinds, and every kind has an arm. */
+type _WrapperStateCoversEveryKind = Assert<IsMutual<WireWrapperState['kind'], WireWrapperKind>>;
+type _WrapperStateIsMessage = Assignable<WireWrapperState, Message>;
+
+describe('wrapper state crosses as a tagged payload, not as a class', () => {
+    it('every wrapper kind names what rebuilding it takes', () => {
+        expect(Object.keys(WRAPPER_COVERAGE).toSorted()).toStrictEqual([
+            'Inventory',
+            'Leaderboard',
+            'Scoreboard',
+            'Team',
+        ]);
+    });
+
+    it('carries every constructor argument, since the receiver runs no scripts', () => {
+        const team: WireWrapperState = { kind: 'Team', name: 'red', members: ['p1'] };
+        const board: WireWrapperState = {
+            kind: 'Leaderboard',
+            order: 'low',
+            scores: [['p1', 30]],
+        };
+        expect(Object.keys(team)).toContain('name');
+        expect(Object.keys(board)).toContain('order');
+    });
+
+    it('carries maps as entry pairs, so a creator-chosen name never lands in key position', () => {
+        // An inventory item called `__proto__` as a KEY would make the codec refuse the whole frame;
+        // as the first half of a pair it is an ordinary string.
+        const bag: WireWrapperState = {
+            kind: 'Inventory',
+            player: 'p1',
+            items: [['__proto__', 1]],
+        };
+        expect(() => jsonCodec.encode({ fields: { bag } })).not.toThrow();
+    });
+
+    it('rides a StateDiff field, so it is bounded by the same reserved-key rule as any value', () => {
+        const diff = {
+            host: { kind: 'game' },
+            fields: { scores: { kind: 'Scoreboard', scores: [['p1', 7]] } },
+        };
+        expect(() => jsonCodec.encode({ state: [diff] })).not.toThrow();
     });
 });
 

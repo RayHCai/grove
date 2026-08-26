@@ -538,6 +538,71 @@ describe('the manifest and the template table', () => {
         expect(renderer.inspect().assets.map((a) => a.name)).toStrictEqual(['ok']);
     });
 
+    it('merges a later manifest in rather than replacing what the join established', async () => {
+        const { mirror, bridge, renderer } = await harness();
+        await bridge.loadManifest({
+            assets: [{ key: 'coin.png', kind: 'texture', url: '/coin.png' }],
+            templates: [{ template: 'coin', kind: 'sprite', texture: 'coin.png' }],
+        });
+
+        // What a mid-session `manifest` envelope carries: the additions alone.
+        await bridge.loadManifest({
+            assets: [{ key: 'gem.png', kind: 'texture', url: '/gem.png' }],
+            templates: [{ template: 'gem', kind: 'sprite', texture: 'gem.png' }],
+        });
+
+        expect(
+            renderer
+                .inspect()
+                .assets.map((a) => a.name)
+                .toSorted(),
+        ).toStrictEqual(['coin.png', 'gem.png']);
+
+        // The template the JOIN established still resolves: a replacing load would have dropped it
+        // and every coin on screen would have gone to the placeholder.
+        const delta = mirror.applyState(
+            stateEnvelope([
+                { kind: 'spawn', snapshot: entity(1, 'coin') },
+                { kind: 'spawn', snapshot: entity(2, 'gem') },
+            ]),
+        );
+        bridge.reconcile(delta);
+        const nodes = renderer.inspect().nodes;
+        expect(nodes.get(bridge.nodeFor(delta.added[0]!)!)?.missingTexture).toBe(false);
+        expect(nodes.get(bridge.nodeFor(delta.added[1]!)!)?.missingTexture).toBe(false);
+    });
+
+    it('does not re-fetch an asset it has already declared', async () => {
+        const { bridge, renderer } = await harness();
+        const manifest = {
+            assets: [{ key: 'coin.png', kind: 'texture' as const, url: '/coin.png' }],
+            templates: [],
+        };
+        await bridge.loadManifest(manifest);
+        await bridge.loadManifest(manifest);
+        // One entry, not two: the renderer's own intent map is what answers "already declared".
+        expect(renderer.inspect().assets.map((a) => a.name)).toStrictEqual(['coin.png']);
+    });
+
+    it('resolves a template declared mid-session on the spawn riding right behind it', () => {
+        // The trap the join path already documents, in its additive form: the template loop has to
+        // fill before the first `await`, or the entity spawned in the very next envelope draws as a
+        // placeholder and keeps it.
+        return harness().then(({ mirror, bridge, renderer }) => {
+            void bridge.loadManifest({
+                assets: [],
+                templates: [{ template: 'late', kind: 'group' }],
+            });
+            const delta = mirror.applyState(
+                stateEnvelope([{ kind: 'spawn', snapshot: entity(9, 'late') }]),
+            );
+            bridge.reconcile(delta);
+            expect(renderer.inspect().nodes.get(bridge.nodeFor(delta.added[0]!)!)?.kind).toBe(
+                'group',
+            );
+        });
+    });
+
     it('maps a sprite template’s visual onto the node desc', async () => {
         const { mirror, bridge, renderer } = await harness();
         await bridge.loadManifest({

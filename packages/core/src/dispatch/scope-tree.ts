@@ -11,10 +11,23 @@ export const NO_SCOPE: ScopeId = 0;
 
 let nextId = 1;
 
+/**
+ * Who a contained throw is charged to — the instance half of a breaker key, plus what a log record
+ * needs to name it. `ScriptInstance` satisfies it; a callback registered outside a handler has none.
+ */
+export interface GuardOwner {
+    readonly id: number;
+    readonly className: string;
+    /** The host's scope-tree id, for cancellation and timer/tween ownership. */
+    readonly hostScopeId: ScopeId;
+}
+
 export interface InvocationScope {
     readonly id: ScopeId;
     readonly hostId: ScopeId;
     readonly startTick: number;
+    /** The script instance running here, so a closure it registers can be charged back to it. */
+    readonly owner: GuardOwner | null;
     dead: boolean;
     concurrencyKey: string;
     cancel: (() => void) | null;
@@ -41,11 +54,17 @@ export class ScopeTree {
         this.#hostScopes.delete(hostId);
     }
 
-    createInvocation(hostId: ScopeId, tick: number, concurrencyKey: string): InvocationScope {
+    createInvocation(
+        hostId: ScopeId,
+        tick: number,
+        concurrencyKey: string,
+        owner: GuardOwner | null = null,
+    ): InvocationScope {
         const scope: InvocationScope = {
             id: nextId++,
             hostId,
             startTick: tick,
+            owner,
             dead: false,
             concurrencyKey,
             cancel: null,

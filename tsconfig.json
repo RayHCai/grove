@@ -18,6 +18,9 @@
             "path": "./packages/transport"
         },
         {
+            "path": "./packages/project"
+        },
+        {
             "path": "./packages/protocol"
         },
         {
@@ -25,9 +28,6 @@
         },
         {
             "path": "./packages/client"
-        },
-        {
-            "path": "./packages/platform"
         },
         {
             "path": "./packages/engine"

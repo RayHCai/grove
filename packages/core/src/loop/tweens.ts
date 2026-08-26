@@ -4,8 +4,10 @@
 
 import type { Easing } from '@platform/math';
 import { ease, lerp } from '@platform/math';
-import type { ScopeId } from '../dispatch/scope-tree.js';
+import { currentInvocation } from '../dispatch/ambient.js';
+import type { GuardOwner, ScopeId } from '../dispatch/scope-tree.js';
 import { NO_SCOPE } from '../dispatch/scope-tree.js';
+import type { GuardedCall } from './timers.js';
 
 /** How a tween reads and writes the value it animates. */
 export interface TweenTarget {
@@ -26,6 +28,8 @@ interface Tween {
     durationTicks: number;
     easing: Easing;
     resolve: (() => void) | null;
+    /** The script instance that started it — a `TweenTarget` may write a creator-authored setter. */
+    owner: GuardOwner | null;
     cancelled: boolean;
 }
 
@@ -35,8 +39,16 @@ export class TweenEngine {
     #nextId = 1;
     #simRate = 60;
 
+    #guard: GuardedCall = (_owner, _method, fn) => {
+        fn();
+    };
+
     setSimRate(rate: number): void {
         this.#simRate = rate;
+    }
+
+    setGuard(guard: GuardedCall): void {
+        this.#guard = guard;
     }
 
     /** Starts a tween, cancelling any other on the same (target, prop); a cancel resolves too. */
@@ -73,6 +85,7 @@ export class TweenEngine {
                 durationTicks,
                 easing,
                 resolve,
+                owner: currentInvocation()?.owner ?? null,
                 cancelled: false,
             };
             this.#tweens.set(id, tween);
@@ -110,7 +123,11 @@ export class TweenEngine {
             tween.elapsed += 1;
             const t = Math.min(1, tween.elapsed / tween.durationTicks);
             const eased = ease(t, tween.easing);
-            tween.target.set(tween.prop, lerp(tween.from, tween.to, eased));
+            // `set` is engine code for an Entity and a creator-authored setter for a plain object,
+            // and the object form is what `tween(this, …)` on a script reaches.
+            this.#guard(tween.owner, `tween:${id}`, () => {
+                tween.target.set(tween.prop, lerp(tween.from, tween.to, eased));
+            });
 
             if (t >= 1) {
                 this.#tweens.delete(id);

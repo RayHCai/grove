@@ -8,6 +8,8 @@
 import type {
     InputAction,
     InputFrame,
+    Interaction,
+    InteractionFrame,
     JoinRequest,
     Reject,
     ServerToClient,
@@ -26,6 +28,7 @@ import type {
     Transport,
 } from '@platform/transport';
 import { jsonCodec, loopbackPair } from '@platform/transport';
+import type { BreakerTrip } from '@platform/core';
 import { GameServer } from '../src/server.js';
 import type { ServerConfig } from '../src/server.js';
 import type { PumpResult } from '../src/driver.js';
@@ -43,13 +46,21 @@ export class Peer {
         });
     }
 
-    /** The first frame on a connection — the client speaks first (§3.2). */
+    /**
+     * The first frame on a connection — the client speaks first (§3.2).
+     *
+     * Declares no project by default, which is what an unconfigured server declares too: the
+     * identity check passes on agreement, not on absence, so a test that wants a mismatch says so.
+     */
     join(name = 'peer', over: Partial<JoinRequest> = {}): void {
         const request: JoinRequest = {
             kind: 'join-request',
             protocolVersion: PROTOCOL_VERSION,
             name,
             clientSentMs: 1000,
+            projectId: '',
+            projectHash: '',
+            bundleHash: '',
             ...over,
         };
         this.#send(request);
@@ -76,6 +87,11 @@ export class Peer {
     /** Burns `n` seq values without sending them, so the next `input` leaves a gap (§4.4). */
     skipSeq(n = 1): void {
         this.#seq += n;
+    }
+
+    /** One tick's HUD presses and pointer hits. It carries no seq, so it disturbs no ack. */
+    interaction(tick: number, events: Interaction[]): void {
+        this.#send({ kind: 'interaction', tick, events } satisfies InteractionFrame);
     }
 
     timeSync(clientSentMs: number): void {
@@ -150,6 +166,8 @@ export interface HarnessOptions {
     codec?: Codec;
     /** `deliver()` passes a frame waits. 1 is transport's faithful default; 0 removes the delay. */
     latency?: number;
+    /** The dev channel, so a test can watch what the host would be told. */
+    onBreakerTrip?: (trip: BreakerTrip) => void;
 }
 
 export class Harness {
@@ -166,6 +184,7 @@ export class Harness {
         this.server = new GameServer({
             ...(opts.config === undefined ? {} : { config: opts.config }),
             ...(opts.codec === undefined ? {} : { codec: opts.codec }),
+            ...(opts.onBreakerTrip === undefined ? {} : { onBreakerTrip: opts.onBreakerTrip }),
             // Handed to the driver, never called by a test around `pump` (§6.4, §8).
             deliver: () => {
                 for (const pair of this.#pairs) pair.deliver();

@@ -22,6 +22,7 @@
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
+        "@platform/project": "workspace:*",
         "@platform/transport": "workspace:*"
     },
     "devDependencies": {

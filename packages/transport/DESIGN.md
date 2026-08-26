@@ -106,6 +106,13 @@ indices and string _values_ are fine); a number that overflowed to non-finite, e
 (`unsupported-value`); nesting past 128 (`frame-too-deep`); more than `MAX_FRAME_BYTES` (4 MiB) of wire
 bytes (`frame-too-large`), counted and refused BEFORE the parse, because the parse is what allocates.
 
+**The cap is the receiver's protection, so a producer near it divides its payload rather than asking for a
+bigger frame.** It bounds what one parse allocates on an untrusted path, and raising it to fit one sender's
+largest message gives that bound away for every peer and every message. A producer sizes its own frames
+against `MAX_FRAME_BYTES` — `Codec.byteLength` over an encoded frame is the measurement — and splits above
+it; `@platform/server` does this for a join snapshot, over its own budget held below this number so an
+envelope's wrapper has room.
+
 **Both walks are iterative** with an explicit stack. A recursive walk — including a `JSON.parse`
 reviver — overflows around 5,000 levels on a well-formed ~60 KB frame the byte cap does not catch,
 and a `RangeError` is not a code a caller can act on. Depth, node count and byte count bound three
@@ -243,4 +250,4 @@ last four and the frame rejections reach `onError` instead — a socket event ha
 
 `@platform/server` (`Transport`, `Codec`, `EncodedFrame`, `Message`, `TimerSource`, `jsonCodec`),
 `@platform/client` (`Transport`, `Message`, `TransportError`), `@platform/protocol` (`JsonValue`, and
-the codec gate), `@platform/engine` (dependency only).
+the codec gate), `@platform/project` (`JsonValue`), `@platform/engine` (dependency only).

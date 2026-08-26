@@ -60,7 +60,7 @@ another name:
 - **One line per change.** A behaviour change is a clause; a whole feature is rarely more than a sentence and a
   table row. If you need a paragraph, the design changed — say so in the response, not in prose padding.
 - **No documented behaviour changed → no edit.** Say that instead of manufacturing one.
-- **Packages with no `DESIGN.md`** (`engine`, `math`, `platform`) keep their contract in `README.md` — update
+- **Packages with no `DESIGN.md`** (`engine`, `math`) keep their contract in `README.md` — update
   that; don't add a `DESIGN.md` uninvited.
 
 ## Build

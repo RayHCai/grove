@@ -5,22 +5,24 @@ its decorators, handler dispatch, the fixed-step loop, timers/tweens, `@serverSt
 marks. No canvas, no sockets, no DOM, no clock of its own — core is **pumped** (`Loop.step`), and everything
 outside its walls is a seam with a null implementation, so the whole package runs in Node. `@platform/engine`
 re-exports it as the creator API; `@platform/server` and `@platform/client` drive it from either side of the
-wire and read its marks to replicate. Only dependency: `@platform/math`.
+wire and read its marks to replicate. Dependencies: `@platform/math`, and `@platform/project` for the
+authoring types alone — its `validate` is the server's to call, so the validator stays out of core's import
+path and core only ever receives an already-valid manifest.
 
 ## Layout
 
-| Path           | Owns                                                                                                                                                                                                                                                                                                                                                                                                      |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts` | barrel, grouped by concern; `PACKAGE_NAME`                                                                                                                                                                                                                                                                                                                                                                |
-| `config.ts`    | `DEFAULT_SIM_RATE`/`DEFAULT_SEND_RATE` (60/20), `BREAKER_THRESHOLD` 100, `MAX_SEND_DEPTH` 64, `MAX_DEDUP_KEYS` 1024, `MAX_LOG_RECORDS` 512, `MAX_REWIND_MS` 250, `MAX_BUBBLE_LENGTH` 200, `resolveConfig`                                                                                                                                                                                                 |
-| `ids.ts`       | `EntityId` brand, `NO_ENTITY`, and thin wrappers over `@platform/math`'s generation-packed handles, where the **arithmetic, never bitwise** rule lives (`<<` wraps int32 at generation 128 and mints live handles)                                                                                                                                                                                        |
-| `errors.ts`    | `LoadError`, `HandlerErrorRecord`                                                                                                                                                                                                                                                                                                                                                                         |
-| `script/`      | `types.ts` locations/phases/concurrency · `metadata.ts` per-class registry · `bases.ts` the four bases · `decorators.ts` all 16 handler decorators + `@serverState` and the `Symbol.metadata` polyfill                                                                                                                                                                                                    |
-| `dispatch/`    | `scope-tree.ts` runtime→host→invocation · `ambient.ts` current-invocation plumbing · `acting-player.ts` the acting-player ambient · `instances.ts` attached-script registry · `breaker.ts` throw counters · `dispatcher.ts`                                                                                                                                                                               |
-| `loop/`        | `store-registry.ts` snapshot contract · `timers.ts` sleep/every/after heap · `tweens.ts` the one tween engine · `loop.ts` `step`/`snapshot`/`restore`                                                                                                                                                                                                                                                     |
-| `world/`       | `entity-table.ts` the per-entity record and hierarchy over math's `SlotTable` · `transform-store.ts` SoA + dirty bitset · `tag-index.ts` · `entity-manager.ts` spawn/destroy/facade cache · `broadphase.ts`                                                                                                                                                                                               |
-| `state/`       | `host-record.ts` values + type tags · `channels.ts` structural journal + state marks · `backing.ts` the `@serverState` accessor pair · `immutable.ts` deep-readonly predicate                                                                                                                                                                                                                             |
-| `runtime/`     | the creator-facing facades (`Entity`, `Game`, `Player`, `Camera`, `HUD`, `random`, `assets`, `sound`/`music`, `sleep`/`every`/`after`, `request`, motion verbs, wrappers, movement) plus the plumbing: `runtime.ts`, `wiring.ts`, `load-game.ts`, `hosts.ts`, `roster.ts`, `contacts.ts`, `regions.ts`, `lag-ring.ts`, `action-states.ts`, `seams.ts`, `physics.ts`, `prng-store.ts`, `transform-view.ts` |
+| Path           | Owns                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts` | barrel, grouped by concern; `PACKAGE_NAME`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `config.ts`    | `DEFAULT_SIM_RATE`/`DEFAULT_SEND_RATE` (60/20), `BREAKER_THRESHOLD` 100, `MAX_SEND_DEPTH` 64, `MAX_DEDUP_KEYS` 1024, `MAX_LOG_RECORDS` 512, `MAX_REWIND_MS` 250, `MAX_BUBBLE_LENGTH` 200, `resolveConfig`                                                                                                                                                                                                                                                                                                                                                                          |
+| `ids.ts`       | `EntityId` brand, `NO_ENTITY`, and thin wrappers over `@platform/math`'s generation-packed handles, where the **arithmetic, never bitwise** rule lives (`<<` wraps int32 at generation 128 and mints live handles)                                                                                                                                                                                                                                                                                                                                                                 |
+| `errors.ts`    | `LoadError`, `HandlerErrorRecord`, `BreakerTrip`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `script/`      | `types.ts` locations/phases/concurrency · `metadata.ts` per-class registry · `bases.ts` the four bases · `decorators.ts` all 16 handler decorators + `@serverState` and the `Symbol.metadata` polyfill                                                                                                                                                                                                                                                                                                                                                                             |
+| `dispatch/`    | `scope-tree.ts` runtime→host→invocation · `ambient.ts` current-invocation plumbing · `acting-player.ts` the acting-player ambient · `instances.ts` attached-script registry · `breaker.ts` throw counters · `dispatcher.ts`                                                                                                                                                                                                                                                                                                                                                        |
+| `loop/`        | `store-registry.ts` snapshot contract · `timers.ts` sleep/every/after heap · `tweens.ts` the one tween engine · `loop.ts` `step`/`snapshot`/`restore`                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `world/`       | `entity-table.ts` the per-entity record and hierarchy over math's `SlotTable` · `transform-store.ts` SoA + dirty bitset · `tag-index.ts` · `entity-manager.ts` spawn/destroy/facade cache · `broadphase.ts`                                                                                                                                                                                                                                                                                                                                                                        |
+| `state/`       | `host-record.ts` values + type tags · `channels.ts` structural journal + state marks · `backing.ts` the `@serverState` accessor pair · `immutable.ts` deep-readonly predicate                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `runtime/`     | the creator-facing facades (`Entity`, `Game`, `Player`, `Camera`, `HUD`, `random`, `assets`, `sound`/`music`, `sleep`/`every`/`after`, `request`, motion verbs, wrappers, movement) plus the plumbing: `runtime.ts`, `wiring.ts`, `load-game.ts`, `hosts.ts`, `roster.ts`, `contacts.ts`, `regions.ts`, `lag-ring.ts`, `action-states.ts`, `seams.ts`, `persistence.ts`, `physics.ts`, `prng-store.ts`, `transform-view.ts`, and `movement-pass.ts`, which holds `tickMovement` apart from the decorator-bearing `movement.ts` so the loop's graph reaches no decorator as a value |
 
 ## 1. Script model
 
@@ -61,9 +63,21 @@ wire and read its marks to replicate. Only dependency: `@platform/math`.
   `tick`, `event`, `stack`), deduped by `class#method#message` — one record per distinct triple, the repeats
   counted and readable through `dispatcher.throwCount` — and 100 **consecutive** throws disable that
   `(instance, method)`; a success resets it, and an async handler counts as a success only once its promise
-  settles. Breaker counts are snapshot state; the dedup map is not, and both it and the default log are capped
-  so a session cannot grow them without bound.
+  settles. The handler is read **inside** the try, since a handler declared as an accessor makes the property
+  read itself creator code. Breaker counts are snapshot state; the dedup map is not, and both it and the
+  default log are capped so a session cannot grow them without bound.
   Wiring throws are fatal (`LoadError`) because a half-hoisted host record matches no declaration.
+- **The same boundary covers creator code that runs without a dispatch**, through `dispatcher.guard(owner,
+site, fn)` — one implementation, so the dedup, log and breaker cannot diverge between the two entries. Four
+  callers: the movement pass (`tickMovement`, `tick`), a due timer (`timer:<id>`), a tween's write to its
+  target (`tween:<id>`) and a countdown's completion (`countdown:<id>`). Each is keyed on the CALLBACK rather
+  than on the method that registered it, which has already returned; the owning `ScriptInstance` comes from
+  `InvocationScope.owner`, captured at registration, or from `instances.forInstance` for a movement the pass
+  holds directly. An unowned callback is contained and logged but cannot be disabled — there is no instance to
+  charge.
+- **A trip is reported to the host** through `dispatcher.onTrip`, carrying the log record plus the
+  `instanceId`, since a class name does not say which of a template's copies stopped. The listener's own throw
+  is contained, so a reporting bug cannot end a tick.
 
 ## 3. Loop, tick order, snapshot
 
@@ -76,16 +90,22 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
 1  adopt tick        rt.tick = the argument, NOT an increment
 2-3 input            passes.input  — stub in core; installed by the endpoint
 4  movement          per player with a movement instance, live avatars only
-5  contacts          ContactSource.pairs() → @onCollide per tag, both directions
-6  regions           passes.regions — stub
-7  timers & tweens   TimerHeap.advance(), TweenEngine.advance(), passes.countdowns — stub
+5  contacts          ContactSource.entered() → @onCollide per tag, both directions
+6  regions           RegionIndex.crossings() → @onEnter / @onExit per entity
+7  timers & tweens   TimerHeap.advance(), TweenEngine.advance(), then every running Countdown
 8  @onUpdate         server + synced locations only
-9  destroy drain     EntityManager.drainDestroyed()
+9  destroy drain     @onEnd at every doomed entity, then EntityManager.drainDestroyed()
 10 replicate         server only: LagRing.capture(tick)
 ```
 
-- `opts.replay` makes the dispatcher skip client-located handlers; `EffectSink` is the drop point for
-  one-shot effects. `opts.scope` reaches the passes, and `snapshot(scope)` is the only thing that acts on it.
+- `opts.replay` makes the dispatcher skip client-located handlers and the countdowns pass skip its whole
+  advance, since no store rewinds a countdown for a re-run; `EffectSink` is the drop point for one-shot
+  effects. `opts.scope` reaches the passes, and `snapshot(scope)` is the only thing that acts on it.
+- **An edge is a diff, and the previous tick lives on whatever owns the walk** — the overlapping pair set on
+  `ContactSource`, the per-region occupant sets on `RegionIndex`. Neither is a `SnapshotStore`, so a rewind
+  leaves both describing the tick they were last folded on; that is why the client honours neither pass.
+  `@onCollide` is therefore the moment two bodies touch, with `Entity.getTouching` as the pull-based
+  "am I still touching"; a contact has no exit handler.
 - **Snapshot completeness is a registry, not a list.** A `SnapshotStore` declares `storeName`, a `scopeMode`
   (`filtered` | `whole` | `derived`, no default) and `createBuffer`/`capture(into, scope)`/`apply`. Six stores
   register, in capture order: `entities`, `transforms`, `tags`, `prng` (whole — one interleaved stream, no
@@ -124,6 +144,21 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   decorator. An omitted player defaults to the dispatcher's acting-player ambient in `Scoreboard`, and throws
   in `Leaderboard.submit`, which has no one to attribute a bare score to. `Countdown` (own `onZero`, not
   `@onEnd`) and `Storage` (over the `KVStore` seam) sit outside it.
+- **A wrapper field's value in `values` is the wrapper itself**, put there by `#bindWrappers` — the same map
+  every other field uses, because the replication path reads that map and a wrapper left out of it marks a
+  channel whose drain then finds nothing. `serializeHostField` and `restoreHostField` are the two ends both
+  endpoints replicate through: the first substitutes `serialize()` (no codec carries a class instance), the
+  second calls `restore()` on a wrapper already held, or `reviveWrapper`s one from the payload's own `kind`
+  when the receiver holds none — which is the ordinary client, since it runs no scripts. Every constructor
+  argument therefore rides the payload: `Leaderboard`'s order decides what `top` means, `Team`'s name is its
+  identity, and `Inventory`'s player is resolved through the roster, staying raw when that player is unknown.
+- **Persistence is a synchronous cache written through to an async store.** `PersistedState` is what
+  `rt.persisted` holds and what wiring's seeding reads, because the hoist is synchronous and cannot await;
+  `save(record)` captures the record's fields into the cache **now** and returns the store's promise. The
+  asymmetry is deliberate: the boundary that triggers a save is a connection that has already closed, so
+  nothing is there to await it, and the capture has to be synchronous because the record is torn down
+  immediately after. A host is one KV entry under the `serverState` scope, so a rejoin costs one round trip
+  rather than one per field.
 - `Immutable<T>` is the deep-readonly predicate that collapses a mutable declaration to a branded marker.
 
 ## 5. World
@@ -138,14 +173,17 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   reads return copies. Timed verbs (`glideTo`, `fadeTo`, `growTo`, `spin*`) are all `TweenEngine.start` with
   last-one-wins per `(target, prop)`. Hierarchy carries position only.
 - `destroy()` is logical-now, teardown-at-end-of-tick: `alive` flips false and cascades to children
-  immediately; the drain unparents, clears tags, releases the slot, cancels timers/tweens, removes instances
-  and the host, journals `destroy`, and bumps the generation.
+  immediately; the drain fires `@onEnd` at **every** doomed entity before tearing any of them down — so a
+  handler still finds the rest of its subtree addressable — then per entity unparents, clears tags, releases
+  the slot, cancels timers/tweens, removes instances and the host, journals `destroy`, and bumps the
+  generation.
 - `Broadphase` is naive O(n²) over a `TransformView`, ascending id order, and takes its transform source as a
   constructor argument — the live store or a ring buffer. `liveTransformView` is the one factory for a view
   over the live stores, so `rt.broadphase`'s point-only view and `ContactSource`'s differ in one argument:
   the half-extent lookup. `ContactSource` layers self/parent/child exclusion and tag filtering on top;
   half-extents come from `collider.bounds`.
-- `RegionIndex` is build-time named rectangles with point queries; `find({ in })` resolves against it.
+- `RegionIndex` is build-time named rectangles with point queries; `find({ in })` resolves against it, and
+  the regions pass folds live membership through it to get the `@onEnter` / `@onExit` edges.
 
 ## 6. Runtime, facades, load order
 
@@ -160,10 +198,29 @@ simulation code inside a tick never has to consult the ambient slot at all.
 
 `loadGame(manifest)` → build world (bounds, regions, assets, collaborators, `passes`) → attach Game scripts
 (wire + hoist, **no** `@onStart`) → `startGame(rt)` runs Game `@onStart` to its first await →
-`joinPlayer` / `leavePlayer` release and end sessions. The manifest takes `role`, `simRate`, `bounds`,
-`regions`, `assets`, `gameScripts`. `leavePlayer` dispatches `@onPlayerLeave` **before** the roster removal so
-the handler can still read the player; `PlayerManager.adopt` keeps a wire-supplied `index` where `create`
-mints one.
+`joinPlayer` / `leavePlayer` release and end sessions → `endGame(rt)` runs `@onEnd` at every attached
+instance, because the world ending ends every host under it. The manifest takes `role`, `simRate`, `bounds`,
+`regions`, `assets`, `gameScripts`. `leavePlayer` goes innermost host outward and removes last — `@onEnd` at
+the player host then its camera host, then `@onPlayerLeave` at the Game, then `PlayerManager.remove`, which
+drops both hosts — so every handler can still read the player; `PlayerManager.adopt` keeps a wire-supplied
+`index` where `create` mints one.
+
+`hud` is a facade over the current runtime's `HUDState` — the authored screens, the open stack bottom to
+top, and one record per widget a verb has written — so it is per-world like `game` rather than a process
+singleton. A verb writes the record and pushes the whole of it at the `HUDSink`; `hud.player` is
+`rt.localPlayer` and **throws** where there is none, which is any server runtime. `open(name)` mints the
+screen on first mention, attaches its registered classes, then marks it visible and dispatches `@onStart`;
+`close(name)` dispatches `@onEnd` and then drops the instances and the host record, so a reopen builds fresh
+client state. Both are idempotent, and a screen dispatch names `client` locations explicitly because a
+screen exists on one machine whatever role built the runtime. `pressWidget` fires `@onPress` at every
+attached instance except a screen-hosted one whose screen the press did not name — which is what keeps two
+menus with a `back` button apart — and `pointerHit` fires `@onClick` / `@onHoverEnter` / `@onHoverExit` at
+the entity, checking only that it is alive, since the hit was resolved against a camera no authority holds.
+
+A `Countdown` enrols itself on the runtime when `start()` is called and drops out when it pauses or reaches
+zero, so the set the countdowns pass walks holds only running ones and a game minting one per round does not
+grow it for the session. Its `onZero` runs through `Runtime.guardCallback`, the same boundary a timer
+callback gets, because it is creator code with no invocation of its own.
 
 `action-states.ts` is deliberately pure — no runtime, no dispatch — because both endpoints fold input edges
 and a second implementation of the one-tick-wide `pressed`/`released` rule would diverge.
@@ -176,11 +233,12 @@ Each is an interface with a null implementation, so every live member is exercis
 | --------------- | -------------------------------------------------------------------- | --------------------- |
 | `Clock`         | `ManualClock` (held on the runtime; the host's accumulator reads it) | host app              |
 | `PhysicsSink`   | `NullPhysicsSink` — integrates position, `blocked` all false         | Rapier                |
-| `KVStore`       | `MemoryKVStore`                                                      | `@platform/platform`  |
+| `KVStore`       | `MemoryKVStore`, behind `PersistedState`                             | host app              |
 | `EffectSink`    | `NullEffectSink` — audio, particles, camera shake                    | client / audio layer  |
 | `Broadphase`    | naive O(n²) over any `TransformView`                                 | Rapier or a grid      |
 | `ContactSource` | over `Broadphase`                                                    | Rapier                |
 | `RegionIndex`   | built once at load                                                   | core (panel-authored) |
+| `HUDSink`       | `NullHUDSink` — widget and screen writes                             | client                |
 
 `InputSource`, `SceneSink` and `ReplicationSink` are **not** declared here: the endpoints drive `passes.input`
 and read `consumeDirty()` / `drainStructural()` / `drainState()` directly.

@@ -17,11 +17,20 @@ import { Camera } from './camera.js';
 import { Entity } from './entity.js';
 import { Asset, AssetRegistry } from './assets.js';
 import type { AssetKind } from './assets.js';
+import { tickMovement } from './movement-pass.js';
 import { Wiring, activeLocationsFor } from './wiring.js';
 import { createRuntime } from './runtime.js';
 import type { Runtime, TickPasses } from './runtime.js';
 import type { DispatchCtx, DispatchOptions } from '../dispatch/dispatcher.js';
-import { entityKey } from './hosts.js';
+import {
+    GAME_KEY,
+    SCREEN_KEY_PREFIX,
+    cameraKey,
+    entityKey,
+    playerKey,
+    screenKey,
+} from './hosts.js';
+import { HUDState } from './hud.js';
 import { liveTransformView } from './transform-view.js';
 
 export interface GameManifest {
@@ -49,8 +58,12 @@ export function loadGame(manifest: GameManifest = {}): Runtime {
     if (manifest.bounds) rt.worldBounds = manifest.bounds;
     rt.regions = new RegionIndex();
     for (const r of manifest.regions ?? []) rt.regions.define(r.name, r.bounds);
+    rt.hud = new HUDState();
 
     rt.entityManager.makeFacade = (id: EntityId) => new Entity(id, rt);
+    rt.entityManager.dispatchEnd = (id: EntityId) => {
+        void dispatchToHostKind(rt, entityKey(id as number), 'onEnd', '@end', { alive: false });
+    };
     rt.playerManager = new PlayerManager(rt);
     rt.random = new RuntimeRandom(rt);
     rt.roster = new Roster(rt);
@@ -84,23 +97,102 @@ export function startGame(rt: Runtime): Promise<void> {
     return dispatchLifecycle(rt, 'onStart', '@start');
 }
 
+/** The world stopped existing, so every attached script's @onEnd runs — the mirror of startGame. */
+export function endGame(rt: Runtime): Promise<void> {
+    return dispatchLifecycle(rt, 'onEnd', '@end');
+}
+
 /** Creates the player record, then lets @onPlayerJoin decide spawn or spectate. */
 export function joinPlayer(rt: Runtime, id: string, name: string): Player {
     const player = rt.playerManager!.create(id, name);
-    void dispatchToHost(rt, 'game', 'onPlayerJoin', '@playerJoin', { player });
+    void dispatchToHostKind(rt, GAME_KEY, 'onPlayerJoin', '@playerJoin', { player });
     return player;
 }
 
-/** Ends a session; @onPlayerLeave runs before removal, while the player is still readable. */
+/**
+ * Ends a session: the player's own hosts wind up, then the Game is told, then the roster drops them.
+ *
+ * Innermost host outward, and the removal last, so both @onEnd and @onPlayerLeave can still read the
+ * player and everything hoisted onto its record.
+ */
 export function leavePlayer(rt: Runtime, id: string): void {
     const player = rt.playerManager?.byId(id);
     if (!player) return;
-    void dispatchToHost(rt, 'game', 'onPlayerLeave', '@playerLeave', { player });
+    const ended = { player, alive: false };
+    void dispatchToHostKind(rt, playerKey(id), 'onEnd', '@end', ended);
+    void dispatchToHostKind(rt, cameraKey(id), 'onEnd', '@end', ended);
+    void dispatchToHostKind(rt, GAME_KEY, 'onPlayerLeave', '@playerLeave', { player });
     rt.playerManager?.remove(id);
 }
 
+/** A HUD widget press, as either endpoint hands one to core. */
+export interface WidgetPress {
+    widget: string;
+    /** The screen the widget belongs to; absent for one outside every screen. */
+    screen?: string;
+    /** Who pressed it — engine-supplied from the connection, never from the frame. */
+    player?: Player;
+}
+
+/**
+ * Dispatches `@onPress` for one widget.
+ *
+ * A screen-hosted handler answers only its own screen's widgets, which is what keeps two menus with
+ * a `back` button from colliding; every other host resolves the widget across the whole HUD. The
+ * rule lives here rather than at either endpoint because both dispatch the same press.
+ */
+export function pressWidget(rt: Runtime, press: WidgetPress): Promise<void> {
+    const onScreen = press.screen === undefined ? undefined : screenKey(press.screen);
+    const pending: Promise<void>[] = [];
+    for (const [hostKey, si] of rt.instances.entries()) {
+        if (hostKey.startsWith(SCREEN_KEY_PREFIX) && hostKey !== onScreen) continue;
+        pending.push(
+            rt.dispatcher.dispatch(
+                [si],
+                'onPress',
+                press.widget,
+                hostKey,
+                tickCtx(rt, press.player === undefined ? {} : { player: press.player }),
+                { activeLocations: roleLocations(rt), tick: rt.tick },
+            ),
+        );
+    }
+    return Promise.all(pending).then(() => undefined);
+}
+
+/** Which pointer edge a hit carries. Each is its own handler kind, so the kind IS the edge. */
+export type PointerEdge = 'onClick' | 'onHoverEnter' | 'onHoverExit';
+
+const POINTER_EVENT: Readonly<Record<PointerEdge, string>> = {
+    onClick: '@click',
+    onHoverEnter: '@hoverEnter',
+    onHoverExit: '@hoverExit',
+};
+
+/**
+ * Dispatches a pointer hit at the entity it landed on.
+ *
+ * The entity is the peer's claim about its own camera and cursor, which no authority can recompute,
+ * so this checks only that it is alive — a handler that grants something must check reach itself.
+ */
+export function pointerHit(
+    rt: Runtime,
+    edge: PointerEdge,
+    id: EntityId,
+    player?: Player,
+): Promise<void> {
+    if (!rt.entities.isAlive(id)) return Promise.resolve();
+    return dispatchToHostKind(
+        rt,
+        entityKey(id as number),
+        edge,
+        POINTER_EVENT[edge],
+        player === undefined ? { other: rt.entityManager.facade(id) } : { player },
+    );
+}
+
 /** The per-tick half of a DispatchCtx; `extra` carries whatever the event itself supplies. */
-function tickCtx(rt: Runtime, extra?: Omit<Partial<DispatchCtx>, 'dt' | 'alive'>): DispatchCtx {
+function tickCtx(rt: Runtime, extra?: Omit<Partial<DispatchCtx>, 'dt'>): DispatchCtx {
     return { data: {}, dt: 1 / rt.simRate, alive: true, ...extra };
 }
 
@@ -121,19 +213,20 @@ function dispatchLifecycle(rt: Runtime, kind: 'onStart' | 'onEnd', event: string
     return Promise.all(pending).then(() => undefined);
 }
 
-function dispatchToHost(
+/** Fires one kind at one host's scripts, in attachment order. */
+function dispatchToHostKind(
     rt: Runtime,
     hostKey: string,
-    kind: 'onPlayerJoin' | 'onPlayerLeave',
+    kind: HandlerKind,
     event: string,
-    ctx: { player: Player },
+    extra?: Omit<Partial<DispatchCtx>, 'dt'>,
 ): Promise<void> {
     return rt.dispatcher.dispatch(
         rt.instances.forHost(hostKey),
         kind,
         event,
         hostKey,
-        tickCtx(rt, { player: ctx.player }),
+        tickCtx(rt, extra),
         { activeLocations: roleLocations(rt), tick: rt.tick },
     );
 }
@@ -184,6 +277,13 @@ function makePasses(rt: Runtime): TickPasses {
         }
     };
 
+    // Held by the table rather than allocated per tick: the contact walk is O(n²) and the region
+    // walk visits every live entity per region, so both run at simRate over the whole world.
+    const entered: Array<[EntityId, EntityId]> = [];
+    const liveIds: EntityId[] = [];
+    const posX = (id: EntityId): number => rt.transforms.posX(id);
+    const posY = (id: EntityId): number => rt.transforms.posY(id);
+
     return {
         input() {
             // Core owns no input source; the client and tests dispatch input events themselves.
@@ -196,20 +296,47 @@ function makePasses(rt: Runtime): TickPasses {
                 // otherwise keep writing positions for whatever entity reuses the released slot.
                 const host = movement.host as unknown as { entityId: EntityId };
                 if (!rt.entities.isAlive(host.entityId)) continue;
-                movement.tick(dt);
+                tickMovement(rt, movement, host.entityId, dt);
             }
         },
         contacts(dispatch) {
-            for (const [a, b] of rt.contacts?.pairs() ?? []) {
+            for (const [a, b] of rt.contacts?.entered(entered) ?? []) {
                 fireCollide(rt, a, b, dispatch);
                 fireCollide(rt, b, a, dispatch);
             }
         },
-        regions() {
-            // Nothing dispatches region enter/exit; find({ in }) queries RegionIndex on demand.
+        regions(dispatch) {
+            const regions = rt.regions;
+            if (!regions) return;
+            const ids = rt.entities.liveIds(liveIds);
+            for (const crossing of regions.crossings(ids, posX, posY)) {
+                // A destroyed entity leaves every region it was in on the tick it dies, and firing
+                // @onExit there would run a handler on a host whose @onEnd has not gone out yet.
+                if (!crossing.entered && !rt.entities.isAlive(crossing.id)) continue;
+                const self = crossing.id as number;
+                void rt.dispatcher.dispatch(
+                    rt.instances.forHost(entityKey(self)),
+                    crossing.entered ? 'onEnter' : 'onExit',
+                    crossing.region,
+                    String(self),
+                    tickCtx(rt),
+                    dispatch,
+                );
+            }
         },
-        countdowns() {
-            // No Countdown registry exists, so there is nothing to advance.
+        countdowns(dispatch) {
+            // A replayed tick has already spent this countdown: it is wall-facing display timing
+            // with no authoritative counterpart, so nothing rewinds it back for the re-run.
+            if (dispatch.replay === true) return;
+            // Over a copy: an onZero that starts another countdown would otherwise have it advanced
+            // on the tick it was created, since a Set visits what an iteration adds.
+            for (const countdown of Array.from(rt.countdowns)) {
+                // Guarded like a timer's callback: onZero is creator code with no invocation of its
+                // own, so an unguarded throw would escape the loop.
+                rt.guardCallback(countdown.owner, countdown.guardKey, '@countdown', () =>
+                    countdown.advance(),
+                );
+            }
         },
         update(dispatch, _dt) {
             // A ClientScript's @onUpdate is display-rate via frame(), never the sim step.

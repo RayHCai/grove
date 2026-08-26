@@ -5,7 +5,15 @@
 // resulting set lives for one send and is not state the server carries between ticks.
 
 import type { EntityId, HostRecord, Runtime, StateMark, StructuralOp } from '@platform/core';
-import { Entity, GAME_KEY, NO_ENTITY, Player, entityKey, playerKey } from '@platform/core';
+import {
+    Entity,
+    GAME_KEY,
+    NO_ENTITY,
+    Player,
+    entityKey,
+    playerKey,
+    serializeHostField,
+} from '@platform/core';
 import type {
     EntitySnapshot,
     NetId,
@@ -121,7 +129,13 @@ export interface RosterOps {
  * Nothing else drains them on the server, so there is no double-drain hazard. Draining is also what
  * meets core's replication-sink obligation: core marks the right channel, the sink decides cadence.
  */
-export function drainOnce(rt: Runtime, tick: number, roster: RosterOps): SendSet {
+export function drainOnce(
+    rt: Runtime,
+    tick: number,
+    roster: RosterOps,
+    spill: WireStructuralOp[],
+    budget: number,
+): SendSet {
     const set: SendSet = {
         tick,
         structural: [],
@@ -132,20 +146,36 @@ export function drainOnce(rt: Runtime, tick: number, roster: RosterOps): SendSet
         encodedTransform: null,
     };
 
+    // Last send's overflow first and in order, ahead of anything new: the ops do not commute and the
+    // journal is applied verbatim, so a reordered spill creates a node for a dead entity.
+    const ordered: WireStructuralOp[] = spill.splice(0);
+
     for (const snapshot of roster.joins) {
-        set.structural.push({ kind: 'player-join', player: snapshot });
+        ordered.push({ kind: 'player-join', player: snapshot });
     }
 
+    // Converted to wire form HERE, before any of it can be held over: a spawn's snapshot is read from
+    // live state, and an entity destroyed while its op waited would go out with an empty template.
     const journal = rt.channels.drainStructural();
     const ephemeral = ephemeralIds(rt, journal);
     for (const op of journal) {
         const wire = toWireStructural(rt, op, ephemeral);
         if (wire === undefined) set.dropped += 1;
-        else set.structural.push(wire);
+        else ordered.push(wire);
     }
 
     for (const id of roster.leaves) {
-        set.structural.push({ kind: 'player-leave', id });
+        ordered.push({ kind: 'player-leave', id });
+    }
+
+    // A script spawning in a loop mints more ops in one interval than a frame can carry, and a peer
+    // refuses an over-cap frame before parsing it — then resyncs, which asks for something bigger.
+    // Capped and carried instead, so the journal arrives whole across as many sends as it takes.
+    if (ordered.length > budget) {
+        set.structural = ordered.slice(0, budget);
+        spill.push(...ordered.slice(budget));
+    } else {
+        set.structural = ordered;
     }
 
     // consumeDirty returns dirty slot indices — which entities moved, not what they moved to — so
@@ -261,7 +291,9 @@ function toStateWrite(
     // A grouped diff cannot carry these: assigning one would set the bucket's prototype instead of
     // adding a key, so it is dropped and counted like an unrepresentable value.
     if (RESERVED_KEYS.has(mark.field)) return undefined;
-    const value = encodeStateValue(record.values.get(mark.field));
+    // Through core, because a wrapper field's value IS the wrapper and no codec represents a class
+    // instance: read raw, every scoreboard write would be dropped here and counted.
+    const value = encodeStateValue(serializeHostField(record, mark.field));
     // The codec throws on `undefined`, so one unrepresentable field would abort the whole send for
     // every connection. Dropped and counted instead.
     if (value === undefined) return undefined;
@@ -311,6 +343,10 @@ export function encodeStateValue(
         if (Object.getPrototypeOf(value) !== Object.prototype) return undefined;
         const out: { [key: string]: JsonValue } = {};
         for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+            // At every level, not just the top: assigning a reserved key here sets `out`'s prototype
+            // instead of adding a key, so the field would go out silently missing a member. A
+            // serialized wrapper is a nested object, which is what puts real keys down here.
+            if (RESERVED_KEYS.has(key)) return undefined;
             const encoded = encodeStateValue(item, open, depth + 1);
             if (encoded === undefined) return undefined;
             out[key] = encoded;
@@ -355,11 +391,16 @@ function encodedTransform(set: SendSet, codec: Codec): EncodedFrame {
 function sendState(conn: Connection, player: Player, set: SendSet): void {
     const ack = conn.admission.takeAck();
     const scoped = set.playerState.get(player.id);
+    // A connection that joined while ops were held over skips them: its snapshot was read from live
+    // state and already holds their effect. Sliced only when it owes a skip, so the ordinary send
+    // still hands every connection the one array.
+    const skip = Math.min(conn.structuralSkip, set.structural.length);
+    if (skip > 0) conn.structuralSkip -= skip;
     const envelope: StateEnvelope = {
         kind: 'state',
         tick: set.tick,
         ackSeq: ack.ackSeq,
-        structural: set.structural,
+        structural: skip === 0 ? set.structural : set.structural.slice(skip),
         state: scoped === undefined ? set.sharedState : [...set.sharedState, ...scoped],
     };
     // Absent when this ack resolved no input, never explicitly `undefined` — the codec refuses the

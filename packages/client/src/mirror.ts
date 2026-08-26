@@ -1,11 +1,22 @@
-// The mirror world: a real core runtime with nothing running in it, and the one path that writes it.
+// The mirror world: a real core runtime, the one path that writes it from the wire, and the passes a
+// prediction step runs in it.
 //
 // A real runtime rather than typed arrays, because prediction needs one — snapshot/restore reach core's
-// private stores, so a hand-rolled mirror would be thrown away to get it. Nothing simulates: every pass is
-// something the client must not do, having no authority behind it and no handlers to dispatch to.
+// private stores, so a hand-rolled mirror would be thrown away to get it. Idle, every pass is a no-op:
+// simulating is something the client may do only over an authoritative baseline it can rewind to.
 
 import type { EntityId, Runtime, TickPasses } from '@platform/core';
-import { GAME_KEY, Loop, entityKey, loadGame, playerKey, Player } from '@platform/core';
+import {
+    GAME_KEY,
+    Loop,
+    entityKey,
+    loadGame,
+    playerKey,
+    restoreHostField,
+    Player,
+} from '@platform/core';
+import { clientPasses } from './passes.js';
+import type { ClientPassContext } from './passes.js';
 import type { Bounds } from '@platform/math';
 import { bounds as makeBounds } from '@platform/math';
 import type {
@@ -71,18 +82,31 @@ export interface MirrorView {
     entries(): IterableIterator<[NetId, EntityId]>;
 }
 
+/** A creator script class, as the host holds one. */
+export type ScriptClass = new () => object;
+
+/**
+ * The scripts to attach to a mirrored entity, keyed by the template it spawned from.
+ *
+ * The wire's `attach` op names a class this runtime has no registry to resolve, so the host supplies
+ * the table instead — it already holds the game's code. Only what a prediction step may run belongs
+ * here: a `ServerScript` is filtered out of a client tick and would never be dispatched to.
+ */
+export type TemplateScripts = Readonly<Record<string, readonly ScriptClass[]>>;
+
 /** What `Welcome` supplies that the mirror needs to build its runtime. */
 export interface MirrorOptions {
     simRate: number;
     bounds: Bounds;
     regions: Array<{ name: string; bounds: Bounds }>;
+    scripts?: TemplateScripts;
 }
 
 function emptyDelta(): MirrorDelta {
     return { added: [], removed: [], reparented: [], joined: [], left: [] };
 }
 
-/** Every pass a no-op: the mirror holds a `Loop` for snapshot/restore and never calls `step`. */
+/** Every pass a no-op, so a `step` taken without a baseline behind it moves nothing. */
 function inertPasses(): TickPasses {
     return {
         input() {},
@@ -98,6 +122,16 @@ export class Mirror {
     readonly #rt: Runtime;
     readonly #loop: Loop;
     readonly #index = new MirrorIndex();
+    readonly #scripts: TemplateScripts | undefined;
+    /** The table `loadGame` built, kept so simulating can install over it rather than rebuild it. */
+    readonly #simPasses: TickPasses;
+    /**
+     * Where the server was in the state the wire last described.
+     *
+     * Its own field rather than `rt.tick`, which a prediction step moves to the local tick: the two agree
+     * only while nothing is predicted, and the behind-check that catches a suspended tab reads this one.
+     */
+    #depictedTick = 0;
     /** Held until the `StateEnvelope` for the same tick lands — the join key is an equality. */
     #heldTransforms: TransformEnvelope | undefined;
     /** The highest tick whose state envelope has been applied; the snapshot stands in for its own. */
@@ -114,6 +148,7 @@ export class Mirror {
     };
 
     constructor(opts: MirrorOptions) {
+        this.#scripts = opts.scripts;
         this.#rt = loadGame({
             role: 'client', // → ['client','synced'], rt.isServer = false
             simRate: opts.simRate,
@@ -124,6 +159,7 @@ export class Mirror {
         // No startGame(rt): it dispatches @onStart at every attached instance, and there are none.
         // Skipped rather than awaited — with an empty registry it would resolve immediately, and calling
         // it would read as though the client runs a lifecycle it does not have.
+        this.#simPasses = this.#rt.passes ?? inertPasses();
         this.#rt.passes = inertPasses();
         this.#loop = new Loop(this.#rt);
     }
@@ -132,19 +168,29 @@ export class Mirror {
         return this.#rt;
     }
 
-    /** Held for prediction's `restore` + `step`; never `step`ped here. */
+    /** The loop a prediction step drives, and the `restore` that takes one back. */
     get loop(): Loop {
         return this.#loop;
     }
 
     /**
-     * The depicted tick — where the server was in the state the mirror holds.
+     * The depicted tick — where the server was in the state the wire last described.
      *
      * Distinct from the client's `localTick`, which is the input tick and ahead of it; the gap sawtooths,
      * so the only sound statement is `localTick >= depictedTick`.
      */
     get depictedTick(): number {
-        return this.#rt.tick;
+        return this.#depictedTick;
+    }
+
+    /**
+     * Installs the passes a prediction step runs, or takes them back out.
+     *
+     * The one writer of `rt.passes` after construction, so what an idle mirror does — nothing — cannot be
+     * changed from outside the file that documents it.
+     */
+    simulate(ctx: ClientPassContext | null): void {
+        this.#rt.passes = ctx === null ? inertPasses() : clientPasses(this.#simPasses, ctx);
     }
 
     get index(): MirrorIndex {
@@ -153,10 +199,11 @@ export class Mirror {
 
     view(): MirrorView {
         const rt = this.#rt;
+        const depicted = (): number => this.#depictedTick;
         return {
             runtime: rt,
             get depictedTick(): number {
-                return rt.tick;
+                return depicted();
             },
             entityFor: (netId) => this.#index.local(netId),
             netFor: (local) => this.#index.net(local),
@@ -173,7 +220,9 @@ export class Mirror {
     applyState(envelope: StateEnvelope): MirrorDelta {
         const delta = emptyDelta();
 
-        // rt.tick is the depicted tick — set to the envelope's, never incremented.
+        // Both are set to the envelope's, never incremented: `rt.tick` is what the world believes the
+        // time is, and the depicted tick is what the wire last said it was.
+        this.#depictedTick = envelope.tick;
         this.#rt.tick = envelope.tick;
 
         // The ops do not commute, so this is a `for` loop and never a group-by-kind.
@@ -191,7 +240,7 @@ export class Mirror {
         for (const diff of envelope.state) this.#applyStateField(diff);
 
         this.#stateAppliedTick = envelope.tick;
-        this.#discardMarks();
+        this.discardMarks();
 
         // Transform last, so it wins: the newest position information by construction.
         this.#releaseHeldTransforms(envelope.tick);
@@ -260,9 +309,10 @@ export class Mirror {
 
         this.#heldTransforms = undefined;
         this.#stateAppliedTick = -1;
+        this.#depictedTick = 0;
         this.#rt.tick = 0;
         // The dirty set is the bridge's queue, and `delta.removed` already destroys every node it names.
-        this.#discardMarks();
+        this.discardMarks();
         return delta;
     }
 
@@ -324,7 +374,8 @@ export class Mirror {
             }
 
             case 'attach':
-                // Dropped, with a counter: no scripts are instantiated. Prediction gives it a consumer.
+                // Dropped, with a counter: the op names a script class, and this runtime holds no
+                // registry that resolves a name to one.
                 this.counters.droppedAttach++;
                 return;
         }
@@ -360,10 +411,19 @@ export class Mirror {
         }
 
         for (const tag of snapshot.tags) entity.tag(tag);
+        // Before the state diffs of this same envelope: attaching hoists `@serverState` onto the host
+        // record, and the wire's values have to land on the hoisted accessors rather than under them.
+        this.#attachScripts(local, snapshot.template);
         // `spawn` sets position only, so a wall authored at scale 3 on layer 2 would render at scale 1 on
         // layer 0 forever — a static entity is dirty exactly once.
         this.#writeTransform(local, t);
         delta.added.push(local);
+    }
+
+    #attachScripts(local: EntityId, template: string): void {
+        const classes = this.#scripts?.[template];
+        if (classes === undefined) return;
+        for (const klass of classes) this.#rt.wiring?.attachToEntity(local, klass as never);
     }
 
     #destroy(netId: NetId, delta: MirrorDelta): void {
@@ -393,14 +453,20 @@ export class Mirror {
      * `channels.markState` would mark a channel with no consumer.
      *
      * Attaching a `ClientScript` later hoists onto this same record, which is why it is not a parallel map.
+     *
+     * Through core's own `restoreHostField` rather than a bare `set`, because a wrapper field's value
+     * is a wrapper: assigning the decoded payload over one would leave a methodless object where a
+     * `Scoreboard` was, and a client holding none needs one built from the payload's tag.
      */
     #applyStateField(diff: StateDiff): void {
         const key = this.#hostKey(diff.host);
         if (key === undefined) return;
         const fields = diff.fields;
         if (typeof fields !== 'object' || fields === null) return;
-        const values = this.#rt.hosts.ensure(key).record.values;
-        for (const [field, value] of Object.entries(fields)) values.set(field, value);
+        const record = this.#rt.hosts.ensure(key).record;
+        for (const [field, value] of Object.entries(fields)) {
+            restoreHostField(record, field, value);
+        }
     }
 
     /**
@@ -447,13 +513,12 @@ export class Mirror {
 
     /**
      * Core's facades mark channels the client has no consumer for; left alone the journal grows for the
-     * session (3000 marks over 1000 apply cycles).
+     * session (3000 marks over 1000 apply cycles). A predicted tick marks them too, so it calls this.
      *
      * Safe here specifically because `clear()` does not reach the transform dirty set — that lives on
-     * `SimTransformStore`, not `ReplicationChannels`, and wiping it would drop a frame's movement. A test
-     * pins the property so a future core change cannot pass silently.
+     * `SimTransformStore`, not `ReplicationChannels`, and wiping it would drop a frame's movement.
      */
-    #discardMarks(): void {
+    discardMarks(): void {
         this.#rt.channels.clear();
     }
 

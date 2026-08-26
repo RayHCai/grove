@@ -13,6 +13,8 @@ import {
     MARKER_PIXELS,
     MARKER_URL,
     PLAYER_TINTS,
+    PROJECT_HASH,
+    PROJECT_ID,
     WORLD,
     markerTemplate,
 } from '../shared.js';
@@ -67,5 +69,13 @@ export function serverConfig(): ServerConfig {
         bounds: WORLD,
         visuals: VISUALS,
         gameScripts: [Rules],
+        project: {
+            projectId: PROJECT_ID,
+            projectHash: PROJECT_HASH,
+            // No bundle: Vite compiles the synced scripts into the page's own bundle, so there is
+            // nothing for the client to fetch separately and nothing to hash.
+            bundleHash: '',
+            bundleUrl: '',
+        },
     };
 }
