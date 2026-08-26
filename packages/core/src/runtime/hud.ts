@@ -12,6 +12,18 @@ import type { Runtime } from './runtime.js';
 import { currentRuntime, hasRuntime } from './runtime.js';
 import { screenKey } from './hosts.js';
 
+/** The named screen positions the panel places a widget at; code never passes one. */
+export type HUDAnchor =
+    | 'top-left'
+    | 'top-center'
+    | 'top-right'
+    | 'middle-left'
+    | 'center'
+    | 'middle-right'
+    | 'bottom-left'
+    | 'bottom-center'
+    | 'bottom-right';
+
 /** A creator script class, as a screen holds one until it is opened. */
 type ScreenScript = new (props?: ScriptProps) => BaseScript<HUDScreen>;
 

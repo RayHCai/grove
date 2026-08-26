@@ -5,6 +5,8 @@ export { getMetadata, getOrCreateMetadata } from './metadata.js';
 export { BaseScript, ServerScript, ClientScript, SyncedScript } from './bases.js';
 export type { Host } from './bases.js';
 
+export type { HandlerDecorator, StateDecorator } from './decorators.js';
+
 export {
     onStart,
     onEnd,
