@@ -1,0 +1,15 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "extends": ["//"],
+    "tasks": {
+        "test": {
+            "inputs": [
+                "src/**",
+                "tests/**",
+                "vitest.config.ts",
+                "$TURBO_ROOT$/packages/math/src/index.ts",
+                "$TURBO_ROOT$/packages/engine/src/index.ts"
+            ]
+        }
+    }
+}

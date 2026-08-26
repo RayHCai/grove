@@ -1,0 +1,19 @@
+{
+    // A creator's project, standing in for a real one — so it extends no config of this repo's and
+    // spells out what the pipeline requires: NodeNext, and `ESNext.Decorators` in `lib`.
+    "compilerOptions": {
+        "target": "ES2023",
+        "lib": ["ES2023", "ESNext.Decorators"],
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "moduleDetection": "force",
+        "strict": true,
+        "verbatimModuleSyntax": true,
+        "skipLibCheck": true,
+        "rootDir": "src",
+        "outDir": "dist",
+        "declaration": false,
+        "sourceMap": false
+    },
+    "include": ["src/**/*.ts"]
+}
