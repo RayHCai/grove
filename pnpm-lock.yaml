@@ -188,9 +188,9 @@ importers:
       '@platform/project':
         specifier: workspace:*
         version: link:../project
-      '@platform/renderer':
+      '@platform/scripting':
         specifier: workspace:*
-        version: link:../renderer
+        version: link:../scripting
       '@platform/server':
         specifier: workspace:*
         version: link:../server
@@ -198,6 +198,9 @@ importers:
         specifier: workspace:*
         version: link:../transport
     devDependencies:
+      '@platform/renderer':
+        specifier: workspace:*
+        version: link:../renderer
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
