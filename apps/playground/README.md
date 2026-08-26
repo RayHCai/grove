@@ -4,7 +4,9 @@ A server-authoritative harness over the whole stack. One `@platform/server` proc
 every open tab is a `@platform/client` session reaching it over a real WebSocket. Click the stage to
 spawn a leaf — it enters off the left edge at the height you clicked, tumbles across, and is
 destroyed once it clears the right edge. **Every tab sees every other tab's leaves**, and each leaf
-carries a coloured badge naming the tab that spawned it.
+carries a coloured badge naming the tab that spawned it. Each tab keeps an id in `sessionStorage` and
+dials with it as `?player=`, so a reload rejoins as the same player and reads back the `@serverState`
+that player left behind — this host believes the query outright, which a real one would not.
 
 Every tab also gets an **avatar**, moved with `A` / `D`. It is the one thing here a tab simulates for
 itself: the client predicts its own avatar ahead of the server and rewinds it whenever the server
