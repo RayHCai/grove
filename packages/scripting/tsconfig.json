@@ -1,0 +1,18 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "rootDir": "src",
+        "outDir": "dist",
+        "tsBuildInfoFile": "dist/.tsbuildinfo",
+
+        // `src/toolchain` runs in Node — it spawns the compiler, reads the project's sources and
+        // hashes bytes. The runtime half under `src/` proper touches none of it.
+        "types": ["node"]
+    },
+    "include": ["src/**/*.ts"],
+    "references": [
+        {
+            "path": "../../packages/core"
+        }
+    ]
+}
