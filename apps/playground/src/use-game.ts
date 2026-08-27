@@ -2,26 +2,27 @@
 //
 // The client owns the frame — `GameClient.frame()` drains the socket, advances the tick clock,
 // flushes input, pushes transforms and calls `render()` — so this hook supplies the loop that
-// drives it and nothing else. Everything the UI shows is polled off `stats()`, because the client
-// publishes no events for it.
+// drives it, and runs the HUD bridge behind it. Everything the panels show is polled off `stats()`,
+// because the client publishes no events for it; the HUD is not, because `ClientHUDSink` does.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ClientStats, FrameSource, SessionState } from '@platform/client';
-import { GameClient } from '@platform/client';
+import type {
+    ClientHUDSink,
+    ClientStats,
+    FrameSource,
+    GameClient,
+    SessionState,
+} from '@platform/client';
 import { createPerformanceClock } from '@platform/client/browser';
+import { createClient } from '@platform/engine/host';
 import type { CameraState, IRenderer } from '@platform/renderer';
 import { connectWebSocket } from '@platform/transport/websocket';
-import { BINDINGS, CODE_CLEAR, PROJECT_HASH, PROJECT_ID } from './shared';
-import { createStageInputDevice } from './stage-input';
+import { HudBridge, pressWidget } from './hud';
+import { pickLeaf } from './pick';
+import { PROJECT } from './project';
 import { CLIENT_SCRIPTS } from './scripts';
-
-/**
- * What this tab claims to be running.
- *
- * `bundleHash` stays empty and no `bundle` loader is passed: `Runner` is compiled into the page's own
- * bundle, so there is nothing to fetch — the server declares none either, and the two agree.
- */
-const PROJECT = { projectId: PROJECT_ID, projectHash: PROJECT_HASH, bundleHash: '' };
+import { BINDINGS, CODE_CLEAR, SCREEN_LOBBY, WIDGET_READY } from './shared';
+import { createStageInputDevice } from './stage-input';
 
 /** Seconds between fps samples, which is also the averaging window. */
 const FPS_WINDOW = 0.5;
@@ -29,8 +30,18 @@ const FPS_WINDOW = 0.5;
 /** Where this tab's player id is kept, so a reload dials back as the same player. */
 const IDENTITY_KEY = 'grove.playerId';
 
+/**
+ * Everything the session panel shows: the client's own stats, plus the two counter sets it does not
+ * fold in and the frame rate nothing but this hook measures.
+ */
 export interface GameStats extends ClientStats {
     fps: number;
+    /** Wire ops the mirror declined to apply. Nonzero after a clean session is a bug. */
+    droppedAttach: number;
+    oversizedList: number;
+    invalidNetId: number;
+    /** Corrections the predicted world could not ease into and had to snap. */
+    snappedCorrections: number;
 }
 
 export interface UseGameOptions {
@@ -45,12 +56,14 @@ export interface UseGameOptions {
 export interface UseGameResult {
     state: SessionState | 'connecting';
     failure: string | null;
-    /** This tab's player slot, which picks the tint its leaves spawn under. `null` until live. */
-    playerIndex: number | null;
+    /** The live HUD, or `null` before the session exists. React subscribes to its `onChange`. */
+    hud: ClientHUDSink | null;
     /** Polled by the panels; `null` before the session exists. */
     readStats: () => GameStats | null;
     /** Synthesizes the clear key, so the HUD button and the keyboard take the same path. */
     requestClear: () => void;
+    /** Presses the ready widget — the interaction frame, not an input action. */
+    pressReady: () => void;
 }
 
 export function useGame(opts: UseGameOptions): UseGameResult {
@@ -60,7 +73,7 @@ export function useGame(opts: UseGameOptions): UseGameResult {
 
     const [state, setState] = useState<SessionState | 'connecting'>('connecting');
     const [failure, setFailure] = useState<string | null>(null);
-    const [playerIndex, setPlayerIndex] = useState<number | null>(null);
+    const [hud, setHud] = useState<ClientHUDSink | null>(null);
 
     // The camera resolver is captured once by `GameClient`, so it is read through a ref — a fresh
     // closure per render would be ignored, and re-creating the client would resync the world.
@@ -78,9 +91,23 @@ export function useGame(opts: UseGameOptions): UseGameResult {
         // never goes away.
         let cancelled = false;
         let client: GameClient | null = null;
+        let bridge: HudBridge | null = null;
 
-        const device = createStageInputDevice({ container, renderer });
-        const frames = createCountingFrameSource(fpsRef);
+        const device = createStageInputDevice({
+            container,
+            renderer,
+            // A pointer hit is resolved here and nowhere lower: the entity a click landed on is a
+            // claim about this tab's own camera, which no authority can recompute.
+            onWorldPress: (x, y) => {
+                const mirror = client?.mirror;
+                if (mirror === undefined) return;
+                const hit = pickLeaf(mirror.runtime, x, y);
+                if (hit !== undefined) client?.pointer('onClick', hit);
+            },
+        });
+        // The bridge runs BEHIND the client's own frame: it reads state the drain just applied, so
+        // running it first would show every widget one frame stale.
+        const frames = createCountingFrameSource(fpsRef, () => bridge?.sync());
 
         emitRef.current = (code: string, down: boolean) => device.emit({ kind: 'key', code, down });
 
@@ -92,7 +119,10 @@ export function useGame(opts: UseGameOptions): UseGameResult {
                     return;
                 }
 
-                client = new GameClient({
+                // The composition root, not `new GameClient`: the identity this tab claims is
+                // derived from the SAME manifest the authority booted from, so a stale tab across a
+                // `dev` restart is refused at the handshake rather than drawn wrongly.
+                client = createClient({
                     transport,
                     renderer,
                     frames,
@@ -107,17 +137,22 @@ export function useGame(opts: UseGameOptions): UseGameResult {
                 });
 
                 clientRef.current = client;
+                bridge = new HudBridge({ client, renderer });
+                setHud(client.hud);
+
                 const unsubscribe = client.lifecycle.onChange((next: SessionState) => {
                     setState(next);
                     setFailure(describeFailure(client));
-                    // The roster lands with the welcome, so the slot is only readable once live.
-                    setPlayerIndex(client?.localPlayer?.index ?? null);
                 });
                 client.start();
                 setState(client.state);
 
+                // Unmounted while the socket was still connecting: cleanup already ran and held
+                // neither of these, so the teardown it could not do happens here.
                 if (cancelled) {
                     unsubscribe();
+                    bridge.dispose();
+                    bridge = null;
                     client.destroy();
                 }
             } catch (cause) {
@@ -131,6 +166,11 @@ export function useGame(opts: UseGameOptions): UseGameResult {
             cancelled = true;
             emitRef.current = null;
             clientRef.current = null;
+            setHud(null);
+            // Before the client's own teardown, because both reach the renderer and only this one
+            // knows which node is the clock's.
+            bridge?.dispose();
+            bridge = null;
             // `ownsRenderer` is left false: `useRenderer` built the renderer and destroys it.
             if (client !== null) client.destroy();
             else device.dispose();
@@ -140,7 +180,16 @@ export function useGame(opts: UseGameOptions): UseGameResult {
     const readStats = useCallback((): GameStats | null => {
         const live = clientRef.current;
         if (live === null) return null;
-        return { ...live.stats(), fps: fpsRef.current };
+        const mirror = live.mirror?.counters;
+        const predicted = live.prediction?.counters;
+        return {
+            ...live.stats(),
+            fps: fpsRef.current,
+            droppedAttach: mirror?.droppedAttach ?? 0,
+            oversizedList: mirror?.oversizedList ?? 0,
+            invalidNetId: mirror?.invalidNetId ?? 0,
+            snappedCorrections: predicted?.snappedCorrections ?? 0,
+        };
     }, []);
 
     const requestClear = useCallback(() => {
@@ -150,16 +199,28 @@ export function useGame(opts: UseGameOptions): UseGameResult {
         emit(CODE_CLEAR, false);
     }, []);
 
-    return { state, failure, playerIndex, readStats, requestClear };
+    /**
+     * The one client→server command that is not an input action.
+     *
+     * The screen name scopes the press, so `LobbyScreen`'s own handler answers it locally on this
+     * frame while the authority is told on the next — which is why the button can say "asked"
+     * before anything has granted it.
+     */
+    const pressReady = useCallback(() => {
+        const live = clientRef.current;
+        if (live !== null) pressWidget(live, WIDGET_READY, SCREEN_LOBBY);
+    }, []);
+
+    return { state, failure, hud, readStats, requestClear, pressReady };
 }
 
 /**
- * A rAF frame source that also keeps a rolling fps.
+ * A rAF frame source that also keeps a rolling fps and runs the host's own after-frame work.
  *
  * The client stops it on close, reject and failure, so the loop's lifetime is the session's rather
  * than the component's.
  */
-function createCountingFrameSource(fps: React.RefObject<number>): FrameSource {
+function createCountingFrameSource(fps: React.RefObject<number>, after: () => void): FrameSource {
     let handle = 0;
     let frames = 0;
     let windowStart = 0;
@@ -179,6 +240,7 @@ function createCountingFrameSource(fps: React.RefObject<number>): FrameSource {
                     windowStart = now;
                 }
                 onFrame(now);
+                after();
             };
             handle = requestAnimationFrame(loop);
         },

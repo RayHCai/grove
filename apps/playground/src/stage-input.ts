@@ -15,6 +15,14 @@ export interface StageInputOptions {
     container: HTMLElement;
     /** Read for `screenToWorld`, which needs the live camera and viewport. */
     renderer: IRenderer;
+    /**
+     * The press in world space, for the caller that resolves a pointer hit.
+     *
+     * A second route out of the same event rather than a second subscriber: `onRaw` here holds one
+     * handler, which is the client's, and a pointer hit is not an input action — it rides the
+     * interaction frame and is addressed by entity, so it never belongs on a binding.
+     */
+    onWorldPress?: (x: number, y: number) => void;
 }
 
 /**
@@ -38,8 +46,11 @@ export function createStageInputDevice(opts: StageInputOptions): EmittingInputDe
                 if (event.kind === 'pointer' && event.down) {
                     // Emitted from the press's own handler because `pointerMove` is dropped: this
                     // is the only aim sample the server gets, and it has to ride the press's frame.
-                    const aim = aimFor(opts, event.screenX, event.screenY);
-                    if (aim !== null) handler({ kind: 'axis', code: CODE_AIM_Y, value: aim });
+                    const world = worldPoint(opts, event.screenX, event.screenY);
+                    if (world !== null) {
+                        handler({ kind: 'axis', code: CODE_AIM_Y, value: encodeAim(world.y) });
+                        opts.onWorldPress?.(world.x, world.y);
+                    }
                 }
 
                 handler(event);
@@ -63,12 +74,16 @@ export function createStageInputDevice(opts: StageInputOptions): EmittingInputDe
 }
 
 /**
- * The click's world y, biased, or `null` if it cannot be trusted.
+ * The click in world space, or `null` if it cannot be trusted.
  *
  * One non-finite `value` makes the server drop the whole input frame with no reply, which reads as
  * a stall rather than as a bad coordinate — so a bad reading is dropped here instead.
  */
-function aimFor(opts: StageInputOptions, screenX: number, screenY: number): number | null {
+function worldPoint(
+    opts: StageInputOptions,
+    screenX: number,
+    screenY: number,
+): { x: number; y: number } | null {
     const rect = opts.container.getBoundingClientRect();
     // Screen space starts at the CANVAS, which fills the container's content box — so the
     // container's own border comes off too, or every click resolves a pixel low.
@@ -76,6 +91,6 @@ function aimFor(opts: StageInputOptions, screenX: number, screenY: number): numb
         x: screenX - rect.left - opts.container.clientLeft,
         y: screenY - rect.top - opts.container.clientTop,
     });
-    if (!Number.isFinite(world.y)) return null;
-    return encodeAim(world.y);
+    if (!Number.isFinite(world.x) || !Number.isFinite(world.y)) return null;
+    return { x: world.x, y: world.y };
 }

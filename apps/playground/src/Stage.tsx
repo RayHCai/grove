@@ -9,17 +9,10 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import type { CameraState, IRenderer } from '@platform/renderer';
 import { useRenderer } from './use-renderer';
 import { useGame } from './use-game';
+import { HudPanel } from './HudPanel';
 import { Inspector } from './Inspector';
 import { NetPanel } from './NetPanel';
-import {
-    DESIGN,
-    LEAF_ASSET,
-    LEAF_URL,
-    MARKER_ASSET,
-    MARKER_URL,
-    defaultGameUrl,
-    tintCss,
-} from './shared';
+import { DESIGN, LEAF_ASSET, LEAF_URL, MARKER_ASSET, MARKER_URL, defaultGameUrl } from './shared';
 
 /**
  * Zoom levels the UI offers.
@@ -82,7 +75,7 @@ export function Stage(): React.JSX.Element {
         [],
     );
 
-    const { state, failure, playerIndex, readStats, requestClear } = useGame({
+    const { state, failure, hud, readStats, requestClear, pressReady } = useGame({
         renderer,
         container: containerRef,
         url,
@@ -91,24 +84,17 @@ export function Stage(): React.JSX.Element {
 
     return (
         <div className="stage">
-            <div className="stage__canvas" ref={containerRef} role="presentation" />
+            {/* The HUD overlays the canvas rather than living inside it: the renderer owns that
+                element, and the DOM input device is bound to it — a button inside would arrive as a
+                stage click as well as a press. */}
+            <div className="stage__view">
+                <div className="stage__canvas" ref={containerRef} role="presentation" />
+                <HudPanel hud={hud} onReady={pressReady} live={state === 'live'} />
+            </div>
 
             <div className="stage__hud">
                 <span className={`badge badge--${phase}`}>{phase}</span>
                 <span className={`badge badge--${state}`}>{state}</span>
-
-                {/* Which leaves on the stage are this tab's. The tint rides the template the server
-                    spawns under, so the swatch and the sprite read the same number. */}
-                {playerIndex !== null && (
-                    <span className="stage__me">
-                        <i
-                            className="stage__swatch"
-                            style={{ background: tintCss(playerIndex) }}
-                            aria-hidden="true"
-                        />
-                        yours
-                    </span>
-                )}
 
                 <span className="stage__url">{url}</span>
 
@@ -129,9 +115,10 @@ export function Stage(): React.JSX.Element {
                 </label>
 
                 {/* Clearing is a server action like any other, so the button takes the same path a
-                    keypress does rather than reaching into the world. It clears it for everyone. */}
+                    keypress does rather than reaching into the world. It clears it for everyone,
+                    and only in the lobby — during a round the leaves are the round's. */}
                 <button type="button" onClick={requestClear} disabled={state !== 'live'}>
-                    clear (C)
+                    clear planted (C)
                 </button>
             </div>
 

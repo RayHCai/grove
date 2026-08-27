@@ -8,13 +8,23 @@
 import { ScriptRegistry } from '@platform/scripting';
 import type { ScriptId } from '@platform/project';
 import { scriptId } from '@platform/project';
-import { SCRIPT_CLICKER, SCRIPT_RULES, SCRIPT_RUNNER } from '../shared.js';
+import {
+    SCRIPT_CLICKER,
+    SCRIPT_HARVESTER,
+    SCRIPT_LEAF,
+    SCRIPT_PROFILE,
+    SCRIPT_RULES,
+    SCRIPT_RUNNER,
+} from '../shared.js';
 import { Runner } from '../synced/runner.js';
-import { Clicker, Rules } from './game.js';
+import { Clicker, Harvester, Leaf, Profile, Rules } from './game.js';
 
 export const SERVER_SCRIPTS: ScriptRegistry<ScriptId> = ScriptRegistry.from<ScriptId>([
     { id: scriptId(SCRIPT_RULES), location: 'server', ctor: Rules as never },
     { id: scriptId(SCRIPT_CLICKER), location: 'server', ctor: Clicker as never },
+    { id: scriptId(SCRIPT_PROFILE), location: 'server', ctor: Profile as never },
+    { id: scriptId(SCRIPT_HARVESTER), location: 'server', ctor: Harvester as never },
+    { id: scriptId(SCRIPT_LEAF), location: 'server', ctor: Leaf as never },
     // Synced, so it links into both sides — and it is the one class the client is ever told to
     // attach, which is what makes prediction have anything to replay.
     { id: scriptId(SCRIPT_RUNNER), location: 'synced', ctor: Runner as never },

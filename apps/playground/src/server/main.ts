@@ -1,16 +1,17 @@
-// The composition root: one `GameServer`, one WebSocket listener, one process.
+// The composition root: one authority, one WebSocket listener, one process.
 //
-// `@platform/server` never opens a socket and `@platform/transport` is a leaf with no dependencies,
-// so standing up a listener and handing it a transport per connection is this file's whole job.
+// `@platform/engine/host` builds the server from the authored project and `@platform/transport` is a
+// leaf with no dependencies, so standing up a listener and handing it a transport per connection is
+// this file's whole job.
 
 import type { IncomingMessage } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
-import { GameServer } from '@platform/server';
+import type { BreakerTrip } from '@platform/core';
 import type { TransportError } from '@platform/transport';
 import { webSocketTransport } from '@platform/transport/websocket';
 import { DEFAULT_GAME_PORT } from '../shared.js';
-import { SEND_RATE, SIM_RATE, serverConfig } from './config.js';
+import { SEND_RATE, SIM_RATE, createGameServer } from './host.js';
 import { fileKVStore } from './kv.js';
 
 const raw = process.env['GAME_PORT'];
@@ -38,11 +39,19 @@ function playerIdentity(request: IncomingMessage): string {
 
 let anonCount = 0;
 
-// The store is injected HERE and not in `serverConfig()`, which describes the world rather than how
-// it is hosted: the session suite boots the same config over a loopback pair and must not write to
+// The store is injected HERE and not in the project, which describes the world rather than how it is
+// hosted: the session suite boots the same project over a loopback pair and must not write to
 // anyone's disk to do it.
 const statePath = process.env['GAME_STATE_FILE'] ?? 'dist/state.json';
-const server = new GameServer({ config: { ...serverConfig(), kv: fileKVStore(statePath) } });
+const server = createGameServer({
+    kv: fileKVStore(statePath),
+    // A handler the breaker gave up on after a hundred consecutive throws. Deliberately not an
+    // envelope: a disabled handler is something whoever runs the server has to see, and a player's
+    // client can neither act on it nor be trusted with a stack.
+    onBreakerTrip: (trip: BreakerTrip) => {
+        log(`[game] breaker disabled ${trip.scriptClass}.${trip.method} at tick ${trip.tick}`);
+    },
+});
 const wss = new WebSocketServer({ port });
 
 wss.on('listening', () => {

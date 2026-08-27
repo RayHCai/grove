@@ -16,6 +16,7 @@
     "dependencies": {
         "@platform/client": "workspace:*",
         "@platform/core": "workspace:*",
+        "@platform/engine": "workspace:*",
         "@platform/math": "workspace:*",
         "@platform/project": "workspace:*",
         "@platform/protocol": "workspace:*",
