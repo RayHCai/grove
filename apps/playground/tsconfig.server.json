@@ -20,8 +20,16 @@
         "declaration": true,
         "declarationMap": true
     },
-    // `src/synced` is compiled here too, though the browser runs it as well: this project is defined by
-    // what lowers the decorators, and the browser imports the `dist/synced` output it emits.
-    "include": ["src/shared.ts", "src/server/**/*.ts", "src/synced/**/*.ts"],
+    // `src/synced` and `src/screens` are compiled here too, though the browser runs both: this project
+    // is defined by what lowers the decorators, and the browser imports the `dist/` output it emits.
+    // `src/project.ts` is here because the server boots from it, and in the browser's project because
+    // the client claims the same identity from it — it carries no decorator, so both may read it.
+    "include": [
+        "src/shared.ts",
+        "src/project.ts",
+        "src/server/**/*.ts",
+        "src/synced/**/*.ts",
+        "src/screens/**/*.ts"
+    ],
     "references": []
 }

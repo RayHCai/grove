@@ -58,6 +58,11 @@ body {
     gap: 10px;
 }
 
+/* The positioning context the HUD overlays. The canvas host itself is the renderer's. */
+.stage__view {
+    position: relative;
+}
+
 /*
  * The canvas host. `aspect-ratio` matches the 960x540 design stage so `fit` has nothing to
  * letterbox at rest; resizing the window narrower is what exercises the bars.
@@ -126,20 +131,6 @@ body {
     color: var(--danger);
 }
 
-.stage__me {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.stage__swatch {
-    width: 11px;
-    height: 11px;
-    border-radius: 3px;
-    /* The tint multiplies a mid-green sprite, so the swatch is the nearer of the two to the truth. */
-    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
-}
-
 .stage__zoom {
     margin-left: auto;
     display: flex;
@@ -194,6 +185,149 @@ body {
     border-radius: 4px;
     background: #1b241e;
     color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+}
+
+/* ── the HUD, drawn from the client's own sink ─────────────────────── */
+
+/*
+ * An overlay, so the round clock the renderer draws on its `ui` surface and the panels drawn here
+ * sit in one place. `pointer-events: none` throughout except the button: every other pixel belongs
+ * to the stage, where a click is an aim sample and a pointer hit.
+ */
+.hud {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    pointer-events: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.hud__bar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel) 82%, transparent);
+    backdrop-filter: blur(3px);
+}
+
+.hud__me {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.hud__swatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 3px;
+    /* The tint multiplies a white sprite, so the swatch is exactly the colour drawn on the stage. */
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 35%);
+}
+
+.hud__phase {
+    font-size: 13px;
+    color: var(--text);
+}
+
+/* The count and the fill are two verbs writing one widget, so they share one box. */
+.hud__clock {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 54px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: #1b241e;
+    overflow: hidden;
+}
+
+.hud__fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.hud__clock b {
+    position: relative;
+    font-size: 15px;
+}
+
+.hud__stat {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.hud__stat b {
+    color: var(--text);
+    font-size: 15px;
+}
+
+.hud__panel {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--panel) 90%, transparent);
+    backdrop-filter: blur(3px);
+}
+
+/* The one interactive pixel over the stage. */
+.hud__ready {
+    pointer-events: auto;
+    padding: 7px 18px;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.hud__ready:disabled {
+    border-color: var(--border);
+    background: #1b241e;
+    color: var(--muted);
+    cursor: not-allowed;
+}
+
+.hud__totals {
+    display: flex;
+    gap: 16px;
+}
+
+.hud__winner {
+    font-size: 16px;
+    color: var(--accent);
+}
+
+.hud__board {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px;
 }

@@ -24,10 +24,10 @@
     },
     // `src/server` is the Node half: decorator syntax, `ws`, and NodeNext resolution. It is a
     // project of its own (`tsconfig.server.json`) and never reaches the browser bundle. `src/synced`
-    // belongs to that project too — the browser runs it, but as the `dist/synced` copy `tsc` lowered,
-    // since decorator syntax through Vite's transform reaches the runtime verbatim.
+    // and `src/screens` belong to that project too — the browser runs both, but as the `dist` copies
+    // `tsc` lowered, since decorator syntax through Vite's transform reaches the runtime verbatim.
     "include": ["src/**/*.ts", "src/**/*.tsx"],
-    "exclude": ["src/server", "src/synced"],
+    "exclude": ["src/server", "src/synced", "src/screens"],
     "references": [
         {
             "path": "../../packages/core"

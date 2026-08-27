@@ -1,10 +1,18 @@
-// The drifter rule, as arithmetic and nothing else.
+// The leaf rules, as arithmetic and nothing else.
 //
-// It holds no entity, no runtime and no socket, which is what lets the tick rule be tested in Node
-// with neither a world nor a clock. `game.ts` is the only file that turns these numbers into
-// entities.
+// It holds no entity, no runtime and no socket, which is what lets the tick rule and the scoring
+// rule be tested in Node with neither a world nor a clock. `game.ts` is the only file that turns
+// these numbers into entities.
 
 import type { Bounds } from '@platform/math';
+import {
+    BADGE_BONUS,
+    HARVEST_POINTS,
+    LEAF_HALF,
+    LEAF_SCALE,
+    POP_POINTS,
+    RIPE_MULTIPLIER,
+} from '../shared.js';
 
 /**
  * Half a sprite's width, in world px, used as the off-stage margin.
@@ -20,8 +28,8 @@ export const LEAF_SPEED = 240;
 /** Degrees per second, CCW-positive. */
 export const LEAF_SPIN = 90;
 
-/** `leaf.png` is 16x16, so pixel art needs scaling up to be visible on a 960px stage. */
-export const LEAF_SCALE = 3;
+/** How much wider a leaf draws while it is ripe, so `bonus` is legible without a second sprite. */
+export const RIPE_SCALE = LEAF_SCALE * 1.35;
 
 /**
  * The owner badge parented above each leaf: how big, how far above, and how solid.
@@ -55,6 +63,16 @@ export function clampToWorld(y: number, bounds: Bounds): number {
     return Math.min(Math.max(y, bounds.bottom), bounds.top);
 }
 
+/**
+ * The band a dropped leaf may enter at, inset so a leaf never rides the very edge of the stage.
+ *
+ * The inset is the harvest half-box: an avatar cannot reach above the world's top edge, so a leaf
+ * spawned there would be uncatchable rather than merely hard.
+ */
+export function dropBand(bounds: Bounds): { low: number; high: number } {
+    return { low: bounds.bottom + LEAF_HALF, high: bounds.top - LEAF_HALF };
+}
+
 export interface LeafStep {
     x: number;
     rotation: number;
@@ -76,4 +94,21 @@ export function stepLeaf(x: number, rotation: number, dt: number): LeafStep {
 /** Whether a leaf at `x` has finished crossing and should be destroyed. */
 export function hasExited(x: number, bounds: Bounds): boolean {
     return x > exitX(bounds);
+}
+
+/**
+ * What one harvest is worth.
+ *
+ * Ripening multiplies and the badge adds, in that order: the badge is a flat reward for crossing
+ * the stage to the leaf that is yours, and multiplying it too would make one lucky leaf decide a
+ * round. A click is worth {@link POP_POINTS} and takes neither — popping is the cheap steal, not
+ * the way to win.
+ */
+export function harvestValue(opts: { ripe: boolean; badgedForHarvester: boolean }): number {
+    const base = opts.ripe ? HARVEST_POINTS * RIPE_MULTIPLIER : HARVEST_POINTS;
+    return base + (opts.badgedForHarvester ? BADGE_BONUS : 0);
+}
+
+export function popValue(): number {
+    return POP_POINTS;
 }

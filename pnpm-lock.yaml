@@ -64,6 +64,9 @@ importers:
       '@platform/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@platform/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
       '@platform/math':
         specifier: workspace:*
         version: link:../../packages/math
