@@ -1,107 +1,182 @@
 # @platform/playground
 
-A server-authoritative harness over the whole stack. One `@platform/server` process holds the world;
-every open tab is a `@platform/client` session reaching it over a real WebSocket. Click the stage to
-spawn a leaf — it enters off the left edge at the height you clicked, tumbles across, and is
-destroyed once it clears the right edge. **Every tab sees every other tab's leaves**, and each leaf
-carries a coloured badge naming the tab that spawned it. Each tab keeps an id in `sessionStorage` and
-dials with it as `?player=`, so a reload rejoins as the same player and reads back the `@serverState`
-that player left behind — this host believes the query outright, which a real one would not.
+**Leaf Harvest** — a complete round-based game for N players, over the whole stack. One
+`@platform/server` process holds the world; every open tab is a `@platform/client` session reaching
+it over a real WebSocket. Both ends are built from **one authored project file**, `src/project.ts`,
+through the two composition roots in `@platform/engine/host`.
 
-Every tab also gets an **avatar**, moved with `A` / `D`. It is the one thing here a tab simulates for
-itself: the client predicts its own avatar ahead of the server and rewinds it whenever the server
-disagrees, so the keys answer on the frame they are pressed rather than a round trip later. Leaves
-are nobody's to predict — they are drawn one send interval behind and interpolated between the poses
-the server sent, which is what keeps them smooth without a faster wire.
+Join, ready up, and the round starts for everyone. Leaves drift in from the left; walk into one to
+harvest it, or click one anywhere on the stage to pop it for less. A leaf inside the green band is
+**ripe** and worth double; a leaf carrying **your** badge colour is worth three more; a leaf that
+reaches the brown strip on the right is composted and counts against nobody. When the clock runs
+out the stage clears, everyone spectates, the winner is crowned, and the lobby reopens. Your
+lifetime total and best round survive a reload, because each tab dials with a stable `?player=` id
+and the server reads that player's saved `@serverState` back before it allocates a `Player`.
 
 ```bash
 pnpm --filter @platform/playground dev        # http://localhost:5173, game server on :5174
-pnpm --filter @platform/playground test       # the drift rule, and a whole session over loopback
+pnpm --filter @platform/playground test       # the pure rules, and a whole match over loopback
 ```
 
 `dev` compiles the server project and then starts Vite, which spawns the server as a child process
 and kills it on exit. The packages are consumed from their `dist/`, so `pnpm build` at the repo root
 must have run at least once.
 
-## Two halves, two compilers
+## Controls
+
+| Input     | Does                                                              |
+| --------- | ----------------------------------------------------------------- |
+| `W A S D` | moves your avatar, on both axes — the one thing this tab predicts |
+| click     | pops a leaf for a point during a round; plants one in the lobby   |
+| `C`       | clears every planted leaf, for everyone. Lobby only               |
+| ready up  | a HUD widget press, which is what starts the round                |
+
+## One project, two compilers, two composition roots
 
 ```
-src/                       the browser bundle — Vite, oxc, DOM
+src/
+├── project.ts             THE GAME AS ONE FILE — settings, regions, assets, templates, scripts
+├── shared.ts              the contract BOTH halves compile against, palette and widget names too
+│
 ├── main.tsx               React root, StrictMode
 ├── App.tsx                chrome around one <Stage/>
-├── Stage.tsx              the canvas pane, the HUD, zoom
+├── Stage.tsx              the canvas pane, the chrome, zoom
+├── HudPanel.tsx           the interface, drawn from ClientHUDSink and nothing else
 ├── use-renderer.ts        renderer lifecycle: init, assets, teardown. No frame loop.
-├── use-game.ts            dial -> GameClient -> the frame that drives it
+├── use-game.ts            dial -> createClient -> the frame that drives it
+├── hud.ts                 replicated state -> hud verbs, and the `ui` clock node
+├── pick.ts                screen point -> entity handle, for a pointer hit
 ├── stage-input.ts         the device seam, and the screen -> world conversion
 ├── Inspector.tsx          polled render-tree panel over inspect()
 ├── NetPanel.tsx           polled session panel over client.stats()
-├── shared.ts              the contract BOTH halves compile against, palette included
+│
 ├── synced/                compiled by tsc, RUN BY BOTH — the browser imports dist/synced/
 │   └── runner.ts          the avatar's movement, and the only thing either end predicts
+├── screens/               compiled by tsc, RUN BY THE BROWSER — imported as dist/screens/
+│   └── lobby.ts           ClientScript<HUDScreen>: the ready button's local half
 └── server/                the Node process — tsc, NodeNext, no DOM
-    ├── main.ts            the composition root: GameServer + a ws listener
-    ├── config.ts          what this world is, apart from how it is hosted
-    ├── game.ts            the authoritative game
-    └── leaf.ts            PURE: the drift rule. No entity, no runtime, no socket.
-
-public/
-├── leaf.png               16x16 pixel-art sprite, nearest-filtered
-└── marker.png             8x8 white disc — white so a tint returns the tint
+    ├── main.ts            the WebSocket listener, and identity per socket
+    ├── host.ts            createServer over the project, plus the crown's late-declared art
+    ├── game.ts            Rules, Clicker, Profile, Harvester, Leaf — every decorator here
+    ├── leaf.ts            PURE: the drift rule and the scoring rule. No entity, no socket.
+    └── kv.ts              a KVStore over one JSON file — the host app's, never the server's
 ```
 
-`src/server` and `src/synced` are a project of their own (`tsconfig.server.json`) and are excluded
-from the browser's. They have to be: core's scripts are written with TC39 standard decorators, and
-**`tsc` is the only tool in this repo that lowers them** — Vite's oxc transform emits them verbatim
-and the runtime then refuses to parse the file. This is the same split `packages/server` uses for its
-own decorated fixtures.
+**`createServer` is the boot order.** `src/server/host.ts` hands `src/project.ts` to
+`@platform/engine/host`, which validates the file, resolves each attachment's class through the
+script registry, builds the templates, instantiates the placed world — and only then is the server
+willing to accept anything, because a joiner's snapshot is the one baseline no later delta repairs.
+No transport is passed to it: it would `accept` with no player id, and the id is what makes
+`@serverState` survive a rejoin, so `main.ts` calls `accept(transport, playerId)` per socket itself.
 
-That split is what `src/synced` is named for. `runner.ts` runs on **both** ends — the authority
-simulates it, and each client replays it over its own avatar — but the browser imports the lowered
-`dist/synced/runner.js`, not the source, which is why `dev` compiles the server project first.
+**`createClient` claims the same identity from the same file.** `projectId` and `contentHash` become
+the `projectHash` the handshake compares, so a tab left open across a `dev` restart is refused with
+`identity` rather than drawn wrongly. Bump `PROJECT_HASH` in `shared.ts` when the contract changes.
+
+**Three trees, one compiler.** `src/server`, `src/synced` and `src/screens` are a project of their
+own (`tsconfig.server.json`) and are excluded from the browser's. They have to be: core's scripts are
+written with TC39 standard decorators, and **`tsc` is the only tool in this repo that lowers them** —
+Vite's oxc transform emits them verbatim and the runtime then refuses to parse the file. The browser
+imports `dist/synced/runner.js` and `dist/screens/lobby.js`, never the sources. `dist/client` is
+Vite's own output and `emptyOutDir` empties whatever it is aimed at, which is why the screen scripts
+are not emitted there.
+
+`src/shared.ts` and `src/project.ts` are the two files both projects compile. Neither carries a
+decorator, which is what makes that legal.
 
 ## Where authority actually sits
 
-A click is not a spawn. It is an input frame:
+A click is not a spawn, and a ready press is not a round.
 
 1. `stage-input.ts` converts the pointer to world space — `getBoundingClientRect` then
    `renderer.screenToWorld` — and emits it as an axis **ahead of** the button, so the server has
    folded this tick's aim before it dispatches the press that reads it.
-2. `Clicker`, attached per player at join, counts the press and caches the aim.
-3. On the same tick's update pass, `Clicker` spawns the leaf; `Rules` drifts every leaf and reaps
-   the ones that crossed.
-4. The spawn, the reparent and the transforms drain onto the wire and arrive at **every** tab, where
-   `RenderBridge` turns them into renderer nodes.
+2. The same conversion feeds `pick.ts`, which resolves which leaf was under the cursor and calls
+   `client.pointer('onClick', local)`. That rides the **interaction frame**, not an input action:
+   the entity a click landed on is a claim about this tab's own camera, which no authority can
+   recompute, so the server checks only that the entity is alive. The hit test offsets each leaf by
+   one send interval of travel, because the render bridge draws everything it does not predict that
+   far behind the pose `rt.transforms` holds — testing the simulated pose puts the box half a leaf
+   off the art at 240 px/s.
+3. `Rules.@onPress('ready')` answers the HUD press the same way — engine-supplied `ctx.player`, no
+   frame that could claim to be someone else. When every seated player has readied, the round starts
+   for everyone, because `phase` is Game-hosted `@serverState`.
+4. During a round the **server** drops the leaves, on an `every` timer, at a height and in a colour
+   `game.random` chose — the snapshot-captured PRNG, so a replayed tick draws the same number.
+5. `Harvester.@onCollide('leaf')` on each avatar scores and destroys. `Leaf.@onEnter('bonus')`
+   ripens; `@onEnter('compost')` wastes.
 
 Nothing in `src/*.tsx` owns an entity, a node id or a clock.
 
 Movement takes the same path with one extra step. `Rules.join` spawns the avatar through
 `player.spawn()`, which **owns** it to that player — and ownership is what puts it in that client's
-predicted scope and what makes the server reap it when the tab closes. `Runner` is attached on both
-ends: by `game.ts` on the authority, and by `use-game.ts`'s `scripts` table on the client, keyed by
-the template it spawned from. Held `A` / `D` therefore moves the avatar locally on the tick it is
-pressed, and the authority arrives at the same number a round trip later. A tab predicts **only** its
-own avatar: another tab's moves when an envelope says so.
+predicted scope and what makes the server reap it when the tab closes. `Runner` rides the Player
+template's `scripts` list, so it is attached on both ends: by the template on the authority, and by
+the `attach` op the browser resolves through its own registry. Held keys therefore move the avatar
+on the tick they are pressed, and the authority arrives at the same number a round trip later. A tab
+predicts **only** its own avatar: another tab's moves when an envelope says so.
+
+## The HUD, which has no wire of its own
+
+There is no HUD envelope in the protocol, and there cannot be: a HUD is one client's, so `hud.*`
+writes into whichever runtime is current and pushes what changed at that runtime's sink. The
+authority's HUD state reaches nobody. What crosses is `@serverState`, and `src/hud.ts` is the
+client-side half that turns it back into widgets:
+
+```
+Rules writes @serverState / a Scoreboard  ->  wire  ->  the mirror's host records
+   -> HudBridge, inside withRuntime(mirror.runtime), calls hud.text / number / bar / open
+      -> ClientHUDSink collects it and tells React to look again
+         -> HudPanel renders client.hud.widgets — it decides layout and nothing else
+            -> the ready button calls pressWidget -> InteractionFrame -> Rules.@onPress
+```
+
+`LobbyScreen` is the one class in this app that runs only in a browser. It answers the press
+locally — the button says "asked" on the frame it was pressed — and the bridge corrects the label
+when the authority's `readyCount` lands. That is the whole reason a screen script exists: a
+`ClientScript`'s `@onUpdate` is dispatched by neither tick pass, so anything per-frame is the host's
+to run, but `hud.open` dispatches a screen's `@onStart` inside the call that opened it.
+
+That last fact decides an ordering. The bridge opens and closes screens **before** its own widget
+writes, because a screen's `@onStart` runs inside `hud.open` — opened afterwards, `LobbyScreen`'s
+static placeholder would overwrite the authoritative label, and the diff would not put it back until
+`readyCount` next moved.
+
+Every write is diffed before it is made. `hud.*` notifies the sink on every call and the sink
+notifies React, so writing the same number every frame would re-render the interface at the frame
+rate to say nothing had changed.
+
+The round clock is the exception that is drawn rather than laid out: one `kind: 'text'` node on the
+renderer's `ui` surface, anchored `top-center`. Text is legal only there — a text node on a
+camera-transformed surface throws, and world text is an asset instead.
 
 ## Five things worth knowing
 
 - **The renderer lives in a ref, never in state**, and the client owns the frame. `GameClient.frame`
   drains the socket, advances the tick clock, flushes input, pushes transforms and calls `render()`
-  — so `use-renderer` deliberately has no loop of its own, or every frame would present twice.
+  — so `use-renderer` deliberately has no loop of its own, or every frame would present twice. The
+  HUD bridge runs immediately behind it, from the same frame source, or every widget is one frame
+  stale.
 - **Textures are loaded before the session starts.** A sprite whose texture arrives after its node
   was created is never repointed, and the client's bridge starts its manifest load without awaiting
   it — so every leaf already in the world at join would draw a placeholder for the rest of the
-  session. `use-renderer`'s `onReady` resolves that first.
+  session. `use-renderer`'s `onReady` resolves that first. The crown is the one template declared
+  mid-session, through `declareVisuals`, which the server drains ahead of the send that spawns it.
 - **Leaves are spawned unowned.** The server destroys every entity whose `ownerId` matches a
   departing player, so an owned leaf would vanish from every other tab the moment the tab that
-  spawned it closed.
-- **Zoom goes through `GameClientOptions.camera`.** The client pushes the camera every frame
-  unconditionally, so a `setCamera` from a change handler is reverted before it is seen. The
-  resolver reads a ref, because the options object is captured once.
-- **The owner badge is a template, not a colour field.** A transform diff carries position,
-  rotation, scale, opacity and layer and nothing else, so per-entity colour has to ride the
-  template — the server declares one badge template per player slot, differing only in `tint`, and
-  spawns under the clicker's. The badge is drawn from a white sprite rather than the leaf because a
-  tint MULTIPLIES: `leaf.png` is green, so a red tint would return mud instead of red.
+  planted it closed. The avatar's shadow is the opposite case: it is minted by the Player template's
+  own `children`, inherits its root's owner, and dies with it.
+- **Colour rides the template, never a field.** A transform diff carries position, rotation, scale,
+  opacity and layer and nothing else, so per-entity colour has to be a template choice — one badge
+  template per palette seat, differing only in `tint`. `maxPlayers` is eight for that reason: a
+  ninth concurrent player would share a hue and the ripe-for badge would stop meaning anything. The
+  badge is drawn from a white sprite rather than the leaf because a tint MULTIPLIES: `leaf.png` is
+  green, so a red tint would return mud instead of red.
+- **The seat is the rules', not `player.index`.** Core allocates indices from a counter a leave
+  never lowers, so after eight tabs have come and gone a ninth takes index 8 — and keying the
+  palette off it would hand that tab the hue and the spawn point of whoever still holds index 0.
+  `Rules.join` assigns the lowest seat no live player holds and replicates it as player-hosted
+  state, which is also where the swatch beside the score reads it from.
 - **Spawn and exit track the server's `bounds`, not a tab's viewport.** The authority cannot follow
   N windows, so `DESIGN` is set to match `WORLD`: under `fit` with letterboxing a tab's stage is
   exactly those bounds, and every tab enters a leaf at the same world x whatever its window size.
@@ -110,32 +185,38 @@ own avatar: another tab's moves when an envelope says so.
 
 Both poll rather than read per frame, because `inspect()` and `stats()` both allocate and neither
 publishes a change event — reading them per frame would make the debugger the most expensive thing
-on screen.
+on screen. The HUD is the opposite and subscribes, because its sink does publish one.
 
 - **inspector** — surfaces with their roots in draw order, the node tree, and a detail pane per node.
   Each leaf's parented badge is what makes inheritance visible: its `resolved pos` tracks its parent
-  while its `rotation` stays 0, which is why it rides upright over a tumbling leaf.
+  while its `rotation` stays 0, which is why it rides upright over a tumbling leaf. The `ui` surface
+  holds the round clock.
 - **session** — the tick the server has depicted, the tick this tab stamps input with, the round trip
-  between them, and the lead the clock holds so input lands on time. The three silent-failure
-  counters only appear when they are nonzero.
+  between them, the lead the clock holds, and where the predicted world stands. `attach skipped`
+  counts the server-located scripts this page was told about and correctly holds no class for — it
+  is a census, not a fault. The silent-failure counters only appear when they are nonzero.
 
 Culling shows up at **zoom 2x or 4x**: zooming shrinks the world viewport, so a leaf still travelling
 between the old edges falls outside the new ones and the `cull` flag lights up.
 
 ## Configuration
 
-| Variable        | Where              | Default                 |
-| --------------- | ------------------ | ----------------------- |
-| `GAME_PORT`     | the Node process   | `5174`                  |
-| `VITE_GAME_URL` | the browser bundle | `ws://<page host>:5174` |
+| Variable          | Where              | Default                 |
+| ----------------- | ------------------ | ----------------------- |
+| `GAME_PORT`       | the Node process   | `5174`                  |
+| `GAME_STATE_FILE` | the Node process   | `dist/state.json`       |
+| `VITE_GAME_URL`   | the browser bundle | `ws://<page host>:5174` |
 
-`src/server/config.ts` holds the rest: `simRate` 60, `sendRate` 20, `maxPlayers` 16, and the world's
-bounds. The send rate is the package default: the client draws everything it does not predict one
-send interval behind and interpolates between the two poses either side of that moment, so a leaf
-moved by a server script is smooth at 20 broadcasts a second on a 144 Hz display.
+Everything else is in `src/project.ts`: `simRate` 60, `sendRate` 20, `maxPlayers` 8, the world's
+bounds, and the two regions. The round length and the results dwell are **script props** on the
+`Rules` attachment, written between construction and the `@serverState` hoist — inspector values, in
+the file, rather than constants inside a module the browser cannot see. The send rate is the package
+default: the client draws everything it does not predict one send interval behind and interpolates
+between the two poses either side of that moment, so a leaf moved by a server script is smooth at 20
+broadcasts a second on a 144 Hz display.
 
 ## Not a library
 
 This package emits no `dist` types for consumption and is imported by nothing. `dist/client` is
-Vite's; `dist/server` is `tsc`'s, which is why Vite is pointed at a subdirectory — `emptyOutDir`
-empties whatever it is aimed at.
+Vite's; `dist/server`, `dist/synced` and `dist/screens` are `tsc`'s, which is why Vite is pointed at
+a subdirectory — `emptyOutDir` empties whatever it is aimed at.

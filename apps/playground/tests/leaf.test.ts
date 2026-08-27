@@ -1,4 +1,4 @@
-// The drift rule, in Node, with no world and no clock.
+// The drift rule and the scoring rule, in Node, with no world and no clock.
 
 import { describe, it, expect } from 'vitest';
 import { bounds } from '@platform/math';
@@ -7,11 +7,22 @@ import {
     LEAF_SPEED,
     LEAF_SPIN,
     clampToWorld,
+    dropBand,
     exitX,
+    harvestValue,
     hasExited,
+    popValue,
     spawnX,
     stepLeaf,
 } from '../src/server/leaf';
+import {
+    AVATAR_HALF,
+    BADGE_BONUS,
+    HARVEST_POINTS,
+    LEAF_HALF,
+    POP_POINTS,
+    RIPE_MULTIPLIER,
+} from '../src/shared';
 
 const WORLD = bounds(-480, 480, 270, -270);
 
@@ -67,6 +78,51 @@ describe('hasExited', () => {
         // 1024 world px at 240 px/s is a shade over four seconds.
         expect(ticks).toBeGreaterThan(200);
         expect(ticks).toBeLessThan(300);
+    });
+});
+
+describe('dropBand', () => {
+    it('insets the stage by the leaf, so nothing rides an edge', () => {
+        const band = dropBand(WORLD);
+        expect(band.low).toBe(-270 + LEAF_HALF);
+        expect(band.high).toBe(270 - LEAF_HALF);
+    });
+
+    it('stays inside what an avatar can reach', () => {
+        // The avatar clamps its own body onto the stage, so the furthest height it can stand at is
+        // an avatar's half-box inside the edge — a leaf dropped past that plus both half-boxes
+        // would be uncatchable rather than merely hard.
+        const band = dropBand(WORLD);
+        const reach = AVATAR_HALF + LEAF_HALF;
+        expect(band.high).toBeLessThanOrEqual(WORLD.top - AVATAR_HALF + reach);
+        expect(band.low).toBeGreaterThanOrEqual(WORLD.bottom + AVATAR_HALF - reach);
+    });
+});
+
+describe('harvestValue', () => {
+    it('pays the flat rate for an ordinary leaf', () => {
+        expect(harvestValue({ ripe: false, badgedForHarvester: false })).toBe(HARVEST_POINTS);
+    });
+
+    it('multiplies for ripeness and adds for the badge, in that order', () => {
+        // The badge is a flat reward for crossing the stage to the leaf that is yours; multiplying
+        // it too would let one lucky leaf decide a round.
+        expect(harvestValue({ ripe: true, badgedForHarvester: false })).toBe(
+            HARVEST_POINTS * RIPE_MULTIPLIER,
+        );
+        expect(harvestValue({ ripe: false, badgedForHarvester: true })).toBe(
+            HARVEST_POINTS + BADGE_BONUS,
+        );
+        expect(harvestValue({ ripe: true, badgedForHarvester: true })).toBe(
+            HARVEST_POINTS * RIPE_MULTIPLIER + BADGE_BONUS,
+        );
+    });
+
+    it('is always worth more than the click that steals it', () => {
+        expect(popValue()).toBe(POP_POINTS);
+        expect(harvestValue({ ripe: false, badgedForHarvester: false })).toBeGreaterThan(
+            popValue(),
+        );
     });
 });
 
