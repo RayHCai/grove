@@ -7,7 +7,7 @@
 // declaration, which is what lets the two collapse into these without either shape being authored
 // twice.
 
-import type { ScriptId, TemplateId } from './ids.js';
+import type { AssetId, ScriptId, TemplateId } from './ids.js';
 import type {
     AssetKind,
     AssetMeta,
@@ -95,11 +95,24 @@ export function toGameManifest(project: ProjectManifest, opts: GameManifestOptio
     };
 }
 
+/**
+ * The two wire rates, which no runtime reads: core simulates and neither sends.
+ *
+ * Its own narrowing rather than fields on {@link GameManifest}, so a host takes them without the
+ * layer that builds a world holding two numbers it has no use for.
+ */
+export type ServerSettings = { sendRate: number; maxPlayers: number };
+
+/** Narrows a project to what a host serves it with. */
+export function toServerSettings(project: ProjectManifest): ServerSettings {
+    return { sendRate: project.settings.sendRate, maxPlayers: project.settings.maxPlayers };
+}
+
 /** One asset a joining client fetches. Carries the `url` its runtime counterpart drops. */
-export type RenderAssetRef = { key: string; kind: AssetKind; url: string; meta?: AssetMeta };
+export type RenderAssetRef = { key: AssetId; kind: AssetKind; url: string; meta?: AssetMeta };
 
 /** A template visual addressed by the key entities spawn under, since a renderer has no records. */
-export type RenderTemplateVisual = TemplateVisual & { template: string };
+export type RenderTemplateVisual = TemplateVisual & { template: TemplateId };
 
 /** What a renderer needs to draw a template at all: the art, and which art each template draws. */
 export type RenderManifest = { assets: RenderAssetRef[]; templates: RenderTemplateVisual[] };
