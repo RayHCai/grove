@@ -1,4 +1,4 @@
-// NAMED HIGH-RISK TEST (§7, §15): packed-id generation overflow.
+// Packed-id generation overflow — the highest-risk case in node-id.ts.
 //
 // `generation * 2^24 + index` must be ARITHMETIC. JavaScript's `<<` and `|` coerce to
 // int32, so `generation << 24` goes NEGATIVE at generation 128 and wraps to a value that
@@ -42,7 +42,7 @@ describe('NO_NODE', () => {
     });
 });
 
-describe('generation 128 and above — the int32 wrap (§7)', () => {
+describe('generation 128 and above — the int32 wrap', () => {
     it('stays positive at generation 128, where `gen << 24` goes negative', () => {
         const id = packNodeId(0, 128);
         expect(id).toBe(2_147_483_648); // 128 * 2^24

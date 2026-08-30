@@ -30,7 +30,7 @@ import type { NodeId } from '../node-id.js';
 import { NO_NODE } from '../node-id.js';
 import { AssetQueue } from '../asset-queue.js';
 import type { RendererCore } from './renderer-core.js';
-import { emptySnapshot } from './renderer-core.js';
+import { emptySnapshot } from './scene-snapshot.js';
 
 /** What both backends share of `IRenderer`. Extend it; do not construct it. */
 export abstract class RendererShell implements IRenderer {

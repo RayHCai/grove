@@ -1,7 +1,3 @@
-// Store mutations apply immediately while GPU operations queue, so the client's frame loop needs no
-// branch and no caller needs a rebuild path: node ids survive a loss because the store is the source
-// of truth and the Pixi objects are derived from it.
-//
 //   webglcontextlost  ->  preventDefault()  ->  'lost'  ->  emit 'contextlost'
 //   webglcontextrestored / GPUDevice.lost
 //                     ->  'restoring'
@@ -9,9 +5,8 @@
 //                     ->  recreate the xform/art pairs from our node records, mark all dirty
 //                     ->  'ok'  ->  emit 'contextrestored'
 //
-// `preventDefault()` on `webglcontextlost` is mandatory: without it the browser never fires
-// `webglcontextrestored`. Pixi's own handler already calls it and a second call is idempotent, so
-// this guard keeps the guarantee even if that handler is ever reordered.
+// Pixi's own handler already calls `preventDefault()` and a second call is idempotent, so this
+// guard calls it too rather than trusting an ordering it does not control.
 
 import type { ContextState } from '../renderer.js';
 import type { AssetQueue } from '../asset-queue.js';

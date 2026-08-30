@@ -8,7 +8,7 @@
 // Every rect here is world space, y-up: `top > bottom`.
 
 import type { Bounds, Size } from '@platform/math';
-import { DEG2RAD, bounds, boundsExpand, boundsOverlap, boundsSet } from '@platform/math';
+import { DEG2RAD, bounds, boundsExpand, boundsOverlap, boundsSet, cos, sin } from '@platform/math';
 
 /** Default `cullMargin`, in world px. */
 export const DEFAULT_CULL_MARGIN = 64;
@@ -31,8 +31,9 @@ function quarterTurn(degrees: number): number {
 /**
  * `cos` of an angle in degrees, exact at multiples of 90.
  *
- * `Math.cos(90 * DEG2RAD)` is 6.1e-17, and that residue leaks into every edge of a
- * quarter-turned AABB — the commonest authored rotation.
+ * Math's `cos(90 * DEG2RAD)` is 6.1e-17 and the deterministic one is off by ~1e-7 even at 0, so
+ * without these arms the residue would leak into every edge of a quarter-turned AABB — the
+ * commonest authored rotation.
  */
 function cosDeg(degrees: number): number {
     switch (quarterTurn(degrees)) {
@@ -44,7 +45,7 @@ function cosDeg(degrees: number): number {
         case 2:
             return -1;
         default:
-            return Math.cos(degrees * DEG2RAD);
+            return cos(degrees * DEG2RAD);
     }
 }
 
@@ -59,7 +60,7 @@ function sinDeg(degrees: number): number {
         case 3:
             return -1;
         default:
-            return Math.sin(degrees * DEG2RAD);
+            return sin(degrees * DEG2RAD);
     }
 }
 
@@ -184,5 +185,5 @@ export function isVisibleInViewport(
     // the viewport's half-extent inverts the axis, and `boundsOverlap` re-normalizes it into a
     // rect that grows without bound. Clamping keeps the test monotonic in the margin.
     const margin = Number.isFinite(cullMargin) && cullMargin > 0 ? cullMargin : 0;
-    return boundsOverlap(worldBounds, boundsExpand(viewport, margin, expandedViewport));
+    return boundsOverlap(worldBounds, boundsExpand(expandedViewport, viewport, margin));
 }

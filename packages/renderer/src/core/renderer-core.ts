@@ -1,11 +1,9 @@
 // Everything both backends share, in one copy: the two stores, handle validation, the validation
-// order the contract asserts, hierarchy, the resolve/flush/cull pass, projection and bounds,
-// non-GPU asset bookkeeping, and the event emitter.
+// order the contract asserts, hierarchy, the resolve/flush/cull pass, projection and bounds, and
+// non-GPU asset bookkeeping.
 //
 // Anything touching a display object or a GPU resource goes through `SceneSink` instead, and a
-// backend is the only place a Pixi type may appear. Before this class existed the two backends had
-// already drifted: the headless cull path ignored surface visibility while the Pixi one skipped
-// hidden surfaces, and only one backend was under test.
+// backend is the only place a Pixi type may appear.
 
 import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import {
@@ -24,7 +22,6 @@ import type {
     InspectOptions,
     NodeDesc,
     NodePatch,
-    NodeSnapshot,
     RendererEvents,
     RendererInitOptions,
     SceneSnapshot,
@@ -37,7 +34,7 @@ import type {
 import type { NodeId } from '../node-id.js';
 import { NO_NODE } from '../node-id.js';
 import { rendererError } from '../errors.js';
-import { DEFAULT_SURFACES, isCameraTransformed, isSurface, surfaceOrder } from '../surfaces.js';
+import { DEFAULT_SURFACES, isCameraTransformed, isSurface } from '../surfaces.js';
 import type { NodeKind, NodeRecord } from '../node-store.js';
 import { NodeStore } from '../node-store.js';
 import { TransformStore } from '../transform-store.js';
@@ -50,6 +47,8 @@ import {
 } from '../bounds.js';
 import { fitScale, stageRect, worldViewport } from '../viewport.js';
 import { screenToWorld, uiToScreen, worldToScreen } from '../projection.js';
+import { EventEmitter } from './event-emitter.js';
+import { blankTransform, inDrawOrder, snapshotScene } from './scene-snapshot.js';
 import type { SceneSink } from './scene-sink.js';
 import { NO_PARENT } from './scene-sink.js';
 
@@ -110,7 +109,7 @@ export class RendererCore {
     #config: CoreConfig;
     #camera: CameraState = { position: { x: 0, y: 0, z: 0 }, zoom: 1, framing: 'stage' };
 
-    readonly #listeners = new Map<EventName, Set<(e: never) => void>>();
+    readonly #events = new EventEmitter<RendererEvents>();
 
     // Scratch, so the per-frame path allocates nothing.
     readonly #stage: Bounds = bounds();
@@ -699,9 +698,7 @@ export class RendererCore {
      * Called by a backend's `render()`. Draws nothing itself — a backend presents afterwards.
      *
      * The cull pass is O(dirty), not O(scene): a node's cull answer can only change if its own
-     * values changed, if its resolved position moved, or if the viewport did. A full scan every
-     * frame re-decided an answer that had not changed for every node in the scene, allocating an
-     * index array as it went.
+     * values changed, if its resolved position moved, or if the viewport did.
      */
     flush(): void {
         this.xf.resolve();
@@ -771,127 +768,21 @@ export class RendererCore {
 
     /** Root ids for one surface in draw order — by `layer`, ties by insertion. */
     drawOrderOf(surface: Surface): NodeId[] {
-        return this.#inDrawOrder(
+        return inDrawOrder(
+            this,
             this.xf.roots().filter((slot) => this.nodes.recordAt(slot)?.surface === surface),
         );
     }
 
-    /**
-     * Slots as ids, ordered by `layer` with ties broken by their position in `slots`.
-     *
-     * One rule for roots and for a node's children alike: a tree view that ordered the two
-     * differently would misrepresent what draws on top. A slot with no record is dropped, because
-     * the sibling walk behind a child list is not itself checked for liveness.
-     */
-    #inDrawOrder(slots: readonly number[]): NodeId[] {
-        return (
-            slots
-                .map((slot, insertion) => ({
-                    slot,
-                    insertion,
-                    layer: this.nodes.recordAt(slot)?.layer ?? 0,
-                }))
-                // `toSorted` is stable, so equal layers keep insertion order.
-                .toSorted((a, b) => a.layer - b.layer || a.insertion - b.insertion)
-                .map((entry) => this.nodes.idAt(entry.slot))
-                .filter((id) => id !== NO_NODE)
-        );
-    }
-
-    /**
-     * The scene as a plain snapshot, for tooling.
-     *
-     * Allocates per node deliberately: a debugger reading a live view of the SoA stores would see
-     * values change under it mid-walk and could mutate the scene through a leaked reference.
-     * `assets` arrives as an argument because residency is the one thing the core does not own.
-     */
+    /** The scene as a plain snapshot, for tooling. */
     inspect(
         opts: InspectOptions | undefined,
         assets: ReadonlyArray<{ name: string; size: Size }>,
         contextState: ContextState,
     ): SceneSnapshot {
-        // Once up front, since re-resolving per node would be quadratic on a deep tree.
-        this.xf.resolve();
-
-        const resident = new Set(assets.map((asset) => asset.name));
-        const wanted = opts?.surface;
-        const skipBounds = opts?.skipBounds ?? false;
-
-        const surfaces = this.#config.enabledSurfaces
-            .filter((surface) => wanted === undefined || surface === wanted)
-            .toSorted((a, b) => surfaceOrder(a) - surfaceOrder(b))
-            .map((surface) => ({ surface, visible: this.#sink.surfaceVisible(surface) }));
-
-        const roots: Partial<Record<Surface, NodeId[]>> = {};
-        for (const { surface } of surfaces) roots[surface] = this.drawOrderOf(surface);
-
-        const nodes = new Map<NodeId, NodeSnapshot>();
-        let culled = 0;
-        for (const slot of this.nodes.liveIndices()) {
-            const record = this.nodes.recordAt(slot);
-            if (record === null) continue;
-            if (wanted !== undefined && record.surface !== wanted) continue;
-
-            const id = this.nodes.idAt(slot);
-            if (id === NO_NODE) continue;
-
-            const isCulled = this.xf.culled(slot);
-            if (isCulled) culled++;
-
-            // A group has no art, so it has no extent to report.
-            const hasBounds = !skipBounds && record.kind !== 'group';
-
-            nodes.set(id, {
-                id,
-                kind: record.kind,
-                surface: record.surface,
-                layer: record.layer,
-                texture: record.texture,
-                text: record.text,
-                uiAnchor: record.uiAnchor,
-                parent: this.parentOf(id),
-                children: this.#childrenInDrawOrder(slot),
-                local: this.localTransformOf(id) ?? blankTransform(),
-                resolved: this.resolvedTransformOf(id) ?? blankTransform(),
-                localBounds: hasBounds
-                    ? boundsCopy(bounds(), this.localBoundsAt(slot, this.#scratchLocal))
-                    : null,
-                worldBounds: hasBounds
-                    ? boundsCopy(bounds(), this.worldBoundsAt(slot, this.#scratchWorld))
-                    : null,
-                culled: isCulled,
-                // Only a sprite can miss a texture: a group has none, and text carries its string.
-                missingTexture: record.kind === 'sprite' && !resident.has(record.texture),
-            });
-        }
-
-        return {
-            roots,
-            nodes,
-            surfaces,
-            camera: {
-                position: { ...this.#camera.position },
-                zoom: this.#camera.zoom,
-                framing: this.#camera.framing ?? 'stage',
-            },
-            canvas: { ...this.#config.canvas },
-            stageRect: boundsCopy(bounds(), this.#stage),
-            viewport: boundsCopy(bounds(), this.#viewport),
-            resolution: this.#config.resolution,
-            contextState,
-            assets: assets.map((asset) => ({ name: asset.name, size: { ...asset.size } })),
-            counts: {
-                nodes: nodes.size,
-                culled,
-                surfaces: surfaces.length,
-                assets: assets.length,
-            },
-        };
-    }
-
-    /** A node's direct children in draw order. */
-    #childrenInDrawOrder(index: number): NodeId[] {
-        return this.#inDrawOrder(this.xf.children(index));
+        return snapshotScene(this, opts, assets, contextState, (surface) =>
+            this.#sink.surfaceVisible(surface),
+        );
     }
 
     /** How many live nodes reference an asset name — the `inUse` count. */
@@ -916,24 +807,11 @@ export class RendererCore {
     }
 
     on<K extends EventName>(event: K, handler: (e: RendererEvents[K]) => void): () => void {
-        let set = this.#listeners.get(event);
-        if (set === undefined) {
-            set = new Set();
-            this.#listeners.set(event, set);
-        }
-        const erased = handler as (e: never) => void;
-        set.add(erased);
-        return () => {
-            set?.delete(erased);
-        };
+        return this.#events.on(event, handler);
     }
 
     emit<K extends EventName>(event: K, payload: RendererEvents[K]): void {
-        const set = this.#listeners.get(event);
-        if (set === undefined) return;
-        // Snapshotted: a handler may unsubscribe itself — or another — mid-dispatch.
-        const snapshot = Array.from(set);
-        for (const handler of snapshot) (handler as (e: RendererEvents[K]) => void)(payload);
+        this.#events.emit(event, payload);
     }
 
     /** Drops every node, listener and display object. */
@@ -941,7 +819,7 @@ export class RendererCore {
         this.#sink.clearAll();
         this.nodes.clear();
         this.xf.clear();
-        this.#listeners.clear();
+        this.#events.clear();
     }
 
     /** Validates a `parent` field and returns its slot index, or -1 when there is none. */
@@ -1012,37 +890,4 @@ export class RendererCore {
         const world = this.worldBoundsAt(index, this.#scratchWorld);
         return isVisibleInViewport(world, this.#viewport, this.#config.cullMargin);
     }
-}
-
-/**
- * The snapshot for a renderer that is not live — before `init`, after `destroy`.
- *
- * So `inspect()` never returns `null` and an inspector panel mounting before init reads zero nodes
- * rather than crashing.
- */
-export function emptySnapshot(contextState: ContextState): SceneSnapshot {
-    return {
-        roots: {},
-        nodes: new Map(),
-        surfaces: [],
-        camera: { position: { x: 0, y: 0, z: 0 }, zoom: 1, framing: 'stage' },
-        canvas: { width: 0, height: 0 },
-        stageRect: bounds(),
-        viewport: bounds(),
-        resolution: 1,
-        contextState,
-        assets: [],
-        counts: { nodes: 0, culled: 0, surfaces: 0, assets: 0 },
-    };
-}
-
-/** A zeroed `Transform`, for the `out`-less call path. */
-function blankTransform(): Transform {
-    return {
-        position: vec3(),
-        rotation: 0,
-        scale: vec3(1, 1, 1),
-        alpha: 1,
-        visible: true,
-    };
 }

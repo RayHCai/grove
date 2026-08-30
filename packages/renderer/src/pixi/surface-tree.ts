@@ -7,7 +7,7 @@
 
 import { Container, Graphics } from 'pixi.js';
 import type { Bounds, Size } from '@platform/math';
-import { boundsHeight, boundsWidth } from '@platform/math';
+import { bounds, boundsCopy, boundsEqual, boundsHeight, boundsWidth } from '@platform/math';
 import type { CameraState, ScaleMode, Surface } from '../renderer.js';
 import { SURFACE_ORDER, isCameraTransformed, isClippedWhenLetterboxed } from '../surfaces.js';
 import { cameraScale } from '../projection.js';
@@ -18,8 +18,11 @@ export class SurfaceTree {
     readonly #roots = new Map<Surface, Container>();
     readonly #masks = new Map<Surface, Graphics>();
 
-    /** The mask geometry currently recorded, so an unchanged stage re-records nothing. */
-    #maskShape: string | null = null;
+    /** Whether a mask is currently recorded, so an unchanged stage re-records nothing. */
+    #maskActive = false;
+
+    /** The stage rect the recorded mask was built from. Meaningless while `#maskActive` is false. */
+    readonly #maskRect: Bounds = bounds();
 
     /** The container every surface root is added to. */
     readonly stage: Container;
@@ -90,11 +93,11 @@ export class SurfaceTree {
 
         // `clear()` + `rect()` + `fill()` costs a re-triangulation and a buffer upload, and this
         // runs off `setCamera` — every frame — for a rectangle that only changes on resize.
-        const shape = active
-            ? `${stageRect.left},${stageRect.top},${stageRect.right},${stageRect.bottom}`
-            : null;
-        if (shape === this.#maskShape) return;
-        this.#maskShape = shape;
+        if (active === this.#maskActive && (!active || boundsEqual(this.#maskRect, stageRect))) {
+            return;
+        }
+        this.#maskActive = active;
+        if (active) boundsCopy(this.#maskRect, stageRect);
 
         for (const [surface, root] of this.#roots) {
             if (!isClippedWhenLetterboxed(surface)) continue;
@@ -127,7 +130,7 @@ export class SurfaceTree {
 
     /** Destroys every root and mask. */
     destroy(): void {
-        this.#maskShape = null;
+        this.#maskActive = false;
         for (const [surface, root] of this.#roots) {
             this.#clearMask(surface, root);
             root.destroy({ children: true });

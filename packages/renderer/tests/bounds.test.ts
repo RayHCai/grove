@@ -1,7 +1,5 @@
-// NAMED HIGH-RISK TEST (§8, §15): the rotated-AABB expansion.
-//
-// Three things go wrong quietly here, so each is asserted with exact numbers rather than with a
-// tolerance or a smoke check:
+// The rotated-AABB expansion. Three things go wrong quietly here, so each is asserted with exact
+// numbers rather than with a tolerance or a smoke check:
 //
 //   1. The ANCHOR SIGN. `anchor` is y-down inside the art; local bounds are y-up. Getting that
 //      flip backwards mirrors every off-center sprite vertically, which looks like a content
@@ -9,8 +7,9 @@
 //   2. QUARTER-TURN FUZZ. `Math.cos(90 * DEG2RAD)` is 6.1e-17, so the naive expansion reports
 //      10.000000000000002 for a rect that is exactly 10 wide. Quarter turns are asserted with
 //      `toBe`, and the naive form is asserted to be WRONG so the divergence is unambiguous.
-//      Diagonals get a tolerance instead — `Math.sin`/`Math.cos` are not correctly rounded, so
-//      cos(225 deg) differs from -cos(45 deg) by an ULP. Only the 90s bypass the transcendental.
+//      Diagonals get a tolerance instead: they go through `@platform/math`'s polynomial `sin`
+//      and `cos`, which trade about 1e-8 of accuracy for agreeing across engines. Only the 90s
+//      bypass the transcendental, which is why only they are exact.
 //   3. THE MARGIN'S UNIT. `cullMargin` is WORLD px. If it were ever scaled by zoom, a
 //      zoomed-out view would pop sprites at the edge. The zoom-sweep test below is what
 //      catches that.
@@ -29,7 +28,7 @@ import {
 /** The 64x32 texture every anchor case below is measured against. */
 const TEX = { width: 64, height: 32 };
 
-/** A y-up 960x540 stage viewport at zoom 1, per §4.2. */
+/** A y-up 960x540 stage viewport at zoom 1. */
 function stageViewport(zoom = 1, cx = 0, cy = 0): Bounds {
     const halfW = 960 / (2 * zoom);
     const halfH = 540 / (2 * zoom);
@@ -37,7 +36,7 @@ function stageViewport(zoom = 1, cx = 0, cy = 0): Bounds {
 }
 
 describe('DEFAULT_CULL_MARGIN', () => {
-    it('is 64 world px (§8)', () => {
+    it('is 64 world px — the cull margin unit', () => {
         expect(DEFAULT_CULL_MARGIN).toBe(64);
     });
 });
@@ -124,7 +123,7 @@ describe('spriteLocalBounds — per-axis scale', () => {
         );
     });
 
-    it('mirrors an off-center rect about the origin under negative scaleX (§5 flip)', () => {
+    it('mirrors an off-center rect about the origin under negative scaleX', () => {
         // scaleX = -1 with a top-left anchor: the art now extends LEFT of the origin. The rect
         // must still come back normalized, left <= right.
         const flipped = spriteLocalBounds(TEX, -1, 1, 0, 0);
@@ -211,7 +210,7 @@ describe('spriteLocalBounds / emptyLocalBounds — out parameter', () => {
         expect(out).toEqual({ left: -32, right: 32, top: 16, bottom: -16 });
     });
 
-    it('gives a group zero extent at the origin (§8 — groups are never culled)', () => {
+    it('gives a group zero extent at the origin — a group is never culled', () => {
         expect(emptyLocalBounds()).toEqual({ left: 0, right: 0, top: 0, bottom: 0 });
 
         const out = bounds(1, 2, 3, 4);
@@ -252,30 +251,25 @@ describe('rotatedHalfExtents — quarter turns are EXACT', () => {
 
 describe('rotatedHalfExtents — 45 degrees', () => {
     it("expands a SQUARE's half-extent to hx * sqrt(2)", () => {
-        // The named §15 case: a 45-degree square is the largest relative expansion possible.
+        // A 45-degree square is the largest relative expansion possible.
         const r = rotatedHalfExtents(10, 10, 45);
-        expect(r.hx).toBe(10 * Math.SQRT2);
-        expect(r.hy).toBe(10 * Math.SQRT2);
+        expect(r.hx).toBeCloseTo(10 * Math.SQRT2, 7);
+        expect(r.hy).toBeCloseTo(10 * Math.SQRT2, 7);
     });
 
     it('makes a non-square rect SQUARE at 45, both half-extents (hx + hy) / sqrt(2)', () => {
         const r = rotatedHalfExtents(10, 20, 45);
         expect(r.hx).toBe(r.hy);
-        expect(r.hx).toBeCloseTo(30 * Math.SQRT1_2, 12);
-        expect(r.hx).toBeCloseTo(21.213203435596427, 12);
+        expect(r.hx).toBeCloseTo(30 * Math.SQRT1_2, 7);
     });
 
     it('is quadrant-independent at -45, 45, 135, 225 and -315', () => {
         // Taking |cos| and |sin| erases the sign, so every 45-degree diagonal expands the same.
-        // NOT asserted with toBe: Math.cos/Math.sin are not required to be correctly rounded, and
-        // cos(225 deg) is one ULP off -cos(45 deg), which shifts hy to 21.21320343559643. Only
-        // the QUARTER turns are exact (they bypass the transcendental entirely); a 1-ULP spread
-        // on a diagonal is the library's, not ours, so the tolerance is deliberate.
         const at45 = rotatedHalfExtents(10, 20, 45);
         for (const degrees of [-45, 135, 225, -315, 315, -135]) {
             const r = rotatedHalfExtents(10, 20, degrees);
-            expect(r.hx).toBeCloseTo(at45.hx, 12);
-            expect(r.hy).toBeCloseTo(at45.hy, 12);
+            expect(r.hx).toBeCloseTo(at45.hx, 7);
+            expect(r.hy).toBeCloseTo(at45.hy, 7);
         }
     });
 });
@@ -285,10 +279,8 @@ describe('rotatedHalfExtents — a non-multiple of 45', () => {
         // hx' = cos30*10 + sin30*20 = 5*sqrt(3) + 10
         // hy' = sin30*10 + cos30*20 = 5 + 10*sqrt(3)
         const r = rotatedHalfExtents(10, 20, 30);
-        expect(r.hx).toBeCloseTo(5 * Math.sqrt(3) + 10, 12);
-        expect(r.hy).toBeCloseTo(5 + 10 * Math.sqrt(3), 12);
-        expect(r.hx).toBeCloseTo(18.660254037844386, 12);
-        expect(r.hy).toBeCloseTo(22.320508075688775, 12);
+        expect(r.hx).toBeCloseTo(5 * Math.sqrt(3) + 10, 7);
+        expect(r.hy).toBeCloseTo(5 + 10 * Math.sqrt(3), 7);
     });
 
     it('mirrors 30 into 60 by swapping the axes', () => {
@@ -410,11 +402,11 @@ describe('worldAabb — rotation about the node ORIGIN, not the rect center', ()
         const local = spriteLocalBounds({ width: 20, height: 20 }, 1, 1, 0.5, 0.5);
         const b = worldAabb(local, 45, 10, 20);
         const half = 10 * Math.SQRT2;
-        expect(b.left).toBe(10 - half);
-        expect(b.right).toBe(10 + half);
-        expect(b.top).toBe(20 + half);
-        expect(b.bottom).toBe(20 - half);
-        expect(boundsWidth(b)).toBeCloseTo(20 * Math.SQRT2, 12);
+        expect(b.left).toBeCloseTo(10 - half, 7);
+        expect(b.right).toBeCloseTo(10 + half, 7);
+        expect(b.top).toBeCloseTo(20 + half, 7);
+        expect(b.bottom).toBeCloseTo(20 - half, 7);
+        expect(boundsWidth(b)).toBeCloseTo(20 * Math.SQRT2, 7);
     });
 
     it('agrees with rotatedHalfExtents for a centered rect at 30 degrees', () => {
@@ -427,7 +419,7 @@ describe('worldAabb — rotation about the node ORIGIN, not the rect center', ()
         expect(b.bottom).toBeCloseTo(-5 - r.hy, 12);
     });
 
-    it('keeps a group a point at its world position for any rotation (§8)', () => {
+    it('keeps a group a point at its world position for any rotation', () => {
         const local = emptyLocalBounds();
         for (const degrees of [0, 37, 90, 180, -45]) {
             expect(worldAabb(local, degrees, 12, -7)).toEqual({
@@ -521,7 +513,7 @@ describe('isVisibleInViewport', () => {
     });
 
     it('clamps a NEGATIVE margin to zero instead of insetting the viewport', () => {
-        // `cullMargin` is slack ADDED to the viewport (§8); an inset has no specified meaning.
+        // `cullMargin` is slack ADDED to the viewport; an inset has no specified meaning.
         // Honouring one is unsafe: `boundsExpand` moves each edge toward the interior, so an
         // inset deeper than the viewport half-extent INVERTS the axis, and `boundsOverlap`
         // re-normalizes min/max — so the inverted rect reads as a valid one that GROWS as the
@@ -559,9 +551,9 @@ describe('isVisibleInViewport', () => {
     });
 });
 
-describe('isVisibleInViewport — cullMargin is WORLD px, never CSS px (§8)', () => {
+describe('isVisibleInViewport — cullMargin is WORLD px, never CSS px', () => {
     it('yields the same world slack at every zoom, because the function never sees a zoom', () => {
-        // The viewport shrinks in world units as zoom rises (§4.2), but 64 always means 64
+        // The viewport shrinks in world units as zoom rises, but 64 always means 64
         // WORLD px of slack. A sprite 63 world px past the right edge is drawn at every zoom
         // and one 65 past it is culled at every zoom. If the margin were CSS px, the same 64
         // would buy 6.4 world px at zoom 10 and 640 at zoom 0.1 — the zoomed-out editor view

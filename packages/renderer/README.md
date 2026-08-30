@@ -12,11 +12,11 @@ Importing `@platform/renderer` yields the interface and types **without pulling 
 the module graph** — otherwise anything touching the type (server-side tooling, the panel's type
 emission) would drag a WebGL library along.
 
-| Import                    | Gives you                                  |
-| ------------------------- | ------------------------------------------ |
-| `@platform/renderer`      | `IRenderer`, every type, and the pure math |
-| `@platform/renderer/pixi` | `createPixiRenderer()` — the real backend  |
-| `@platform/renderer/null` | `createNullRenderer()` — headless, no DOM  |
+| Import                    | Gives you                                                              |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `@platform/renderer`      | `IRenderer`, every type, `NO_NODE`, `RendererError`, `AssetQueue`      |
+| `@platform/renderer/pixi` | `createPixiRenderer()` — the real backend                              |
+| `@platform/renderer/null` | `createNullRenderer()`, `createReadyNullRenderer()` — headless, no DOM |
 
 ```ts
 import type { IRenderer } from '@platform/renderer';
@@ -82,6 +82,8 @@ src/
 ├── core/               PURE: everything both backends share
 │   ├── renderer-core.ts    stores, validation, hierarchy, resolve/cull, projection
 │   ├── renderer-shell.ts   IRenderer's backend-independent half, the fonts-last unload
+│   ├── scene-snapshot.ts   inspect()'s per-node projection + the empty snapshot
+│   ├── event-emitter.ts    typed pub/sub, no scene knowledge
 │   └── scene-sink.ts       the seam a backend implements
 ├── null/               headless IRenderer — no DOM
 └── pixi/               the PixiJS v8 backend
