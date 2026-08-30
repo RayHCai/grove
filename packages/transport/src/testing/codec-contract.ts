@@ -1,52 +1,47 @@
-// The reusable Codec conformance suite, exported as `@platform/transport/testing`.
-//
-// "Swapping the injected codec swaps the validator, so loopback stays a conservative model of
-// whatever wire is live" is only TRUE if every codec actually validates, and a permissive `encode`
-// one layer up would silently break it — so this is enforced completeness rather than discipline.
-//
-// It lives in `src/` behind a subpath export rather than in `tests/` because the binary codec lands
-// in `@platform/protocol`, which sits ABOVE transport, while `tests/` is outside `dist` and outside
-// `exports`: an acceptance gate the implementer cannot import is not a gate.
-//
-// CODEC-AGNOSTIC BY CONSTRUCTION: this file may only touch `Codec` members plus whatever arrives
-// through `opts`. It never assumes a frame is a string, never parses one, and asserts byte counts
-// only through `codec.byteLength`. Where codecs legitimately differ — JSON cannot carry a
-// `Uint8Array`, a binary codec might — the expectation comes in through `opts`.
+// Codec-agnostic by construction: nothing here may touch anything but `Codec` members and whatever
+// arrives through `opts`, so every case a JSON frame would decide comes in as a fixture instead.
 
 import { describe, it, expect } from 'vitest';
 import type { Codec } from '../codec.js';
-import type { Message } from '../transport.js';
+import type { Frame, Message } from '../transport.js';
 import { TransportError } from '../errors.js';
 
+/**
+ * Fixtures for the cases only a codec knows how to express.
+ *
+ * Every frame-shaped option defaults to a JSON fixture, so a non-JSON codec supplies its own or
+ * passes `null` to skip the case its wire cannot express.
+ */
 export interface CodecContractOptions {
     /** Label for the describe block, so two codecs' results are told apart. */
     name?: string;
-    /**
-     * A frame this codec cannot have produced, for the `malformed-frame` case. Defaults to a
-     * truncated JSON string; a binary codec supplies a byte sequence its header rejects.
-     */
-    malformedFrame?: unknown;
-    /**
-     * Builds a well-formed frame nesting `depth` levels, for the decode-side depth cap. Defaults to
-     * nested JSON objects; a binary codec supplies its own nesting. Omit to skip.
-     */
-    makeDeepFrame?: (depth: number) => unknown;
+    /** A frame this codec cannot have produced, for the `malformed-frame` case. */
+    malformedFrame?: Frame | null;
+    /** Builds a well-formed frame nesting `depth` levels, for the decode-side depth cap. */
+    makeDeepFrame?: ((depth: number) => Frame) | null;
     /** A nesting depth every codec must REFUSE on both directions, deep enough to overflow a recursive walk. */
     hostileDepth?: number;
     /**
-     * A frame carrying a pollution key, in this codec's own encoding — it cannot be produced through
-     * `encode`, which is the point. Omit to skip (a wire format with no object keys cannot express one).
+     * Frames carrying a pollution key, in this codec's own encoding — unproducible through
+     * `encode`, which is the point.
      */
-    pollutionFrames?: readonly unknown[];
-    /** A frame carrying a non-finite number, again unproducible through `encode`. Omit to skip. */
-    nonFiniteFrame?: unknown;
-    /**
-     * Builds a frame of roughly `bytes` wire bytes, for the decode-side byte cap. Defaults to a JSON
-     * string of that length; a binary codec supplies its own. Omit to skip.
-     */
-    makeLargeFrame?: (bytes: number) => unknown;
+    pollutionFrames?: readonly Frame[] | null;
+    /** A frame carrying a non-finite number, again unproducible through `encode`. */
+    nonFiniteFrame?: Frame | null;
+    /** Builds a frame of roughly `bytes` wire bytes, for the decode-side byte cap. */
+    makeLargeFrame?: ((bytes: number) => Frame) | null;
     /** A wire size every codec must REFUSE, large enough that parsing it is itself the attack. */
     hostileBytes?: number;
+}
+
+/**
+ * Resolves one fixture.
+ *
+ * `null` rather than an omitted key is the skip, because `exactOptionalPropertyTypes` makes an
+ * explicit `undefined` unassignable and would leave the skip unreachable for every typed caller.
+ */
+function fixture<T>(supplied: T | null | undefined, fallback: T): T | null {
+    return supplied === undefined ? fallback : supplied;
 }
 
 /**
@@ -160,27 +155,25 @@ const ADMISSIBLE: ReadonlyArray<{ what: string; value: Message }> = [
 /** Runs the contract. Calls `describe`/`it` internally, so a caller is one line. */
 export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOptions = {}): void {
     const label = opts.name ?? 'Codec contract';
-    const malformed = 'malformedFrame' in opts ? opts.malformedFrame : '{"a":';
-    const pollutionFrames =
-        opts.pollutionFrames ??
-        ([
-            '{"__proto__":{"polluted":true}}',
-            '{"constructor":{"prototype":{"x":1}}}',
-            '{"prototype":1}',
-            '{"a":{"b":{"__proto__":{"x":1}}}}',
-            '[{"__proto__":1}]',
-        ] as const);
-    const nonFinite = 'nonFiniteFrame' in opts ? opts.nonFiniteFrame : '{"a":1e999}';
+    const malformed = fixture<Frame>(opts.malformedFrame, '{"a":');
+    const pollutionFrames = fixture<readonly Frame[]>(opts.pollutionFrames, [
+        '{"__proto__":{"polluted":true}}',
+        '{"constructor":{"prototype":{"x":1}}}',
+        '{"prototype":1}',
+        '{"a":{"b":{"__proto__":{"x":1}}}}',
+        '[{"__proto__":1}]',
+    ]);
+    const nonFinite = fixture<Frame>(opts.nonFiniteFrame, '{"a":1e999}');
     const hostileDepth = opts.hostileDepth ?? 20_000;
     const hostileBytes = opts.hostileBytes ?? 8 * 1024 * 1024;
-    const makeLargeFrame =
-        'makeLargeFrame' in opts
-            ? opts.makeLargeFrame
-            : (bytes: number): unknown => `{"a":"${'x'.repeat(Math.max(0, bytes - 10))}"}`;
-    const makeDeepFrame =
-        'makeDeepFrame' in opts
-            ? opts.makeDeepFrame
-            : (depth: number): string => `${'{"a":'.repeat(depth)}1${'}'.repeat(depth)}`;
+    const makeLargeFrame = fixture<(bytes: number) => Frame>(
+        opts.makeLargeFrame,
+        (bytes: number) => `{"a":"${'x'.repeat(Math.max(0, bytes - 10))}"}`,
+    );
+    const makeDeepFrame = fixture<(depth: number) => Frame>(
+        opts.makeDeepFrame,
+        (depth: number) => `${'{"a":'.repeat(depth)}1${'}'.repeat(depth)}`,
+    );
 
     describe(label, () => {
         describe('encode admission', () => {
@@ -223,71 +216,72 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
         });
 
         describe('decode hostility', () => {
-            for (const frame of pollutionFrames) {
-                it(`rejects a frame carrying a pollution key: ${String(frame)}`, () => {
-                    const codec = makeCodec();
-                    expect(() => codec.decode(frame as never)).toThrow(
-                        expect.objectContaining({ code: 'pollution-key' }),
-                    );
-                });
+            if (pollutionFrames !== null) {
+                for (const frame of pollutionFrames) {
+                    it(`rejects a frame carrying a pollution key: ${String(frame)}`, () => {
+                        const codec = makeCodec();
+                        expect(() => codec.decode(frame)).toThrow(
+                            expect.objectContaining({ code: 'pollution-key' }),
+                        );
+                    });
+                }
+
+                const polluting = pollutionFrames[0];
+                if (polluting !== undefined) {
+                    it('rejects rather than strips — nothing escapes decode', () => {
+                        const codec = makeCodec();
+                        // Rejected, so there is no partially-cleaned value to inspect.
+                        expect(() => codec.decode(polluting)).toThrow(TransportError);
+                        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+                    });
+                }
             }
 
-            it('rejects rather than strips — nothing escapes decode', () => {
-                const codec = makeCodec();
-                // Rejected, so there is no partially-cleaned value to inspect.
-                expect(() =>
-                    codec.decode('{"__proto__":{"polluted":true},"a":1}' as never),
-                ).toThrow(TransportError);
-                expect(({} as Record<string, unknown>).polluted).toBeUndefined();
-            });
-
-            if (malformed !== undefined) {
+            if (malformed !== null) {
                 it('rejects a malformed frame', () => {
                     const codec = makeCodec();
-                    expect(() => codec.decode(malformed as never)).toThrow(
+                    expect(() => codec.decode(malformed)).toThrow(
                         expect.objectContaining({ code: 'malformed-frame' }),
                     );
                 });
+
+                it('throws a TransportError, never a bare SyntaxError', () => {
+                    const codec = makeCodec();
+                    // Drop-and-close needs a machine-readable code, not message text.
+                    try {
+                        codec.decode(malformed);
+                        expect.unreachable('decode should have thrown');
+                    } catch (error) {
+                        expect(error).toBeInstanceOf(TransportError);
+                    }
+                });
             }
 
-            if (nonFinite !== undefined) {
+            if (nonFinite !== null) {
                 it('rejects a frame whose number overflows to non-finite', () => {
                     const codec = makeCodec();
                     // Well-formed on the wire, but a value `encode` refuses — the asymmetry between
                     // the two directions is what a hostile peer probes for.
-                    expect(() => codec.decode(nonFinite as never)).toThrow(
+                    expect(() => codec.decode(nonFinite)).toThrow(
                         expect.objectContaining({ code: 'unsupported-value' }),
                     );
                 });
             }
 
-            it('throws a TransportError, never a bare SyntaxError', () => {
-                const codec = makeCodec();
-                // Drop-and-close needs a machine-readable code, not message text.
-                try {
-                    codec.decode('not a frame at all' as never);
-                    expect.unreachable('decode should have thrown');
-                } catch (error) {
-                    expect(error).toBeInstanceOf(TransportError);
-                }
-            });
-
-            if (makeDeepFrame !== undefined) {
+            if (makeDeepFrame !== null) {
                 it('refuses a deeply nested frame instead of exhausting the stack', () => {
                     const codec = makeCodec();
                     // The frame is well-formed and a few tens of KB — under any byte cap — so a size
                     // limit does not catch it. A TransportError closes the connection; a RangeError
                     // means the process is the attacker's.
-                    expect(() => codec.decode(makeDeepFrame(hostileDepth) as never)).toThrow(
-                        TransportError,
-                    );
+                    expect(() => codec.decode(makeDeepFrame(hostileDepth))).toThrow(TransportError);
                 });
 
                 it('refuses it under a code the caller can act on, not a RangeError', () => {
                     const codec = makeCodec();
                     let thrown: unknown;
                     try {
-                        codec.decode(makeDeepFrame(hostileDepth) as never);
+                        codec.decode(makeDeepFrame(hostileDepth));
                     } catch (error) {
                         thrown = error;
                     }
@@ -304,16 +298,16 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
                 it('still accepts nesting an ordinary envelope reaches', () => {
                     const codec = makeCodec();
                     // The cap must not be so tight that real payloads hit it.
-                    expect(() => codec.decode(makeDeepFrame(16) as never)).not.toThrow();
+                    expect(() => codec.decode(makeDeepFrame(16))).not.toThrow();
                 });
             }
 
-            if (makeLargeFrame !== undefined) {
+            if (makeLargeFrame !== null) {
                 it('refuses a frame over its byte cap, since parsing is what allocates', () => {
                     const codec = makeCodec();
                     let thrown: unknown;
                     try {
-                        codec.decode(makeLargeFrame(hostileBytes) as never);
+                        codec.decode(makeLargeFrame(hostileBytes));
                     } catch (error) {
                         thrown = error;
                     }
@@ -327,7 +321,7 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
 
                 it('still accepts a frame an ordinary envelope reaches', () => {
                     const codec = makeCodec();
-                    expect(() => codec.decode(makeLargeFrame(64 * 1024) as never)).not.toThrow();
+                    expect(() => codec.decode(makeLargeFrame(64 * 1024))).not.toThrow();
                 });
             }
         });
@@ -350,7 +344,7 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
                 // refuses is the one answer that is wrong.
                 for (const key of ['__proto__', 'constructor', 'prototype']) {
                     const codec = makeCodec();
-                    let frame: unknown;
+                    let frame: Frame;
                     try {
                         frame = codec.encode({ [key]: 1 });
                     } catch (error) {
@@ -358,7 +352,7 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
                         expect((error as TransportError).code).toBe('encode-rejected');
                         continue;
                     }
-                    expect(() => codec.decode(frame as never)).not.toThrow();
+                    expect(() => codec.decode(frame)).not.toThrow();
                 }
             });
         });

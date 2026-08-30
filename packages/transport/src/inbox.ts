@@ -1,10 +1,5 @@
-// The receive half both backends stand on: one FIFO per end carrying frames and the terminal marker
-// together, the single-handler registration, the retention cap, and the drain.
-//
-// One FIFO for both kinds is what puts `onClose` behind every frame ahead of it however the two
-// handlers were registered, and one implementation is what keeps a second backend from re-deriving
-// the ordering. What a socket and a loopback genuinely disagree on — ageing, and what an overflow or
-// a `decode` rejection does — is injected, never branched on here.
+// One FIFO carrying frames and the terminal marker together is what puts `onClose` behind every
+// frame ahead of it however the two handlers were registered.
 
 import type { Codec } from './codec.js';
 import { transportError } from './errors.js';
@@ -33,6 +28,21 @@ const MESSAGE_HANDLER_TAKEN =
     "onMessage is already registered on this end; a second handler would split this connection's frames between two consumers. Dispose the first, or fan out above the transport.";
 const CLOSE_HANDLER_TAKEN =
     'onClose is already registered on this end. Dispose the first, or fan out above the transport.';
+
+/**
+ * The overflow message both backends report, for the same reason.
+ *
+ * `advice` carries the only genuine difference: the lifetime that leaks and the wiring point to
+ * move, which are not the same sentence on a pumped wire and on a socket.
+ */
+export function retentionOverflowMessage(
+    retained: number,
+    bytes: number,
+    cap: number,
+    advice: string,
+): string {
+    return `Retained ${retained} bytes for a handler that never registered, and this frame's ${bytes} would pass the ${cap}-byte cap. Frames are retained until onMessage registers, so a join sequence that throws before wiring it grows this inbox for the ${advice}, or raise maxRetainedBytes.`;
+}
 
 /** Where the two backends answer differently; everything else about an inbox is shared. */
 export interface InboxPolicy {

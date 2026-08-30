@@ -715,7 +715,7 @@ describe('websocket — the heartbeat is a silence cutoff, and sends nothing', (
     });
 
     it('puts no bytes on the wire, because the wire has no ping to send', () => {
-        // Protocol's nine messages are the whole wire, and a browser cannot send a ping frame.
+        // Protocol's messages are the whole wire, and a browser cannot send a ping frame.
         const { socket, timer } = harness();
         timer.advance(MAX_MISSED_HEARTBEATS);
         expect(socket.sent).toEqual([]);

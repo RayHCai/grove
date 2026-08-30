@@ -32,7 +32,11 @@ branched on there, and ageing is the caller's — loopback enqueues with a `due`
 enqueues everything already due. `transport.ts` ↔ `codec.ts` is a **type-only** cycle (`import type`
 both ways), so nothing survives to emitted JS. The gate ships under
 `src/` behind its own `./testing` export because `@platform/protocol` sits above transport and must be
-able to import it — a gate the implementer cannot reach is not a gate.
+able to import it — a gate the implementer cannot reach is not a gate. Every case only a codec can
+express arrives through `CodecContractOptions`: the frame-shaped fixtures default to JSON, so a
+non-JSON codec supplies its own or passes **`null`** to skip a case its wire cannot express. `null` and
+not an omitted key, because `exactOptionalPropertyTypes` makes an explicit `undefined` unassignable to
+an optional property and a skip nobody can spell is not a skip.
 
 ## 2. Public surface
 
@@ -74,7 +78,7 @@ as does a socket that is not OPEN — and the dial validates before it construct
 `Connect` (`(url, opts?) => Promise<Transport>`) is the networked seam endpoints compile against, and
 `connectWebSocket` implements it. `ConnectOptions.token` reaches no wire: the reconnect token rides
 `JoinRequest.token`, which protocol owns, and one credential with two channels is a second thing to
-keep in agreement. Also exported: `PACKAGE_NAME`, and `RESERVED_KEYS` — the three object keys the codec
+keep in agreement. Also exported: `RESERVED_KEYS` — the three object keys the codec
 refuses, shared so a layer that answers them differently holds no second copy of the set.
 
 `EncodedFrame` is branded so `sendEncoded` accepts only a `Codec.encode` result — a hand-built or
@@ -171,7 +175,9 @@ Two doors, because the two ends acquire a socket differently: `connectWebSocket(
 resolves on OPEN, `webSocketTransport(socket, opts?)` wraps one a listener already accepted. The
 listener stays outside the package — it needs a socket library and a leaf has no dependencies — so it
 belongs to the composition root, and `webSocketTransport` is called in its connection handler
-**synchronously**: retention covers a late `onMessage`, not a late transport.
+**synchronously**: retention covers a late `onMessage`, not a late transport. The dial fires once and
+never retries: a reconnect rebinds a session to its `Player`, which is protocol's business and not a
+pipe's.
 
 - **`WebSocketLike` is structural**, because `src/` declares neither `node` nor `DOM` types; a browser's
   `WebSocket`, Node's global and `ws` all satisfy it. `send` takes `Uint8Array<ArrayBuffer>` rather than
@@ -191,17 +197,21 @@ belongs to the composition root, and `webSocketTransport` is called in its conne
 - **`onError` carries what the seam cannot.** A `decode` rejection, a stalled peer, silence and an
   abnormal close arrive on socket events, where a throw lands where nothing can catch it — so each is
   reported there and the connection closes behind it, because `onClose` alone cannot tell a hostile peer
-  from a clean quit. A decode failure is the **peer's** here, unlike loopback where the sender's own
-  `encode` minted the frame; a codec throw that is not a `TransportError` is ours and propagates, as does
-  a throw from `onMessage`. With no `onError` registered the cause is lost but the close still happens.
+  from a clean quit. **At most one cause is reported per connection**, since the ordinary browser failure
+  is an `error` event followed by a 1006 close — two views of one fault, which a consumer counting faults
+  would otherwise see as two. A decode failure is the **peer's** here, unlike loopback where the sender's
+  own `encode` minted the frame; a codec throw that is not a `TransportError` is ours and propagates, as
+  does a throw from `onMessage`. With no `onError` registered the cause is lost but the close still
+  happens. `retention-overflow` is outside this latch and has its own, because the connection survives it.
 - **`close()` always writes 1000**, and inbound 1000 and 1001 are both clean — 1001 is a tab navigating
   away, and reporting it would make every page close look hostile. Any other code is `socket-error`,
-  unless this end closed first, since an implementation may still report 1006 after a local close. A
-  close code is not a protocol channel: protocol's `reject` is, and it precedes the close.
+  unless this end asked to close first, since an implementation may still report 1006 after a local
+  close — which is why the end tracks `open` / `closing` / `closed` rather than one closed flag. A close
+  code is not a protocol channel: protocol's `reject` is, and it precedes the close.
 - **The heartbeat sends nothing.** `HEARTBEAT_INTERVAL_MS` (5 000) counts windows with nothing inbound,
   `MAX_MISSED_HEARTBEATS` (3) consecutive ones close the connection, so the cutoff falls between 10 and
-  15 s — a frame may land just before a boundary. Protocol's nine messages are the whole wire and a
-  browser cannot send a ping control frame, so liveness is read off traffic both directions already carry
+  15 s — a frame may land just before a boundary. Protocol's messages are the whole wire and a browser
+  cannot send a ping control frame, so liveness is read off traffic both directions already carry
   unprompted: `state` every send-tick, `time-sync` every 2 s. Any inbound frame resets the count, one the
   codec refuses included. The interval is cleared on every close path, because its closure holds the end.
 - **`maxBufferedBytes`** (default `MAX_FRAME_BYTES`) bounds the socket's own `bufferedAmount` ahead of
