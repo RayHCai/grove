@@ -11,10 +11,12 @@ import type {
     ProjectId,
     Reject,
     ServerToClient,
+    SnapshotChunk,
     TimeSync,
     Welcome,
 } from '@platform/protocol';
 import { PROTOCOL_VERSION } from '@platform/protocol';
+import { isFiniteNumber } from '@platform/math';
 import { MAX_SNAPSHOT_CHUNKS, MAX_WIRE_ITEMS } from './constants.js';
 
 /** A monotonic wall-clock in seconds. Injected, never `Date.now()` at a call site. */
@@ -80,10 +82,6 @@ export function send(transport: Transport, envelope: ClientToServer): void {
 export function rttSeconds(clientNowMs: number, clientSentMs: number): number {
     const rtt = (clientNowMs - clientSentMs) / 1000;
     return Number.isFinite(rtt) && rtt > 0 ? rtt : 0;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-    return typeof value === 'number' && Number.isFinite(value);
 }
 
 /**
@@ -219,6 +217,69 @@ function isChunkCount(value: unknown): boolean {
         (value as number) >= 0 &&
         (value as number) <= MAX_SNAPSHOT_CHUNKS
     );
+}
+
+/**
+ * A snapshot too big for one frame, held until the `Welcome` that names how many pieces there were.
+ *
+ * Held rather than applied: a chunk carries no tick and describes a world the client has not been told
+ * it is joining, so a set with no `Welcome` behind it is never written anywhere. Reassembled here and
+ * never in the mirror — every path below the welcome sees one whole world.
+ */
+export class SnapshotChunks {
+    readonly #held: SnapshotChunk[] = [];
+    #dropped = 0;
+
+    /** Chunks refused as unusable — over the cap, or arriving for a join already answered. */
+    get dropped(): number {
+        return this.#dropped;
+    }
+
+    /**
+     * Buffers one chunk, or counts it refused.
+     *
+     * Bounded on arrival rather than at the fold: the count the `Welcome` will name has not been seen
+     * yet, so this is the only place that can refuse to keep growing. `answered` is a join that already
+     * has its `Welcome`, and such a session's world comes from deltas, never from a chunk.
+     */
+    offer(chunk: SnapshotChunk, answered: boolean): void {
+        if (answered || this.#held.length >= MAX_SNAPSHOT_CHUNKS) {
+            this.#dropped++;
+            return;
+        }
+        this.#held.push(chunk);
+    }
+
+    /** The next join answers with its own set, at its own tick, so a resync discards what is held. */
+    clear(): void {
+        this.#held.length = 0;
+    }
+
+    /**
+     * Prepends every held chunk to the welcome's own snapshot, in index order.
+     *
+     * False when the set does not match what the `Welcome` named — a short set would open a session
+     * on a world missing entities the server believes it sent, which reads later as a mirror bug
+     * rather than as the truncated join it is.
+     */
+    foldInto(welcome: Welcome): boolean {
+        const expected = welcome.snapshotChunks ?? 0;
+        if (this.#held.length !== expected) return false;
+        const held = this.#held.splice(0);
+        if (expected === 0) return true;
+
+        // The wire is FIFO, so arrival order is already emission order; sorting states the invariant
+        // the fold depends on rather than trusting it, and a duplicate index shows up as a gap.
+        held.sort((a, b) => a.index - b.index);
+        if (held.some((chunk, at) => chunk.index !== at)) return false;
+
+        const snapshot = welcome.snapshot;
+        // Ahead of the welcome's own, because `entities` is parents-before-children across the whole
+        // set and the chunks carry the earlier half of that order.
+        snapshot.entities = [...held.flatMap((c) => c.entities), ...snapshot.entities];
+        snapshot.state = [...held.flatMap((c) => c.state), ...snapshot.state];
+        return true;
+    }
 }
 
 /**

@@ -5,6 +5,7 @@
 // client, and it is what `@platform/server` can later run against to prove the two halves agree — the
 // acceptance test for the pair, which neither package can write alone.
 
+import { defined } from '@platform/math';
 import type { TemplateId } from '@platform/project';
 import type {
     ClientToServer,
@@ -307,21 +308,26 @@ export function wireTransform(over: Partial<WireTransform> = {}): WireTransform 
 }
 
 export function entity(
-    netId: number,
+    id: number,
     template = 'thing',
     over: Partial<Omit<EntitySnapshot, 'netId' | 'template'>> = {},
 ): EntitySnapshot {
     return {
-        netId: netId as NetId,
+        netId: netId(id),
         template: template as TemplateId,
         parent: over.parent ?? null,
         owner: over.owner ?? null,
         tags: over.tags ?? [],
         transform: over.transform ?? wireTransform(),
-        ...(over.overrides === undefined ? {} : { overrides: over.overrides }),
+        ...defined({ overrides: over.overrides }),
     };
 }
 
-export function transformDiff(netId: number, over: Partial<WireTransform> = {}): TransformDiff {
-    return { netId: netId as NetId, ...wireTransform(over) };
+export function transformDiff(id: number, over: Partial<WireTransform> = {}): TransformDiff {
+    return { netId: netId(id), ...wireTransform(over) };
+}
+
+/** A netId as the wire spells it. Minted here because only a fake peer mints one. */
+export function netId(n: number): NetId {
+    return n as NetId;
 }

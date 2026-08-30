@@ -19,6 +19,20 @@ export interface RingEntry {
     epoch: number;
 }
 
+/**
+ * Restates `from`'s held buttons and non-neutral axes into `into`, then closes the tick.
+ *
+ * A rebuilt fold asserts held state rather than a transition, and edges are one tick wide — so the
+ * `advanceTick` is part of the operation, not a caller's afterthought.
+ */
+export function assertHeld(from: ActionStates, into: ActionStates): void {
+    for (const action of from.heldActions()) into.applyEdge({ action, on: 'press' });
+    for (const { action, value } of from.axisValues()) {
+        into.applyEdge({ action, on: 'hold', value });
+    }
+    into.advanceTick();
+}
+
 export class InputRing {
     readonly #entries: RingEntry[] = [];
     #heldAtHorizon: ActionStates = createActionStates();
@@ -104,15 +118,7 @@ export class InputRing {
         this.#entries.length = 0;
         this.#horizonTick = -1;
         this.#heldAtHorizon = createActionStates();
-        if (!live) return;
-        for (const action of live.heldActions()) {
-            this.#heldAtHorizon.applyEdge({ action, on: 'press' });
-        }
-        for (const { action, value } of live.axisValues()) {
-            this.#heldAtHorizon.applyEdge({ action, on: 'hold', value });
-        }
-        // A rebuilt horizon asserts held state rather than a transition, and edges are one tick wide.
-        this.#heldAtHorizon.advanceTick();
+        if (live) assertHeld(live, this.#heldAtHorizon);
     }
 
     #fold(entry: RingEntry): void {

@@ -19,16 +19,21 @@ export interface BundleSource {
     evaluate(bytes: ArrayBuffer): Promise<unknown>;
 }
 
-/** Why a bundle did not load. The message reaches a person, so it says what happened in words. */
-export class BundleError extends Error {
+/**
+ * Why a bundle did not load. The message reaches a person, so it says what happened in words.
+ *
+ * Not `BundleError`: `@platform/scripting` throws one of those from the build toolchain, and two classes
+ * under one name make `instanceof` answer for whichever was imported.
+ */
+export class BundleLoadError extends Error {
     constructor(message: string) {
         super(message);
-        this.name = 'BundleError';
+        this.name = 'BundleLoadError';
     }
 }
 
 /**
- * Fetches, verifies and evaluates the bundle at `url`, or throws a {@link BundleError}.
+ * Fetches, verifies and evaluates the bundle at `url`, or throws a {@link BundleLoadError}.
  *
  * `expectedHash` is the server's; a mismatch is terminal rather than a retry, because the bytes that
  * arrived are not the bytes the authority is simulating with and running them is exactly the silent
@@ -43,24 +48,26 @@ export async function loadBundle(
     // is data and this is code, so a scheme the client did not choose is refused outright. Unlike a
     // manifest row, a refused bundle fails the session — there is nothing to draw a placeholder for.
     if (!isAllowedAssetUrl(url, REMOTE_ASSET_SCHEMES)) {
-        throw new BundleError(`the game code is at an address this client will not fetch: ${url}`);
+        throw new BundleLoadError(
+            `the game code is at an address this client will not fetch: ${url}`,
+        );
     }
     if (expectedHash === '') {
-        throw new BundleError('the server named game code but no hash to check it against');
+        throw new BundleLoadError('the server named game code but no hash to check it against');
     }
 
     const bytes = await source.fetch(url);
     // Bounded before it is hashed or evaluated: the length is peer-chosen, and both the digest and
     // the parse behind it are linear in it.
     if (bytes.byteLength > MAX_BUNDLE_BYTES) {
-        throw new BundleError(
+        throw new BundleLoadError(
             `the game code is ${bytes.byteLength} bytes, past the ${MAX_BUNDLE_BYTES} this client will run`,
         );
     }
 
     const actual = await source.hash(bytes);
     if (actual !== expectedHash) {
-        throw new BundleError(
+        throw new BundleLoadError(
             'the game code does not match what the server said it would send — refusing to run it',
         );
     }
