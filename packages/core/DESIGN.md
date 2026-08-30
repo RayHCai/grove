@@ -13,7 +13,7 @@ path and core only ever receives an already-valid manifest.
 
 | Path           | Owns                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts` | barrel, grouped by concern; `PACKAGE_NAME`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `src/index.ts` | the public barrel; it names every export explicitly, so the sub-barrels below it are internal composition points                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `config.ts`    | `DEFAULT_SIM_RATE`/`DEFAULT_SEND_RATE` (60/20), `BREAKER_THRESHOLD` 100, `MAX_SEND_DEPTH` 64, `MAX_DEDUP_KEYS` 1024, `MAX_LOG_RECORDS` 512, `MAX_REWIND_MS` 250, `MAX_BUBBLE_LENGTH` 200, `resolveConfig`                                                                                                                                                                                                                                                                                                                                                                          |
 | `ids.ts`       | `EntityId` brand, `NO_ENTITY`, and thin wrappers over `@platform/math`'s generation-packed handles, where the **arithmetic, never bitwise** rule lives (`<<` wraps int32 at generation 128 and mints live handles)                                                                                                                                                                                                                                                                                                                                                                 |
 | `errors.ts`    | `LoadError`, `HandlerErrorRecord`, `BreakerTrip`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -59,8 +59,8 @@ path and core only ever receives an already-valid manifest.
   ambient invocation on resume (`resumeWith`) — awaiting a promise core did not hand out falls back to the host
   scope. `ctx.player` is saved and restored as a second ambient over the same body, so a wrapper's
   omitted-player default holds for the synchronous part of a handler and not across an await.
-- **Error boundary:** a throw at the invocation boundary is caught, logged (`scriptClass`, `method`, `hostId`,
-  `tick`, `event`, `stack`), deduped by `class#method#message` — one record per distinct triple, the repeats
+- **Error boundary:** a throw at the invocation boundary is caught, logged (`scriptClass`, `method`, the
+  host's own key as `hostId`, `tick`, `event`, `stack`), deduped by `class#method#message` — one record per distinct triple, the repeats
   counted and readable through `dispatcher.throwCount` — and 100 **consecutive** throws disable that
   `(instance, method)`; a success resets it, and an async handler counts as a success only once its promise
   settles. The handler is read **inside** the try, since a handler declared as an accessor makes the property
@@ -157,6 +157,8 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   the **transform** channel is `SimTransformStore`'s own dirty index, which is what lets the server's sink and
   the client's `SceneSink` drain it independently. None of the three is captured by snapshot — they are output
   bookkeeping. `detach()` journals `reparent → NO_ENTITY`; `attachTo` unlinks silently and journals one op.
+  A bubble is a `say:<text>` tag op, and `say` clears the one it replaces while `clearSay` — which the timed
+  form calls on its own tag alone — journals the removal, so an entity carries one bubble at a time.
   `attach` carries the `ScriptId` the running bundle stamped, resolved through `rt.scriptIdOf`, and is
   journaled at entity hosts alone — a class that resolver cannot name is attached locally and journaled
   nowhere, since nothing on the wire can name a class.
@@ -225,7 +227,9 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
 ## 6. Runtime, facades, load order
 
 `Runtime` (`runtime.ts`) is the one mutable slot holding every store, the scope tree, host table, channels,
-dispatcher, seams, `tick`, `isServer` and the collaborators `loadGame` fills in. `createRuntime()` /
+dispatcher, seams, `tick` and `isServer`. Everything `loadGame` builds is one non-optional `Wired` record
+behind `rt.wired`, installed whole so no facade sees half a world, and reaching it on a runtime built bare
+for a store-level test is a `LoadError` rather than a silent no-op. `createRuntime()` /
 `withRuntime(rt, fn)` / `clearRuntime()` make the spec's module consts (`game`, `random`, `assets`)
 facades over a swappable world rather than process singletons — `game` is a `Proxy` returning methods
 **unbound**, so neither the const nor a method read off it captures a stale instance. Anything a facade needs

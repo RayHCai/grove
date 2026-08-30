@@ -13,8 +13,8 @@ afterEach(() => clearRuntime());
 describe('liveTransformView', () => {
     it('reads positions and live ids off the live stores', () => {
         const rt = loadGame();
-        const a = rt.gameInstance!.spawn('crate', 10, 20);
-        const b = rt.gameInstance!.spawn('crate', -3, 4);
+        const a = rt.wired.gameInstance.spawn('crate', 10, 20);
+        const b = rt.wired.gameInstance.spawn('crate', -3, 4);
         const view = liveTransformView(rt);
 
         expect(view.posX(a.entityId)).toBe(10);
@@ -24,7 +24,7 @@ describe('liveTransformView', () => {
 
     it('refills the array it is handed rather than allocating', () => {
         const rt = loadGame();
-        rt.gameInstance!.spawn('crate', 0, 0);
+        rt.wired.gameInstance.spawn('crate', 0, 0);
         const view = liveTransformView(rt);
         const out: EntityId[] = [];
 
@@ -35,7 +35,7 @@ describe('liveTransformView', () => {
 
     it('treats every entity as a point when no half-extent function is given', () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.collider = { enabled: true, isTrigger: false, bounds: bounds(-20, 20, 4, -4) };
         const view = liveTransformView(rt);
 
@@ -45,7 +45,7 @@ describe('liveTransformView', () => {
 
     it('asks the supplied function per axis', () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         const view = liveTransformView(rt, (_id, axis) => (axis === 'w' ? 7 : 3));
 
         expect(view.halfWidth(e.entityId)).toBe(7);

@@ -7,13 +7,14 @@ import { MemoryKVStore } from '../src/runtime/seams.js';
 import { Scoreboard, Team } from '../src/runtime/wrappers.js';
 import { createHostRecord } from '../src/state/host-record.js';
 import { clearRuntime, createRuntime } from '../src/runtime/runtime.js';
-import type { Player, PlayerManager } from '../src/runtime/player.js';
+import type { Wired } from '../src/runtime/runtime.js';
+import type { Player } from '../src/runtime/player.js';
 
 const player = (id: string) => ({ id, name: id }) as unknown as Player;
 
 function withPlayerLookup(): void {
     const rt = createRuntime();
-    rt.playerManager = { byId: (id: string) => player(id) } as unknown as PlayerManager;
+    rt.install({ playerManager: { byId: (id: string) => player(id) } } as unknown as Wired);
 }
 
 afterEach(() => {
@@ -98,7 +99,7 @@ describe('PersistedState', () => {
 describe('a wrapper is seeded from persistence at bind time', () => {
     it('restores a previous session’s contents into the initializer’s empty wrapper', () => {
         const rt = createRuntime();
-        rt.playerManager = { byId: (id: string) => player(id) } as unknown as PlayerManager;
+        rt.install({ playerManager: { byId: (id: string) => player(id) } } as unknown as Wired);
 
         // What the previous session left behind.
         const before = createHostRecord('game');

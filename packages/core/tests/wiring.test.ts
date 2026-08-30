@@ -11,7 +11,7 @@ import type { TemplateDef } from '../src/world/templates.js';
 
 afterEach(() => clearRuntime());
 
-/** The one turn of the microtask queue a dispatch's promise needs to settle. */
+/** Yields a macrotask, which drains every microtask a dispatch's promise chain queues behind it. */
 function settle(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -23,7 +23,7 @@ function instanceOn(rt: ReturnType<typeof loadGame>, hostKey: string, at = 0): o
 describe('constructor props', () => {
     it('reach the constructor, so a class can derive from what it was configured with', () => {
         const rt = loadGame();
-        const crate = rt.gameInstance!.spawn('crate', 0, 0);
+        const crate = rt.wired.gameInstance.spawn('crate', 0, 0);
         crate.addScript(Configured as never, { speed: 9 });
 
         const instance = instanceOn(rt, entityKey(crate.entityId as number)) as {
@@ -34,7 +34,7 @@ describe('constructor props', () => {
 
     it('land BEFORE the hoist, so an inspector value beats the field initializer', () => {
         const rt = loadGame();
-        const crate = rt.gameInstance!.spawn('crate', 0, 0);
+        const crate = rt.wired.gameInstance.spawn('crate', 0, 0);
         crate.addScript(Configured as never, { speed: 9 });
 
         // The host record is what replication reads and what `entity.speed` resolves through, so
@@ -47,14 +47,14 @@ describe('constructor props', () => {
 
     it('leave a field the props do not name at its initializer', () => {
         const rt = loadGame();
-        const crate = rt.gameInstance!.spawn('crate', 0, 0);
+        const crate = rt.wired.gameInstance.spawn('crate', 0, 0);
         crate.addScript(Configured as never, { speed: 9 });
         expect((crate as unknown as { label: string }).label).toBe('default');
     });
 
     it('are optional, so a class attached with none is exactly what it was before', () => {
         const rt = loadGame();
-        const crate = rt.gameInstance!.spawn('crate', 0, 0);
+        const crate = rt.wired.gameInstance.spawn('crate', 0, 0);
         crate.addScript(Configured as never);
         expect((crate as unknown as { speed: number }).speed).toBe(1);
         expect(
@@ -65,7 +65,7 @@ describe('constructor props', () => {
 
     it('never write a reserved key, which would rewrite the instance rather than a field', () => {
         const rt = loadGame();
-        const crate = rt.gameInstance!.spawn('crate', 0, 0);
+        const crate = rt.wired.gameInstance.spawn('crate', 0, 0);
         const hostile = JSON.parse('{"__proto__": {"owned": true}, "speed": 4}') as Record<
             string,
             never
@@ -93,7 +93,7 @@ describe('constructor props', () => {
             },
         ];
         const rt = loadGame({ templates });
-        const turret = rt.gameInstance!.spawn('turret', 0, 0);
+        const turret = rt.wired.gameInstance.spawn('turret', 0, 0);
         expect((turret as unknown as { speed: number }).speed).toBe(7);
     });
 });
@@ -134,7 +134,7 @@ describe('@onStart is deferred to a pass, not fired at the attach', () => {
 
     it('never runs for a script whose host was torn down before the drain', async () => {
         const rt = loadGame();
-        const crate = rt.gameInstance!.spawn('crate', 0, 0);
+        const crate = rt.wired.gameInstance.spawn('crate', 0, 0);
         crate.addScript(LateJoiner as never);
         expect(rt.instances.pendingStartCount).toBe(1);
 
@@ -152,8 +152,8 @@ describe('@onStart is deferred to a pass, not fired at the attach', () => {
     it('is the first pass, so a script is running before anything dispatches to it', async () => {
         const rt = loadGame();
         const order: string[] = [];
-        const passes = rt.passes!;
-        rt.passes = {
+        const passes = rt.wired.passes;
+        rt.wired.passes = {
             ...passes,
             starts: (dispatch) => {
                 order.push('starts');

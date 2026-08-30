@@ -62,5 +62,5 @@ export const assets: Assets = {
 // Resolved per call off the runtime, not held in a module slot: a second loadGame would otherwise
 // repoint the first world's assets, and withRuntime could not put them back.
 function resolve(): Assets {
-    return hasRuntime() ? (currentRuntime().assets ?? emptyRegistry) : emptyRegistry;
+    return hasRuntime() ? (currentRuntime().wiredOrNull?.assets ?? emptyRegistry) : emptyRegistry;
 }

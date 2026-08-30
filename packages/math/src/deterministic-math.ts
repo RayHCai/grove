@@ -1,21 +1,17 @@
-// Deterministic replacements for the ECMA-262 implementation-approximated functions.
-// Two machines must produce identical results from identical inputs; the built-in
-// transcendentals do not guarantee that (DESIGN §9.1). These implementations use
-// polynomial/range-reduction over exact IEEE-754 operations, producing bit-identical
-// results everywhere.
+// Deterministic replacements for the ECMA-262 implementation-approximated functions: two machines
+// must produce identical results from identical inputs, which the built-in transcendentals do not
+// guarantee, so these use polynomial/range-reduction over exact IEEE-754 operations only.
 //
-// The six load-bearing functions — sin, cos, atan2, pow, exp, log — are implemented
-// carefully. The rest are derived from them by identity.
+// Only sin, cos, atan2, exp, log and pow carry their own approximation; everything below them is
+// derived by identity, so a precision fix belongs in one of those six.
 //
-// SAFE SET (not replaced): abs, sign, min, max, floor, ceil, round, trunc, fround, sqrt.
-// Those are exact IEEE-754 operations and agree bit-for-bit on every target.
+// Not replaced, because they are already exact IEEE-754 and agree bit-for-bit on every target:
+// abs, sign, min, max, floor, ceil, round, trunc, fround, sqrt.
 
 const PI = 3.141592653589793;
 const HALF_PI = 1.5707963267948966;
 const TWO_PI = 6.283185307179586;
 const INV_TWO_PI = 0.15915494309189535;
-
-// ─── sin / cos ──────────────────────────────────────────────────────────────────
 
 function reduceAngle(x: number): number {
     const q = Math.round(x * INV_TWO_PI);
@@ -56,8 +52,6 @@ export function tan(x: number): number {
     if (c === 0) return x > 0 ? Infinity : -Infinity;
     return sin(x) / c;
 }
-
-// ─── atan / atan2 ────────────────────────────────────────────────────────────────
 
 function atanKernel(x: number): number {
     const x2 = x * x;
@@ -140,8 +134,6 @@ export function acos(x: number): number {
     if (x === -1) return PI;
     return atan2(Math.sqrt(1 - x * x), x);
 }
-
-// ─── exp / log ──────────────────────────────────────────────────────────────────
 
 const LN2_HI = 0.6931471803691238;
 const LN2_LO = 1.9082149292705877e-10;
@@ -249,8 +241,6 @@ export function log(x: number): number {
     return e * LN2_HI - (s * (f - R) - e * LN2_LO - f);
 }
 
-// ─── pow ─────────────────────────────────────────────────────────────────────────
-
 export function pow(base: number, exponent: number): number {
     if (exponent === 0) return 1;
     if (exponent === 1) return base;
@@ -286,8 +276,6 @@ export function pow(base: number, exponent: number): number {
     const sign = base < 0 && Number.isInteger(exponent) && exponent % 2 !== 0 ? -1 : 1;
     return sign * exp(exponent * log(Math.abs(base)));
 }
-
-// ─── derived functions ───────────────────────────────────────────────────────────
 
 export function expm1(x: number): number {
     if (Math.abs(x) < 1e-5) return x + 0.5 * x * x;

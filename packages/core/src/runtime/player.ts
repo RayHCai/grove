@@ -124,25 +124,25 @@ export class Player {
     }
 
     get camera(): Camera {
-        if (!this.#camera) this.#camera = this.#rt.makeCamera!(this);
+        if (!this.#camera) this.#camera = this.#rt.wired.makeCamera(this);
         return this.#camera;
     }
 
     get storage(): Storage {
-        if (!this.#storage) this.#storage = this.#rt.makeStorage!(this);
+        if (!this.#storage) this.#storage = this.#rt.wired.makeStorage(this);
         return this.#storage;
     }
 
     spawn(): void {
-        this.#rt.roster?.spawnAvatar(this);
+        this.#rt.wired.roster.spawnAvatar(this);
     }
 
     spectate(): void {
-        this.#rt.roster?.spectate(this);
+        this.#rt.wired.roster.spectate(this);
     }
 
     respawn(): void {
-        this.#rt.roster?.respawn(this);
+        this.#rt.wired.roster.respawn(this);
     }
 
     teleportTo(x: number, y: number): void {
@@ -150,12 +150,12 @@ export class Player {
     }
 
     setMovement(movement: new () => BaseMovement): this {
-        this.#rt.roster?.setMovement(this, movement);
+        this.#rt.wired.roster.setMovement(this, movement);
         return this;
     }
 
     addScript(script: new (props?: ScriptProps) => BaseScript<Player>, props?: ScriptProps): this {
-        this.#rt.wiring?.attachToPlayer(this, script, props);
+        this.#rt.wired.wiring.attachToPlayer(this, script, props);
         return this;
     }
 }

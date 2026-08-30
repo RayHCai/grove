@@ -8,13 +8,14 @@ import { clearRuntime } from '../src/runtime/runtime.js';
 import { Loop } from '../src/loop/loop.js';
 import { after } from '../src/runtime/time.js';
 import { BREAKER_THRESHOLD } from '../src/config.js';
+import { instanceOf } from './helpers.js';
 
 afterEach(() => clearRuntime());
 
 describe('breaker', () => {
     it('counts an async throw, so a handler that always rejects is disabled', async () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.addScript(AsyncFaulty as never);
 
         for (let i = 0; i < BREAKER_THRESHOLD; i++) await e.send('boom');
@@ -30,7 +31,7 @@ describe('breaker', () => {
 
     it('logs one record per distinct message and counts the repeats', async () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.addScript(AsyncFaulty as never);
 
         for (let i = 0; i < 5; i++) await e.send('boom');
@@ -47,7 +48,7 @@ describe('nested dispatch', () => {
     it('leaves the outer handler its own invocation, so a timer it starts is owned by its host', () => {
         const rt = loadGame();
         const loop = new Loop(rt);
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.addScript(Nester as never);
         const inst = instanceOf<Nester>(rt, e, 'Nester');
 
@@ -69,14 +70,3 @@ describe('nested dispatch', () => {
         expect(fired).toBe(0);
     });
 });
-
-function instanceOf<T>(
-    rt: ReturnType<typeof loadGame>,
-    e: { entityId: unknown },
-    className: string,
-): T {
-    for (const si of rt.instances.forHost(`entity:${e.entityId as number}`)) {
-        if (si.className === className) return si.instance as T;
-    }
-    throw new Error(`${className} not attached`);
-}

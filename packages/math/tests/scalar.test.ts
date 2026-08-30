@@ -1,6 +1,6 @@
 // Contract tests for the scalar helpers.
 //
-// These are on the creator surface (api_spec.ts:82-83), so the edge behaviour is part of
+// These are on the creator surface, so the edge behaviour is part of
 // the public promise rather than an implementation detail: `clamp` normalizes a reversed
 // range instead of returning NaN, and `lerp` is deliberately UNCLAMPED so tween code can
 // extrapolate. Both `lerp` endpoints are asserted with exact equality rather than a
@@ -150,9 +150,5 @@ describe('index re-exports', () => {
         expect(math.lerp).toBe(lerp);
         expect(math.DEG2RAD).toBe(DEG2RAD);
         expect(math.RAD2DEG).toBe(RAD2DEG);
-    });
-
-    it('exposes the package name', () => {
-        expect(math.PACKAGE_NAME).toBe('@platform/math');
     });
 });

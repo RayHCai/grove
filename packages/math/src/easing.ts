@@ -1,5 +1,5 @@
 // Easing curves. Each maps t ∈ [0,1] to a value in [0,1] (with overshoot for bounce).
-// The names match api_spec.ts:55. Pure arithmetic — deterministic by construction.
+// Pure arithmetic, so a curve is deterministic by construction.
 
 export type Easing = 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'bounce';
 

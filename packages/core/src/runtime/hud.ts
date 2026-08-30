@@ -3,6 +3,7 @@
 // resolves the current runtime's state, and a server runtime simply has no local player.
 
 import type { ScriptProps } from '@platform/project';
+import { defined } from '@platform/math';
 import type { AssetRef } from './assets.js';
 import type { BaseScript } from '../script/bases.js';
 import type { Countdown } from './wrappers.js';
@@ -65,7 +66,7 @@ export class HUDScreen {
     // Registered rather than attached: a screen never opened has no script instances, so the class
     // is held until the open that wires it.
     addScript(script: ScreenScript, props?: ScriptProps): this {
-        this.#scripts.push({ klass: script, ...(props === undefined ? {} : { props }) });
+        this.#scripts.push({ klass: script, ...defined({ props }) });
         return this;
     }
 }
@@ -162,11 +163,15 @@ export class HUD {
         // Wired first: a script's location is rejected at attach time, and a LoadError thrown after
         // the screen was marked visible would leave one open that nothing ever put on screen.
         for (const attachment of found.scripts) {
-            rt.wiring?.attachToScreen(found, attachment.klass as never, attachment.props);
+            rt.wiredOrNull?.wiring.attachToScreen(
+                found,
+                attachment.klass as never,
+                attachment.props,
+            );
         }
 
         found.setVisible(true);
-        rt.hud?.openOrder.push(screen);
+        hudState()?.openOrder.push(screen);
         rt.hudSink.screen(screen, true);
         // Immediate rather than deferred to the starts pass, and then dropped from its queue: a
         // menu that appeared but ran nothing until the next tick reads as a dropped frame, and
@@ -180,14 +185,16 @@ export class HUD {
     /** Closes a screen, running `@onEnd` and discarding its instances. Idempotent. */
     close(screen: string): void {
         const rt = runtime();
-        const found = rt?.hud?.screens.get(screen);
-        if (rt === undefined || found === undefined || !found.visible) return;
+        const state = hudState();
+        const found = state?.screens.get(screen);
+        if (rt === undefined || state === undefined || found === undefined || !found.visible)
+            return;
 
         // Before the teardown, or the handler runs against a host record that is already gone.
         void dispatchScreen(rt, screen, 'onEnd', '@end');
         found.setVisible(false);
-        const at = rt.hud?.openOrder.indexOf(screen) ?? -1;
-        if (at >= 0) rt.hud?.openOrder.splice(at, 1);
+        const at = state.openOrder.indexOf(screen);
+        if (at >= 0) state.openOrder.splice(at, 1);
         // Instances and host both: closing DISCARDS client state, so a reopen builds fresh ones.
         rt.instances.removeHost(screenKey(screen));
         rt.hosts.remove(screenKey(screen));
@@ -196,20 +203,20 @@ export class HUD {
 
     closeAll(): void {
         // Over a copy, because `close` splices the list it walks.
-        for (const name of Array.from(runtime()?.hud?.openOrder ?? [])) this.close(name);
+        for (const name of Array.from(hudState()?.openOrder ?? [])) this.close(name);
     }
 
     /** An authored screen, open or not; null for a name nothing has mentioned. */
     screen(name: string): HUDScreen | null {
-        return runtime()?.hud?.screens.get(name) ?? null;
+        return hudState()?.screens.get(name) ?? null;
     }
 
     get screens(): HUDScreen[] {
-        return [...(runtime()?.hud?.screens.values() ?? [])];
+        return [...(hudState()?.screens.values() ?? [])];
     }
 
     get openScreens(): HUDScreen[] {
-        const state = runtime()?.hud;
+        const state = hudState();
         if (state === undefined) return [];
         return state.openOrder
             .map((name) => state.screens.get(name))
@@ -223,11 +230,11 @@ export class HUD {
      * so a creator reading a widget back would be asking the engine what it just told it.
      */
     widget(name: string): Readonly<HUDWidgetState> | null {
-        return runtime()?.hud?.widgets.get(name) ?? null;
+        return hudState()?.widgets.get(name) ?? null;
     }
 
     #ensure(name: string): HUDScreen {
-        const state = runtime()?.hud;
+        const state = hudState();
         if (state === undefined) return new HUDScreen(name);
         const found = state.screens.get(name);
         if (found) return found;
@@ -240,7 +247,7 @@ export class HUD {
     // no-op-safe, and a creator call is not where a missing runtime should surface.
     #write(widget: string, patch: (state: HUDWidgetState) => void): void {
         const rt = runtime();
-        const state = rt?.hud;
+        const state = hudState();
         if (rt === undefined || state === undefined) return;
         let record = state.widgets.get(widget);
         if (record === undefined) {
@@ -254,6 +261,10 @@ export class HUD {
 
 function runtime(): Runtime | undefined {
     return hasRuntime() ? currentRuntime() : undefined;
+}
+
+function hudState(): HUDState | undefined {
+    return runtime()?.wiredOrNull?.hud;
 }
 
 function dispatchScreen(

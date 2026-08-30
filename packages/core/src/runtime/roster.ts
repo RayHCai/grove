@@ -56,8 +56,7 @@ export class Roster {
     setMovement(player: Player, movement: new () => BaseMovement): void {
         const avatar = this.#tryAvatar(player);
         if (!avatar) return;
-        const instance = this.#rt.wiring?.attachMovement(avatar, movement) as
-            BaseMovement | undefined;
+        const instance = this.#rt.wired.wiring.attachMovement(avatar, movement) as BaseMovement;
         player.setMovementInstance(instance);
     }
 

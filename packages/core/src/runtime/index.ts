@@ -61,7 +61,7 @@ export {
     clearRuntime,
     CollectingLog,
 } from './runtime.js';
-export type { EngineLog, TickPasses } from './runtime.js';
+export type { EngineLog, TickPasses, Wired } from './runtime.js';
 
 export {
     loadGame,
@@ -87,6 +87,7 @@ export { ContactSource } from './contacts.js';
 export { LagRing } from './lag-ring.js';
 export { Wiring, activeLocationsFor } from './wiring.js';
 export { HostTable, entityKey, playerKey, cameraKey, screenKey, GAME_KEY } from './hosts.js';
+export type { HostKind } from './hosts.js';
 
 export { ManualClock, MemoryKVStore, NullEffectSink, NullHUDSink, noBlocked } from './seams.js';
 export type {

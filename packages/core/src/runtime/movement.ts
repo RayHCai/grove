@@ -1,5 +1,5 @@
 // The stage order in `tick` is the prediction contract both endpoints replay, so subclasses
-// override the hooks and never `tick` itself. Nothing enforces that yet.
+// override the hooks and never `tick` itself.
 
 import type { Vec3 } from '@platform/math';
 import { approach as mathApproach, vec3, vec3Length } from '@platform/math';
