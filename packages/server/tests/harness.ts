@@ -3,7 +3,7 @@
 // Pure, no wall-clock and no socket, the way core, the renderer and transport are validated. The
 // composition root's shape is reproduced faithfully in one respect that matters: `deliver` is handed
 // to the DRIVER and drains every pair, so no test ever sequences delivery against a step itself —
-// a test that had to order the two would be reproducing the bug §6.4 removes.
+// a test that had to order the two would be reproducing the bug that owning the sequence removes.
 
 import type {
     InputAction,
@@ -27,6 +27,7 @@ import type {
     Message,
     Transport,
 } from '@platform/transport';
+import { defined } from '@platform/math';
 import { jsonCodec, loopbackPair } from '@platform/transport';
 import type { BreakerTrip } from '@platform/core';
 import { GameServer } from '../src/server.js';
@@ -47,7 +48,7 @@ export class Peer {
     }
 
     /**
-     * The first frame on a connection — the client speaks first (§3.2).
+     * The first frame on a connection — the client speaks first.
      *
      * Declares no project by default, which is what an unconfigured server declares too: the
      * identity check passes on agreement, not on absence, so a test that wants a mismatch says so.
@@ -66,7 +67,7 @@ export class Peer {
         this.#send(request);
     }
 
-    /** One tick's batch, `seq` advancing with it (protocol §3.7). Returns the seq it used. */
+    /** One tick's batch, `seq` advancing with it. Returns the seq it used. */
     input(tick: number, actions: InputAction[], over: Partial<InputFrame> = {}): number {
         const frame: InputFrame = {
             kind: 'input',
@@ -84,7 +85,7 @@ export class Peer {
         this.#send({ kind: 'input', tick, seq, actions } satisfies InputFrame);
     }
 
-    /** Burns `n` seq values without sending them, so the next `input` leaves a gap (§4.4). */
+    /** Burns `n` seq values without sending them, so the next `input` leaves a gap. */
     skipSeq(n = 1): void {
         this.#seq += n;
     }
@@ -98,7 +99,7 @@ export class Peer {
         this.#send({ kind: 'time-sync', clientSentMs });
     }
 
-    /** Sends whatever it is handed, so a malformed-frame test can reach the narrowing (§3.2). */
+    /** Sends whatever it is handed, so a malformed-frame test can reach the narrowing. */
     raw(message: unknown): void {
         this.#transport.send(message as Message);
     }
@@ -141,7 +142,7 @@ export class Peer {
     }
 }
 
-/** Counts `encode` calls, so the encode-once claim is measured rather than assumed (§5.4). */
+/** Counts `encode` calls, so the encode-once claim is measured rather than assumed. */
 export class CountingCodec implements Codec {
     encodes = 0;
     decodes = 0;
@@ -182,10 +183,12 @@ export class Harness {
     constructor(opts: HarnessOptions = {}) {
         this.#latency = opts.latency ?? 1;
         this.server = new GameServer({
-            ...(opts.config === undefined ? {} : { config: opts.config }),
-            ...(opts.codec === undefined ? {} : { codec: opts.codec }),
-            ...(opts.onBreakerTrip === undefined ? {} : { onBreakerTrip: opts.onBreakerTrip }),
-            // Handed to the driver, never called by a test around `pump` (§6.4, §8).
+            ...defined({
+                config: opts.config,
+                codec: opts.codec,
+                onBreakerTrip: opts.onBreakerTrip,
+            }),
+            // Handed to the driver, never called by a test around `pump`.
             deliver: () => {
                 for (const pair of this.#pairs) pair.deliver();
             },
@@ -265,7 +268,7 @@ export class Harness {
      * A join that has completed and whose Welcome has been delivered.
      *
      * Pumps until the Welcome arrives rather than a fixed count: the server answers a join at the
-     * next SEND-tick, so the snapshot and the journal are cut at the same instant (§5.1), which puts
+     * next SEND-tick, so the snapshot and the journal are cut at the same instant, which puts
      * the reply up to one send interval plus one delivery after the request.
      */
     joined(name = 'peer', limit = 32): Peer {

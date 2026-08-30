@@ -5,10 +5,8 @@
         "outDir": "dist",
         "tsBuildInfoFile": "dist/.tsbuildinfo",
 
-        // Only `src/testkit/fixtures.ts` carries decorators, and only because a test needs
-        // decorated scripts to dispatch at: `src/` proper declares none (§10). `tsc` lowers
-        // standard decorators and the test runner's transform does not, so the fixtures are
-        // compiled by the build and imported from `dist` (core DESIGN §3.3, §12).
+        // Only `src/testkit/fixtures.ts` carries decorators, and `tsc` lowers them where the test
+        // runner's transform does not, so the fixtures are built and imported from `dist`.
         "lib": ["ES2023", "ESNext.Decorators"]
     },
     "include": ["src/**/*.ts"],

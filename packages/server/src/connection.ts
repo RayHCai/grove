@@ -1,8 +1,3 @@
-// The registry record and its admission bookkeeping.
-//
-// Keyed by a server-minted connectionId, never by player id: a dropped socket and its replacement
-// are two connections that must bind to one Player, so player identity cannot be the key.
-
 import type { Player } from '@platform/core';
 import { createActionStates } from '@platform/core';
 import type { ActionStates } from '@platform/core';
@@ -12,6 +7,7 @@ import {
     CONTROL_BUCKET_FRAMES,
     INPUT_BUCKET_FRAMES,
     MAX_ACTION_NAMES,
+    RATE_BREACH_CLOSE,
     controlRefillTicks,
 } from './constants.js';
 
@@ -29,9 +25,7 @@ export interface AckReport {
  * Per-connection admission state: the resolution frontier, the headroom samples riding its acks,
  * and the rate limiters.
  *
- * The frontier is not a high-water mark. `ackSeq` is the highest `n` with every seq `≤ n` resolved —
- * applied or definitively rejected — so a refusal advances the ack past itself while a gap holds it
- * back; either half alone passes under a high-water-mark implementation.
+ * The frontier is not a high-water mark — either half of the resolved rule alone passes under one.
  */
 export class AdmissionState {
     /** -1 = nothing resolved, matching the client's own start. */
@@ -39,12 +33,7 @@ export class AdmissionState {
     readonly #resolved = new Set<number>();
     /** seq → `frame.tick - serverTickOnArrival`, for whichever ack resolves it. */
     readonly #headroom = new Map<number, number>();
-    /**
-     * A seq above the frontier that has not arrived, and the latest tick it can name.
-     *
-     * Datable because seq and tick advance together: a missing seq named a tick no later than the
-     * next seq that did arrive, so once that bound leaves the past grace it can never be applied.
-     */
+    /** A seq above the frontier that has not arrived, and the latest tick it can name — datable because seq and tick advance together. */
     readonly #gapTickBound = new Map<number, number>();
     #highestSeen = -1;
 
@@ -67,6 +56,11 @@ export class AdmissionState {
         return this.#rateRefusals;
     }
 
+    /** Whether cumulative rate refusals have reached the sustained-breach threshold. */
+    get overRateBreachLimit(): boolean {
+        return this.#rateRefusals >= RATE_BREACH_CLOSE;
+    }
+
     get lastInputTick(): number {
         return this.#lastInputTick;
     }
@@ -81,10 +75,7 @@ export class AdmissionState {
         return this.#highestSeen;
     }
 
-    /**
-     * Records that `seq` arrived on `serverTick` naming `frameTick`, before it is admitted or
-     * refused, dating any gap it skipped so the abandonment rule has a bound to work from.
-     */
+    /** Records that `seq` arrived on `serverTick` naming `frameTick`, dating any gap it skipped. */
     noteArrival(seq: number, frameTick: number, serverTick: number): void {
         this.noteTraffic(serverTick);
         // Only above the frontier: a replayed seq the frontier has already passed would leave a
@@ -96,10 +87,7 @@ export class AdmissionState {
         if (seq > this.#highestSeen) this.#highestSeen = seq;
     }
 
-    /**
-     * Restarts the stale-hold clock, at join too: a player joining at tick 500 must not be born
-     * `holdStaleTicks` silent against a counter that started at zero.
-     */
+    /** Restarts the stale-hold clock, at join too: a player joining at tick 500 must not be born `holdStaleTicks` silent. */
     noteTraffic(serverTick: number): void {
         this.#lastInputTick = serverTick;
     }
@@ -111,11 +99,7 @@ export class AdmissionState {
         this.#gapTickBound.delete(seq);
     }
 
-    /**
-     * Abandons every gap seq whose latest possible tick is already out of the past grace: it can
-     * never be applied, so holding the frontier behind it stalls the client's ring on a frame that
-     * is not coming.
-     */
+    /** Abandons every gap seq whose latest possible tick is already out of the past grace. */
     abandonStale(currentTick: number, pastGrace: number): void {
         const floor = currentTick - pastGrace;
         for (const [seq, tickBound] of this.#gapTickBound) {
@@ -127,9 +111,10 @@ export class AdmissionState {
     }
 
     /**
-     * Advances the frontier as far as it is contiguous and reports the ack, with the headroom of the
-     * earliest input it resolved — the tail, not the mean, because a lead sized to the mean drops
-     * the tail and a player feels that as occasional unresponsiveness.
+     * Advances the frontier as far as it is contiguous and reports the ack.
+     *
+     * The headroom is the earliest input this ack resolved — the tail, not the mean, because a lead
+     * sized to the mean drops the tail and a player feels that as occasional unresponsiveness.
      */
     takeAck(): AckReport {
         let earliest: number | undefined;
@@ -164,25 +149,14 @@ export class AdmissionState {
         return true;
     }
 
-    /**
-     * Spends a token for a `join-request` or `time-sync`.
-     *
-     * A separate bucket because the input one does not cover them and both are far more expensive
-     * per frame than an input: a resync buys a full world walk, a `time-sync` a reply.
-     */
+    /** Spends a token for a `join-request` or `time-sync`, off their own far shallower bucket. */
     takeControlToken(): boolean {
         if (this.#controlTokens <= 0) return false;
         this.#controlTokens--;
         return true;
     }
 
-    /**
-     * Whether this connection may still name `action`.
-     *
-     * The name reaches core's fold as a map key and stays there, and every held action costs a
-     * synthesized `hold` dispatch every tick — so an unbounded key space is unbounded per-tick work
-     * bought with one frame.
-     */
+    /** Whether this connection may still name `action` — the first use of a new name claims a slot. */
     admitsAction(action: string): boolean {
         if (this.#actionNames.has(action)) return true;
         if (this.#actionNames.size >= MAX_ACTION_NAMES) return false;
@@ -197,48 +171,26 @@ export class Connection {
     /**
      * The stable player id the host named this peer, or null when it named none.
      *
-     * The host's claim and never the peer's: a wire field here would be a read-and-overwrite
-     * capability over any saved player, since the leave path writes the record back.
+     * Never a wire field: the leave path writes the record back, so one here would be a
+     * read-and-overwrite capability over any saved player.
      */
     readonly identity: string | null;
     readonly transport: Transport;
     readonly admission = new AdmissionState();
     /** Disposers from `transport.onMessage` / `onClose`, run once on drop. */
     readonly disposers: (() => void)[] = [];
-    /**
-     * This connection's folded input.
-     *
-     * Core's fold, not a second implementation: two would diverge, and the divergence surfaces as a
-     * prediction mismatch debugged as a replication bug.
-     */
+    /** This connection's folded input, through core's own fold — a second one would diverge. */
     readonly actions: ActionStates = createActionStates();
-    /**
-     * HUD presses and pointer hits awaiting the next tick pass.
-     *
-     * A queue rather than an immediate dispatch, because a handler reached from a socket callback
-     * would run between ticks. It needs no depth of its own: the input bucket bounds how many frames
-     * reach it and the pass empties it every tick.
-     */
+    /** HUD presses and pointer hits awaiting the next tick pass. */
     readonly interactions: Interaction[] = [];
 
     /** Null until the first valid `JoinRequest` allocates it. */
     player: Player | null = null;
-    /**
-     * The `JoinRequest` still owed a `Welcome`, answered at the next send-tick.
-     *
-     * Non-null means the Player exists but its snapshot has not been taken, so the broadcast skips
-     * this connection: everything in that send predates the snapshot it is about to receive. The
-     * request is held rather than a flag because only it carries the `clientSentMs` to echo.
-     */
+    /** The `JoinRequest` still owed a `Welcome`, held rather than flagged because only it carries the `clientSentMs` to echo. */
     pendingJoin: JoinRequest | null = null;
     /** True while this connection's persisted record is being read, so a second request cannot race it. */
     admitting = false;
-    /**
-     * The pump clock reading at `accept`, against which the join deadline is measured.
-     *
-     * Null when accepted before the first wake: the injected clock's epoch is unknown until then, so
-     * a host passing `Date.now() / 1000` would expire every connection stamped 0.
-     */
+    /** The pump clock reading at `accept`, or null when accepted before the first wake. */
     acceptedAtSeconds: number | null;
     closed = false;
 
@@ -258,24 +210,22 @@ export class Connection {
         return this.player !== null;
     }
 
+    /** The Player of a connection that is both live and joined, or null — the one predicate every walk over the registry needs. */
+    get livePlayer(): Player | null {
+        return this.closed ? null : this.player;
+    }
+
     /** What this connection's Player is keyed by: the host's id when it named one, else the connection's. */
     get playerId(): string {
         return this.identity ?? this.connectionId;
     }
 
-    /**
-     * Structural ops still held over from before this connection's snapshot, which it must skip.
-     *
-     * A join snapshot is read from LIVE state, so it already contains the effect of every op waiting
-     * in the spill queue — replaying them would spawn a second copy of entities it already holds, and
-     * a duplicate spawn is not idempotent. Counted down as each send delivers part of the backlog,
-     * never cleared in one go: a spill deeper than one send's budget spans several sends.
-     */
+    /** Structural ops still held over from before this connection's snapshot, which it must skip. */
     structuralSkip = 0;
 
     /** Whether this connection is owed the current send: joined, live, and no longer awaiting a `Welcome`. */
     get wantsBroadcast(): boolean {
-        return !this.closed && this.player !== null && this.pendingJoin === null;
+        return this.livePlayer !== null && this.pendingJoin === null;
     }
 
     /** Runs every disposer once. */
