@@ -1,0 +1,45 @@
+{
+    "name": "@platform/glue",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "The composition of one game instance: a project in, a running, reachable world out.",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./node": {
+            "types": "./dist/node/index.d.ts",
+            "import": "./dist/node/index.js"
+        }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc -b",
+        "typecheck": "tsc -p tsconfig.test.json",
+        "test": "vitest run --passWithNoTests",
+        "clean": "rm -rf dist .turbo"
+    },
+    "dependencies": {
+        "@platform/core": "workspace:*",
+        "@platform/engine": "workspace:*",
+        "@platform/project": "workspace:*",
+        "@platform/scripting": "workspace:*",
+        "@platform/server": "workspace:*",
+        "@platform/transport": "workspace:*",
+        "ws": "^8.21.3"
+    },
+    "devDependencies": {
+        "@platform/client": "workspace:*",
+        "@platform/renderer": "workspace:*",
+        "@types/node": "^22.10.5",
+        "@types/ws": "^8.18.1",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    }
+}

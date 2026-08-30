@@ -6,6 +6,7 @@
 
 import { GameClient } from '@platform/client';
 import type { GameClientOptions } from '@platform/client';
+import { defined } from '@platform/math';
 import type { ProjectManifest, ScriptId } from '@platform/project';
 import type { ScriptRegistry } from '@platform/scripting';
 import { projectClaim } from './identity.js';
@@ -29,12 +30,15 @@ export function createClient(opts: CreateClientOptions): GameClient {
         ...forwarded,
         // No project declared is a real answer rather than a missing one, and the client's own
         // all-empty default already says it — so an absent manifest is left to say it.
-        ...(project === undefined
-            ? {}
-            : { project: { ...projectClaim(project), bundleHash: bundleHash ?? '' } }),
+        ...defined({
+            project:
+                project === undefined
+                    ? undefined
+                    : { ...projectClaim(project), bundleHash: bundleHash ?? '' },
+        }),
         // Passed through whole: the wire names a `ScriptId` and the mirror resolves it, so there is
         // one table keyed one way. Filtering by location happens at the attach site instead, which
         // is the only place that knows an `attach` op arrived for an entity at all.
-        ...(scripts === undefined ? {} : { scripts }),
+        ...defined({ scripts }),
     });
 }
