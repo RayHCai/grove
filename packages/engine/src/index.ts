@@ -4,8 +4,6 @@
 // The composition roots that stand a game up are behind `@platform/engine/host`, so a chunk that
 // resolves this specifier never reaches the server, the client or the renderer through it.
 
-export const PACKAGE_NAME = '@platform/engine';
-
 // The primitives are IMPLEMENTED in @platform/math and re-exported here, so each creator-facing
 // name resolves to exactly one type. A creator has one import; the split is internal.
 export type { Vec3, Bounds, Easing } from '@platform/math';

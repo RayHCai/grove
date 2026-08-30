@@ -36,6 +36,9 @@
             "path": "./packages/engine"
         },
         {
+            "path": "./packages/glue"
+        },
+        {
             "path": "./apps/platform"
         },
         {
