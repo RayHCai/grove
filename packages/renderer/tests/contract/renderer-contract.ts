@@ -1,9 +1,8 @@
-// The reusable renderer contract (§15).
+// The reusable renderer contract.
 //
 // `runRendererContract(() => createNullRenderer())` today; the SAME suite runs unchanged against
-// `PixiRenderer` once a browser-mode vitest target exists, and it is the acceptance test if a
-// Three.js backend ever appears. That is the whole reason it exists — an interface validated
-// against one implementation is just that implementation's shape.
+// `PixiRenderer` once a browser-mode vitest target exists. That is the whole reason it exists —
+// an interface validated against one implementation is just that implementation's shape.
 //
 // BACKEND-AGNOSTIC BY CONSTRUCTION: this file may only touch `IRenderer` members plus whatever
 // arrives through `opts`. It imports no backend, no pixi, and assumes no GPU. Where backends
@@ -11,7 +10,8 @@
 // expectation comes in through `opts` rather than being hard-coded.
 
 import { describe, it, expect } from 'vitest';
-import type { IRenderer, NodeDesc, Surface } from '../../src/renderer.js';
+import { defined } from '@platform/math';
+import type { IRenderer, NodeDesc, RendererInitOptions, Surface } from '../../src/renderer.js';
 import type { NodeId } from '../../src/node-id.js';
 import { NO_NODE } from '../../src/node-id.js';
 import { RendererError } from '../../src/errors.js';
@@ -28,6 +28,8 @@ export interface RendererContractOptions {
     image?: { name: string; url: string; size: { width: number; height: number } };
     /** Surfaces the backend under test should enable. All five, so surface rules are testable. */
     surfaces?: readonly Surface[];
+    /** A DOM backend needs a real element; a headless one never dereferences one. */
+    container?: HTMLElement;
 }
 
 const DESIGN = { width: 800, height: 600 };
@@ -47,16 +49,14 @@ export function runRendererContract(
     };
     const surfaces = opts.surfaces ?? (['editorSpace', 'world', 'ui', 'editorOverlay'] as const);
 
+    function initOptions(extra: Partial<RendererInitOptions> = {}): RendererInitOptions {
+        return { design: DESIGN, ...defined({ container: opts.container }), ...extra };
+    }
+
     /** An initialized renderer with the test image loaded. */
     async function ready(): Promise<IRenderer> {
         const renderer = makeRenderer();
-        await renderer.init({
-            // Not dereferenced by a headless backend; a DOM backend needs a real element and
-            // supplies its own via `opts` in that environment.
-            container: undefined as unknown as HTMLElement,
-            design: DESIGN,
-            enabledSurfaces: surfaces,
-        });
+        await renderer.init(initOptions({ enabledSurfaces: surfaces }));
         await renderer.loadAsset({
             name: image.name,
             kind: 'image',
@@ -72,39 +72,25 @@ export function runRendererContract(
     }
 
     describe(label, () => {
-        // ─── lifecycle ──────────────────────────────────────────────
-
         describe('lifecycle', () => {
             it('reports initialized only after init', async () => {
                 const renderer = makeRenderer();
                 expect(renderer.initialized).toBe(false);
-                await renderer.init({
-                    container: undefined as unknown as HTMLElement,
-                    design: DESIGN,
-                    enabledSurfaces: surfaces,
-                });
+                await renderer.init(initOptions({ enabledSurfaces: surfaces }));
                 expect(renderer.initialized).toBe(true);
                 renderer.destroy();
             });
 
             it('rejects a second init', async () => {
                 const renderer = await ready();
-                await expect(
-                    renderer.init({
-                        container: undefined as unknown as HTMLElement,
-                        design: DESIGN,
-                    }),
-                ).rejects.toBeInstanceOf(RendererError);
+                await expect(renderer.init(initOptions())).rejects.toBeInstanceOf(RendererError);
                 renderer.destroy();
             });
 
             it('rejects a non-positive design size', async () => {
                 const renderer = makeRenderer();
                 await expect(
-                    renderer.init({
-                        container: undefined as unknown as HTMLElement,
-                        design: { width: 0, height: 600 },
-                    }),
+                    renderer.init(initOptions({ design: { width: 0, height: 600 } })),
                 ).rejects.toBeInstanceOf(RendererError);
             });
 
@@ -123,8 +109,6 @@ export function runRendererContract(
                 expect(() => renderer.destroy()).not.toThrow();
             });
         });
-
-        // ─── handles ────────────────────────────────────────────────
 
         describe('handle lifecycle', () => {
             it('mints live, distinct, non-null handles', async () => {
@@ -147,7 +131,7 @@ export function runRendererContract(
                 const second = renderer.createNode(sprite());
 
                 // The freelist may hand back the same slot, but the generation must differ, so
-                // the old handle can never validate again (§7).
+                // the old handle can never validate again.
                 expect(second).not.toBe(first);
                 expect(renderer.isAlive(first)).toBe(false);
                 expect(renderer.isAlive(second)).toBe(true);
@@ -161,7 +145,7 @@ export function runRendererContract(
             });
         });
 
-        describe('stale handles are no-ops, not throws (§7)', () => {
+        describe('stale handles are no-ops, not throws', () => {
             it('accepts every method on a destroyed node without throwing', async () => {
                 const renderer = await ready();
                 const id = renderer.createNode(sprite());
@@ -194,9 +178,7 @@ export function runRendererContract(
             });
         });
 
-        // ─── inheritance ────────────────────────────────────────────
-
-        describe('position-only inheritance (§5)', () => {
+        describe('position-only inheritance', () => {
             it('adds a parent position into a child', async () => {
                 const renderer = await ready();
                 const parent = renderer.createNode(sprite({ position: { x: 100, y: 50 } }));
@@ -221,8 +203,8 @@ export function runRendererContract(
                 const child = renderer.createNode(sprite({ parent }));
 
                 // The child keeps its own defaults under a fully-transformed parent. This is
-                // the single most important assertion in the suite: §5's rule is what the whole
-                // §6.2 tree shape exists to enforce.
+                // the single most important assertion in the suite: position-only inheritance is
+                // what the sibling tree shape in a backend exists to enforce.
                 const resolved = renderer.resolvedTransformOf(child);
                 expect(resolved?.rotation).toBe(0);
                 expect(resolved?.scale.x).toBe(1);
@@ -240,7 +222,7 @@ export function runRendererContract(
 
                 const local = renderer.localTransformOf(child);
                 const resolved = renderer.resolvedTransformOf(child);
-                // Only position and visible may differ between the two (§6.1).
+                // Only position and visible may differ between the two.
                 expect(resolved?.rotation).toBe(local?.rotation);
                 expect(resolved?.scale.x).toBe(local?.scale.x);
                 expect(resolved?.scale.y).toBe(local?.scale.y);
@@ -281,8 +263,6 @@ export function runRendererContract(
             });
         });
 
-        // ─── hierarchy ──────────────────────────────────────────────
-
         describe('hierarchy', () => {
             it('reports parents and children', async () => {
                 const renderer = await ready();
@@ -292,12 +272,12 @@ export function runRendererContract(
 
                 expect(renderer.parentOf(first)).toBe(parent);
                 expect(renderer.parentOf(parent)).toBe(NO_NODE);
-                // Insertion-defined order (§11.1).
+                // Insertion-defined order.
                 expect(renderer.childrenOf(parent)).toEqual([first, second]);
                 renderer.destroy();
             });
 
-            it('reinterprets on attach and preserves on detach (§11.1)', async () => {
+            it('reinterprets on attach and preserves on detach', async () => {
                 const renderer = await ready();
                 const parent = renderer.createNode(sprite({ position: { x: 100, y: 0 } }));
                 const child = renderer.createNode(sprite({ position: { x: 10, y: 0 } }));
@@ -353,7 +333,7 @@ export function runRendererContract(
                 const a = renderer.createNode(sprite());
                 const b = renderer.createNode(sprite({ parent: a }));
 
-                // A caller bug, not a race (§7).
+                // A caller bug, not a race.
                 expect(() => renderer.attachNode(a, b)).toThrow(RendererError);
                 renderer.destroy();
             });
@@ -381,7 +361,7 @@ export function runRendererContract(
             });
         });
 
-        describe('destroy cascade (§11.1)', () => {
+        describe('destroy cascade', () => {
             it('invalidates every descendant handle', async () => {
                 const renderer = await ready();
                 const root = renderer.createNode(sprite());
@@ -429,8 +409,6 @@ export function runRendererContract(
             });
         });
 
-        // ─── batching and patches ───────────────────────────────────
-
         describe('updateNodes', () => {
             it('treats an undefined field as unchanged', async () => {
                 const renderer = await ready();
@@ -450,7 +428,7 @@ export function runRendererContract(
                 const renderer = await ready();
                 const id = renderer.createNode(sprite());
 
-                // The pattern §11.1 promises: refill one array every frame, zero allocation.
+                // The documented pattern: refill one array every frame, zero allocation.
                 const pooled = [{ id, position: { x: 0, y: 0 } }];
                 pooled[0]!.position.x = 3;
                 renderer.updateNodes(pooled);
@@ -495,7 +473,7 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
-            it('createNodes parents to an already-existing node (§11.1)', async () => {
+            it('createNodes parents to an already-existing node', async () => {
                 const renderer = await ready();
                 const parent = renderer.createNode(sprite());
                 const [a, b] = renderer.createNodes([sprite({ parent }), sprite({ parent })]);
@@ -610,7 +588,7 @@ export function runRendererContract(
             });
         });
 
-        describe('updateSubtree is set-only (§5.1)', () => {
+        describe('updateSubtree is set-only', () => {
             it('writes every descendant and includes the root by default', async () => {
                 const renderer = await ready();
                 const root = renderer.createNode(sprite({ alpha: 1 }));
@@ -620,7 +598,7 @@ export function runRendererContract(
                 renderer.updateSubtree(root, { alpha: 0.5 });
 
                 // FLATTENS rather than scaling proportionally — the stated cost of set
-                // semantics (§5.1).
+                // semantics.
                 expect(renderer.localTransformOf(root)?.alpha).toBe(0.5);
                 expect(renderer.localTransformOf(mid)?.alpha).toBe(0.5);
                 expect(renderer.localTransformOf(leaf)?.alpha).toBe(0.5);
@@ -644,7 +622,7 @@ export function runRendererContract(
                 renderer.updateSubtree(root, { alpha: 0.5 });
 
                 const late = renderer.createNode(sprite({ parent: root }));
-                // A one-shot fan-out, not a mode: the new child keeps the default (§5.1).
+                // A one-shot fan-out, not a mode: the new child keeps the default.
                 expect(renderer.localTransformOf(late)?.alpha).toBe(1);
                 renderer.destroy();
             });
@@ -662,9 +640,7 @@ export function runRendererContract(
             });
         });
 
-        // ─── surfaces ───────────────────────────────────────────────
-
-        describe('surfaces (§4)', () => {
+        describe('surfaces', () => {
             it('reports which surfaces are enabled', async () => {
                 const renderer = await ready();
                 for (const surface of surfaces) {
@@ -675,11 +651,7 @@ export function runRendererContract(
 
             it('throws when creating a node on a disabled surface', async () => {
                 const renderer = makeRenderer();
-                await renderer.init({
-                    container: undefined as unknown as HTMLElement,
-                    design: DESIGN,
-                    enabledSurfaces: ['world', 'ui'],
-                });
+                await renderer.init(initOptions({ enabledSurfaces: ['world', 'ui'] }));
 
                 expect(renderer.isSurfaceEnabled('editorOverlay')).toBe(false);
                 expect(() =>
@@ -690,11 +662,7 @@ export function runRendererContract(
 
             it('leaves setSurfaceVisible on a disabled surface a silent no-op', async () => {
                 const renderer = makeRenderer();
-                await renderer.init({
-                    container: undefined as unknown as HTMLElement,
-                    design: DESIGN,
-                    enabledSurfaces: ['world', 'ui'],
-                });
+                await renderer.init(initOptions({ enabledSurfaces: ['world', 'ui'] }));
 
                 expect(() => renderer.setSurfaceVisible('editorUi', false)).not.toThrow();
                 renderer.destroy();
@@ -710,7 +678,7 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
-            it('rejects a text node on a camera-transformed surface (§9.3)', async () => {
+            it('rejects a text node on a camera-transformed surface', async () => {
                 const renderer = await ready();
                 // The error must point at createTextAsset — world text is an asset first.
                 expect(() =>
@@ -727,9 +695,7 @@ export function runRendererContract(
             });
         });
 
-        // ─── camera and viewport ────────────────────────────────────
-
-        describe('camera and viewport (§4.2, §6.4)', () => {
+        describe('camera and viewport', () => {
             it('reports the camera it was given, defaulting framing to stage', async () => {
                 const renderer = await ready();
                 renderer.setCamera({ position: { x: 10, y: -20 }, zoom: 2 });
@@ -811,7 +777,7 @@ export function runRendererContract(
             });
         });
 
-        describe('projection round-trips (§6.4)', () => {
+        describe('projection round-trips', () => {
             it('maps the world origin to the canvas center for a centered camera', async () => {
                 const renderer = await ready();
                 renderer.resize(800, 600);
@@ -823,7 +789,7 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
-            it('flips y — a point above the camera gets a smaller screen y (§6.3)', async () => {
+            it('flips y — a point above the camera gets a smaller screen y', async () => {
                 const renderer = await ready();
                 renderer.resize(800, 600);
                 renderer.setCamera({ position: { x: 0, y: 0 }, zoom: 1 });
@@ -937,9 +903,7 @@ export function runRendererContract(
             });
         });
 
-        // ─── bounds ─────────────────────────────────────────────────
-
-        describe('bounds (§8)', () => {
+        describe('bounds', () => {
             it('sizes a sprite from its texture, centered by default', async () => {
                 const renderer = await ready();
                 const id = renderer.createNode(sprite());
@@ -993,7 +957,7 @@ export function runRendererContract(
                 const flipped = renderer.createNode(sprite({ scale: { x: -1, y: 1 } }));
 
                 const local = renderer.localBoundsOf(flipped)!;
-                // A negative scale is the common horizontal flip (§5) and must not invert the
+                // A negative scale is the common horizontal flip and must not invert the
                 // rect.
                 expect(local.left).toBeLessThanOrEqual(local.right);
                 expect(local.bottom).toBeLessThanOrEqual(local.top);
@@ -1014,9 +978,7 @@ export function runRendererContract(
             });
         });
 
-        // ─── assets ─────────────────────────────────────────────────
-
-        describe('assets (§9)', () => {
+        describe('assets', () => {
             it('resolves a load with the name and a size', async () => {
                 const renderer = await ready();
                 expect(renderer.hasAsset(image.name)).toBe(true);
@@ -1056,7 +1018,7 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
-            it('resolves loadAssets with a result rather than rejecting (§9.1)', async () => {
+            it('resolves loadAssets with a result rather than rejecting', async () => {
                 const renderer = await ready();
                 const result = await renderer.loadAssets([
                     { name: 'a', kind: 'image', url: '/a.png', size: { width: 8, height: 8 } },
@@ -1069,7 +1031,7 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
-            it('reports an unknown unload rather than throwing (§9.2)', async () => {
+            it('reports an unknown unload rather than throwing', async () => {
                 const renderer = await ready();
                 const result = await renderer.unloadAssets(['never-loaded']);
 
@@ -1095,7 +1057,7 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
-            it('unloads an in-use texture anyway and reports it (§9.2)', async () => {
+            it('unloads an in-use texture anyway and reports it', async () => {
                 const renderer = await ready();
                 renderer.createNode(sprite());
                 renderer.createNode(sprite());
@@ -1112,7 +1074,7 @@ export function runRendererContract(
                 const renderer = await ready();
                 const id = renderer.createNode(sprite());
                 await renderer.unloadAssets([image.name]);
-                // The node falls back to the placeholder; its id stays valid (§9.2).
+                // The node falls back to the placeholder; its id stays valid.
                 expect(renderer.isAlive(id)).toBe(true);
                 renderer.destroy();
             });
@@ -1132,7 +1094,7 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
-            it('creates a text asset with a real measured size (§9.3)', async () => {
+            it('creates a text asset with a real measured size', async () => {
                 const renderer = await ready();
                 const info = await renderer.createTextAsset('greeting', 'hello');
 
@@ -1151,7 +1113,7 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
-            it('makes a world text asset usable as a sprite texture (§9.3)', async () => {
+            it('makes a world text asset usable as a sprite texture', async () => {
                 const renderer = await ready();
                 await renderer.createTextAsset('label', 'Score');
                 const id = renderer.createNode({
@@ -1177,8 +1139,6 @@ export function runRendererContract(
             });
         });
 
-        // ─── text nodes ─────────────────────────────────────────────
-
         describe('UI text nodes', () => {
             it('sets text on a UI text node', async () => {
                 const renderer = await ready();
@@ -1195,8 +1155,6 @@ export function runRendererContract(
                 renderer.destroy();
             });
         });
-
-        // ─── events ─────────────────────────────────────────────────
 
         describe('events', () => {
             it('emits resize with the canvas, stage, viewport and resolution', async () => {
@@ -1220,7 +1178,7 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
-            it('returns an unsubscribe function (api_spec.ts:264)', async () => {
+            it('returns an unsubscribe function', async () => {
                 const renderer = await ready();
                 let count = 0;
                 const off = renderer.on('resize', () => {
@@ -1254,10 +1212,8 @@ export function runRendererContract(
             });
         });
 
-        // ─── render ─────────────────────────────────────────────────
-
         describe('render', () => {
-            it('is safe to call repeatedly and takes no dt (§11.1)', async () => {
+            it('is safe to call repeatedly and takes no dt', async () => {
                 const renderer = await ready();
                 renderer.createNode(sprite());
                 expect(() => {
@@ -1284,8 +1240,6 @@ export function runRendererContract(
                 renderer.destroy();
             });
         });
-
-        // ─── inspect (§11.2) ────────────────────────────────────────
 
         describe('inspect', () => {
             it('returns an empty snapshot before init rather than throwing', () => {
@@ -1408,7 +1362,7 @@ export function runRendererContract(
                 expect(c?.local.position.x).toBe(10);
                 expect(c?.resolved.position.x).toBe(110);
                 expect(c?.resolved.position.y).toBe(55);
-                // Rotation does NOT inherit, so local and resolved agree on it (§5).
+                // Rotation does NOT inherit, so local and resolved agree on it.
                 expect(c?.local.rotation).toBe(30);
                 expect(c?.resolved.rotation).toBe(30);
                 renderer.destroy();
@@ -1467,7 +1421,7 @@ export function runRendererContract(
                 const snapshot = renderer.inspect();
                 expect(snapshot.nodes.get(s)?.localBounds).not.toBeNull();
                 expect(snapshot.nodes.get(s)?.worldBounds).not.toBeNull();
-                // A group has no art, so no extent (§8).
+                // A group has no art, so no extent.
                 expect(snapshot.nodes.get(g)?.localBounds).toBeNull();
                 renderer.destroy();
             });
@@ -1498,7 +1452,7 @@ export function runRendererContract(
             it('reports cull state after a render, and counts it', async () => {
                 const renderer = await ready();
                 renderer.createNode(sprite({ position: { x: 0, y: 0 } }));
-                // Far outside an 800x600 stage, so §8 culls it.
+                // Far outside an 800x600 stage, so the cull test rejects it.
                 renderer.createNode(sprite({ position: { x: 50_000, y: 0 } }));
                 renderer.render();
 

@@ -57,11 +57,7 @@ class CountingSink implements SceneSink {
 
 function core(): { core: RendererCore; sink: CountingSink } {
     const sink = new CountingSink();
-    const config = resolveInitOptions(
-        { container: undefined as unknown as HTMLElement, design: DESIGN },
-        DESIGN,
-        1,
-    );
+    const config = resolveInitOptions({ design: DESIGN }, DESIGN, 1);
     return { core: new RendererCore(sink, config), sink };
 }
 

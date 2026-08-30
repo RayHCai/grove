@@ -1,5 +1,5 @@
 // The transform graph: position-only inheritance, the two dirty scopes, and tree integrity
-// (§5, §6.1). This is the highest-risk logic in the package (§16 step 2).
+// This is the highest-risk logic in the package.
 //
 // The assertions below check SET CONTENTS, not just sizes — a dirty-scope bug that widened a
 // single-node write into a subtree write would keep the size right for a leaf and be invisible
@@ -46,7 +46,7 @@ describe('defaults', () => {
         expect(store.parent(0)).toBe(-1);
     });
 
-    it('centers the anchor — a negative-x flip must pivot in place (§5)', () => {
+    it('centers the anchor — a negative-x flip must pivot in place', () => {
         const store = storeOf(1);
         expect(store.anchorX(0)).toBe(0.5);
         expect(store.anchorY(0)).toBe(0.5);
@@ -63,7 +63,7 @@ describe('defaults', () => {
     });
 });
 
-describe('position-only inheritance (§5)', () => {
+describe('position-only inheritance', () => {
     it('adds a parent position into a child', () => {
         const store = storeOf(2);
         store.setPosition(0, 10, 20, 3);
@@ -123,7 +123,7 @@ describe('position-only inheritance (§5)', () => {
     });
 });
 
-describe('visibility inheritance (§5)', () => {
+describe('visibility inheritance', () => {
     it('hides a 3-deep chain from the top, and restores it', () => {
         const store = storeOf(3);
         store.link(1, 0);
@@ -160,7 +160,7 @@ describe('visibility inheritance (§5)', () => {
     });
 });
 
-describe('dirty scope — the crux of §6.1', () => {
+describe('dirty scope — a write dirties exactly what it changed', () => {
     it('flush-dirties ONE node and resolve-dirties NOTHING for a rotation write', () => {
         const store = storeOf(3);
         store.link(1, 0);
@@ -177,7 +177,7 @@ describe('dirty scope — the crux of §6.1', () => {
         expect(sorted(store.consumeFlushDirty())).toEqual([0]);
     });
 
-    it('resolve-dirties nothing for any other non-inheriting channel (§5)', () => {
+    it('resolve-dirties nothing for any other non-inheriting channel', () => {
         const store = storeOf(3);
         store.link(1, 0);
         store.link(2, 1);
@@ -196,7 +196,7 @@ describe('dirty scope — the crux of §6.1', () => {
         }
     });
 
-    it('flush-dirties one node per spinning enemy — 200 nodes, not 200 subtrees (§5)', () => {
+    it('flush-dirties one node per spinning enemy — 200 nodes, not 200 subtrees', () => {
         const store = storeOf(200);
         for (let i = 1; i < 200; i++) store.link(i, 0);
         settle(store);
@@ -215,7 +215,7 @@ describe('dirty scope — the crux of §6.1', () => {
         settle(store);
 
         store.setPosition(0, 5, 5, 0);
-        // Only node 0's local values changed; the backend composes the rest (§6.2).
+        // Only node 0's local values changed; the backend composes the rest.
         expect(sorted(store.consumeFlushDirty())).toEqual([0]);
         store.resolve();
         // Every descendant's RESOLVED position moved.
@@ -260,7 +260,7 @@ describe('dirty scope — the crux of §6.1', () => {
         expect(store.culled(0)).toBe(true);
     });
 
-    it('markAllDirty then resolve recomposes the whole graph (§10)', () => {
+    it('markAllDirty then resolve recomposes the whole graph', () => {
         const store = storeOf(3);
         store.link(1, 0);
         store.link(2, 1);
@@ -313,7 +313,7 @@ describe('resolve ordering', () => {
         expect(store.lastResolveVisits).toBe(3);
     });
 
-    it('skips clean subtrees rather than walking the whole graph (§6.1)', () => {
+    it('skips clean subtrees rather than walking the whole graph', () => {
         const store = storeOf(7);
         // Two independent 3-node branches under separate roots, plus one lone root.
         store.link(1, 0);
@@ -553,7 +553,7 @@ describe('slot lifecycle', () => {
         expect(store.firstChild(500)).toBe(-1);
     });
 
-    it('keeps Float64 precision — the reason it is not Float32 (§6.1)', () => {
+    it('keeps Float64 precision — the reason it is not Float32', () => {
         const store = storeOf(1);
         // 0.1 is not representable in binary; Float32 would lose it at this magnitude.
         store.setPosition(0, 0.1, 1e15 + 0.5, 0);
@@ -600,7 +600,7 @@ describe('slot lifecycle', () => {
         expect(store.consumeFlushDirty()).toEqual([]);
     });
 
-    it('treats an out-of-range or non-integer index as absent rather than throwing (§7)', () => {
+    it('treats an out-of-range or non-integer index as absent rather than throwing', () => {
         const store = storeOf(1);
         expect(() => store.setPosition(99, 1, 1, 1)).not.toThrow();
         expect(() => store.setPosition(-1, 1, 1, 1)).not.toThrow();

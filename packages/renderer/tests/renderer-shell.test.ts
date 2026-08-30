@@ -5,7 +5,8 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Size } from '@platform/math';
-import { emptySnapshot, RendererCore, resolveInitOptions } from '../src/core/renderer-core.js';
+import { RendererCore, resolveInitOptions } from '../src/core/renderer-core.js';
+import { emptySnapshot } from '../src/core/scene-snapshot.js';
 import { RendererShell } from '../src/core/renderer-shell.js';
 import type { SceneSink } from '../src/core/scene-sink.js';
 import { NO_NODE } from '../src/node-id.js';
@@ -24,10 +25,7 @@ import type {
 const DESIGN: Size = { width: 800, height: 600 };
 const PROBE_SIZE: Size = { width: 4, height: 4 };
 
-const INIT: RendererInitOptions = {
-    container: undefined as unknown as HTMLElement,
-    design: DESIGN,
-};
+const INIT: RendererInitOptions = { design: DESIGN };
 
 /** No display objects: the shell never calls a sink, and the core only needs `sizeOf`. */
 class ProbeSink implements SceneSink {

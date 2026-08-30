@@ -1,17 +1,7 @@
-// Pure. The authoritative transform graph: structure-of-arrays over growable typed arrays,
-// indexed by slot index. The backend's tree mirrors this one, and nothing here asks it anything.
+// Pure, and authoritative: the backend's tree mirrors this one, and nothing here asks it anything.
 //
-// Only position and visibility inherit, which is why `resolved` holds three axes and one flag
-// rather than a full transform: for rotation, scale, alpha and tint, local IS resolved. Position
-// composition is therefore vector addition — no matrix, no decomposition.
-//
-// Two distinct dirty sets, and conflating them is the easiest way to break this file:
-//
-//   resolve-dirty   Subtree scope: a position/visibility write or a relink changes the resolved
-//                   values of that node and everything beneath it.
-//   flush-dirty     Single node: whose LOCAL values must reach the backend. The backend tree
-//                   composes for us, so moving a parent writes only the parent's local position,
-//                   and a rotation write resolve-dirties nothing at all.
+// Three dirty sets, and conflating the subtree-scoped `resolveDirty` with the single-node
+// `flushDirty` is the easiest way to break this file.
 //
 // `Float64Array` because composed positions accumulate and the drift matters more than the bytes.
 
@@ -228,99 +218,99 @@ export class TransformStore {
     }
 
     posX(index: number): number {
-        return this.#has(index) ? (this.#posX[index] as number) : 0;
+        return this.#num(this.#posX, index, 0);
     }
 
     posY(index: number): number {
-        return this.#has(index) ? (this.#posY[index] as number) : 0;
+        return this.#num(this.#posY, index, 0);
     }
 
     posZ(index: number): number {
-        return this.#has(index) ? (this.#posZ[index] as number) : 0;
+        return this.#num(this.#posZ, index, 0);
     }
 
     rotation(index: number): number {
-        return this.#has(index) ? (this.#rot[index] as number) : 0;
+        return this.#num(this.#rot, index, 0);
     }
 
     scaleX(index: number): number {
-        return this.#has(index) ? (this.#scaleX[index] as number) : 1;
+        return this.#num(this.#scaleX, index, 1);
     }
 
     scaleY(index: number): number {
-        return this.#has(index) ? (this.#scaleY[index] as number) : 1;
+        return this.#num(this.#scaleY, index, 1);
     }
 
     scaleZ(index: number): number {
-        return this.#has(index) ? (this.#scaleZ[index] as number) : 1;
+        return this.#num(this.#scaleZ, index, 1);
     }
 
     alpha(index: number): number {
-        return this.#has(index) ? (this.#alpha[index] as number) : 1;
+        return this.#num(this.#alpha, index, 1);
     }
 
     anchorX(index: number): number {
-        return this.#has(index) ? (this.#anchorX[index] as number) : 0.5;
+        return this.#num(this.#anchorX, index, 0.5);
     }
 
     anchorY(index: number): number {
-        return this.#has(index) ? (this.#anchorY[index] as number) : 0.5;
+        return this.#num(this.#anchorY, index, 0.5);
     }
 
     tint(index: number): number {
-        return this.#has(index) ? (this.#tint[index] as number) : WHITE;
+        return this.#num(this.#tint, index, WHITE);
     }
 
     visible(index: number): boolean {
-        return this.#has(index) ? this.#visible[index] === 1 : false;
+        return this.#flag(this.#visible, index);
     }
 
     neverCull(index: number): boolean {
-        return this.#has(index) ? this.#neverCull[index] === 1 : false;
+        return this.#flag(this.#neverCull, index);
     }
 
     culled(index: number): boolean {
-        return this.#has(index) ? this.#culled[index] === 1 : false;
+        return this.#flag(this.#culled, index);
     }
 
     resolvedX(index: number): number {
-        return this.#has(index) ? (this.#resolvedX[index] as number) : 0;
+        return this.#num(this.#resolvedX, index, 0);
     }
 
     resolvedY(index: number): number {
-        return this.#has(index) ? (this.#resolvedY[index] as number) : 0;
+        return this.#num(this.#resolvedY, index, 0);
     }
 
     resolvedZ(index: number): number {
-        return this.#has(index) ? (this.#resolvedZ[index] as number) : 0;
+        return this.#num(this.#resolvedZ, index, 0);
     }
 
     resolvedVisible(index: number): boolean {
-        return this.#has(index) ? this.#resolvedVisible[index] === 1 : false;
+        return this.#flag(this.#resolvedVisible, index);
     }
 
     parent(index: number): number {
-        return this.#has(index) ? (this.#parent[index] as number) : NONE;
+        return this.#int(this.#parent, index, NONE);
     }
 
     firstChild(index: number): number {
-        return this.#has(index) ? (this.#firstChild[index] as number) : NONE;
+        return this.#int(this.#firstChild, index, NONE);
     }
 
     lastChild(index: number): number {
-        return this.#has(index) ? (this.#lastChild[index] as number) : NONE;
+        return this.#int(this.#lastChild, index, NONE);
     }
 
     nextSibling(index: number): number {
-        return this.#has(index) ? (this.#nextSibling[index] as number) : NONE;
+        return this.#int(this.#nextSibling, index, NONE);
     }
 
     prevSibling(index: number): number {
-        return this.#has(index) ? (this.#prevSibling[index] as number) : NONE;
+        return this.#int(this.#prevSibling, index, NONE);
     }
 
     depth(index: number): number {
-        return this.#has(index) ? (this.#depth[index] as number) : 0;
+        return this.#int(this.#depth, index, 0);
     }
 
     /**
@@ -344,7 +334,7 @@ export class TransformStore {
             this.#addRoot(child);
         } else {
             this.#parent[child] = parent;
-            const last = this.#lastChild[parent] as number;
+            const last = this.#lastChild[parent] ?? NONE;
             if (last === NONE) {
                 this.#firstChild[parent] = child;
             } else {
@@ -362,7 +352,7 @@ export class TransformStore {
     /** Makes `child` a root. */
     unlink(child: number): void {
         if (!this.#has(child)) return;
-        if ((this.#parent[child] as number) === NONE) return;
+        if ((this.#parent[child] ?? NONE) === NONE) return;
         this.link(child, NONE);
     }
 
@@ -373,7 +363,7 @@ export class TransformStore {
         // The slot-count countdown is a backstop: a malformed cycle would otherwise spin forever.
         for (let guard = this.#count; walk !== NONE && guard >= 0; guard--) {
             if (walk === ancestor) return true;
-            walk = this.#parent[walk] as number;
+            walk = this.#parent[walk] ?? NONE;
         }
         return false;
     }
@@ -383,9 +373,9 @@ export class TransformStore {
         out.length = 0;
         if (!this.#has(index)) return out;
         for (
-            let c = this.#firstChild[index] as number;
+            let c = this.#firstChild[index] ?? NONE;
             c !== NONE;
-            c = this.#nextSibling[c] as number
+            c = this.#nextSibling[c] ?? NONE
         ) {
             out.push(c);
         }
@@ -407,20 +397,20 @@ export class TransformStore {
             out.push(index);
         } else {
             for (
-                let c = this.#firstChild[index] as number;
+                let c = this.#firstChild[index] ?? NONE;
                 c !== NONE;
-                c = this.#nextSibling[c] as number
+                c = this.#nextSibling[c] ?? NONE
             ) {
                 out.push(c);
             }
         }
 
         for (let head = 0; head < out.length; head++) {
-            const node = out[head] as number;
+            const node = out[head] ?? NONE;
             for (
-                let c = this.#firstChild[node] as number;
+                let c = this.#firstChild[node] ?? NONE;
                 c !== NONE;
-                c = this.#nextSibling[c] as number
+                c = this.#nextSibling[c] ?? NONE
             ) {
                 out.push(c);
             }
@@ -433,7 +423,7 @@ export class TransformStore {
         out.length = 0;
         for (const index of this.#rootOrder) {
             if (index === NONE) continue;
-            if (this.#has(index) && (this.#parent[index] as number) === NONE) out.push(index);
+            if (this.#has(index) && (this.#parent[index] ?? NONE) === NONE) out.push(index);
         }
         return out;
     }
@@ -496,7 +486,7 @@ export class TransformStore {
     markAllDirty(): void {
         for (let i = 0; i < this.#count; i++) {
             this.#flushDirty.add(i);
-            if ((this.#parent[i] as number) === NONE) this.#resolveDirty.add(i);
+            if ((this.#parent[i] ?? NONE) === NONE) this.#resolveDirty.add(i);
         }
     }
 
@@ -505,12 +495,30 @@ export class TransformStore {
         return index >= 0 && index < this.#count && Number.isInteger(index);
     }
 
+    /** Reads a Float64 lane, or `fallback` when the slot is absent. */
+    #num(lane: Float64Array, index: number, fallback: number): number {
+        return this.#has(index) ? (lane[index] ?? fallback) : fallback;
+    }
+
+    // Split by array type rather than taking a union: one reader over both would make every
+    // element access in the per-frame path polymorphic.
+
+    /** Reads an Int32 lane, or `fallback` when the slot is absent. */
+    #int(lane: Int32Array, index: number, fallback: number): number {
+        return this.#has(index) ? (lane[index] ?? fallback) : fallback;
+    }
+
+    /** `true` when a Uint8 lane holds 1 at `index`; an absent slot reads false. */
+    #flag(lane: Uint8Array, index: number): boolean {
+        return this.#has(index) ? lane[index] === 1 : false;
+    }
+
     /** `true` when any ancestor of `index` is itself waiting to be resolved. */
     #hasDirtyAncestor(index: number): boolean {
         for (
-            let walk = this.#parent[index] as number;
+            let walk = this.#parent[index] ?? NONE;
             walk !== NONE;
-            walk = this.#parent[walk] as number
+            walk = this.#parent[walk] ?? NONE
         ) {
             if (this.#resolveDirty.has(walk)) return true;
         }
@@ -528,27 +536,28 @@ export class TransformStore {
         stack.length = 0;
         stack.push(index);
         while (stack.length > 0) {
-            const node = stack.pop() as number;
+            const node = stack.pop();
+            if (node === undefined) break;
             this.#resolveDirty.delete(node);
             this.#visits++;
 
-            const parent = this.#parent[node] as number;
-            const baseX = parent === NONE ? 0 : (this.#resolvedX[parent] as number);
-            const baseY = parent === NONE ? 0 : (this.#resolvedY[parent] as number);
-            const baseZ = parent === NONE ? 0 : (this.#resolvedZ[parent] as number);
-            const baseVisible = parent === NONE ? 1 : (this.#resolvedVisible[parent] as number);
+            const parent = this.#parent[node] ?? NONE;
+            const baseX = parent === NONE ? 0 : (this.#resolvedX[parent] ?? 0);
+            const baseY = parent === NONE ? 0 : (this.#resolvedY[parent] ?? 0);
+            const baseZ = parent === NONE ? 0 : (this.#resolvedZ[parent] ?? 0);
+            const baseVisible = parent === NONE ? 1 : (this.#resolvedVisible[parent] ?? 0);
 
             // Addition and nothing else — no matrix, no rotation of the offset — so it is exact.
-            const nx = baseX + (this.#posX[node] as number);
-            const ny = baseY + (this.#posY[node] as number);
-            const nz = baseZ + (this.#posZ[node] as number);
+            const nx = baseX + (this.#posX[node] ?? 0);
+            const ny = baseY + (this.#posY[node] ?? 0);
+            const nz = baseZ + (this.#posZ[node] ?? 0);
             const nv = baseVisible === 1 && this.#visible[node] === 1 ? 1 : 0;
 
             const changed =
-                nx !== (this.#resolvedX[node] as number) ||
-                ny !== (this.#resolvedY[node] as number) ||
-                nz !== (this.#resolvedZ[node] as number) ||
-                nv !== (this.#resolvedVisible[node] as number);
+                nx !== this.#resolvedX[node] ||
+                ny !== this.#resolvedY[node] ||
+                nz !== this.#resolvedZ[node] ||
+                nv !== this.#resolvedVisible[node];
 
             this.#resolvedX[node] = nx;
             this.#resolvedY[node] = ny;
@@ -557,9 +566,9 @@ export class TransformStore {
             if (changed) this.#resolvedChanged.add(node);
 
             for (
-                let c = this.#firstChild[node] as number;
+                let c = this.#firstChild[node] ?? NONE;
                 c !== NONE;
-                c = this.#nextSibling[c] as number
+                c = this.#nextSibling[c] ?? NONE
             ) {
                 stack.push(c);
             }
@@ -568,16 +577,16 @@ export class TransformStore {
 
     /** Removes `child` from whatever list holds it, leaving its own links cleared. */
     #detach(child: number): void {
-        const parent = this.#parent[child] as number;
-        const prev = this.#prevSibling[child] as number;
-        const next = this.#nextSibling[child] as number;
+        const parent = this.#parent[child] ?? NONE;
+        const prev = this.#prevSibling[child] ?? NONE;
+        const next = this.#nextSibling[child] ?? NONE;
 
         if (prev !== NONE) this.#nextSibling[prev] = next;
         if (next !== NONE) this.#prevSibling[next] = prev;
 
         if (parent !== NONE) {
-            if ((this.#firstChild[parent] as number) === child) this.#firstChild[parent] = next;
-            if ((this.#lastChild[parent] as number) === child) this.#lastChild[parent] = prev;
+            if ((this.#firstChild[parent] ?? NONE) === child) this.#firstChild[parent] = next;
+            if ((this.#lastChild[parent] ?? NONE) === child) this.#lastChild[parent] = prev;
         } else {
             this.#removeRoot(child);
         }
@@ -593,13 +602,14 @@ export class TransformStore {
         stack.length = 0;
         stack.push(index);
         while (stack.length > 0) {
-            const node = stack.pop() as number;
-            const parent = this.#parent[node] as number;
-            this.#depth[node] = parent === NONE ? 0 : (this.#depth[parent] as number) + 1;
+            const node = stack.pop();
+            if (node === undefined) break;
+            const parent = this.#parent[node] ?? NONE;
+            this.#depth[node] = parent === NONE ? 0 : (this.#depth[parent] ?? 0) + 1;
             for (
-                let c = this.#firstChild[node] as number;
+                let c = this.#firstChild[node] ?? NONE;
                 c !== NONE;
-                c = this.#nextSibling[c] as number
+                c = this.#nextSibling[c] ?? NONE
             ) {
                 stack.push(c);
             }

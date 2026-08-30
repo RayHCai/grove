@@ -38,7 +38,8 @@ export interface CameraState {
 }
 
 export interface RendererInitOptions {
-    container: HTMLElement;
+    /** The element a DOM backend mounts its canvas in. A headless backend never reads it. */
+    container?: HTMLElement;
     /** The reference stage, in world px. UI is authored against this size. */
     design: Size;
     /** Default `['world', 'ui']` — a shipped game allocates no editor containers. */
