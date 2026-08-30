@@ -9,7 +9,7 @@ import { jsonCodec } from '@platform/transport';
 // `tsconfig.test.json` only, so the parity checks below pin the restated types without core
 // appearing in any shipped module graph.
 import type { AssetKind, EntityId, EventPhase, TransformBuffer, WrapperKind } from '@platform/core';
-import type { ScriptId, TemplateId } from '@platform/project';
+import type { AssetId, ScriptId, TemplateId } from '@platform/project';
 import type {
     ClientToServer,
     EntityOverrides,
@@ -36,6 +36,7 @@ import type {
     TransformEnvelope,
     Welcome,
     WireAssetKind,
+    WireAssetRef,
     WireScriptAttachment,
     WireSingleStructuralOp,
     WireStructuralGroup,
@@ -66,6 +67,7 @@ type Empty<T extends never> = T;
 const netId = (n: number): NetId => n as NetId;
 const templateId = (key: string): TemplateId => key as TemplateId;
 const scriptId = (key: string): ScriptId => key as ScriptId;
+const assetId = (key: string): AssetId => key as AssetId;
 
 const transform: WireTransform = {
     posX: 1,
@@ -128,21 +130,34 @@ const welcome: Welcome = {
     snapshot,
     visuals: {
         assets: [
-            { key: 'coin', kind: 'texture', url: 'coin.png', meta: { width: 16, height: 16 } },
+            {
+                key: assetId('coin'),
+                kind: 'texture',
+                url: 'coin.png',
+                meta: { width: 16, height: 16 },
+            },
         ],
         templates: [
-            { template: 'coin', kind: 'sprite', texture: 'coin', anchorX: 0.5, anchorY: 0.5 },
-            { template: 'spawner', kind: 'group' },
+            {
+                template: templateId('coin'),
+                kind: 'sprite',
+                texture: assetId('coin'),
+                anchorX: 0.5,
+                anchorY: 0.5,
+            },
+            { template: templateId('spawner'), kind: 'group' },
             // Nested, so the recursive arm rides the same encode and round-trip as everything else.
             {
-                template: 'turret',
+                template: templateId('turret'),
                 kind: 'group',
                 children: [
-                    { kind: 'sprite', texture: 'coin', offsetY: -4 },
+                    { kind: 'sprite', texture: assetId('coin'), offsetY: -4 },
                     {
                         kind: 'group',
                         offsetY: 12,
-                        children: [{ kind: 'sprite', texture: 'coin', rotation: 90, layer: 1 }],
+                        children: [
+                            { kind: 'sprite', texture: assetId('coin'), rotation: 90, layer: 1 },
+                        ],
                     },
                 ],
             },
@@ -246,8 +261,8 @@ const snapshotChunk: SnapshotChunk = {
 const manifestUpdate: ManifestUpdate = {
     kind: 'manifest',
     visuals: {
-        assets: [{ key: 'gem', kind: 'texture', url: 'gem.png' }],
-        templates: [{ template: 'gem', kind: 'sprite', texture: 'gem' }],
+        assets: [{ key: assetId('gem'), kind: 'texture', url: 'gem.png' }],
+        templates: [{ template: templateId('gem'), kind: 'sprite', texture: assetId('gem') }],
     },
 };
 
@@ -634,6 +649,20 @@ describe('a spawn names its template by authoring id, and what it overrides', ()
         const attach = turretGroup.ops.find((op) => op.kind === 'attach');
         expect(attach && 'script' in attach).toBe(true);
         expect(attach && 'scriptClass' in attach).toBe(false);
+    });
+});
+
+describe('the render manifest is keyed by authoring ids on both sides of each join', () => {
+    it('refuses a bare string where the id a spawn keys the manifest by belongs', () => {
+        // @ts-expect-error — the other end of `EntitySnapshot.template`, unbranded here until now.
+        const loose: TemplateVisual = { template: 'coin', kind: 'group' };
+        expect(loose.template).toBe('coin');
+    });
+
+    it('refuses a bare string where the key a texture resolves through belongs', () => {
+        // @ts-expect-error — a sprite's `texture` is an AssetId, so the entry it names must be one.
+        const dangling: WireAssetRef = { key: 'coin', kind: 'texture', url: '/coin.png' };
+        expect(dangling.key).toBe('coin');
     });
 });
 
