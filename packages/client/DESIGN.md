@@ -10,34 +10,39 @@ rewound to the authoritative pose before the next delta lands.
 ```
 server ──state/transform envelopes──> Transport ──> Mirror (core runtime) <──replay── InputRing
                                           │                    │
-       <──── input frames (one per tick) ──┘                    └──> RenderBridge ──> IRenderer
+       <──── input frames (tick-stamped) ──┘                    └──> RenderBridge ──> IRenderer
 ```
 
 Deps: `core`, `math`, `protocol`, `renderer`, `transport`. Never `server`. No React.
 
 ## Layout
 
-| File                                   | Owns                                                                                  |
-| -------------------------------------- | ------------------------------------------------------------------------------------- |
-| [src/client.ts](src/client.ts)         | `GameClient` — frame order, receive/dispatch, input flush, liveness, resync           |
-| [src/mirror.ts](src/mirror.ts)         | `Mirror` — the runtime, the paths that write it from the wire, its pass table         |
-| [src/prediction.ts](src/prediction.ts) | `Prediction` — baseline, rewind, replay, scope, correction                            |
-| [src/passes.ts](src/passes.ts)         | The client's `TickPasses`: the input fold, and the scope the rest honour              |
-| [src/index-map.ts](src/index-map.ts)   | `MirrorIndex` — bidirectional `netId ↔ EntityId`                                      |
-| [src/clock.ts](src/clock.ts)           | `ClientClock` — tick accumulator, lead loop, nudge, epoch, behind-check               |
-| [src/ring.ts](src/ring.ts)             | `InputRing` — unacked frames, fold-at-prune horizon                                   |
-| [src/bindings.ts](src/bindings.ts)     | `BindingTable` — raw event → action edges, axis quantizer, held codes                 |
-| [src/input.ts](src/input.ts)           | Seams: `RawInputEvent`, `InputDevice`, `FrameSource` + scripted implementations       |
-| [src/handshake.ts](src/handshake.ts)   | Join/time-sync builders, envelope narrowing, welcome validation, reject text          |
-| [src/bundle.ts](src/bundle.ts)         | `BundleSource` seam, and the fetch → bound → hash → compare → evaluate order          |
-| [src/lifecycle.ts](src/lifecycle.ts)   | `Lifecycle` — `SessionState`, `FailureReason`, input gating                           |
-| [src/bridge.ts](src/bridge.ts)         | `RenderBridge` — `EntityId → NodeId`, manifest, dirty-set push, interpolation, camera |
-| [src/hud-sink.ts](src/hud-sink.ts)     | `ClientHUDSink` — core's HUD seam: widget records and the open screen stack           |
-| [src/constants.ts](src/constants.ts)   | Engine constants, each stating its unit                                               |
-| [src/browser/](src/browser/)           | DOM adapters behind the `./browser` subpath                                           |
+| File                                   | Owns                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [src/client.ts](src/client.ts)         | `GameClient` — frame order, receive/dispatch, input flush, liveness, resync                       |
+| [src/mirror.ts](src/mirror.ts)         | `Mirror` — the runtime, the paths that write it from the wire, its pass table                     |
+| [src/prediction.ts](src/prediction.ts) | `Prediction` — baseline, rewind, replay, scope, correction                                        |
+| [src/passes.ts](src/passes.ts)         | The client's `TickPasses`: the input fold, and the scope the rest honour                          |
+| [src/index-map.ts](src/index-map.ts)   | `MirrorIndex` — bidirectional `netId ↔ EntityId`                                                  |
+| [src/clock.ts](src/clock.ts)           | `ClientClock` — tick accumulator, lead loop, nudge, epoch, behind-check                           |
+| [src/ring.ts](src/ring.ts)             | `InputRing` — unacked frames, fold-at-prune horizon                                               |
+| [src/bindings.ts](src/bindings.ts)     | `BindingTable` — raw event → action edges, axis quantizer, held codes                             |
+| [src/input.ts](src/input.ts)           | Seams: `RawInputEvent`, `InputDevice`, `FrameSource` + scripted implementations                   |
+| [src/handshake.ts](src/handshake.ts)   | Join/time-sync builders, envelope narrowing, welcome validation, snapshot reassembly, reject text |
+| [src/bundle.ts](src/bundle.ts)         | `BundleSource` seam, and the fetch → bound → hash → compare → evaluate order                      |
+| [src/lifecycle.ts](src/lifecycle.ts)   | `Lifecycle` — `SessionState`, `FailureReason`, input gating                                       |
+| [src/bridge.ts](src/bridge.ts)         | `RenderBridge` — `EntityId → NodeId`, manifest, dirty-set push, interpolation, camera             |
+| [src/hud-sink.ts](src/hud-sink.ts)     | `ClientHUDSink` — core's HUD seam: widget records and the open screen stack                       |
+| [src/constants.ts](src/constants.ts)   | Engine constants, each stating its unit                                                           |
+| [src/browser/](src/browser/)           | DOM adapters behind the `./browser` subpath                                                       |
 
 Two exports: `.` (no DOM) and `./browser` (`createRafFrameSource`, `createPerformanceClock`,
-`createDomInputDevice`, `pollGamepads`, `createBrowserBundleSource`). `tsconfig.json` adds `lib: DOM` package-wide, since a project
+`createDomInputDevice`, `pollGamepads`, `createBrowserBundleSource`). The root barrel publishes four values
+— `GameClient`, `ClientHUDSink`, `ManualFrameSource`, `ScriptedInputDevice` — plus the seam types a host
+implements and the types `GameClient`'s own members are declared as. Everything else in the table above is
+exported as a **type only**, so nothing outside can construct a second mirror, clock or ring, forge a
+handshake envelope, or read a tuning constant as if it were a knob; this package's own tests sit inside the
+boundary and import `src/*.js` directly. `tsconfig.json` adds `lib: DOM` package-wide, since a project
 reference cannot cover one subdirectory; the boundary is held by a `no-restricted-globals` override in
 `.oxlintrc.json` denying `window`/`document`/`navigator`/`performance`/rAF outside `src/browser/`.
 
@@ -56,7 +61,8 @@ browser passes rAF and a headless host drives it by hand.
    person. While a bundle is in flight the drain **holds** instead: it returns before splicing, and a
    `Welcome` that opens a fetch mid-batch pushes the rest of that batch back onto the FRONT of the inbox, so
    arrival order survives the wait and nothing is dropped into a session that does not exist yet.
-3. `clock.advance(now)` → 0..N tick indices (dt clamped inside), then flush one input frame per tick.
+3. `clock.advance(now)` → 0..N tick indices (dt clamped inside), then flush one input frame stamped with
+   the newest of them. A frame that advanced none sends nothing.
 4. `#predict()` — carry the predicted world to `localTick`. After the flush, so the tick just stamped is
    replayed on the frame it was sent; only while `live`.
 5. `#checkBundleDeadline()` → `bundle` failure; `#checkNotBehind()` → resync; `#checkLiveness()` → `stalled`
@@ -93,7 +99,7 @@ in it. `TimeSync` refreshes every
 `SYNC_INTERVAL_SECONDS` and is diagnostic after the seed.
 
 **A snapshot arriving in pieces is reassembled here, not in the mirror.** `snapshot-chunk` envelopes precede
-their `Welcome`, which names how many there were; `GameClient` holds them — bounded at
+their `Welcome`, which names how many there were; `SnapshotChunks` holds them — bounded at
 `MAX_SNAPSHOT_CHUNKS`, because they are memory kept before anything has been validated — and folds them onto
 `snapshot.entities` / `snapshot.state` **ahead** of the welcome's own remainder, since `entities` is
 parents-before-children across the whole set. The fold runs before `isUsableWelcome`, so every path below it
@@ -275,9 +281,10 @@ discarded by the epoch of the **acked ring entry**, not by arrival time.
 
 ## Input ([src/bindings.ts](src/bindings.ts), [src/ring.ts](src/ring.ts))
 
-Edges only, plus an axis sample when it moves past a quantum; **one frame per tick** carrying every action
-for that tick, coalesced per `(action, phase)`, empty frames unsent — so `seq` and `tick` advance together
-and `ackSeq` names a tick boundary. `BindingTable` is per player, context-filtered, pure, and tracks held
+Edges only, plus an axis sample when it moves past a quantum; **one frame per display frame that advanced a
+tick**, stamped with the newest one — the earliest tick every edge since the last flush could apply on —
+coalesced per `(action, phase)`, empty frames unsent, so `seq` and `tick` advance together and `ackSeq`
+names a tick boundary. `BindingTable` is per player, context-filtered, pure, and tracks held
 codes; a key bound as an axis half goes through the axis path via `polarity`. Cursor axes quantize against
 `AXIS_QUANTUM * viewport extent`, so wire volume is zoom-invariant; a return to neutral always sends. The
 context-filtered view is cached and invalidated by `setContext`/`add`/`rebind`, because `resolve` runs per
@@ -384,9 +391,9 @@ into the frame that changed state.
 Each constant states its unit in its own doc line, because mixing them is the failure mode (a tick is
 16.7 ms at 60 Hz, 50 ms at 20 Hz) and the unit is wanted where the reader hovers it, not in a divider.
 
-| Ticks                                    | Seconds                                                                                                                                                            | Dimensionless                                      |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
-| `HEADROOM_TARGET` 2 · `LEAD_MIN_TICKS` 1 | `LEAD_MAX_SECONDS` .25 · `SYNC_INTERVAL_SECONDS` 2 · `MAX_FRAME_DT` .1 · `STALL_SECONDS` 1 · `CORRECTION_SMOOTH_SECONDS` .1 · `MAX_INTERPOLATION_DELAY_SECONDS` .1 | `GAIN` .25 · `NUDGE_MAX` .02 · `AXIS_QUANTUM` 1/64 |
+| Ticks                                    | Seconds                                                                                                                                                                                        | Dimensionless                                      |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `HEADROOM_TARGET` 2 · `LEAD_MIN_TICKS` 1 | `LEAD_MAX_SECONDS` = core's `MAX_REWIND_MS` / 1000 · `SYNC_INTERVAL_SECONDS` 2 · `MAX_FRAME_DT` .1 · `STALL_SECONDS` 1 · `CORRECTION_SMOOTH_SECONDS` .1 · `MAX_INTERPOLATION_DELAY_SECONDS` .1 | `GAIN` .25 · `NUDGE_MAX` .02 · `AXIS_QUANTUM` 1/64 |
 
 Plus, in the session's own ticks: `ACK_STALL_TICKS` 60, `RING_TICKS` 48, `MAX_REPLAY_TICKS` 48. In world
 units squared, `CORRECTION_SNAP_DISTANCE_SQUARED` 64². In seconds, `BUNDLE_DEADLINE_SECONDS` 30; in bytes,

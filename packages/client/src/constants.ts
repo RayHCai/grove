@@ -2,6 +2,8 @@
 // a tick is 16.7 ms at 60 Hz and 50 ms at 20 Hz, so a constant read in the wrong unit means triple the
 // input delay on a 20 Hz project for a reason nobody would look for in a rate setting.
 
+import { MAX_REWIND_MS } from '@platform/core';
+
 /** Ticks of headroom the lead loop holds the earliest input at: one absorbs jitter, one a dropped send. */
 export const HEADROOM_TARGET = 2;
 
@@ -9,7 +11,7 @@ export const HEADROOM_TARGET = 2;
 export const LEAD_MIN_TICKS = 1;
 
 /** Seconds. Past core's `MAX_REWIND_MS` the input is unusable anyway, so the lead stops here. */
-export const LEAD_MAX_SECONDS = 0.25;
+export const LEAD_MAX_SECONDS = MAX_REWIND_MS / 1000;
 
 /** Seconds between `TimeSync` refreshes. Diagnostic once the lead is seeded. */
 export const SYNC_INTERVAL_SECONDS = 2;
@@ -43,7 +45,12 @@ export const AXIS_QUANTUM = 1 / 64;
 /** Ticks of the session's own rate that `ackSeq` may stand still before `stalled`. */
 export const ACK_STALL_TICKS = 60;
 
-/** Ring capacity in frames, one per tick. Bounded by `LEAD_MAX` plus core's `MAX_REWIND_MS`. */
+/**
+ * Ring capacity in frames, one per tick.
+ *
+ * A literal with headroom, not a derivation: `LEAD_MAX_SECONDS` plus core's rewind window is a span in
+ * seconds, and how many ticks it spans depends on a `simRate` this file cannot see.
+ */
 export const RING_TICKS = 48;
 
 /**

@@ -16,6 +16,7 @@ import type {
 } from '@platform/core';
 import { activeLocationsFor, entityKey, playerKey, tickMovement } from '@platform/core';
 import type { EventPhase } from '@platform/core';
+import { defined } from '@platform/math';
 import type { InputFrame } from '@platform/protocol';
 
 /**
@@ -128,7 +129,7 @@ function activeActions(actions: ActionStates): Set<string> {
  */
 function hostKeys(player: Player, scope: ReadonlySet<EntityId>): string[] {
     const keys = [playerKey(player.id)];
-    for (const id of scope) keys.push(entityKey(id as number));
+    for (const id of scope) keys.push(entityKey(id));
     return keys;
 }
 
@@ -148,7 +149,7 @@ function dispatchInput(
         dt: 1 / rt.simRate,
         alive: true,
         player,
-        ...(value === undefined ? {} : { value }),
+        ...defined({ value }),
     };
 
     for (const hostKey of hosts) {
@@ -193,7 +194,7 @@ function runUpdatePass(
     const rt = ctx.rt;
     const opts: DispatchOptions = { ...dispatch, activeLocations: activeLocationsFor('server') };
 
-    for (const id of scope ?? ctx.scope()) dispatchUpdate(rt, entityKey(id as number), dt, opts);
+    for (const id of scope ?? ctx.scope()) dispatchUpdate(rt, entityKey(id), dt, opts);
     const player = ctx.player();
     if (player !== null) dispatchUpdate(rt, playerKey(player.id), dt, opts);
 }

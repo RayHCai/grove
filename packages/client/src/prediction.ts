@@ -20,6 +20,7 @@ import { CORRECTION_SNAP_DISTANCE_SQUARED, MAX_REPLAY_TICKS } from './constants.
 import type { Mirror } from './mirror.js';
 import type { ClientPassContext } from './passes.js';
 import type { InputRing } from './ring.js';
+import { assertHeld } from './ring.js';
 
 /** What a dev console asks of the predicted half. A rising `cappedReplays` is a client falling behind. */
 export interface PredictionCounters {
@@ -216,7 +217,7 @@ export class Prediction {
     *#stateHosts(): IterableIterator<string> {
         yield GAME_KEY;
         yield playerKey(this.#playerId);
-        for (const id of this.#scope) yield entityKey(id as number);
+        for (const id of this.#scope) yield entityKey(id);
     }
 
     /**
@@ -227,13 +228,7 @@ export class Prediction {
      */
     #seedActions(): void {
         const actions = createActionStates();
-        const horizon = this.#ring.heldAtHorizon;
-        for (const action of horizon.heldActions()) actions.applyEdge({ action, on: 'press' });
-        for (const { action, value } of horizon.axisValues()) {
-            actions.applyEdge({ action, on: 'hold', value });
-        }
-        // A rebuilt horizon asserts held state rather than a transition, and edges are one tick wide.
-        actions.advanceTick();
+        assertHeld(this.#ring.heldAtHorizon, actions);
 
         const depicted = this.#mirror.depictedTick;
         this.#ring.frames(this.#frames);
