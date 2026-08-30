@@ -12,7 +12,8 @@ import { useGame } from './use-game';
 import { HudPanel } from './HudPanel';
 import { Inspector } from './Inspector';
 import { NetPanel } from './NetPanel';
-import { DESIGN, LEAF_ASSET, LEAF_URL, MARKER_ASSET, MARKER_URL, defaultGameUrl } from './shared';
+import { defaultGameUrl } from './hosting';
+import { DESIGN, LEAF_ASSET, LEAF_URL, MARKER_ASSET, MARKER_URL } from './scripts/globals';
 
 /**
  * Zoom levels the UI offers.

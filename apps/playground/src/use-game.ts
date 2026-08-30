@@ -20,8 +20,8 @@ import { connectWebSocket } from '@platform/transport/websocket';
 import { HudBridge, pressWidget } from './hud';
 import { pickLeaf } from './pick';
 import { PROJECT } from './project';
-import { CLIENT_SCRIPTS } from './scripts';
-import { BINDINGS, CODE_CLEAR, SCREEN_LOBBY, WIDGET_READY } from './shared';
+import { CLIENT_SCRIPTS } from './client-registry';
+import { BINDINGS, CODE_CLEAR, SCREEN_LOBBY, WIDGET_READY } from './scripts/globals';
 import { createStageInputDevice } from './stage-input';
 
 /** Seconds between fps samples, which is also the averaging window. */
@@ -92,6 +92,7 @@ export function useGame(opts: UseGameOptions): UseGameResult {
         let cancelled = false;
         let client: GameClient | null = null;
         let bridge: HudBridge | null = null;
+        let unsubscribe: (() => void) | null = null;
 
         const device = createStageInputDevice({
             container,
@@ -140,7 +141,7 @@ export function useGame(opts: UseGameOptions): UseGameResult {
                 bridge = new HudBridge({ client, renderer });
                 setHud(client.hud);
 
-                const unsubscribe = client.lifecycle.onChange((next: SessionState) => {
+                unsubscribe = client.lifecycle.onChange((next: SessionState) => {
                     setState(next);
                     setFailure(describeFailure(client));
                 });
@@ -164,6 +165,9 @@ export function useGame(opts: UseGameOptions): UseGameResult {
 
         return () => {
             cancelled = true;
+            // `destroy()` does not clear the lifecycle's listeners, so this is the only handle on it.
+            unsubscribe?.();
+            unsubscribe = null;
             emitRef.current = null;
             clientRef.current = null;
             setHud(null);

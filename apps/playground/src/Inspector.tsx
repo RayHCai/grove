@@ -190,7 +190,7 @@ function TreeNode({ id, snapshot, depth, selected, onSelect }: TreeNodeProps): R
                 </span>
                 <span className="tree__flags">
                     {node.layer !== 0 && <span title="layer">L{node.layer}</span>}
-                    {node.culled && <span title="culled by §8">cull</span>}
+                    {node.culled && <span title="outside the expanded viewport">cull</span>}
                     {node.missingTexture && <span title="texture not resident">no-tex</span>}
                     {!node.resolved.visible && <span title="resolved invisible">hidden</span>}
                 </span>

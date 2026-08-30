@@ -2,8 +2,9 @@
 
 **Leaf Harvest** — a complete round-based game for N players, over the whole stack. One
 `@platform/server` process holds the world; every open tab is a `@platform/client` session reaching
-it over a real WebSocket. Both ends are built from **one authored project file**, `src/project.ts`,
-through the two composition roots in `@platform/engine/host`.
+it over a real WebSocket. Both ends are built from **one authored project file**, `src/project.ts` —
+the authority through `@platform/glue`, the browser through `createClient` in
+`@platform/engine/host`.
 
 Join, ready up, and the round starts for everyone. Leaves drift in from the left; walk into one to
 harvest it, or click one anywhere on the stage to pop it for less. A leaf inside the green band is
@@ -31,58 +32,100 @@ must have run at least once.
 | `C`       | clears every planted leaf, for everyone. Lobby only               |
 | ready up  | a HUD widget press, which is what starts the round                |
 
-## One project, two compilers, two composition roots
+## The game, and the shell that loads it
+
+The game is `src/scripts/`. Nothing in it imports a host file, a registry, a transport or a
+renderer — **one package, `@platform/engine`, and its own siblings.** That is the creator surface,
+and the boundary is the point of the layout: everything outside `scripts/` is the shell that loads
+what is inside it, and could load a different game without changing.
 
 ```
-src/
-├── project.ts             THE GAME AS ONE FILE — settings, regions, assets, templates, scripts
-├── shared.ts              the contract BOTH halves compile against, palette and widget names too
-│
-├── main.tsx               React root, StrictMode
-├── App.tsx                chrome around one <Stage/>
-├── Stage.tsx              the canvas pane, the chrome, zoom
-├── HudPanel.tsx           the interface, drawn from ClientHUDSink and nothing else
-├── use-renderer.ts        renderer lifecycle: init, assets, teardown. No frame loop.
-├── use-game.ts            dial -> createClient -> the frame that drives it
-├── hud.ts                 replicated state -> hud verbs, and the `ui` clock node
-├── pick.ts                screen point -> entity handle, for a pointer hit
-├── stage-input.ts         the device seam, and the screen -> world conversion
-├── Inspector.tsx          polled render-tree panel over inspect()
-├── NetPanel.tsx           polled session panel over client.stats()
-│
-├── synced/                compiled by tsc, RUN BY BOTH — the browser imports dist/synced/
-│   └── runner.ts          the avatar's movement, and the only thing either end predicts
-├── screens/               compiled by tsc, RUN BY THE BROWSER — imported as dist/screens/
-│   └── lobby.ts           ClientScript<HUDScreen>: the ready button's local half
-└── server/                the Node process — tsc, NodeNext, no DOM
-    ├── main.ts            the WebSocket listener, and identity per socket
-    ├── host.ts            createServer over the project, plus the crown's late-declared art
-    ├── game.ts            Rules, Clicker, Profile, Harvester, Leaf — every decorator here
-    ├── leaf.ts            PURE: the drift rule and the scoring rule. No entity, no socket.
-    └── kv.ts              a KVStore over one JSON file — the host app's, never the server's
+src/scripts/                    THE GAME. @platform/engine + these files, and nothing else.
+├── globals.ts                  the variables panel: every tunable, name and key. Imports NOTHING.
+├── session.ts                  the live match, and the one capability the host grants
+├── state.ts                    the one place a replicated field is reached by name
+├── game/
+│   └── rules.ts                Rules            → the Game
+├── players/
+│   ├── clicker.ts              Clicker          → every Player, at the join
+│   └── profile.ts              Profile          → every Player, and the only persisted thing
+├── templates/
+│   ├── avatar/                 what the `player` template carries
+│   │   ├── runner.ts           Runner    (synced) — the only thing either end predicts
+│   │   └── harvester.ts        Harvester (server) — the collider, and the catch
+│   └── leaf/
+│       └── leaf.ts             Leaf      (server) — the regions, the click, and the leaf's own maths
+└── screens/
+    └── lobby.ts                LobbyScreen (client) — the ready button's local half
 ```
 
-**`createServer` is the boot order.** `src/server/host.ts` hands `src/project.ts` to
-`@platform/engine/host`, which validates the file, resolves each attachment's class through the
-script registry, builds the templates, instantiates the placed world — and only then is the server
-willing to accept anything, because a joiner's snapshot is the one baseline no later delta repairs.
-No transport is passed to it: it would `accept` with no player id, and the id is what makes
-`@serverState` survive a rejoin, so `main.ts` calls `accept(transport, playerId)` per socket itself.
+```
+src/                            THE SHELL. It knows about engines, sockets and React.
+├── project.ts                  the authored manifest: settings, regions, assets, templates, scripts
+├── hosting.ts                  the address a browser dials. The only other file BOTH compilers see.
+├── client-registry.ts          ScriptId → class, for the browser
+│
+├── main.tsx / App.tsx          React root
+├── Stage.tsx                   the canvas pane, the chrome, zoom
+├── HudPanel.tsx                the interface, drawn from ClientHUDSink and nothing else
+├── use-renderer.ts             renderer lifecycle: init, assets, teardown. No frame loop.
+├── use-game.ts                 dial -> createClient -> the frame that drives it
+├── hud.ts                      replicated state -> hud verbs, and the `ui` clock node
+├── pick.ts                     screen point -> entity handle, for a pointer hit
+├── stage-input.ts              the device seam, and the screen -> world conversion
+├── Inspector.tsx / NetPanel.tsx   polled debug panels
+└── server/                     the Node process — tsc, NodeNext, no DOM
+    ├── main.ts                 port, save file, identity per socket — then listenOn
+    ├── host.ts                 GameInstance over the project, plus the capability it grants
+    ├── registry.ts             ScriptId → class, for the authority
+    └── visuals.ts              the crown's art, declared mid-session rather than in the manifest
+```
+
+**One script per file, foldered by what it attaches to.** `project.ts` names each one as its own
+`ScriptModule` with a `path`, an `export`, a `location` and a `host` — so `validate` refuses an
+illegal attachment from the file alone, before a module is loaded or a world is built.
+
+**`globals.ts` is the variables panel.** It imports nothing at all, which is what lets a script read
+it, the project file describe a world with it, and the browser shell draw a HUD against it, without
+any of the three learning about the other two.
+
+**A script reaches another script by importing it.** `Rules` calls `spawnLeaf` and `stepLeaf` from
+the leaf's own module rather than restating either. The one thing imports cannot express is a
+_running instance_ on another host — the runtime exposes no "get me that host's script" — so
+`session.ts` holds the live `Rules` and every other script asks it. Its `Rules` import is type-only
+and must stay that way, or the cycle closes at runtime.
+
+**`GameInstance` is the boot order.** `src/server/host.ts` hands `src/project.ts` to
+`@platform/glue`, whose constructor validates the file, resolves each attachment's class through the
+registry, builds the templates, instantiates the placed world and runs each Game `@onStart` — and
+only then will it admit anything, because a joiner's snapshot is the one baseline no later delta
+repairs. It listens for nothing on its own, which is what leaves `host.ts` a gap to grant the game
+its one capability in, and what lets the session suite drive the same boot over a loopback pair.
+
+**`listenOn` is the deployment.** `src/server/main.ts` hands the booted instance to
+`@platform/glue/node`, which owns the listener, the transport it builds per socket, the id each
+socket is accepted under, and the order the world and the socket are closed in. What is left in this
+app is the three things that are genuinely this deployment's: where it listens, where it saves —
+`fileKVStore` over the JSON file `GAME_STATE_FILE` names — and who it believes a socket is. That
+last one is resolved from the peer's own query here, which only a toy host would do, and the file
+says so where it reads it.
 
 **`createClient` claims the same identity from the same file.** `projectId` and `contentHash` become
 the `projectHash` the handshake compares, so a tab left open across a `dev` restart is refused with
-`identity` rather than drawn wrongly. Bump `PROJECT_HASH` in `shared.ts` when the contract changes.
+`identity` rather than drawn wrongly. Bump `PROJECT_HASH` in `project.ts` when the game changes.
 
-**Three trees, one compiler.** `src/server`, `src/synced` and `src/screens` are a project of their
-own (`tsconfig.server.json`) and are excluded from the browser's. They have to be: core's scripts are
-written with TC39 standard decorators, and **`tsc` is the only tool in this repo that lowers them** —
-Vite's oxc transform emits them verbatim and the runtime then refuses to parse the file. The browser
-imports `dist/synced/runner.js` and `dist/screens/lobby.js`, never the sources. `dist/client` is
-Vite's own output and `emptyOutDir` empties whatever it is aimed at, which is why the screen scripts
-are not emitted there.
+**Two trees, one compiler.** `src/scripts` and `src/server` belong to `tsconfig.server.json` and are
+excluded from the browser's. They have to be: scripts are written with TC39 standard decorators, and
+**`tsc` is the only tool in this repo that lowers them** — Vite's oxc transform emits them verbatim
+and the runtime then refuses to parse the file. The browser therefore imports
+`dist/scripts/templates/avatar/runner.js` and `dist/scripts/screens/lobby.js`, never those sources.
+`dist/client` is Vite's own output and `emptyOutDir` empties whatever it is aimed at, which is why
+the scripts are not emitted there.
 
-`src/shared.ts` and `src/project.ts` are the two files both projects compile. Neither carries a
-decorator, which is what makes that legal.
+`project.ts`, `hosting.ts` and `scripts/globals.ts` are the three files both projects compile. None
+carries a decorator, which is what makes that legal — and excluding a directory only drops it from a
+project's ROOT file set, so `globals.ts` is still type-checked on the browser side through the
+import `project.ts` makes of it.
 
 ## Where authority actually sits
 
@@ -207,16 +250,22 @@ between the old edges falls outside the new ones and the `cull` flag lights up.
 | `GAME_STATE_FILE` | the Node process   | `dist/state.json`       |
 | `VITE_GAME_URL`   | the browser bundle | `ws://<page host>:5174` |
 
-Everything else is in `src/project.ts`: `simRate` 60, `sendRate` 20, `maxPlayers` 8, the world's
-bounds, and the two regions. The round length and the results dwell are **script props** on the
-`Rules` attachment, written between construction and the `@serverState` hoist — inspector values, in
-the file, rather than constants inside a module the browser cannot see. The send rate is the package
-default: the client draws everything it does not predict one send interval behind and interpolates
-between the two poses either side of that moment, so a leaf moved by a server script is smooth at 20
-broadcasts a second on a 144 Hz display.
+How the world is built is in `src/project.ts`: `simRate` 60, `sendRate` 20, `maxPlayers` 8, the
+world's bounds, and the two regions. How the game is tuned is in `src/scripts/globals.ts`: the
+scoring, the round length, the palette, every action and every widget name.
+
+The round length and the results dwell reach `Rules` twice over, and deliberately: `globals.ts`
+holds the defaults the class initializes with, and `project.ts` passes the same numbers as **script
+props** on the attachment — written between construction and the `@serverState` hoist. That is the
+inspector's half of the same value, and it is what makes the attachment, not the module, the last
+word on a configured field.
+
+The send rate is the package default: the client draws everything it does not predict one send
+interval behind and interpolates between the two poses either side of that moment, so a leaf moved
+by a server script is smooth at 20 broadcasts a second on a 144 Hz display.
 
 ## Not a library
 
 This package emits no `dist` types for consumption and is imported by nothing. `dist/client` is
-Vite's; `dist/server`, `dist/synced` and `dist/screens` are `tsc`'s, which is why Vite is pointed at
-a subdirectory — `emptyOutDir` empties whatever it is aimed at.
+Vite's; `dist/scripts` and `dist/server` are `tsc`'s, which is why Vite is pointed at a
+subdirectory — `emptyOutDir` empties whatever it is aimed at.

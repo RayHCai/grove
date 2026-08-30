@@ -1,28 +1,23 @@
-// The composition root: one authority, one WebSocket listener, one process.
+// The composition root, which is now three lines of policy and one call.
 //
-// `@platform/engine/host` builds the server from the authored project and `@platform/transport` is a
-// leaf with no dependencies, so standing up a listener and handing it a transport per connection is
-// this file's whole job.
+// Everything this file used to do — parse a port, stand up a listener, build a transport per socket
+// in the right order, accept it under a resolved identity, drive `pump` rather than `start`, close
+// the world before the socket — belongs to `@platform/glue/node`. What is left is the three things
+// that are genuinely this deployment's: where it listens, where it saves, and who it believes a
+// socket is.
 
 import type { IncomingMessage } from 'node:http';
-import { WebSocketServer } from 'ws';
-import type { WebSocket } from 'ws';
-import type { BreakerTrip } from '@platform/core';
-import type { TransportError } from '@platform/transport';
-import { webSocketTransport } from '@platform/transport/websocket';
-import { DEFAULT_GAME_PORT } from '../shared.js';
-import { SEND_RATE, SIM_RATE, createGameServer } from './host.js';
-import { fileKVStore } from './kv.js';
+import { fileKVStore, listenOn } from '@platform/glue/node';
+import { DEFAULT_GAME_PORT } from '../hosting.js';
+import { PROJECT } from '../project.js';
+import { createGameInstance } from './host.js';
 
 const raw = process.env['GAME_PORT'];
 const port = raw === undefined ? DEFAULT_GAME_PORT : Number(raw);
-if (!Number.isInteger(port) || port <= 0) {
-    throw new RangeError(`GAME_PORT must be a positive integer, received ${raw}`);
-}
 
 /** The one console this process writes to, so the lint exemption is a single line wide. */
 // oxlint-disable-next-line no-console
-const log = (line: string): void => void console.log(line);
+const log = (line: string): void => void console.log(`[game] ${line}`);
 
 /**
  * Who the server should think this socket is — a toy's answer, taken from the peer's own query.
@@ -30,7 +25,7 @@ const log = (line: string): void => void console.log(line);
  * A real host reads a cookie or an auth header here. This one believes the claim, so anyone may
  * name themselves anyone; the server keys persisted `@serverState` by it, so on a real deployment
  * that is a read-and-overwrite of another player's save. Kept visible here rather than on the wire,
- * which is the whole reason the server takes identity from its host and never from a frame.
+ * which is the whole reason identity is the host's to resolve and never a frame's to carry.
  */
 function playerIdentity(request: IncomingMessage): string {
     const claimed = new URL(request.url ?? '/', 'ws://placeholder').searchParams.get('player');
@@ -39,71 +34,30 @@ function playerIdentity(request: IncomingMessage): string {
 
 let anonCount = 0;
 
-// The store is injected HERE and not in the project, which describes the world rather than how it is
-// hosted: the session suite boots the same project over a loopback pair and must not write to
-// anyone's disk to do it.
-const statePath = process.env['GAME_STATE_FILE'] ?? 'dist/state.json';
-const server = createGameServer({
-    kv: fileKVStore(statePath),
-    // A handler the breaker gave up on after a hundred consecutive throws. Deliberately not an
-    // envelope: a disabled handler is something whoever runs the server has to see, and a player's
-    // client can neither act on it nor be trusted with a stack.
-    onBreakerTrip: (trip: BreakerTrip) => {
-        log(`[game] breaker disabled ${trip.scriptClass}.${trip.method} at tick ${trip.tick}`);
+const game = listenOn(
+    createGameInstance({
+        kv: fileKVStore(process.env['GAME_STATE_FILE'] ?? 'dist/state.json'),
+        // A handler the breaker gave up on after a hundred consecutive throws. Deliberately not an
+        // envelope: a disabled handler is something whoever runs the server has to see.
+        onBreakerTrip: (trip) => log(`breaker disabled ${trip.scriptClass}.${trip.method}`),
+    }),
+    { port, identify: playerIdentity, onLog: log },
+);
+
+game.listening.then(
+    () => {
+        const { simRate, sendRate } = PROJECT.settings;
+        log(`ws://localhost:${port} — ${simRate}Hz sim, ${sendRate} sends/s`);
     },
-});
-const wss = new WebSocketServer({ port });
+    (cause: Error) => {
+        log(`could not listen on ${port}: ${cause.message}`);
+        process.exitCode = 1;
+        void game.close();
+    },
+);
 
-wss.on('listening', () => {
-    log(`[game] ws://localhost:${port} — ${SIM_RATE}Hz sim, ${SEND_RATE} sends/s`);
-});
-
-wss.on('error', (cause: Error) => {
-    log(`[game] listener failed: ${cause.message}`);
-    process.exitCode = 1;
-    shutdown();
-});
-
-wss.on('connection', (socket: WebSocket, request: IncomingMessage) => {
-    // Synchronously, before any await: the transport registers the socket's message listener in its
-    // constructor and `ws` resumes the stream on the next tick, so a frame that arrives before that
-    // listener exists is simply gone — retention covers a late handler, not a late transport.
-    try {
-        const transport = webSocketTransport(socket, {
-            onError: (error: TransportError) => {
-                log(`[game] connection error (${error.code}): ${error.message}`);
-            },
-        });
-        // `null` means refused, and the server has already closed the transport.
-        if (server.accept(transport, playerIdentity(request)) === null) {
-            log('[game] refused a connection');
-        }
-    } catch (cause) {
-        log(`[game] could not accept a connection: ${(cause as Error).message}`);
-        socket.close(1011);
-    }
-});
-
-/**
- * The server is pumped here rather than self-driven through `GameServer.start()`.
- *
- * `start()` drives the Driver directly, which skips `GameServer.pump`'s join-deadline sweep — so a
- * connection that opens and never joins would hold one of the 32 unjoined slots for good. Pumping
- * keeps that sweep, and gives the world a real wall clock instead of the interval's own cadence.
- */
-const tick = setInterval(() => {
-    server.pump(Date.now() / 1000);
-}, 1000 / SIM_RATE);
-
-let closing = false;
-
-function shutdown(): void {
-    if (closing) return;
-    closing = true;
-    clearInterval(tick);
-    server.close();
-    wss.close(() => process.exit(process.exitCode ?? 0));
-}
-
+// The signal wiring is the APPLICATION's, never the package's: a library that installed these would
+// fight whatever else the process already does about shutdown.
+const shutdown = (): void => void game.close().then(() => process.exit(process.exitCode ?? 0));
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
