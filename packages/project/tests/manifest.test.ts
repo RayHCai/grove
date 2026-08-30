@@ -148,7 +148,8 @@ describe('validate', () => {
     });
 
     it('accepts a diamond, where two children name one leaf template', () => {
-        // Not a cycle: the walk tracks the path it is on, not every template it has ever seen.
+        // Not a cycle: a second reference to a template already measured is its cached height, and
+        // only the path currently being measured is what a cycle is detected against.
         const shared = draft();
         shared.templates[1]!.children = [
             { template: templateId('coin') },

@@ -1,11 +1,17 @@
-// Hand-rolled, and read side by side with manifest.ts: the validator's structure IS the manifest's
-// structure, so a field added there is a check added here.
-//
 // It refuses rather than repairs, and it returns the value it was handed rather than a copy — a
 // project file is the creator's own text, and a loader that silently rewrote it would make "what
 // does this project contain" unanswerable from the file.
 
-import type { ProjectManifest, ScriptHost } from './manifest.js';
+import type {
+    AssetKind,
+    AssetMeta,
+    EntityTransform,
+    ProjectBounds,
+    ProjectManifest,
+    ScriptHost,
+    ScriptLocation,
+    SpriteVisual,
+} from './manifest.js';
 import { PROJECT_FORMAT_VERSION } from './manifest.js';
 
 /** Why a value is not a `ProjectManifest`, and where in it the fault sits. */
@@ -41,16 +47,50 @@ const MAX_PROP_DEPTH = 32;
  */
 const MAX_TEMPLATE_DEPTH = 8;
 
-const ASSET_KINDS: ReadonlySet<string> = new Set([
-    'texture',
-    'atlas',
-    'audio',
-    'font',
-    'clip',
-    'effect',
-]);
-const SCRIPT_LOCATIONS: ReadonlySet<string> = new Set(['server', 'client', 'synced']);
-const SCRIPT_HOSTS: ReadonlySet<string> = new Set(['entity', 'player', 'game', 'camera', 'screen']);
+/** Each table is keyed by the type it mirrors, so manifest.ts cannot grow a member unnoticed. */
+function isMember<K extends string>(table: Record<K, true>, value: string): value is K {
+    return Object.hasOwn(table, value);
+}
+
+const ASSET_KINDS: Record<AssetKind, true> = {
+    texture: true,
+    atlas: true,
+    audio: true,
+    font: true,
+    clip: true,
+    effect: true,
+};
+const SCRIPT_LOCATIONS: Record<ScriptLocation, true> = { server: true, client: true, synced: true };
+const SCRIPT_HOSTS: Record<ScriptHost, true> = {
+    entity: true,
+    player: true,
+    game: true,
+    camera: true,
+    screen: true,
+};
+
+const BOUNDS_EDGES: Record<keyof ProjectBounds, true> = {
+    left: true,
+    right: true,
+    top: true,
+    bottom: true,
+};
+const ASSET_META_FIELDS: Record<keyof AssetMeta, true> = {
+    width: true,
+    height: true,
+    duration: true,
+};
+type SpriteNumber = Exclude<keyof SpriteVisual, 'kind' | 'texture' | 'neverCull'>;
+const SPRITE_NUMBERS: Record<SpriteNumber, true> = { anchorX: true, anchorY: true, tint: true };
+const TRANSFORM_FIELDS: Record<keyof EntityTransform, true> = {
+    x: true,
+    y: true,
+    z: true,
+    rotation: true,
+    scale: true,
+    opacity: true,
+    layer: true,
+};
 
 /**
  * Narrows an untrusted parse to a `ProjectManifest`, or throws a {@link ProjectFormatError} naming
@@ -106,7 +146,7 @@ function readSettings(value: unknown, path: string): void {
 /** Four finite edges and no ordering rule: the names are read in the space that produced them. */
 function readBounds(value: unknown, path: string): void {
     const bounds = readObject(value, path);
-    for (const edge of ['left', 'right', 'top', 'bottom']) {
+    for (const edge of Object.keys(BOUNDS_EDGES)) {
         readNumber(bounds[edge], `${path}.${edge}`);
     }
 }
@@ -121,7 +161,7 @@ function readAssets(value: unknown, path: string): ReadonlySet<string> {
         ids.add(id);
 
         const kind = readString(asset['kind'], `${at}.kind`);
-        if (!ASSET_KINDS.has(kind)) fail(`${at}.kind`, `unknown asset kind "${kind}"`);
+        if (!isMember(ASSET_KINDS, kind)) fail(`${at}.kind`, `unknown asset kind "${kind}"`);
         readKey(asset['url'], `${at}.url`);
         readAssetMeta(asset['meta'], `${at}.meta`);
     }
@@ -131,7 +171,7 @@ function readAssets(value: unknown, path: string): ReadonlySet<string> {
 function readAssetMeta(value: unknown, path: string): void {
     if (value === undefined) return;
     const meta = readObject(value, path);
-    for (const field of ['width', 'height', 'duration']) {
+    for (const field of Object.keys(ASSET_META_FIELDS)) {
         if (meta[field] !== undefined) readNumber(meta[field], `${path}.${field}`);
     }
 }
@@ -152,13 +192,14 @@ function readScriptModules(value: unknown, path: string): ReadonlyMap<string, Sc
 
             readKey(decl['export'], `${declAt}.export`);
             const location = readString(decl['location'], `${declAt}.location`);
-            if (!SCRIPT_LOCATIONS.has(location)) {
+            if (!isMember(SCRIPT_LOCATIONS, location)) {
                 fail(`${declAt}.location`, `unknown script location "${location}"`);
             }
             const host = readString(decl['host'], `${declAt}.host`);
-            if (!SCRIPT_HOSTS.has(host)) fail(`${declAt}.host`, `unknown script host "${host}"`);
-
-            hosts.set(id, host as ScriptHost);
+            if (!isMember(SCRIPT_HOSTS, host)) {
+                fail(`${declAt}.host`, `unknown script host "${host}"`);
+            }
+            hosts.set(id, host);
         }
     }
     return hosts;
@@ -176,28 +217,29 @@ function readTemplates(
     // entity's parent, which is ordered so a loader builds the hierarchy in one pass. A template
     // graph has no such order to impose: two templates may legally reference each other's siblings.
     const ids = new Set<string>();
+    const rows: Array<{ at: string; id: string; record: Record<string, unknown> }> = [];
     for (const [index, entry] of entries.entries()) {
         const at = `${path}[${index}]`;
-        const id = readKey(readObject(entry, at)['id'], `${at}.id`);
+        const record = readObject(entry, at);
+        const id = readKey(record['id'], `${at}.id`);
         if (ids.has(id)) fail(`${at}.id`, `duplicate template id "${id}"`);
         ids.add(id);
+        rows.push({ at, id, record });
     }
 
     const children = new Map<string, string[]>();
-    for (const [index, entry] of entries.entries()) {
-        const at = `${path}[${index}]`;
-        const template = readObject(entry, at);
-        readVisual(template['visual'], `${at}.visual`, assets);
+    for (const row of rows) {
+        readVisual(row.record['visual'], `${row.at}.visual`, assets);
         // Entity-hosted: a template configures entities, and the tray drop reaches every instance
         // spawned from it and nothing else.
-        readAttachments(template['scripts'], `${at}.scripts`, hosts, 'entity');
+        readAttachments(row.record['scripts'], `${row.at}.scripts`, hosts, 'entity');
         children.set(
-            template['id'] as string,
-            readTemplateChildren(template['children'], `${at}.children`, ids),
+            row.id,
+            readTemplateChildren(row.record['children'], `${row.at}.children`, ids),
         );
     }
 
-    for (const id of ids) closeSubtree(id, children, path);
+    closeTemplates(children, path);
     return ids;
 }
 
@@ -217,23 +259,41 @@ function readTemplateChildren(value: unknown, path: string, ids: ReadonlySet<str
 }
 
 /**
- * Refuses a subtree that reaches itself or nests past the bound.
+ * Refuses a template that reaches itself or a subtree that nests past the bound.
  *
  * Both are the same fault seen from either end: instantiating either one mints entities until
- * something else stops it, and the thing that would stop it is memory. Checked once per template
- * against a path set, so a diamond — two children naming one leaf template — stays legal.
+ * something else stops it, and the thing that would stop it is memory.
+ *
+ * Each template's height is measured once and kept, so a node reachable by many paths costs one
+ * visit rather than one per path — a diamond stays legal, and a wide legal graph stays linear. The
+ * open set is the path currently being measured, which is what a cycle is detected against and what
+ * keeps this recursion no deeper than the cap.
  */
-function closeSubtree(root: string, children: ReadonlyMap<string, string[]>, path: string): void {
-    const walk = (id: string, open: Set<string>): void => {
+function closeTemplates(children: ReadonlyMap<string, string[]>, path: string): void {
+    const open = new Set<string>();
+    const heights = new Map<string, number>();
+
+    const measure = (id: string, root: string): number => {
         if (open.has(id)) fail(path, `template "${id}" contains itself`);
-        if (open.size >= MAX_TEMPLATE_DEPTH) {
+        const known = heights.get(id);
+        if (open.size + (known ?? 1) > MAX_TEMPLATE_DEPTH) {
             fail(path, `template "${root}" nests deeper than ${MAX_TEMPLATE_DEPTH}`);
         }
+        if (known !== undefined) return known;
+
         open.add(id);
-        for (const child of children.get(id) ?? []) walk(child, open);
+        let tallest = 0;
+        for (const child of children.get(id) ?? []) {
+            const height = measure(child, root);
+            if (height > tallest) tallest = height;
+        }
         open.delete(id);
+
+        heights.set(id, tallest + 1);
+        return tallest + 1;
     };
-    walk(root, new Set());
+
+    for (const id of children.keys()) measure(id, id);
 }
 
 function readVisual(value: unknown, path: string, assets: ReadonlySet<string>): void {
@@ -244,7 +304,7 @@ function readVisual(value: unknown, path: string, assets: ReadonlySet<string>): 
 
     const texture = readKey(visual['texture'], `${path}.texture`);
     if (!assets.has(texture)) fail(`${path}.texture`, `no asset named "${texture}"`);
-    for (const field of ['anchorX', 'anchorY', 'tint']) {
+    for (const field of Object.keys(SPRITE_NUMBERS)) {
         if (visual[field] !== undefined) readNumber(visual[field], `${path}.${field}`);
     }
     if (visual['neverCull'] !== undefined) readBoolean(visual['neverCull'], `${path}.neverCull`);
@@ -285,7 +345,7 @@ function readEntities(
 function readTransform(value: unknown, path: string): void {
     if (value === undefined) return;
     const transform = readObject(value, path);
-    for (const field of ['x', 'y', 'z', 'rotation', 'scale', 'opacity', 'layer']) {
+    for (const field of Object.keys(TRANSFORM_FIELDS)) {
         if (transform[field] !== undefined) readNumber(transform[field], `${path}.${field}`);
     }
 }
@@ -326,11 +386,7 @@ function readAttachments(
 }
 
 function readProps(value: unknown, path: string): void {
-    const props = readObject(value, path);
-    for (const [key, member] of Object.entries(props)) {
-        if (RESERVED_KEYS.has(key)) fail(`${path}.${key}`, 'reserved key');
-        checkJsonValue(member, `${path}.${key}`, 1);
-    }
+    checkJsonValue(readObject(value, path), path, 0);
 }
 
 /**
