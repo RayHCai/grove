@@ -1,5 +1,5 @@
 // @platform/examples
-// Phase-0 sample games, used as regression tests.
+// Sample games, type-checked against the creator surface.
 
 // Shell package: the public surface lands here.
-export const PACKAGE_NAME = '@platform/examples';
+export {};

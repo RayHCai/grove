@@ -2,7 +2,7 @@
 //
 //   Greenhouse  ClientScript<HUDScreen>  the whole screen
 //
-// A screen exists on one machine, so ClientScript is its only legal location (§12.2).
+// A screen exists on one machine, so ClientScript is its only legal location.
 // Everything here is local until the one `request`.
 
 import { ClientScript, game, hud, onPress, onUpdate, request } from '@platform/engine';
@@ -33,11 +33,12 @@ export class Greenhouse extends ClientScript<HUDScreen> {
             game.players.length < TO_START ? 'Waiting for another sprout…' : 'Ready when you are',
         );
 
-        // The local branch that replaced the `for:` option (§12.3).
+        // Per-viewer wording is a local branch: replicated state carries the name, not the
+        // phrasing.
         const who = state.winner === this.localPlayer.name ? 'You' : state.winner;
         hud.text('lobby-result', state.winner === '' ? '' : `${who} won that one.`);
 
-        // Show that you asked, not that it worked (§12.7); replication clears it.
+        // Show that you asked, not that it worked; replication clears it.
         if (me.isReady) this.pending = false;
         hud.enable('ready', !this.pending && !me.isReady);
 
