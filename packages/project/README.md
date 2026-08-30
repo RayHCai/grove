@@ -1,13 +1,12 @@
 # @platform/project
 
 The authoring shape: the manifest an editor saves for one game, the validator that admits a file,
-the format migrations that move an older one forward, and the two narrowings every runtime input is
+the format migrations that move an older one forward, and the three narrowings every runtime input is
 derived from.
 
 One game is one `ProjectManifest`. It holds the placed world directly — there is no scene between
 the game and its entities, because Game **is** the world: it owns the entities, holds the build-time
-bounds and scopes spawn and find (api_design.md §3.4). The field is therefore `entities`, never
-`scenes`.
+bounds and scopes spawn and find. The field is therefore `entities`, never `scenes`.
 
 Its only dependency is a **type-only** `JsonValue` from `@platform/transport`, the same treatment
 `@platform/protocol` gives that type. That is what lets `core`, `protocol`, `server`, `client` and
@@ -17,7 +16,13 @@ Its only dependency is a **type-only** `JsonValue` from `@platform/transport`, t
 ## What's here
 
 ```ts
-import { validate, migrate, toGameManifest, toRenderManifest } from '@platform/project';
+import {
+    validate,
+    migrate,
+    toGameManifest,
+    toRenderManifest,
+    toServerSettings,
+} from '@platform/project';
 import type { ProjectManifest, TemplateId, ScriptId, AssetId } from '@platform/project';
 
 const project = validate(migrate(JSON.parse(text)));
@@ -30,7 +35,7 @@ const project = validate(migrate(JSON.parse(text)));
 | `manifest.ts` | `PROJECT_FORMAT_VERSION`, `ProjectManifest`, `ProjectSettings`, `EntityRecord`, `TemplateRecord`, `TemplateChildRecord`, `AssetRecord`, `ScriptModule`, `ScriptDecl`, `ScriptAttachment`, `TemplateVisual`, `EntityTransform`, `ProjectBounds`, `RegionRecord` |
 | `validate.ts` | `validate`, `ProjectFormatError`                                                                                                                                                                                                                               |
 | `migrate.ts`  | `migrate`, `MIGRATIONS`, `Migration`, `MigrationChain`                                                                                                                                                                                                         |
-| `adapters.ts` | `toGameManifest`, `toRenderManifest`, `GameManifest`, `RenderManifest`, `ResolvedTemplate`, `ResolvedAttachment`, `PlacedEntity`, `ScriptResolver`, `ScriptClass`                                                                                              |
+| `adapters.ts` | `toGameManifest`, `toRenderManifest`, `toServerSettings`, `GameManifest`, `RenderManifest`, `ServerSettings`, `ResolvedTemplate`, `ResolvedAttachment`, `PlacedEntity`, `ScriptResolver`, `ScriptClass`                                                        |
 
 ## Three ids that survive a save, and two handles that do not
 
@@ -62,15 +67,15 @@ The two are separate calls because they answer different questions, and only one
 
     A template's `children` is the one reference that is deliberately unordered: a child names a
     template, which may be declared further down the array, so the ids are collected first and the
-    graph closed afterwards. That graph is then walked per template against the path it is on, which
+    graph closed afterwards. Closing it measures each template's height once and keeps it, which
     refuses a template that reaches itself and one nesting past eight levels — both being the same
     fault, an instantiation that mints entities until memory stops it — while leaving a diamond, where
-    two children name one leaf template, perfectly legal.
+    two children name one leaf template, perfectly legal and no more expensive than a chain.
 
 `validate` is the trust boundary and the server calls it. Core only ever receives the already-valid
 type, which is what keeps this package out of core's runtime import path.
 
-## The two narrowings
+## The three narrowings
 
 One authoring asset entry has to span three vocabularies: core's six kinds keyed by `key`, the
 renderer's four keyed by `name`, and protocol's restatement of core's. The authoring vocabulary is
@@ -80,6 +85,7 @@ the six, and the adapters are where the narrowing happens.
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `toGameManifest(p, opts)` | what builds a world: role, `simRate`, bounds, regions, assets **without** their urls, the templates, the placed entities, and every attachment's class beside its id |
 | `toRenderManifest(p)`     | what draws one: assets **with** their urls, and one visual per template keyed by its spawn key                                                                       |
+| `toServerSettings(p)`     | what a host serves it with: `sendRate` and `maxPlayers`, which no runtime reads                                                                                      |
 
 A runtime loads nothing, so it holds no address it could act on; a client fetches, so it needs the
 url. `toGameManifest` takes a `ScriptResolver` because a manifest holds ids and a runtime wires

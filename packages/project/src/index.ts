@@ -2,8 +2,6 @@
 // The authoring shape a game is saved as, its validator and format migrations, and the two
 // narrowings every runtime input is derived from.
 
-export const PACKAGE_NAME = '@platform/project';
-
 export type { AssetId, ScriptId, TemplateId } from './ids.js';
 export { assetId, scriptId, templateId } from './ids.js';
 
@@ -50,5 +48,6 @@ export type {
     ResolvedTemplate,
     ScriptClass,
     ScriptResolver,
+    ServerSettings,
 } from './adapters.js';
-export { toGameManifest, toRenderManifest } from './adapters.js';
+export { toGameManifest, toRenderManifest, toServerSettings } from './adapters.js';
