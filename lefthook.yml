@@ -8,6 +8,9 @@ pre-commit:
 
         - name: lint
           glob: '*.{ts,tsx,js,mjs,cjs}'
+          # oxlint exits non-zero when every path it is handed is one it ignores.
+          exclude:
+              - 'docs/*'
           run: pnpm exec oxlint {staged_files}
 
         - name: typecheck
