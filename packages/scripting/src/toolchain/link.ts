@@ -1,9 +1,5 @@
-// Stage two: one ESM chunk per side, linked from the LOWERED output and never from source.
-//
-// Determinism is the point, so nothing here may vary with the machine: the entry module is
-// generated in id order, rolldown runs with its cwd at the lowered root so a module comment
-// carries a relative path rather than someone's home directory, and the emitted text is folded to
-// LF and POSIX separators before it is hashed.
+// Linked from tsc's lowered output and never from source, because a bundler emits TC39 decorators
+// verbatim and the chunk's metadata tables come out empty.
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -14,13 +10,17 @@ import { BundleError } from '../errors.js';
 import type { ScriptSide } from '../registry.js';
 import { locationsFor } from '../registry.js';
 
-/** One class, as the bundle stamps it into the chunk. */
-export interface ScriptDeclaration<Id extends string = string> {
+/** One class the project wants stamped, named the way the manifest names it. */
+export interface ScriptRef<Id extends string = string> {
     readonly id: Id;
-    /** POSIX, relative to the source root, without an extension. */
+    /** POSIX, relative to `srcDir`, without an extension. */
     readonly module: string;
     /** The name the module exports it under; `default` for a default export. */
     readonly export: string;
+}
+
+/** A {@link ScriptRef} once the analysis has placed it on a side — what a chunk is stamped with. */
+export interface ScriptDeclaration<Id extends string = string> extends ScriptRef<Id> {
     readonly location: ScriptLocation;
 }
 
@@ -72,6 +72,7 @@ export async function linkChunks<Id extends string = string>(
         const emitted = path.join(loweredDir, `${declaration.module}.js`);
         if (!existsSync(emitted)) {
             throw new BundleError(
+                'lowered-module-missing',
                 `${declaration.module}.js is not in the lowered output — the analysed source root must be the tsconfig's rootDir`,
             );
         }
@@ -105,13 +106,14 @@ async function link<Id extends string>(
     loweredDir: string,
     all: readonly ScriptDeclaration<Id>[],
 ): Promise<LinkedChunk<Id>> {
-    const locations = target === 'synced' ? SYNCED_ONLY : locationsFor(target as ScriptSide);
+    const locations = target === 'synced' ? SYNCED_ONLY : locationsFor(target);
     const scripts = all.filter((s) => locations.has(s.location));
 
     const entryPath = path.join(loweredDir, `.script-entry-${target}.js`);
     writeFileSync(entryPath, entrySource(target, scripts), 'utf8');
 
     const build = await rolldown({
+        // At the lowered root, so a module comment carries a relative path, not someone's home directory.
         cwd: loweredDir,
         input: { chunk: entryPath },
         external: (id) => !id.startsWith('.') && !path.isAbsolute(id),
@@ -129,6 +131,7 @@ async function link<Id extends string>(
     const chunk = chunks[0];
     if (!chunk || chunks.length !== 1) {
         throw new BundleError(
+            'chunk-split',
             `the ${target} half linked into ${chunks.length} chunks — a script module may not import dynamically`,
         );
     }
