@@ -136,7 +136,7 @@ describe('AssetQueue ordering', () => {
     });
 });
 
-describe('AssetQueue.merge — retained manifest x queue (§10)', () => {
+describe('AssetQueue.merge — retained manifest x queue', () => {
     it('retained with NO intent is re-uploaded', () => {
         const q = new AssetQueue();
         const hero = image('hero');
@@ -186,7 +186,7 @@ describe('AssetQueue.merge — retained manifest x queue (§10)', () => {
         expect(work.toUnload).toEqual([]);
     });
 
-    it('queued UNLOAD not retained is still reported — idempotent, not an error (§9.2)', () => {
+    it('queued UNLOAD not retained is still reported — idempotent, not an error', () => {
         const q = new AssetQueue();
         q.unload('ghost');
 
@@ -287,7 +287,7 @@ describe('AssetQueue.merge — retained manifest x queue (§10)', () => {
     });
 });
 
-describe('AssetQueue.intendedHas (§10)', () => {
+describe('AssetQueue.intendedHas', () => {
     it('answers the queue when it has an intent, ignoring GPU residency', () => {
         const q = new AssetQueue();
         q.load(image('willLoad'));

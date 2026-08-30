@@ -1,4 +1,4 @@
-// Slot table, freelist and generation behaviour (§7).
+// Slot table, freelist and generation behaviour.
 //
 // The contract under test is that a handle is only ever valid for the node it was minted
 // for: a released slot MUST be handed out again (dense reuse keeps the flat scan short),
@@ -221,7 +221,7 @@ describe('stale handle rejection', () => {
 });
 
 describe('generations', () => {
-    it('advances one generation per release, staying positive past 128 (§7)', () => {
+    it('advances one generation per release, staying positive past 128', () => {
         const store = new NodeStore();
         let id = store.create(record());
         expect(nodeGeneration(id)).toBe(1);

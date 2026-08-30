@@ -1,4 +1,4 @@
-// The null backend against the reusable contract (§15), plus the handful of behaviors that are
+// The null backend against the reusable contract, plus the handful of behaviors that are
 // specific to being headless.
 
 import { describe, it, expect } from 'vitest';
@@ -14,7 +14,6 @@ const DESIGN = { width: 800, height: 600 };
 async function ready(): Promise<NullRenderer> {
     const renderer = new NullRenderer();
     await renderer.init({
-        container: undefined as unknown as HTMLElement,
         design: DESIGN,
         enabledSurfaces: ['editorSpace', 'world', 'ui', 'editorOverlay', 'editorUi'],
     });
@@ -109,12 +108,12 @@ describe('NullRenderer — headless specifics', () => {
             url: '/u.png',
         });
         // A headless backend cannot decode a PNG; the documented fallback keeps `AssetInfo`
-        // uniform rather than returning null (§9.1).
+        // uniform rather than returning null.
         expect(info.size).toEqual({ width: 1, height: 1 });
         renderer.destroy();
     });
 
-    it('keeps an in-use font rather than dropping it (§9.2)', async () => {
+    it('keeps an in-use font rather than dropping it', async () => {
         const renderer = await ready();
         await renderer.loadAsset({ name: 'Chalk', kind: 'font', url: '/chalk.woff2' });
         renderer.createNode({
@@ -150,7 +149,7 @@ describe('NullRenderer — headless specifics', () => {
     });
 });
 
-describe('NullRenderer — culling (§8)', () => {
+describe('NullRenderer — culling', () => {
     it('culls a sprite outside the viewport and draws one inside', async () => {
         const renderer = await ready();
         renderer.resize(800, 600);
@@ -207,7 +206,7 @@ describe('NullRenderer — culling (§8)', () => {
         renderer.destroy();
     });
 
-    it('does not let a culled parent hide its children (§8)', async () => {
+    it('does not let a culled parent hide its children', async () => {
         const renderer = await ready();
         renderer.resize(800, 600);
         renderer.setCamera({ position: { x: 0, y: 0 }, zoom: 1 });
@@ -237,11 +236,7 @@ describe('NullRenderer — culling (§8)', () => {
 
     it('draws a node just outside the viewport thanks to the world-px margin', async () => {
         const renderer = new NullRenderer();
-        await renderer.init({
-            container: undefined as unknown as HTMLElement,
-            design: DESIGN,
-            cullMargin: 64,
-        });
+        await renderer.init({ design: DESIGN, cullMargin: 64 });
         await renderer.loadAsset({
             name: 'block',
             kind: 'image',
@@ -266,7 +261,7 @@ describe('NullRenderer — culling (§8)', () => {
     });
 });
 
-describe('NullRenderer — draw order (§4, §11.1)', () => {
+describe('NullRenderer — draw order', () => {
     it('orders roots by layer', async () => {
         const renderer = await ready();
         const back = renderer.createNode({
@@ -297,7 +292,7 @@ describe('NullRenderer — draw order (§4, §11.1)', () => {
         const first = renderer.createNode({ kind: 'group', surface: 'world', layer: 3 });
         const second = renderer.createNode({ kind: 'group', surface: 'world', layer: 3 });
 
-        // Insertion-defined and stable — one fewer source of visual nondeterminism (§11.1).
+        // Insertion-defined and stable — one fewer source of visual nondeterminism.
         expect(renderer.drawOrderOf('world')).toEqual([first, second]);
         renderer.destroy();
     });
@@ -313,7 +308,7 @@ describe('NullRenderer — draw order (§4, §11.1)', () => {
         renderer.destroy();
     });
 
-    it('stacks the surfaces bottom to top, editorOverlay above ui (§4)', async () => {
+    it('stacks the surfaces bottom to top, editorOverlay above ui', async () => {
         const renderer = await ready();
         expect(renderer.surfaceDrawOrder()).toEqual([
             'editorSpace',

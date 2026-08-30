@@ -1,6 +1,6 @@
-// World <-> screen, the y-flip, degrees -> radians, and UI anchors (§6.3, §6.4, §3).
+// World <-> screen, the y-flip, degrees -> radians, and UI anchors.
 //
-// The y-flip round-trip is one of §15's three named high-risk tests. The sign is asserted
+// The y-flip round-trip is the highest-risk case here. The sign is asserted
 // directly — a point ABOVE the camera in world space must get a SMALLER screen y — and then
 // the inverse is checked over a fixed TABLE of cameras, zooms, modes, framings and non-square
 // canvases. The table is fixed on purpose: Math.random() would make a failure unreproducible,
@@ -232,7 +232,7 @@ describe('screenToWorld', () => {
     });
 });
 
-describe('the y-flip round-trip (§15, named high-risk test)', () => {
+describe('the y-flip round-trip', () => {
     // A fixed table, not Math.random(): a failure has to be reproducible, and a sign error
     // shows up on the first row anyway. The cameras include negative and fractional
     // positions, the zooms span 0.25..3, and the canvases are deliberately non-square and
@@ -412,11 +412,11 @@ describe('uiAnchorOrigin', () => {
 
 describe('uiToScreen', () => {
     // The letterboxed stage for the 800x600 design on the 1600x900 canvas: fitScale 1.5, so
-    // a design-px offset is NOT a CSS-px offset — which is the whole point of §3.
+    // a design-px offset is NOT a CSS-px offset, which is the whole point of a UI anchor.
     const STAGE: Bounds = stageRect('stage', 'fit', WIDE, DESIGN);
     const FIT = 1.5;
 
-    it("§3's example: {uiAnchor: 'top-left', position: {x: 20, y: 20}} is in and DOWN", () => {
+    it("{uiAnchor: 'top-left', position: {x: 20, y: 20}} is in and DOWN", () => {
         const p = uiToScreen({ x: 20, y: 20 }, 'top-left', STAGE, FIT);
         // 20 design px * 1.5 = 30 CSS px, added on BOTH axes.
         expect(p).toEqual({ x: 230, y: 30, z: 0 });
@@ -497,7 +497,7 @@ describe('uiToScreen', () => {
     });
 
     it('is correct when `out` IS `offset` — the pooled-scratch call', () => {
-        // §11.1 invites callers to reuse pooled objects to hit zero allocation, and the
+        // Callers may reuse pooled objects to hit zero allocation, and the
         // natural in-place form is `uiToScreen(p, anchor, stage, s, p)`. Writing the anchor
         // origin into `out` before reading `offset` would clobber the offset first: for
         // {20,20} at fitScale 1.5 the origin (200,0) lands in `p`, and the result becomes

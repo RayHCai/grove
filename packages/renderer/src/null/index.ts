@@ -2,12 +2,24 @@
 // relationship. The class is exported too, for the test-only observability members the contract
 // suite needs and `IRenderer` deliberately lacks.
 
-import type { IRenderer } from '../renderer.js';
+import type { IRenderer, RendererInitOptions } from '../renderer.js';
 import { NullRenderer } from './null-renderer.js';
 
 /** A headless `IRenderer` — for tests, the server, and CI. No DOM, no GPU. */
 export function createNullRenderer(): IRenderer {
     return new NullRenderer();
+}
+
+/**
+ * A headless `IRenderer` already through `init`, which is what every caller outside this package
+ * wants: before `init` the node store does not exist and `createNode` silently returns `NO_NODE`.
+ */
+export async function createReadyNullRenderer(
+    options: Omit<RendererInitOptions, 'container'>,
+): Promise<IRenderer> {
+    const renderer = createNullRenderer();
+    await renderer.init(options);
+    return renderer;
 }
 
 export { NullRenderer };

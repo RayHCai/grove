@@ -1,9 +1,9 @@
-// The context guard's state machine and queue semantics (§10).
+// The context guard's state machine and queue semantics.
 //
 // Runs in Node with no WebGL: the guard listens on a canvas-shaped EventTarget and drives the
 // restore through injected hooks, so everything below the GPU boundary is exercised for real. The
 // two things that genuinely need a browser — that Pixi re-uploads correctly, and that a real
-// `webglcontextlost` fires — are §15's named browser-mode tests.
+// `webglcontextlost` fires — need browser mode, not this file.
 
 import { describe, it, expect } from 'vitest';
 import { AssetQueue } from '../src/asset-queue.js';
@@ -117,12 +117,12 @@ describe('ContextGuard — state machine', () => {
         expect(h.lost).toEqual(['webglcontextlost']);
     });
 
-    it('calls preventDefault on webglcontextlost — MANDATORY (§10, §15)', () => {
+    it('calls preventDefault on webglcontextlost — MANDATORY', () => {
         const h = harness();
         const event = h.canvas.fire('webglcontextlost');
 
         // Without preventDefault the browser NEVER fires webglcontextrestored, so a restore
-        // would never happen. This is the classic gotcha §10 calls out by name.
+        // would never happen.
         expect(event.defaultPrevented).toBe(true);
     });
 
@@ -145,7 +145,7 @@ describe('ContextGuard — state machine', () => {
         expect(h.restored).toEqual([{ reloadedAssets: ['hero'], failedAssets: [] }]);
     });
 
-    it('reports failed reloads — a loss during a network outage is real (§10)', async () => {
+    it('reports failed reloads — a loss during a network outage is real', async () => {
         const h = harness();
         h.retained.set('hero', image('hero'));
         h.retained.set('gone', image('gone'));
@@ -176,7 +176,7 @@ describe('ContextGuard — state machine', () => {
     });
 });
 
-describe('ContextGuard — queueing (§10)', () => {
+describe('ContextGuard — queueing', () => {
     it('runs an operation immediately while the context is fine', async () => {
         const h = harness();
         let ran = false;
@@ -241,7 +241,7 @@ describe('ContextGuard — queueing (§10)', () => {
         expect(h.rebuilds).toBe(1);
     });
 
-    it('settles queued promises as cancelled on destroy rather than rejecting (§10)', async () => {
+    it('settles queued promises as cancelled on destroy rather than rejecting', async () => {
         const h = harness();
         h.canvas.fire('webglcontextlost');
 
@@ -397,7 +397,7 @@ describe('ContextGuard — a failed restore does not wedge the renderer', () => 
     });
 });
 
-describe('ContextGuard — restore merge order (§10)', () => {
+describe('ContextGuard — restore merge order', () => {
     it('lets a queued unload SUPPRESS a retained re-upload', async () => {
         const h = harness();
         h.retained.set('level1', image('level1'));

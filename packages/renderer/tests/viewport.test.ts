@@ -1,4 +1,4 @@
-// Framing, scale mode, the two rectangles, and the world viewport (§4.1, §4.2).
+// Framing, scale mode, the two rectangles, and the world viewport.
 //
 // Every assertion here is an exact number. The design stage is 800x600 throughout, and the
 // two canvases are chosen so the ratios stay exactly representable: 1600x900 is WIDER than
@@ -180,7 +180,7 @@ describe('visibleRect', () => {
 });
 
 describe('worldViewport', () => {
-    it("matches §4.2's design/(2*zoom) formula exactly under fit + letterbox", () => {
+    it('matches the design/(2*zoom) formula exactly under fit + letterbox', () => {
         for (const zoom of [1, 2, 0.5, 4, 0.25, 8]) {
             const halfW = DESIGN.width / (2 * zoom);
             const halfH = DESIGN.height / (2 * zoom);
@@ -208,7 +208,7 @@ describe('worldViewport', () => {
         });
     });
 
-    it('keeps top > bottom — the y-up orientation of §4.2', () => {
+    it('keeps top > bottom — the world viewport is y-up', () => {
         for (const mode of MODES) {
             for (const letterbox of [true, false]) {
                 for (const canvas of [WIDE, TALL]) {
@@ -322,7 +322,7 @@ describe('worldViewport', () => {
 
         it('degrades to the design stage at the camera under fit + letterbox', () => {
             // `fitScale` falls back to 1 and the visible rect is the design rect, so this is
-            // the §4.2 formula with s = 1 — still finite, which is all that is required.
+            // the design/(2*zoom) formula with s = 1 — still finite, which is all that is required.
             expect(worldViewport(camera(7, -3, 1), 'fit', true, ZERO, DESIGN)).toEqual({
                 left: -393,
                 right: 407,
@@ -431,7 +431,7 @@ describe('worldViewport', () => {
         });
     });
 
-    // §4.2's promise under `fit` is that "everyone sees the same world". Computing the
+    // The promise under `fit` is that "everyone sees the same world". Computing the
     // half-extent as `design * s / (2 * s * zoom)` rounds twice and lands 1 ulp off on any
     // canvas whose `fitScale` is not a dyadic rational, which makes the viewport differ per
     // client under the one mode whose whole purpose is that it must not.
@@ -448,7 +448,7 @@ describe('worldViewport', () => {
             { width: 100, height: 100 },
         ];
 
-        it('is exactly §4.2 on every real canvas size, for several designs and zooms', () => {
+        it('is exactly design/(2*zoom) on every real canvas size, for several designs and zooms', () => {
             for (const design of [
                 DESIGN,
                 { width: 960, height: 540 },

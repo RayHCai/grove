@@ -53,13 +53,17 @@ export class PixiRenderer extends RendererShell {
         if (this.core !== null) {
             rendererError('already-initialized', 'init() was already called on this renderer');
         }
+        const container = options.container;
+        if (container === undefined) {
+            rendererError('invalid-option', 'a DOM backend needs a container element');
+        }
 
         // The one module allowed to read a global; the pure helper takes the DPR as an argument.
         const dpr =
             typeof globalThis.devicePixelRatio === 'number' ? globalThis.devicePixelRatio : 1;
         const resolution = effectiveResolution(dpr, options.maxResolution ?? 2);
 
-        const measured = measureContainer(options.container, options.design);
+        const measured = measureContainer(container, options.design);
         // Before any GPU work, so a bad option cannot leave a half-built Application behind.
         const config = resolveInitOptions(options, measured, resolution);
 
@@ -84,7 +88,7 @@ export class PixiRenderer extends RendererShell {
                   : {}),
         });
         this.#app = app;
-        options.container.appendChild(app.canvas);
+        container.appendChild(app.canvas);
 
         this.#surfaces = new SurfaceTree(app.stage, config.enabledSurfaces);
         // Each needs the other, so the sink is built first and bound immediately afterwards; the
@@ -96,7 +100,7 @@ export class PixiRenderer extends RendererShell {
         this.core = core;
         this.#installGuard(app);
 
-        if (options.autoResize !== false) this.#installObserver(options.container);
+        if (options.autoResize !== false) this.#installObserver(container);
         core.applyView();
     }
 
