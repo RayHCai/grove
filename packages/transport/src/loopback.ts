@@ -1,20 +1,10 @@
-// The smallest loopback that is FAITHFUL: an encoded-frame queue per direction, an encode on the way
-// in, a decode on the way out. A trusting loopback passing references by identity would be quicker
-// and would reintroduce the silent-divergence class this package exists to kill.
-//
-// Two properties are load-bearing. The queue holds frames rather than live objects, so a peer cannot
-// receive a reference into the sender's own state. And `deliver()` runs at the TOP of the tick, so
-// frames the server produces DURING a step land at the next tick's top — server→client is one tick
-// behind, 50 ms at 20 Hz, which keeps the client's prediction path exercised in every local playtest
-// instead of executing for the first time in production.
-//
-// Ordering is strict FIFO per direction because order IS meaning for the structural channel:
-// destroy-then-spawn and spawn-then-destroy leave different worlds.
+// An encoded-frame queue per direction rather than references passed by identity: a trusting
+// loopback would be quicker and would reintroduce the silent-divergence class this package kills.
 
 import type { Codec } from './codec.js';
 import { jsonCodec } from './codec.js';
 import { transportError } from './errors.js';
-import { FrameInbox, validateRetentionCap } from './inbox.js';
+import { FrameInbox, retentionOverflowMessage, validateRetentionCap } from './inbox.js';
 import { DEFAULT_MAX_RETAINED_BYTES } from './transport.js';
 import type {
     EncodedFrame,
@@ -58,7 +48,12 @@ class LoopbackEnd implements Transport {
             codec,
             maxRetainedBytes,
             onOverflow: (retained, bytes) => {
-                this.#overflow ??= `Retained ${retained} bytes for a handler that never registered, and this frame's ${bytes} would pass the ${maxRetainedBytes}-byte cap. Frames are retained until onMessage registers, so a join sequence that throws before wiring it grows this inbox for the life of the process. Register onMessage before the first deliver(), or raise maxRetainedBytes.`;
+                this.#overflow ??= retentionOverflowMessage(
+                    retained,
+                    bytes,
+                    maxRetainedBytes,
+                    'life of the process. Register onMessage before the first deliver()',
+                );
             },
             onDecodeFailure: (error) => {
                 // A hostile frame cannot arrive here — the sender's own encode produced it — so a

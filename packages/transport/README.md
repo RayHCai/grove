@@ -101,7 +101,16 @@ And the conformance suite, which any new codec must pass before it may be inject
 ```ts
 import { runCodecContract } from '@platform/transport/testing';
 
-runCodecContract(() => myBinaryCodec, { name: 'binaryCodec' });
+// The frame-shaped fixtures default to JSON, so a codec with another wire supplies its own — or
+// `null` for a case that wire cannot express.
+runCodecContract(() => myBinaryCodec, {
+    name: 'binaryCodec',
+    malformedFrame: truncatedBinaryFrame,
+    makeDeepFrame: (depth) => binaryNesting(depth),
+    makeLargeFrame: (bytes) => binaryPadding(bytes),
+    pollutionFrames: [binaryPollutionKey],
+    nonFiniteFrame: null,
+});
 ```
 
 The full rationale and the interface are in [DESIGN.md](./DESIGN.md); this file is the short version.
