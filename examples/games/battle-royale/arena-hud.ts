@@ -2,7 +2,7 @@
 //
 //   Arena  ClientScript<HUDScreen>  the whole screen
 //
-// Panel-marked open at start, so nothing has to close it (§12.5).
+// Panel-marked open at start, so nothing has to close it.
 
 import {
     ClientScript,
@@ -26,9 +26,9 @@ export class Arena extends ClientScript<HUDScreen> {
     pending: WeaponKey | null = null;
     lastHealth = MAX_HEALTH;
 
-    // Six handlers, because decorator arguments are static (§5) — no loop can
-    // register them. @onPress names a widget, @onEvent a rebindable action; both
-    // land in `select` so they cannot drift.
+    // Six handlers, because decorator arguments are static — no loop can register
+    // them. @onPress names a widget, @onEvent a rebindable action; both land in
+    // `select` so they cannot drift.
     @onPress('slot-1') press1() {
         this.select(0);
     }
@@ -77,7 +77,7 @@ export class Arena extends ClientScript<HUDScreen> {
         hud.text('weapon', WEAPONS[me.equipped].label);
 
         // The highlight follows `equipped`, never `pending`: displaying authority
-        // optimistically is the item-flickers bug (§12.7).
+        // optimistically is the item-flickers bug.
         if (this.pending !== null && me.equipped === this.pending) this.pending = null;
 
         for (const [i, key] of SLOTS.entries()) {

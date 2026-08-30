@@ -4,10 +4,8 @@ A small top-down multiplayer battle royale. Ready up in the greenhouse, drop int
 the arena, switch weapons from the hotbar, be the last sprout standing before the
 clock runs out.
 
-Illustrative only — written against `api_spec.ts`, not compiled or run.
-
 One file per template, named after it, holding every script the panel attaches to
-it plus that template's own constants. The Game counts as a template (§3.4).
+it plus that template's own constants. The Game counts as a template.
 
 | File           | Contents                                                                                                                             |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -18,7 +16,7 @@ it plus that template's own constants. The Game counts as a template (§3.4).
 | `lobby.ts`     | `Greenhouse` — ready button, player count, leaderboard.                                                                              |
 | `arena-hud.ts` | `Arena` — health, clock, ring, kills, 3-slot hotbar.                                                                                 |
 | `weapons.ts`   | The three weapons: damage, spread, range, cooldown, ammo, sound.                                                                     |
-| `state.ts`     | Typed accessors for replicated state — the §6.1 hoisting cast, in one place.                                                         |
+| `state.ts`     | Typed accessors for replicated state — the `@serverState` hoisting cast, in one place.                                               |
 
 Also panel-authored: the `greenhouse` / `arena` / `ring-1..3` regions, the `crate`
 template (no scripts — read by tag), the `wilt` clip, the `shoot` / `equip-1..3`

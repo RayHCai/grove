@@ -1,11 +1,11 @@
-// The Game template — the session and the world (§3.4).
+// The Game template — the session and the world.
 //
 //   Match    ServerScript<Game>   phases, clock, ring, roster, leaderboard
 //   Screens  ClientScript<Game>   which screen is up, and the music
 //
-// Two locations on one host, the §1.1 grid across a row: the orchestrator is
-// authoritative, "which menu is up" is one player's screen. The round's shape is
-// declared here because Match enforces it; the HUD imports it to label what it draws.
+// Two locations on one host: the orchestrator is authoritative, "which menu is up" is
+// one player's screen. The round's shape is declared here because Match enforces it;
+// the HUD imports it to label what it draws.
 
 import {
     ClientScript,
@@ -36,7 +36,7 @@ export const ROUND = 120; // seconds
 export const RINGS = 3; // ring-1 is the whole arena, ring-3 the last patch
 export const TO_START = 2; // players needed to begin
 
-// Server, not synced: a Game-hosted synced script re-produces on every client (§1.2).
+// Server, not synced: a Game-hosted synced script re-produces on every client.
 export class Match extends ServerScript<Game> {
     @serverState phase: Phase = 'lobby';
     @serverState left = ROUND;
@@ -48,7 +48,7 @@ export class Match extends ServerScript<Game> {
     readonly wins = new Leaderboard({ order: 'high', persist: true });
     readonly clock = new Countdown(ROUND);
 
-    // Must not assume a player exists: the roster arrives after the world (§3.6).
+    // Must not assume a player exists: the roster arrives after the world.
     @onStart
     build() {
         this.publish();
@@ -72,7 +72,7 @@ export class Match extends ServerScript<Game> {
     }
 
     // `concurrent` because a Game-hosted handler has one instance, so the default
-    // `ignore` would serialize every player's ready-up (§5.9).
+    // `ignore` would serialize every player's ready-up.
     @onRequest('ready', { concurrency: 'concurrent' })
     ready(ctx: Ctx) {
         if (this.phase === 'arena') return;
@@ -131,8 +131,8 @@ export class Match extends ServerScript<Game> {
         }
     }
 
-    // A level read, so a query rather than @onEnter/@onExit bookkeeping (§5.4). Same
-    // `hit` door a pellet uses (fighter.ts); `by` is null, so the ring credits nobody.
+    // A level read, so a query rather than @onEnter/@onExit bookkeeping. Same `hit`
+    // door a pellet uses (fighter.ts); `by` is null, so the ring credits nobody.
     burn() {
         if (this.phase !== 'arena') return;
         const safe = game.find({ in: `ring-${this.ring}`, tag: 'fighter' });
@@ -169,7 +169,7 @@ export class Match extends ServerScript<Game> {
         }
     }
 
-    // stop() then enabled, or friction keeps everyone coasting (§4.1).
+    // stop() then enabled, or friction keeps everyone coasting.
     freeze(player: Player, frozen: boolean) {
         const movement = movementOf(player);
         if (!movement) return;
@@ -182,7 +182,7 @@ export class Match extends ServerScript<Game> {
     }
 }
 
-// Session-scoped client state (§12.5). Follows the replicated phase; never sets it.
+// Session-scoped client state. Follows the replicated phase; never sets it.
 export class Screens extends ClientScript<Game> {
     shown = ''; // no phase equals this, so the first frame always opens
 

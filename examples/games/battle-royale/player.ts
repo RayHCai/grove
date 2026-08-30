@@ -1,4 +1,4 @@
-// The Player template — identity, which outlives the avatar (§3.2).
+// The Player template — identity, which outlives the avatar.
 //
 //   Vitals   ServerScript<Player>   health, kills, ready
 //   Loadout  ServerScript<Player>   equipped weapon and ammo
@@ -28,7 +28,7 @@ export class Loadout extends ServerScript<Player> {
     @serverState ammo: Record<WeaponKey, number> = { ...EMPTY };
 
     // The hotbar's one crossing of the wire (arena-hud.ts asks). Player-hosted, so the
-    // default `ignore` is per-player — the double-press guard a hotbar wants (§5.7).
+    // default `ignore` is per-player — the double-press guard a hotbar wants.
     // ctx.data is untrusted, so validate before keying with it.
     @onRequest('equip')
     equip(ctx: Ctx) {
@@ -38,7 +38,7 @@ export class Loadout extends ServerScript<Player> {
     }
 }
 
-// Camera is the one thing client code may write (§3.3).
+// Camera is the one thing client code may write.
 export class Feel extends ClientScript<Player> {
     @onStart
     arrive() {
