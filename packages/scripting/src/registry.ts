@@ -1,5 +1,4 @@
-// Ids are stamped into the chunk at bundle time, never read off `klass.name`: a minifier renames
-// the class, and the wire carries the id across a process boundary where the name is no contract.
+// An id is read off the chunk and never off `klass.name`, which a minifier renames.
 
 import type { BaseScript, ScriptLocation, ScriptMetadata } from '@platform/core';
 import { LoadError, getMetadata } from '@platform/core';
@@ -51,18 +50,18 @@ export class ScriptRegistry<Id extends string = string> {
         entries: Iterable<ScriptEntry<Id>>,
     ): ScriptRegistry<Id> {
         const byId = new Map<Id, ScriptEntry<Id>>();
-        const seen = new Set<ScriptClass>();
+        const seen = new Map<ScriptClass, Id>();
         for (const entry of entries) {
             if (byId.has(entry.id)) {
                 throw new LoadError(`two script classes claim the id "${entry.id}"`);
             }
-            if (seen.has(entry.ctor)) {
-                const first = [...byId.values()].find((e) => e.ctor === entry.ctor)!;
+            const first = seen.get(entry.ctor);
+            if (first !== undefined) {
                 throw new LoadError(
-                    `one script class is registered twice, as "${first.id}" and "${entry.id}"`,
+                    `one script class is registered twice, as "${first}" and "${entry.id}"`,
                 );
             }
-            seen.add(entry.ctor);
+            seen.set(entry.ctor, entry.id);
             byId.set(entry.id, entry);
         }
         return new ScriptRegistry(byId);

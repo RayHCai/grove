@@ -19,21 +19,19 @@ describe('analyzeScripts', () => {
         expect(byLocal.get('Runner')?.location).toBe('synced');
     });
 
-    it('leaves the abstract link out — it is not a class an attach site can take', () => {
+    it('leaves the abstract link out of the ids but keeps it for the determinism pass', () => {
         expect(byLocal.has('Movable')).toBe(false);
-        expect(analysis.modules.some((mod) => mod.classes.some((k) => k.local === 'Movable'))).toBe(
-            true,
-        );
+        expect(analysis.synced.map((k) => k.local).toSorted()).toEqual(['Movable', 'Runner']);
     });
 
     it('carries the export name a default export is reached by', () => {
-        expect(byLocal.get('Router')?.exported).toBe('default');
+        expect(byLocal.get('Router')?.export).toBe('default');
     });
 
     it('names each module the way the lowered output does', () => {
         expect(byLocal.get('Runner')?.module).toBe('synced/runner');
         expect(byLocal.get('Runner')?.file).toBe('synced/runner.ts');
-        expect(byLocal.get('Runner')?.exported).toBe('Runner');
+        expect(byLocal.get('Runner')?.export).toBe('Runner');
     });
 
     it('ignores a module that declares no script', () => {

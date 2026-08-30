@@ -1,6 +1,5 @@
-// The 22 names below already exist in three other places — @platform/math's barrel,
-// @platform/engine's re-export block and .oxlintrc.json — and a test pins that all four agree,
-// because a list that drifts is a SyncedScript that desyncs.
+// This list also exists in @platform/math's barrel, @platform/engine's re-export block and
+// .oxlintrc.json, and all four must agree: one that drifts is a SyncedScript that desyncs.
 
 /** The transcendentals @platform/math reimplements, in @platform/engine's re-export order. */
 export const TRANSCENDENTALS: readonly string[] = [

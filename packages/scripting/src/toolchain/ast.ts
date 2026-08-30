@@ -1,5 +1,5 @@
-// One shape for every node, because the pass below reaches nodes by key rather than by case: a
-// syntax rolldown's parser adds later is walked correctly instead of silently skipped.
+// Nodes are reached by key rather than by case, so a syntax rolldown's parser adds later is walked
+// instead of silently skipped.
 
 import { parseAst } from 'rolldown/parseAst';
 import { BundleError } from '../errors.js';
@@ -15,9 +15,7 @@ export function parseModule(text: string, file: string): Node {
     try {
         return parseAst(text, { lang: 'ts' }, file) as unknown as Node;
     } catch (err) {
-        throw new BundleError(
-            `${file} does not parse: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        throw new BundleError('parse-failed', `${file} does not parse`, { cause: err });
     }
 }
 
