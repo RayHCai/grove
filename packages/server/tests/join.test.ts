@@ -1,4 +1,4 @@
-// Connection and join (DESIGN §3, §7, §8). Fixtures are compiled by the build (see
+// Connection and join. Fixtures are compiled by the build (see
 // src/testkit/fixtures.ts); this file carries no decorator syntax.
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -13,7 +13,7 @@ afterEach(() => {
     clearRuntime();
 });
 
-describe('§3.2 — the client speaks first', () => {
+describe('the client speaks first', () => {
     it('accept() mints a connection, sends nothing, and mutates no roster', () => {
         const h = harness();
         const peer = h.connect();
@@ -70,10 +70,10 @@ describe('§3.2 — the client speaks first', () => {
         expect(welcome?.bounds).toStrictEqual({ left: -10, right: 10, top: 5, bottom: -5 });
         expect(welcome?.regions[0]?.name).toBe('arena');
         // The tick rides snapshot.tick, so the tick a joiner seeds from cannot disagree with the
-        // tick the world it describes was read at (protocol §3.2).
+        // tick the world it describes was read at.
         expect(welcome && 'tick' in welcome).toBe(false);
         expect(welcome && 'maxPlayers' in welcome).toBe(false);
-        // Omitted, not explicitly undefined: jsonCodec throws on the latter (protocol §4).
+        // Omitted, not explicitly undefined: jsonCodec throws on the latter.
         expect(welcome && 'reconnectToken' in welcome).toBe(false);
     });
 
@@ -106,7 +106,7 @@ describe('§3.2 — the client speaks first', () => {
     });
 });
 
-describe('§3.2 — refusals are envelopes, never a bare close', () => {
+describe('refusals are envelopes, never a bare close', () => {
     it('maxPlayers refuses with Reject { full } and leaves the roster untouched', () => {
         const h = harness({ config: { maxPlayers: 2, gameScripts: [Rules] } });
         h.joined('a');
@@ -165,7 +165,7 @@ describe('§3.2 — refusals are envelopes, never a bare close', () => {
     });
 });
 
-describe('§3.2 — the handshake proves both ends run the same bytes', () => {
+describe('the handshake proves both ends run the same bytes', () => {
     const project = {
         projectId: 'arcade',
         projectHash: 'build-7',
@@ -262,7 +262,7 @@ describe('§3.2 — the handshake proves both ends run the same bytes', () => {
     });
 });
 
-describe('§3.3 — the join snapshot is a walk of the live world', () => {
+describe('the join snapshot is a walk of the live world', () => {
     it('is complete, current, and per-player scoped for state', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const first = h.joined('a');
@@ -336,8 +336,8 @@ describe('§3.3 — the join snapshot is a walk of the live world', () => {
         const h = harness({ config: { gameScripts: [Spectators] } });
         h.joined('a');
         const rt = h.server.runtime;
-        // The order protocol §3.6.1 names: parenting is a post-hoc mutation, so slot order puts
-        // the child first and a slot sweep would ship it first.
+        // The wire requires parents first, and parenting is a post-hoc mutation — so slot order
+        // puts the child first and a slot sweep would ship it first.
         const child = rt.entityManager.spawn('child', 0, 0);
         const parent = rt.entityManager.spawn('parent', 0, 0);
         child.attachTo(parent);
@@ -351,7 +351,7 @@ describe('§3.3 — the join snapshot is a walk of the live world', () => {
     });
 });
 
-describe('§4.3 — the unjoined connection is bounded', () => {
+describe('the unjoined connection is bounded', () => {
     it('closes a connection that never sends a JoinRequest', () => {
         const h = harness();
         const peer = h.connect();
@@ -390,7 +390,7 @@ describe('§4.3 — the unjoined connection is bounded', () => {
     });
 });
 
-describe('§7 — disconnection', () => {
+describe('disconnection', () => {
     it('close removes the connection and the player, and the next broadcast skips it', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const first = h.joined('a');
@@ -416,7 +416,7 @@ describe('§7 — disconnection', () => {
         peer.close();
         h.pumpTicks(2);
         // Dispatched BEFORE the roster removal, so the handler still reads the player it is told
-        // about — the core gap §9 item 0 named as a prerequisite of this server.
+        // about.
         expect(rules.left).toStrictEqual(['c1']);
     });
 
@@ -448,7 +448,7 @@ describe('§7 — disconnection', () => {
     });
 });
 
-describe('§6.3 — the clock-sync and rate frames', () => {
+describe('the clock-sync and rate frames', () => {
     it('answers TimeSync by echoing the client stamp untouched', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');

@@ -1,9 +1,3 @@
-// The drain and the fan-out: three channels to two envelopes, with no structure between them.
-//
-// The drain happens once and the broadcast fans it out. Each drain clears what it consumes, so it
-// cannot be run per connection — the first would take the marks and the rest would get nothing. The
-// resulting set lives for one send and is not state the server carries between ticks.
-
 import type {
     EntityId,
     HostRecord,
@@ -21,6 +15,7 @@ import {
     playerKey,
     serializeHostField,
 } from '@platform/core';
+import { defined } from '@platform/math';
 import type { ScriptId, TemplateId } from '@platform/project';
 import type {
     EntityOverrides,
@@ -48,21 +43,12 @@ import { MAX_STATE_DEPTH } from './constants.js';
 /** Speech bubbles ride a `tag` op that is not in core's tag index, so it is filtered here. */
 const SAY_PREFIX = 'say:';
 
-/**
- * Numerically a `NetId` is the server's `EntityId`, so this needs no map and the one in the system is
- * the client's. The double cast is required, not sloppy: each brand keys off its own `unique symbol`.
- */
+/** A `NetId` numerically IS the server's `EntityId`; the double cast is required because each brand keys off its own `unique symbol`. */
 export function toNetId(id: EntityId): NetId {
     return id as number as NetId;
 }
 
-/**
- * The seven transform fields in core's own declaration order. A read, never a write.
- *
- * Each non-finite cell degrades to the store's own slot default rather than reaching the codec: core
- * guards nothing — `setPosition(NaN)` writes straight into the `Float64Array` — and the codec refuses
- * `NaN`, which would abort the fan-out for every connection and then repeat on every send.
- */
+/** The seven transform fields in core's own declaration order, non-finite cells degraded to slot defaults. A read, never a write. */
 export function readTransform(rt: Runtime, id: EntityId): WireTransform {
     return {
         posX: finiteOr(rt.transforms.posX(id), 0),
@@ -75,13 +61,7 @@ export function readTransform(rt: Runtime, id: EntityId): WireTransform {
     };
 }
 
-/**
- * One entity as a joiner or a spawn must receive it.
- *
- * `hierarchy: false` is the spawn form: core's `create` sets neither parent nor tags, so both arrive as
- * their own later ops. Filling them from live state would describe the entity as it is at drain time
- * while the ops that got it there are still to come, so the client would re-apply a known reparent.
- */
+/** One entity as a joiner or a spawn must receive it; `hierarchy: false` is the spawn form. */
 export function readEntitySnapshot(
     rt: Runtime,
     id: EntityId,
@@ -92,36 +72,27 @@ export function readEntitySnapshot(
     const parent = opts.hierarchy && record.parent !== NO_ENTITY ? toNetId(record.parent) : null;
     return {
         netId: toNetId(id),
-        // Cast at the boundary, as `toNetId` is: core's record holds whatever key `spawn` was
-        // handed, and the wire's is the authoring id the manifest declared.
+        // Cast at the boundary: core's record holds whatever key `spawn` was handed, and the wire's
+        // is the authoring id the manifest declared.
         template: record.template as TemplateId,
         parent,
         owner: record.ownerId === '' ? null : record.ownerId,
         // A mutable copy: the wire boundary refuses a `readonly` array.
         tags: opts.hierarchy ? [...rt.tags.tagsOf(id)] : [],
         transform: readTransform(rt, id),
-        // Only on the hierarchy form: at spawn time nothing is attached yet, and the attachments
-        // that follow ride their own ops. A joiner has no earlier state for those to apply against.
         ...(opts.hierarchy ? overridesOf(rt, id) : {}),
     };
 }
 
-/**
- * The scripts on one entity, as a joiner needs them — absent when it carries none.
- *
- * Read back through the instance registry rather than from the template, because `addScript` puts
- * classes on an entity that no template names, and those are exactly the ones a joiner cannot infer.
- */
+/** The scripts on one entity as a joiner needs them, read back off the instance registry rather than the template — absent when it carries none. */
 function overridesOf(rt: Runtime, id: EntityId): { overrides?: EntityOverrides } {
     const scripts: WireScriptAttachment[] = [];
     for (const instance of rt.instances.forHost(entityKey(id as number))) {
         const script: ScriptId | undefined = rt.scriptIdOf?.(instance.klass);
-        // A class the bundle never stamped is named by nothing on the wire, so it is left out here
-        // for the same reason its `attach` op is never journaled.
         if (script === undefined) continue;
         scripts.push({
             script,
-            ...(instance.props === undefined ? {} : { props: instance.props }),
+            ...defined({ props: instance.props }),
         });
     }
     return scripts.length === 0 ? {} : { overrides: { scripts } };
@@ -132,12 +103,7 @@ export function readPlayerSnapshot(player: Player): PlayerSnapshot {
     return { id: player.id, index: player.index, name: player.name };
 }
 
-/**
- * Everything one send-tick drains, before it is fanned out.
- *
- * `state` is partitioned rather than flat because a `@serverState` field on a Player host replicates
- * to that player alone, so scoping has to survive the drain to be applied at the fan-out.
- */
+/** Everything one send-tick drains, before it is fanned out; `state` is partitioned because scoping has to survive the drain. */
 export interface SendSet {
     tick: number;
     structural: WireStructuralOp[];
@@ -160,12 +126,7 @@ export interface RosterOps {
     leaves: string[];
 }
 
-/**
- * Drains all three channels exactly once and assembles the send set.
- *
- * Nothing else drains them on the server, so there is no double-drain hazard. Draining is also what
- * meets core's replication-sink obligation: core marks the right channel, the sink decides cadence.
- */
+/** Drains all three channels exactly once and assembles the send set — nothing else drains them on the server. */
 export function drainOnce(
     rt: Runtime,
     tick: number,
@@ -183,8 +144,6 @@ export function drainOnce(
         encodedTransform: null,
     };
 
-    // Last send's overflow first and in order, ahead of anything new: the ops do not commute and the
-    // journal is applied verbatim, so a reordered spill creates a node for a dead entity.
     const ordered: WireStructuralOp[] = spill.splice(0);
 
     for (const snapshot of roster.joins) {
@@ -205,9 +164,6 @@ export function drainOnce(
         ordered.push({ kind: 'player-leave', id });
     }
 
-    // A script spawning in a loop mints more ops in one interval than a frame can carry, and a peer
-    // refuses an over-cap frame before parsing it — then resyncs, which asks for something bigger.
-    // Capped and carried instead, so the journal arrives whole across as many sends as it takes.
     const cut = budgetCut(ordered, budget);
     if (cut < ordered.length) {
         set.structural = ordered.slice(0, cut);
@@ -216,8 +172,6 @@ export function drainOnce(
         set.structural = ordered;
     }
 
-    // consumeDirty returns dirty slot indices — which entities moved, not what they moved to — so
-    // the current transform is read per index and one whole-transform diff emitted.
     for (const index of rt.transforms.consumeDirty()) {
         const id = rt.entities.idAt(index);
         if (id === NO_ENTITY) continue; // a released slot; releaseSlot already clears its bit
@@ -227,8 +181,6 @@ export function drainOnce(
     // Built on the first mark, never unconditionally: the table walks every live entity, and a send
     // interval with no state writes is the common case.
     let hosts: Map<string, StateHostAddr> | null = null;
-    // One bucket per host, so an entity that wrote four fields names its address once. Keyed by
-    // core's own host key, which is the host identity the mark already carries.
     const shared = new Map<string, StateDiff>();
     const perPlayer = new Map<PlayerId, StateDiff>();
     for (const mark of rt.channels.drainState()) {
@@ -251,13 +203,7 @@ export function drainOnce(
     return set;
 }
 
-/**
- * How many ops fit in this send, counting a group by what it holds rather than as one.
- *
- * A group is indivisible — it is the boundary that says a subtree arrived whole — so one that
- * exceeds the budget on its own still goes, at index zero and alone. Counting it as a single op
- * instead would let one instantiation spend the cap the cap exists to hold.
- */
+/** How many ops fit in this send, counting a group by what it holds rather than as one. */
 function budgetCut(ordered: readonly WireStructuralOp[], budget: number): number {
     let weight = 0;
     for (const [index, op] of ordered.entries()) {
@@ -267,13 +213,7 @@ function budgetCut(ordered: readonly WireStructuralOp[], budget: number): number
     return ordered.length;
 }
 
-/**
- * Ids spawned and released inside this one journal, whose ops are dropped as a pair.
- *
- * A released entity has no record for the spawn's snapshot to read, so its template would go out as
- * `''` and abort the client's whole reconcile — and an entity that lived less than one send interval is
- * gone by the time the client hears of it anyway.
- */
+/** Ids spawned and released inside this one journal, whose ops are dropped as a pair. */
 function ephemeralIds(rt: Runtime, journal: readonly StructuralOp[]): Set<number> {
     const gone = new Set<number>();
     for (const op of journal) {
@@ -292,16 +232,14 @@ function toWireStructural(
     ephemeral: Set<number>,
 ): WireStructuralOp | undefined {
     if (op.kind !== 'group') return toWireSingle(rt, op, ephemeral);
-    // The boundary survives the conversion whole or not at all: a group whose spawns were all
-    // ephemeral has nothing left to bound, and a partial one would tell the client a subtree
-    // arrived complete when the entity its children hang off never existed.
     const ops: WireSingleStructuralOp[] = [];
     for (const single of op.ops) {
         const wire = toWireSingle(rt, single, ephemeral);
         if (wire !== undefined) ops.push(wire);
     }
-    if (ops.length === 0) return undefined;
-    return ops.length === 1 ? (ops[0] as WireSingleStructuralOp) : { kind: 'group', ops };
+    const only = ops[0];
+    if (only === undefined) return undefined;
+    return ops.length === 1 ? only : { kind: 'group', ops };
 }
 
 function toWireSingle(
@@ -318,16 +256,12 @@ function toWireSingle(
         case 'destroy':
             return { kind: 'destroy', netId: toNetId(op.id) };
         case 'reparent':
-            // NO_ENTITY is how core spells a detach and `null` is how the wire does; the client's
-            // applier branches on exactly this.
             return {
                 kind: 'reparent',
                 netId: toNetId(op.id),
                 parent: op.parent === NO_ENTITY ? null : toNetId(op.parent),
             };
         case 'tag':
-            // A say tag is a real op that is not in core's tag index, so passing it through would
-            // leave the client's tag set and its queries disagreeing with the server's.
             if (op.tag.startsWith(SAY_PREFIX)) return undefined;
             return { kind: 'tag', netId: toNetId(op.id), tag: op.tag, added: op.added };
         case 'attach':
@@ -335,22 +269,18 @@ function toWireSingle(
                 kind: 'attach',
                 netId: toNetId(op.id),
                 script: op.script,
-                ...(op.props === undefined ? {} : { props: op.props }),
+                ...defined({ props: op.props }),
             };
         default: {
-            // `noImplicitReturns` is off, so an unhandled arm would return `undefined` and be
-            // counted as an unrepresentable op — a new arm silently dropped for the session.
+            // `noImplicitReturns` is off, so without this a new arm would return `undefined` and be
+            // silently counted as an unrepresentable op.
             const unreachable: never = op;
             return unreachable;
         }
     }
 }
 
-/**
- * hostId → the wire address for it, built forward from the hosts that exist rather than by parsing a
- * key: a core rename becomes a compile error, and a mark naming a dead host misses the table and is
- * dropped rather than addressed at a host the client cannot resolve.
- */
+/** hostId → its wire address, built forward from the hosts that exist rather than by parsing a key, so a core rename becomes a compile error. */
 function hostAddresses(rt: Runtime): Map<string, StateHostAddr> {
     const table = new Map<string, StateHostAddr>();
     table.set(GAME_KEY, { kind: 'game' });
@@ -368,6 +298,20 @@ function put<K, V>(into: Map<K, V>, key: K, value: V): V {
     return value;
 }
 
+/**
+ * One `@serverState` field as JSON, or `undefined` for "not representable", which the caller drops —
+ * the one read both the join baseline and the per-tick delta go through, so neither can keep a field
+ * the other discards.
+ *
+ * Through core's `serializeHostField`, because a wrapper field's value IS the wrapper and no codec
+ * represents a class instance. A reserved key is refused here too: the grouped diff makes the name a
+ * KEY, so assigning one would set the bucket's prototype instead of adding a member.
+ */
+export function encodeHostField(record: HostRecord, field: string): JsonValue | undefined {
+    if (RESERVED_KEYS.has(field)) return undefined;
+    return encodeStateValue(serializeHostField(record, field));
+}
+
 function toStateWrite(
     mark: StateMark,
     hosts: Map<string, StateHostAddr>,
@@ -375,23 +319,12 @@ function toStateWrite(
     const record = mark.record as HostRecord;
     const host = hosts.get(record.hostId);
     if (host === undefined) return undefined;
-    // A grouped diff cannot carry these: assigning one would set the bucket's prototype instead of
-    // adding a key, so it is dropped and counted like an unrepresentable value.
-    if (RESERVED_KEYS.has(mark.field)) return undefined;
-    // Through core, because a wrapper field's value IS the wrapper and no codec represents a class
-    // instance: read raw, every scoreboard write would be dropped here and counted.
-    const value = encodeStateValue(serializeHostField(record, mark.field));
-    // The codec throws on `undefined`, so one unrepresentable field would abort the whole send for
-    // every connection. Dropped and counted instead.
+    const value = encodeHostField(record, mark.field);
     if (value === undefined) return undefined;
     return { host, hostKey: record.hostId, field: mark.field, value };
 }
 
-/**
- * A `@serverState` value as JSON, or `undefined` for "not representable", which the caller drops and
- * counts. The host record holds values raw and the codec rejects a class instance, so a ref travels as
- * what identifies it across the wire.
- */
+/** A `@serverState` value as JSON, or `undefined` for "not representable"; a ref travels as what identifies it across the wire. */
 export function encodeStateValue(
     value: unknown,
     open: Set<object> = new Set(),
@@ -412,9 +345,8 @@ export function encodeStateValue(
     if (value instanceof Entity) return toNetId(value.entityId) as number;
     if (value instanceof Player) return value.id;
 
-    // A cycle would recurse until the stack blew, and that RangeError aborts the send for every
-    // connection — the failure the drop-and-count contract exists to prevent. `open` is an ancestor
-    // set, deleted on the way out, so a DAG stays legal exactly as it is on the wire.
+    // `open` is an ancestor set, deleted on the way out, so a DAG stays legal exactly as it is on
+    // the wire while a cycle is refused before the recursion blows the stack.
     if (open.has(value) || depth >= MAX_STATE_DEPTH) return undefined;
     open.add(value);
     try {
@@ -430,9 +362,6 @@ export function encodeStateValue(
         if (Object.getPrototypeOf(value) !== Object.prototype) return undefined;
         const out: { [key: string]: JsonValue } = {};
         for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-            // At every level, not just the top: assigning a reserved key here sets `out`'s prototype
-            // instead of adding a key, so the field would go out silently missing a member. A
-            // serialized wrapper is a nested object, which is what puts real keys down here.
             if (RESERVED_KEYS.has(key)) return undefined;
             const encoded = encodeStateValue(item, open, depth + 1);
             if (encoded === undefined) return undefined;
@@ -444,20 +373,10 @@ export function encodeStateValue(
     }
 }
 
-/**
- * One connection's pair of envelopes, reliable first — the client holds a transform envelope until the
- * state envelope for its tick has been applied.
- *
- * The transform envelope is the shared subset until interest management lands, so it is encoded lazily
- * and memoised on the set: a fan-out over N connections pays exactly one `encode`, even though the
- * server drives it connection by connection to skip the peers still awaiting a `Welcome`.
- *
- * No try/catch: `send` / `sendEncoded` after a peer's `close()` are silent no-ops, so one peer dropping
- * between the step and the send cannot abort the fan-out over the others.
- */
+/** One connection's pair of envelopes, reliable first — the client holds a transform envelope until the state envelope for its tick has been applied. */
 export function broadcastTo(conn: Connection, set: SendSet, codec: Codec): void {
-    const player = conn.player;
-    if (conn.closed || player === null) return;
+    const player = conn.livePlayer;
+    if (player === null) return;
     sendState(conn, player, set);
     conn.transport.sendEncoded(encodedTransform(set, codec));
 }
@@ -478,9 +397,6 @@ function encodedTransform(set: SendSet, codec: Codec): EncodedFrame {
 function sendState(conn: Connection, player: Player, set: SendSet): void {
     const ack = conn.admission.takeAck();
     const scoped = set.playerState.get(player.id);
-    // A connection that joined while ops were held over skips them: its snapshot was read from live
-    // state and already holds their effect. Sliced only when it owes a skip, so the ordinary send
-    // still hands every connection the one array.
     const skip = Math.min(conn.structuralSkip, set.structural.length);
     if (skip > 0) conn.structuralSkip -= skip;
     const envelope: StateEnvelope = {
@@ -490,18 +406,11 @@ function sendState(conn: Connection, player: Player, set: SendSet): void {
         structural: skip === 0 ? set.structural : set.structural.slice(skip),
         state: scoped === undefined ? set.sharedState : [...set.sharedState, ...scoped],
     };
-    // Absent when this ack resolved no input, never explicitly `undefined` — the codec refuses the
-    // latter, because `JSON.stringify` would silently drop it.
     if (ack.earliestHeadroom !== undefined) envelope.earliestHeadroom = ack.earliestHeadroom;
     send(conn.transport, envelope);
 }
 
-/**
- * The one place a server envelope reaches the wire.
- *
- * Typed as the union rather than `object`, so an envelope that is not one of protocol's own cannot reach
- * a peer; the cast is only there because an envelope declared as a `type` has no index signature.
- */
+/** The one place a server envelope reaches the wire; the cast is only there because an envelope declared as a `type` has no index signature. */
 export function send(transport: Transport, envelope: ServerToClient): void {
     transport.send(envelope as unknown as Message);
 }

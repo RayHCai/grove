@@ -2,7 +2,7 @@
 // recompute, and what it refuses. Fixtures are compiled by the build.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { clearRuntime } from '@platform/core';
+import { clearRuntime, entityKey } from '@platform/core';
 import type { NetId } from '@platform/protocol';
 import { Rules, Storekeeper, Touchable } from '../dist/testkit/fixtures.js';
 import { MAX_INTERACTIONS_PER_FRAME, MAX_WIDGET_NAME_LENGTH } from '../src/constants.js';
@@ -28,7 +28,7 @@ function avatarNetId(h: Harness, playerId: string): NetId {
 function touchableOn(h: Harness, playerId: string): Touchable {
     const avatar = h.server.runtime.playerManager?.byId(playerId)?.avatar;
     avatar?.addScript(Touchable as never);
-    const host = `entity:${avatar?.entityId as unknown as number}`;
+    const host = entityKey(avatar?.entityId as unknown as number);
     return [...h.server.runtime.instances.forHost(host)].find((i) => i.className === 'Touchable')
         ?.instance as Touchable;
 }

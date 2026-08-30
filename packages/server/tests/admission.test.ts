@@ -70,7 +70,7 @@ class DirectTransport implements Transport {
     }
 }
 
-describe('§4.3 — what one frame is allowed to contain', () => {
+describe('what one frame is allowed to contain', () => {
     it('ignores a frame carrying more actions than the per-frame cap, and keeps the connection', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
@@ -150,7 +150,7 @@ describe('§4.3 — what one frame is allowed to contain', () => {
     });
 });
 
-describe('§4.3 — control frames draw on their own bucket', () => {
+describe('control frames draw on their own bucket', () => {
     it('answers a time-sync flood at most bucket-deep instead of once per frame', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
@@ -191,7 +191,7 @@ describe('§4.3 — control frames draw on their own bucket', () => {
     });
 });
 
-describe('§5.3 — anything the state encoder accepts, the codec accepts', () => {
+describe('anything the state encoder accepts, the codec accepts', () => {
     it('drops a value nested past the cap rather than letting encode abort the send', () => {
         expect(encodeStateValue(nest(MAX_STATE_DEPTH))).toBeUndefined();
 
@@ -208,7 +208,7 @@ describe('§5.3 — anything the state encoder accepts, the codec accepts', () =
     });
 });
 
-describe('§7 — shutdown', () => {
+describe('shutdown', () => {
     it('closes every connection, releases their players, and stops stepping', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
@@ -248,7 +248,7 @@ describe('§7 — shutdown', () => {
     });
 });
 
-describe('§3.4 — the world is built before anything is admitted', () => {
+describe('the world is built before anything is admitted', () => {
     it('is booted by the time any caller holds it, so `accept` never sees a half-world', () => {
         // The whole boot is the constructor — registry, Game scripts, scene, `@onStart` to its
         // first await — and `booted` is set after all of it. There is no window a caller can
@@ -287,7 +287,7 @@ describe('§3.4 — the world is built before anything is admitted', () => {
     });
 });
 
-describe('§3.4, §6.4 — a misconfigured server says so instead of going quiet', () => {
+describe('a misconfigured server says so instead of going quiet', () => {
     it('refuses a simRate the accumulator could never reach', () => {
         expect(() => new GameServer({ config: { simRate: 0 } })).toThrow(/simRate/);
         expect(() => new GameServer({ config: { sendRate: Number.NaN } })).toThrow(/sendRate/);

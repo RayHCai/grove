@@ -1,9 +1,10 @@
-// The live render manifest (DESIGN §5.1): what a joiner is handed, and what connected peers are
+// The live render manifest: what a joiner is handed, and what connected peers are
 // owed when a template comes into use after they joined.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
 import type { ManifestUpdate, RenderManifest } from '@platform/protocol';
+import { assetId, templateId } from '@platform/project';
 import { Rules } from '../dist/testkit/fixtures.js';
 import { ManifestStore } from '../src/manifest.js';
 import { harness } from './harness.js';
@@ -14,8 +15,8 @@ afterEach(() => {
 });
 
 const coin: RenderManifest = {
-    assets: [{ key: 'coin', kind: 'texture', url: '/coin.png' }],
-    templates: [{ template: 'coin', kind: 'sprite', texture: 'coin' }],
+    assets: [{ key: assetId('coin'), kind: 'texture', url: '/coin.png' }],
+    templates: [{ template: templateId('coin'), kind: 'sprite', texture: assetId('coin') }],
 };
 
 function updates(peer: Peer): ManifestUpdate[] {
@@ -52,14 +53,14 @@ describe('ManifestStore', () => {
         const store = new ManifestStore(coin);
         store.declare({
             assets: [],
-            templates: [{ template: 'gem', kind: 'sprite', texture: 'coin' }],
+            templates: [{ template: templateId('gem'), kind: 'sprite', texture: assetId('coin') }],
         });
         expect(store.snapshot().templates.map((t) => t.template)).toEqual(['coin', 'gem']);
         expect(store.hasTemplate('gem')).toBe(true);
     });
 });
 
-describe('§5.1 — a template first used mid-session reaches the clients already connected', () => {
+describe('a template first used mid-session reaches the clients already connected', () => {
     it('sends the addition to a peer that joined before it existed', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');

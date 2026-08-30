@@ -1,12 +1,13 @@
-// The driver (DESIGN §6, §8): the accumulator, the spiral guard, the shed's two halves, the send
-// cadence, and the deliver→step order.
+// The driver: the accumulator, the spiral guard, the shed's two halves, the send cadence, and the
+// deliver→step order.
 //
-// The accumulator half runs against a STUB step, so it is exercised before anything reads a channel
-// (§10 build order step 3). No test calls `pair.deliver()` itself — the driver is handed it, and a
-// test that had to order the two would be reproducing the bug §6.4 removes.
+// The accumulator half runs against a STUB step, so it is exercised without reading a channel. No
+// test calls `pair.deliver()` itself — the driver is handed it, and a test that had to order the
+// two would be reproducing the bug that owning the sequence removes.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { after, clearRuntime } from '@platform/core';
+import { after, clearRuntime, entityKey } from '@platform/core';
+import { defined } from '@platform/math';
 import { Recorder, Rules } from '../dist/testkit/fixtures.js';
 import { Driver } from '../src/driver.js';
 import { maxStepsPerWake, ticksPerSend } from '../src/constants.js';
@@ -33,12 +34,12 @@ function spyDriver(simRate = 60, sendRate = 20, deliver?: () => void): Spy {
             },
             send: () => spy.sends.push(tick),
         },
-        { simRate, sendRate, ...(deliver === undefined ? {} : { deliver }) },
+        { simRate, sendRate, ...defined({ deliver }) },
     );
     return spy;
 }
 
-describe('§6.1 — real time becomes ticks', () => {
+describe('real time becomes ticks', () => {
     it('runs exactly k steps for k / simRate seconds and carries the remainder', () => {
         const spy = spyDriver();
         const dt = 1 / 60;
@@ -75,7 +76,7 @@ describe('§6.1 — real time becomes ticks', () => {
     });
 });
 
-describe('§6.2 — the step cap is a spiral guard', () => {
+describe('the step cap is a spiral guard', () => {
     it('caps the wake, sheds the backlog, and does not jump the tick counter', () => {
         const spy = spyDriver();
         spy.driver.pump(0);
@@ -95,8 +96,8 @@ describe('§6.2 — the step cap is a spiral guard', () => {
         spy.driver.pump(0);
         const result = spy.driver.pump(maxStepsPerWake(60) / 60);
         expect(result.steps).toBe(maxStepsPerWake(60));
-        // §6.1's `if (steps === cap) accumulator = 0` would have discarded a legitimate remainder
-        // here; the shed is conditioned on leftover backlog instead.
+        // An unconditional `if (steps === cap) accumulator = 0` would have discarded a legitimate
+        // remainder here; the shed is conditioned on leftover backlog instead.
         expect(result.shed).toBe(false);
         expect(spy.driver.shedCount).toBe(0);
     });
@@ -137,7 +138,7 @@ describe('§6.2 — the step cap is a spiral guard', () => {
     });
 });
 
-describe('§6.3 — send-tick accounting lives on the driver', () => {
+describe('send-tick accounting lives on the driver', () => {
     it('fires exactly one broadcast per simRate / sendRate steps', () => {
         const spy = spyDriver(60, 20);
         const perSend = ticksPerSend(60, 20);
@@ -163,7 +164,7 @@ describe('§6.3 — send-tick accounting lives on the driver', () => {
     });
 });
 
-describe('§6.4 — the driver owns the deliver→step sequence', () => {
+describe('the driver owns the deliver→step sequence', () => {
     it('delivers before it steps, every wake', () => {
         const order: string[] = [];
         const driver = new Driver(
@@ -195,7 +196,7 @@ describe('§6.4 — the driver owns the deliver→step sequence', () => {
 function onRecorder(h: ReturnType<typeof harness>): Recorder {
     const avatar = h.server.runtime.playerManager?.players[0]?.avatar;
     avatar?.addScript(Recorder as never);
-    const host = `entity:${avatar?.entityId as unknown as number}`;
+    const host = entityKey(avatar?.entityId as unknown as number);
     return [...h.server.runtime.instances.forHost(host)].find((i) => i.className === 'Recorder')
         ?.instance as Recorder;
 }

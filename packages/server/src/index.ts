@@ -1,15 +1,8 @@
-// @platform/server — the authority: it owns the true world, steps it on a real-time accumulator,
-// admits and buffers client input, and broadcasts the resulting state diffs to every client.
-//
-// It sits above the transport (which moves opaque frames) and above core (which owns simulation but no
-// clock and no network) — the seam between them, where core's replication-sink obligation is met and a
-// Transport per player is held. The envelope types are not here: they live in @platform/protocol, so
-// the bytes this writes are the bytes the client reads.
-
-export const PACKAGE_NAME = '@platform/server';
-
 export { GameServer } from './server.js';
-export type { GameServerOptions, ProjectIdentity, ServerConfig } from './server.js';
+export type { GameServerOptions, ProjectIdentity, ScriptIndex, ServerConfig } from './server.js';
+
+export { ServerError, serverError } from './errors.js';
+export type { ServerErrorCode } from './errors.js';
 
 export { AdmissionState, Connection } from './connection.js';
 export type { AckReport, RefusalReason } from './connection.js';
