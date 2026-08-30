@@ -155,12 +155,6 @@
             }
         },
         {
-            "files": ["packages/renderer/**"],
-            "rules": {
-                "no-restricted-properties": "off"
-            }
-        },
-        {
             "files": ["packages/client/src/**"],
             "rules": {
                 "no-restricted-globals": [
@@ -196,6 +190,16 @@
             "files": ["packages/client/src/browser/**"],
             "rules": {
                 "no-restricted-globals": "off"
+            }
+        },
+        {
+            "files": [
+                "apps/editor/src/index.ts",
+                "apps/platform/src/index.ts",
+                "examples/src/index.ts"
+            ],
+            "rules": {
+                "unicorn/require-module-specifiers": "off"
             }
         }
     ]

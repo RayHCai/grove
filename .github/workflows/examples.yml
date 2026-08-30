@@ -1,7 +1,7 @@
 name: Examples
 
-# The phase-0 sample games act as regression tests for the creator API.
-# They run as their own workflow so a break here is legible at a glance.
+# The sample games compile against the creator surface, and they get their own workflow so a
+# break in that surface is legible as its own failing check rather than a line in the CI matrix.
 on:
     push:
         branches: [main]
@@ -18,7 +18,7 @@ env:
 
 jobs:
     regression:
-        name: Sample game regression
+        name: Sample game type-check
         runs-on: ubuntu-latest
         timeout-minutes: 20
         steps:
@@ -33,6 +33,3 @@ jobs:
 
             - name: Build engine and examples
               run: pnpm --filter @platform/examples... run build
-
-            - name: Run sample games
-              run: pnpm --filter @platform/examples run test

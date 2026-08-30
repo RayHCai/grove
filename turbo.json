@@ -5,17 +5,17 @@
     "tasks": {
         "build": {
             "dependsOn": ["^build"],
-            "inputs": ["src/**", "tsconfig.json", "package.json"],
+            "inputs": ["src/**", "tsconfig*.json", "package.json"],
             "outputs": ["dist/**"]
         },
         "typecheck": {
             "dependsOn": ["^build"],
-            "inputs": ["src/**", "tests/**", "tsconfig.json"],
+            "inputs": ["src/**", "tests/**", "tsconfig*.json"],
             "outputs": []
         },
         "test": {
             "dependsOn": ["^build"],
-            "inputs": ["src/**", "tests/**", "vitest.config.ts"],
+            "inputs": ["src/**", "tests/**", "tsconfig*.json", "vitest.config.ts"],
             "outputs": []
         },
         "clean": {

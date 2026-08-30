@@ -59,17 +59,41 @@ jobs:
             - name: ${{ matrix.task.name }}
               run: ${{ matrix.task.run }}
 
+    citations:
+        name: no design-doc citations
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - uses: actions/checkout@v6
+
+            # Grep, not lint: the ban covers comments, test titles, JSX text and JSON alike.
+            # Matched with a trailing digit so this job and the pre-commit hook can name the char.
+            - name: Reject section citations outside docs/
+              run: |
+                  if git grep -nE '§ ?[0-9]' -- 'packages' 'apps' 'examples' '*.json' \
+                      ':(exclude,glob)**/DESIGN.md' ':(exclude,glob)**/README.md' \
+                      ':(exclude,glob)**/readme.md' ':(exclude,glob)docs/**'; then
+                    echo
+                    echo 'Design-doc section citations are banned outside docs/ and DESIGN.md/README.md.'
+                    echo 'State the constraint itself — the numbering drifts and the reader is not holding the doc.'
+                    exit 1
+                  fi
+
     # Single required status check, so branch protection needs only one entry.
     ci-ok:
         name: CI passed
         if: always()
-        needs: [ci]
+        needs: [ci, citations]
         runs-on: ubuntu-latest
         steps:
             - name: Verify all matrix jobs succeeded
               run: |
                   if [ "${{ needs.ci.result }}" != "success" ]; then
                     echo "CI matrix result: ${{ needs.ci.result }}"
+                    exit 1
+                  fi
+                  if [ "${{ needs.citations.result }}" != "success" ]; then
+                    echo "Citation gate result: ${{ needs.citations.result }}"
                     exit 1
                   fi
                   echo "All CI jobs passed."

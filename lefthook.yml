@@ -14,6 +14,16 @@ pre-commit:
           glob: '*.{ts,tsx}'
           run: pnpm run typecheck
 
+        - name: no-design-doc-citations
+          glob: '*.{ts,tsx,js,mjs,cjs,json,yml,yaml}'
+          exclude:
+              - 'docs/*'
+          run: |
+              if grep -lE '§ ?[0-9]' {staged_files}; then
+                  echo 'Design-doc section citations are banned outside docs/ — state the constraint itself.'
+                  exit 1
+              fi
+
 pre-push:
     jobs:
         - name: test
