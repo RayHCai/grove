@@ -1,11 +1,5 @@
-// GameServer: the connection registry, the join sequence, and the close path.
-//
-// The transport interface is one end of one connection, and standing up a listener is a factory
-// concern — so this is the missing multiplexer, the piece transport declined to hold. The server never
-// opens a socket: transports arrive from a loopback pair or a WebSocket listener, and the composition
-// root wires the factory's output into `accept`.
-
 import type { Bounds } from '@platform/math';
+import { defined } from '@platform/math';
 import type {
     BreakerTrip,
     EngineConfig,
@@ -63,22 +57,17 @@ import {
     MAX_IDENTITY_LENGTH,
     MAX_NAME_LENGTH,
     MAX_UNJOINED_CONNECTIONS,
-    RATE_BREACH_CLOSE,
     assertRate,
     pastGraceTicks,
 } from './constants.js';
+import { ServerError } from './errors.js';
 import { Driver } from './driver.js';
 import type { PumpResult } from './driver.js';
 import { InputBuffer, runInputPass } from './input.js';
 import { ManifestStore } from './manifest.js';
 import { buildSnapshot } from './snapshot.js';
 
-/**
- * What this process is running, proved against every joiner's claim before a `Player` is allocated.
- *
- * The hashes are opaque here: the server compares, it does not compute. Whoever built the project
- * knows what went into it, and a server that derived its own would be checking itself.
- */
+/** What this process is running, proved against every joiner's claim before a `Player` is allocated. */
 export interface ProjectIdentity {
     projectId: ProjectId;
     projectHash: string;
@@ -88,10 +77,7 @@ export interface ProjectIdentity {
     bundleUrl: string;
 }
 
-/**
- * A server that declares no project. Every field empty, which is exactly what a client that declares
- * none sends — so the two agree, and any one-sided declaration is a mismatch rather than a pass.
- */
+/** A server that declares no project — every field empty, which is what a client declaring none sends, so agreement rather than absence is what passes. */
 const UNIDENTIFIED: ProjectIdentity = {
     projectId: '',
     projectHash: '',
@@ -99,20 +85,12 @@ const UNIDENTIFIED: ProjectIdentity = {
     bundleUrl: '',
 };
 
-/**
- * The class → id edge core needs, as `@platform/scripting`'s `ScriptRegistry` already provides it.
- *
- * Declared structurally rather than imported: that package imports core, and the server needs one
- * method off whatever registry a host built.
- */
+/** The class → id edge core needs, declared structurally rather than imported because `@platform/scripting` imports core. */
 export interface ScriptIndex {
     idOf(klass: abstract new (...args: never[]) => object): ScriptId | undefined;
 }
 
-/**
- * The server's own load-time input, carrying what core's manifest cannot: `sendRate` and `maxPlayers`
- * have no reader in core, and the render manifest has no source there at all.
- */
+/** The server's own load-time input, carrying what core's manifest cannot. */
 export interface ServerConfig extends Partial<EngineConfig> {
     bounds?: Bounds;
     regions?: Array<{ name: string; bounds: Bounds }>;
@@ -120,30 +98,15 @@ export interface ServerConfig extends Partial<EngineConfig> {
     visuals?: RenderManifest;
     /** Game-hosted `ServerScript` classes, forwarded to `loadGame`. */
     gameScripts?: GameManifest['gameScripts'];
-    /**
-     * What every spawn key means, from `toGameManifest(validate(file), …)`.
-     *
-     * Built before the scene, because instantiating one is what puts a template's scripts and
-     * subtree on an entity — a world built against an empty registry is a world of bare entities.
-     */
+    /** What every spawn key means, from `toGameManifest(validate(file), …)`. */
     templates?: GameManifest['templates'];
     /** The placed world, parents before children — instantiated before the first `accept`. */
     entities?: GameManifest['entities'];
-    /**
-     * Names a script class on the wire, from the registry this process loaded its bundle into.
-     *
-     * Without it no `attach` op is journaled at all: the op names an id, and a class name is no
-     * contract across a minifier or a process boundary.
-     */
+    /** Names a script class on the wire; without it no `attach` op is journaled at all, since the op names an id. */
     scripts?: ScriptIndex;
     /** What this build is. Omitted, every joiner declaring nothing is admitted and nothing else. */
     project?: ProjectIdentity;
-    /**
-     * Where `@serverState` outlives a session. Real owner: the host app.
-     *
-     * Omitted, core's `MemoryKVStore` stands in, so persistence is exercisable with no host at all —
-     * and dies with the process, which is the honest behaviour for a store nobody supplied.
-     */
+    /** Where `@serverState` outlives a session. Omitted, core's `MemoryKVStore` stands in and dies with the process. */
     kv?: KVStore;
 }
 
@@ -157,13 +120,7 @@ export interface GameServerOptions {
     timer?: TimerSource;
     /** The clock a self-driven server reads; `TimerSource` schedules but does not tell time. */
     now?: () => number;
-    /**
-     * Called when the breaker disables a script's handler or callback after consecutive throws.
-     *
-     * The dev channel, and deliberately not an envelope: a disabled handler is something whoever
-     * runs the server has to see, while a player's client can neither act on it nor be trusted with
-     * a stack. Its own throw is contained, so a reporting bug cannot end a tick.
-     */
+    /** Called when the breaker disables a script's handler or callback — the dev channel, deliberately not an envelope. */
     onBreakerTrip?: (trip: BreakerTrip) => void;
 }
 
@@ -184,12 +141,7 @@ export class GameServer {
     readonly #driver: Driver;
     /** Roster ops awaiting the next send — core's journal has no arm for either. */
     readonly #roster: RosterOps = { joins: [], leaves: [] };
-    /**
-     * Structural ops over this send's budget, kept in order for the next one.
-     *
-     * The only server state that survives a send set, and deliberately so: an op held over is one the
-     * peers have not been told about, so dropping it on the floor would leave every mirror wrong.
-     */
+    /** Structural ops over this send's budget, kept in order for the next one — the only server state that survives a send set. */
     readonly #spill: WireStructuralOp[] = [];
     readonly #started: Promise<void>;
     /** `@serverState` that outlives a session — read synchronously, written through at a leave. */
@@ -206,24 +158,21 @@ export class GameServer {
         const config = opts.config ?? {};
         this.#config = resolveConfig(config);
         if (!Number.isInteger(this.#config.maxPlayers) || this.#config.maxPlayers < 1) {
-            throw new RangeError(
+            throw new ServerError(
+                'invalid-config',
                 `maxPlayers must be a positive integer, received ${this.#config.maxPlayers}`,
             );
         }
         this.#codec = opts.codec ?? jsonCodec;
 
-        // Built first, and the only thing that checks the two rates: `resolveConfig` fills defaults
-        // without validating, and a `simRate` of 0 makes `dt` infinite, so the accumulator never
-        // reaches it and the world steps zero times forever. Ahead of `loadGame` so a bad rate
-        // refuses before a world is built rather than after.
+        // Built ahead of `loadGame`, because it is the only thing that checks the two rates and a bad
+        // rate must refuse before a world is built rather than after.
         this.#driver = new Driver(
             { stepOnce: () => this.#stepOnce(), send: () => this.#send() },
             {
                 simRate: this.#config.simRate,
                 sendRate: this.#config.sendRate,
-                ...(opts.deliver === undefined ? {} : { deliver: opts.deliver }),
-                ...(opts.timer === undefined ? {} : { timer: opts.timer }),
-                ...(opts.now === undefined ? {} : { now: opts.now }),
+                ...defined({ deliver: opts.deliver, timer: opts.timer, now: opts.now }),
             },
         );
 
@@ -236,25 +185,20 @@ export class GameServer {
         this.#visuals = new ManifestStore(config.visuals);
         this.#project = config.project ?? UNIDENTIFIED;
 
-        // `role: 'server'` is the location filter: it makes the loop dispatch only server and synced
-        // handlers, so client-only scripts are inert here, which is the trust boundary. Every other
-        // seam is left at core's null default.
-        //
-        // Boot order lives inside this one call: the template registry is built, the Game scripts
-        // are wired, and the placed scene is instantiated against that registry — so nothing can
-        // observe a world whose spawn keys mean nothing yet.
+        // `role: 'server'` is the trust boundary: the loop dispatches only server and synced
+        // handlers, so client-only scripts are inert here.
         this.#rt = loadGame(
             {
                 role: 'server',
                 simRate: this.#config.simRate,
                 bounds,
-                ...(config.regions === undefined ? {} : { regions: config.regions }),
-                ...(config.visuals === undefined
-                    ? {}
-                    : { assets: config.visuals.assets.map((a) => assetManifestEntry(a)) }),
-                ...(config.templates === undefined ? {} : { templates: config.templates }),
-                ...(config.entities === undefined ? {} : { entities: config.entities }),
-                ...(config.gameScripts === undefined ? {} : { gameScripts: config.gameScripts }),
+                ...defined({
+                    regions: config.regions,
+                    assets: config.visuals?.assets.map((a) => assetManifestEntry(a)),
+                    templates: config.templates,
+                    entities: config.entities,
+                    gameScripts: config.gameScripts,
+                }),
             },
             config.scripts === undefined
                 ? {}
@@ -262,9 +206,6 @@ export class GameServer {
         );
         this.#loop = new Loop(this.#rt);
 
-        // The persistence seam's two missing halves. Core declares `kv` and reads `persisted`, and
-        // until now nothing assigned either — so a store was injectable and never injected, and the
-        // seeding path in wiring had no producer to read from.
         if (config.kv !== undefined) this.#rt.kv = config.kv;
         this.#persisted = new PersistedState(this.#rt.kv);
         this.#rt.persisted = this.#persisted;
@@ -273,12 +214,11 @@ export class GameServer {
         // very first tick is still reported.
         if (opts.onBreakerTrip !== undefined) this.#rt.dispatcher.onTrip(opts.onBreakerTrip);
 
-        // The one seam the server itself fills, installed before the first step so no tick ever runs
-        // against core's stub. A missing pass table would leave every input silently unapplied, which
-        // reads as a dead game rather than as a wiring fault.
+        // Installed before the first step, so no tick ever runs against core's stub.
         const passes = this.#rt.passes;
         if (passes === undefined) {
-            throw new Error(
+            throw new ServerError(
+                'no-pass-table',
                 'loadGame returned no tick passes; the input pass has nowhere to install',
             );
         }
@@ -295,15 +235,10 @@ export class GameServer {
                 ),
         };
 
-        // Not awaited. This promise settles when every Game start handler completes, and a handler
-        // awaiting a timer cannot complete until the loop steps — so awaiting it here deadlocks the
-        // server against its own driver. It runs to each handler's first await synchronously, which is
-        // the guarantee that matters: world construction that must precede a join belongs before it.
+        // Not awaited: a start handler awaiting a timer cannot complete until the loop steps, so
+        // awaiting this would deadlock the server against its own driver.
         this.#started = startGame(this.#rt);
 
-        // Last, so `accept` refuses until every step above has run. A connection admitted earlier
-        // would be answered with a `Welcome` whose snapshot is a world still being built, and a
-        // joiner's baseline is the one thing no later delta repairs.
         this.#booted = true;
     }
 
@@ -336,26 +271,13 @@ export class GameServer {
         return this.#booted;
     }
 
-    /**
-     * Registers one established connection and returns its id, or `null` if it was refused and closed.
-     *
-     * It sends no frame and mutates no roster, because the client speaks first — and handlers are
-     * registered before any state mutation, so no frame arriving during join is dropped.
-     *
-     * The refusal is `null` rather than an id: the unjoined cap is distinct from `maxPlayers` so that
-     * unjoined sockets cannot lock out real players, and handing back an id for a socket this call just
-     * closed reads at the composition root as a connection that is still live. A connection offered
-     * before the world is built is refused the same way — a joiner's snapshot is its whole baseline.
-     *
-     * `playerId` is what makes `@serverState` survive a rejoin: the host names the peer, that name
-     * becomes `player.id`, and the persisted record is read under it before the join handlers run.
-     * The server never takes it from a frame, so whatever the host trusts is what the game trusts —
-     * it must be a per-game id and not an account key, because `player.id` reaches every other peer
-     * on the wire. Omitted, the connection is anonymous and persists nothing across processes.
-     */
+    /** Registers one established connection and returns its id, or `null` if it was refused and closed. */
     accept(transport: Transport, playerId?: string): string | null {
         if (playerId !== undefined && playerId === '') {
-            throw new TypeError('playerId must be a non-empty string, or omitted');
+            throw new ServerError(
+                'invalid-argument',
+                'playerId must be a non-empty string, or omitted',
+            );
         }
         if (!this.#booted || this.#closed || this.#unjoinedCount() >= MAX_UNJOINED_CONNECTIONS) {
             transport.close();
@@ -363,9 +285,6 @@ export class GameServer {
         }
 
         const connectionId = `c${this.#nextConnectionId++}`;
-        // Null, not the current reading, before the first wake: the injected clock's epoch is unknown
-        // — a host passing `Date.now() / 1000` reads 1.7e9 — so stamping 0 here and differencing
-        // against it would expire every connection accepted before the loop started.
         const conn = new Connection(
             connectionId,
             playerId ?? null,
@@ -392,7 +311,9 @@ export class GameServer {
 
     /** Networked: self-drive off the injected timer. */
     start(): void {
-        if (this.#closed) throw new Error('GameServer is closed and cannot be started');
+        if (this.#closed) {
+            throw new ServerError('server-closed', 'GameServer is closed and cannot be started');
+        }
         this.#driver.start();
     }
 
@@ -401,14 +322,7 @@ export class GameServer {
         this.#driver.stop();
     }
 
-    /**
-     * Shuts the server down: stops the driver, closes every connection, and refuses later `accept`s.
-     * Idempotent.
-     *
-     * The close path is run directly rather than left to each transport's `onClose`, which fires on the
-     * next delivery — and after this there is no next delivery, so waiting would leak every `Player` and
-     * every registered handler.
-     */
+    /** Shuts the server down: stops the driver, closes every connection, and refuses later `accept`s. Idempotent. */
     close(): void {
         if (this.#closed) return;
         this.#closed = true;
@@ -421,15 +335,7 @@ export class GameServer {
         }
     }
 
-    /**
-     * Declares visuals for templates that have come into use since boot.
-     *
-     * Idempotent per name, so the ordinary call — announcing a template about to be spawned — costs
-     * nothing after the first. Whatever is new reaches connected peers on the next send and every
-     * later joiner through `Welcome.visuals`, so the two paths cannot disagree about what a session
-     * can draw. Core's asset table is defined alongside, or `assets.get` would answer `null` for a
-     * key the wire is already carrying.
-     */
+    /** Declares visuals for templates that have come into use since boot. Idempotent per name. */
     declareVisuals(manifest: RenderManifest): void {
         this.#visuals.declare(manifest);
         // `rt.assets` is the read-only `Assets` facade; only the registry `loadGame` built can take
@@ -448,10 +354,7 @@ export class GameServer {
         }
     }
 
-    /**
-     * Changes the timestep mid-session and tells every client, which treats it as a resync trigger
-     * rather than a live retune — core retunes neither a pending timer nor the lag ring.
-     */
+    /** Changes the timestep mid-session and tells every client, which treats it as a resync trigger — core retunes neither a pending timer nor the lag ring. */
     setSimRate(simRate: number): void {
         assertRate('simRate', simRate);
         this.#rt.setSimRate(simRate);
@@ -473,13 +376,7 @@ export class GameServer {
         }
     }
 
-    /**
-     * A send-tick: drain the three channels once, fan them out, then answer any pending join.
-     *
-     * The `Welcome` is built here rather than at the join request, because a snapshot taken then sits on
-     * the wrong side of the journal cut and the next send would replay ops it already holds — and a
-     * duplicate spawn is not idempotent: the client mints a second entity and orphans the first.
-     */
+    /** A send-tick: drain the three channels once, fan them out, then answer any pending join. */
     #send(): void {
         const set = drainOnce(
             this.#rt,
@@ -494,8 +391,7 @@ export class GameServer {
 
         // Ahead of the fan-out, never after: this send's journal may spawn the first entity of a
         // template these peers have not been told about, and a node created against a table that
-        // does not hold it yet draws the placeholder and keeps it. A peer still awaiting its
-        // `Welcome` is skipped, because the snapshot below already carries the whole manifest.
+        // does not hold it yet draws the placeholder and keeps it.
         const additions = this.#visuals.drain();
 
         for (const conn of this.#connections.values()) {
@@ -506,25 +402,16 @@ export class GameServer {
                 broadcastTo(conn, set, this.#codec);
                 continue;
             }
-            // Skipped by the broadcast above, because everything in this set predates the snapshot it
-            // is about to receive.
             const pending = conn.pendingJoin;
-            if (pending === null || conn.closed || conn.player === null) continue;
+            const player = conn.livePlayer;
+            if (pending === null || player === null) continue;
             conn.pendingJoin = null;
-            // What is still held over is already in the snapshot, which reads live state — so this
-            // connection owes those ops a skip, and every later one is genuinely new to it.
             conn.structuralSkip = this.#spill.length;
-            this.#sendWelcome(conn, this.#welcome(conn.player, pending));
+            this.#sendWelcome(conn, this.#welcome(player, pending));
         }
     }
 
-    /**
-     * Sends a `Welcome`, split across `snapshot-chunk` frames when the world is too big for one.
-     *
-     * Encoded once and measured, then sent as the frame that was measured: `sendEncoded` skips the
-     * peer's own encode, so the common case pays nothing for the check. Only a snapshot that would be
-     * refused by transport is walked a second time to be divided.
-     */
+    /** Sends a `Welcome`, split across `snapshot-chunk` frames when the world is too big for one. */
     #sendWelcome(conn: Connection, welcome: Welcome): void {
         const frame = this.#codec.encode(welcome as unknown as Message);
         if (this.#codec.byteLength(frame) <= MAX_FRAME_PAYLOAD_BYTES) {
@@ -543,27 +430,13 @@ export class GameServer {
         });
     }
 
-    /**
-     * Narrows one inbound frame: a type is a compile-time claim and the bytes are a runtime fact, so
-     * this checks rather than casts.
-     *
-     * A frame it cannot name is ignored and the connection survives — a malformed frame must not be
-     * able to end a session it does not own.
-     */
+    /** Narrows one inbound frame; a frame it cannot name is ignored and the connection survives. */
     #receive(conn: Connection, message: Message): void {
         if (conn.closed) return;
         const envelope = asClientEnvelope(message);
         if (envelope === undefined) return;
-        // A join request buys a full world walk and a time-sync buys a reply, and the input bucket
-        // covers neither, so they draw on a second and far shallower one. An interaction is not on
-        // it: it is the same shape of cost as an input frame — one per tick, bounded contents — and
-        // charging both to one bucket is what keeps a peer's TOTAL per-tick work bounded rather than
-        // letting a second channel double it.
         const onInputBucket = envelope.kind === 'input' || envelope.kind === 'interaction';
         if (!onInputBucket && !conn.admission.takeControlToken()) return;
-        // Any well-formed frame restarts the stale-hold clock. Input alone is not evidence of
-        // liveness: the client sends edges only, so a player holding one button sends one frame and
-        // then nothing, and a time-sync is the one thing a live client sends unprompted.
         if (conn.joined) conn.admission.noteTraffic(this.#rt.tick);
         switch (envelope.kind) {
             case 'join-request':
@@ -581,25 +454,10 @@ export class GameServer {
         }
     }
 
-    /**
-     * The join sequence, in the order the checks must run: version, then identity — both before
-     * anything is built — then, once this player's persisted record is in the cache, capacity before
-     * anything is allocated, and a `Reject` before the close.
-     *
-     * Identity sits above capacity because a client running other code is refused whether or not
-     * there is room, and "full" would send it away to retry a refusal that is not about room.
-     *
-     * A bare close is indistinguishable from a drop, and the right client responses invert: a drop
-     * should offer a rejoin, a version mismatch must never retry, and full is not a network error.
-     */
+    /** The join sequence, in the order the checks must run: version, identity, then — once the persisted record is cached — capacity. */
     #join(conn: Connection, request: JoinRequest): void {
-        // A resync on a joined connection is answered rather than dropped: the client has already
-        // cleared its mirror, clock and ring, so ignoring it leaves a session nothing ever closes.
-        // No second Player and no roster op — every peer already knows this one.
         if (conn.joined) {
             if (request.protocolVersion !== PROTOCOL_VERSION) this.#reject(conn, 'version');
-            // Re-checked on the resync too: the client may have loaded a bundle since it joined, and
-            // a session that started matching can stop.
             else if (!this.#identityMatches(request)) this.#reject(conn, 'identity');
             else conn.pendingJoin = request;
             return;
@@ -615,9 +473,6 @@ export class GameServer {
         }
         if (conn.admitting) return;
 
-        // Before `joinPlayer`, not after: wiring seeds a field synchronously at the hoist and
-        // `@onPlayerJoin` attaches this player's own scripts inside that call, so a record arriving
-        // later seeds nothing until the session after. A host the cache already holds is not re-read.
         if (conn.identity !== null && !this.#persisted.has(playerKey(conn.playerId))) {
             conn.admitting = true;
             void this.#persisted
@@ -626,9 +481,7 @@ export class GameServer {
                 // session rather than a refused one, and the cache stays empty for this host — which
                 // is what stops the leave writing this session's initializers over the unread save.
                 .catch((error: unknown) => {
-                    this.#rt.log.warn(
-                        `reading ${conn.playerId} failed: ${error instanceof Error ? error.message : String(error)}`,
-                    );
+                    this.#rt.log.warn(`reading ${conn.playerId} failed: ${errorMessage(error)}`);
                 })
                 .then(() => {
                     conn.admitting = false;
@@ -636,9 +489,7 @@ export class GameServer {
                 })
                 .catch((error: unknown) => {
                     conn.admitting = false;
-                    this.#rt.log.warn(
-                        `admitting ${conn.playerId} failed: ${error instanceof Error ? error.message : String(error)}`,
-                    );
+                    this.#rt.log.warn(`admitting ${conn.playerId} failed: ${errorMessage(error)}`);
                 });
             return;
         }
@@ -664,13 +515,9 @@ export class GameServer {
             return;
         }
 
-        // The index is the PlayerManager's to assign, never the server's, so the client mirrors it off
-        // the wire rather than renumbering from its own arrival order.
         const player = joinPlayer(this.#rt, conn.playerId, sanitizeName(request.name));
         conn.player = player;
         conn.admission.noteTraffic(this.#rt.tick);
-
-        // The request itself is held, not a flag: only it carries the `clientSentMs` to echo.
         conn.pendingJoin = request;
 
         // Queued rather than sent, so the next broadcast prepends it ahead of the spawns the join
@@ -678,14 +525,7 @@ export class GameServer {
         this.#roster.joins.push(readPlayerSnapshot(player));
     }
 
-    /**
-     * Whether a joiner is running what this server is running.
-     *
-     * The project and its build must agree exactly. A `bundleHash` of `''` is the one asymmetry: it
-     * means the client holds no bundle yet and will fetch the one this welcome names, so it is not a
-     * disagreement — a non-empty one that differs is a client running stale code, which prediction
-     * would replay through and report as jitter.
-     */
+    /** Whether a joiner is running what this server is running; a `bundleHash` of `''` is the one legal asymmetry. */
     #identityMatches(request: JoinRequest): boolean {
         if (request.projectId !== this.#project.projectId) return false;
         if (request.projectHash !== this.#project.projectHash) return false;
@@ -704,8 +544,6 @@ export class GameServer {
             bundleHash: this.#project.bundleHash,
             bundleUrl: this.#project.bundleUrl,
             simRate: this.#rt.simRate,
-            // From the server's own config, because core resolves nothing: a client cannot assume 20,
-            // since it sizes its interpolation delay off this number.
             sendRate: this.#config.sendRate,
             bounds: this.#bounds,
             regions: this.#regions,
@@ -725,36 +563,23 @@ export class GameServer {
     }
 
     #input(conn: Connection, frame: InputFrame): void {
-        // An input frame before the join has no player to attribute to, and identity is the one thing
-        // the server never takes from a frame.
         if (!conn.joined) return;
         const result = this.#buffer.admit(conn, frame, this.#rt.tick, this.#rt.simRate);
 
-        // A sustained breach closes the connection, not a single burst: the bucket already absorbs the
-        // jitter a healthy client produces, so past this many refusals the peer is buggy or hostile
-        // either way. It closes that connection and no other.
         if (
             result.kind === 'refused' &&
             result.reason === 'rate' &&
-            conn.admission.rateRefusals >= RATE_BREACH_CLOSE
+            conn.admission.overRateBreachLimit
         ) {
             conn.transport.close();
         }
     }
 
-    /**
-     * Queues a frame's interactions for the tick pass, which is where they are dispatched.
-     *
-     * Queued rather than dispatched here: a handler reached from a socket callback would run outside
-     * any tick, so `rt.tick` would name whatever the loop last adopted and a `@onPress` that spawns
-     * would land between passes. The queue is drained every tick and the input bucket already bounds
-     * how many frames reach it, so it needs no depth of its own.
-     */
+    /** Queues a frame's interactions for the tick pass, which is where they are dispatched. */
     #interaction(conn: Connection, frame: InteractionFrame): void {
-        // Identity comes from the connection, so an interaction before the join has nobody to blame.
         if (!conn.joined) return;
         if (!conn.admission.takeToken()) {
-            if (conn.admission.rateRefusals >= RATE_BREACH_CLOSE) conn.transport.close();
+            if (conn.admission.overRateBreachLimit) conn.transport.close();
             return;
         }
         for (const event of frame.events) conn.interactions.push(event);
@@ -769,11 +594,7 @@ export class GameServer {
         });
     }
 
-    /**
-     * The per-connection close path, in order: drop it from the registry so the next broadcast skips it,
-     * run the disposers so no handler leaks, then release the player. No grace timer yet, so the release
-     * is immediate.
-     */
+    /** The per-connection close path: drop it from the registry, run the disposers, then release the player. */
     #onTransportClosed(conn: Connection): void {
         if (conn.closed) return;
         conn.closed = true;
@@ -785,20 +606,16 @@ export class GameServer {
         if (player === null) return;
         conn.player = null;
 
-        // Destroyed before the leave, or the leave handler sees a world where the avatar's owner is
-        // already null. Found by owner scan, never `player.avatar`, which throws for a spectator.
+        // Found by owner scan, never `player.avatar`, which throws for a spectator.
         for (const id of this.#rt.entities.liveIds()) {
             if (this.#rt.entities.record(id)?.ownerId === player.id) {
                 this.#rt.entityManager.destroy(id);
             }
         }
-        // Taken before the leave and read after it: `@onPlayerLeave` runs inside `leavePlayer` and
-        // may write a final value, but `PlayerManager.remove` then drops the record from the host
-        // table — so the reference has to be captured first, and the fields read second.
+        // Taken before the leave and read after it: `@onPlayerLeave` may write a final value, but
+        // `PlayerManager.remove` then drops the record from the host table.
         const record = this.#rt.hosts.get(playerKey(player.id))?.record;
         leavePlayer(this.#rt, player.id);
-        // A read that failed must not be answered by writing this session's initializers over the
-        // save it failed to read; a connection the host named nobody for was never read at all.
         if (
             record !== undefined &&
             (conn.identity === null || this.#persisted.has(record.hostId))
@@ -808,21 +625,10 @@ export class GameServer {
         this.#roster.leaves.push(player.id);
     }
 
-    /**
-     * Writes a departing player's `@serverState` through to the store — the session boundary this
-     * server owns, and the only one that exists.
-     *
-     * Fire-and-forget, with the failure routed to the engine log. The trigger is a socket that has
-     * already closed, so nothing is waiting on the answer; making the close path async to carry one
-     * would push a promise up through `transport.onClose` and `GameServer.close()`, neither of which
-     * has anywhere to put it. `PersistedState` captures synchronously for exactly this reason, so a
-     * rejoin reads the value back whether or not the write to the store has landed.
-     */
+    /** Writes a departing player's `@serverState` through to the store, fire-and-forget: the trigger is a socket that has already closed. */
     #persist(record: HostRecord): void {
         this.#persisted.save(record).catch((error: unknown) => {
-            this.#rt.log.warn(
-                `persisting ${record.hostId} failed: ${error instanceof Error ? error.message : String(error)}`,
-            );
+            this.#rt.log.warn(`persisting ${record.hostId} failed: ${errorMessage(error)}`);
         });
     }
 
@@ -832,10 +638,7 @@ export class GameServer {
         return n;
     }
 
-    /**
-     * Closes a connection that has not joined inside the deadline — the one denial needing no frame at
-     * all, measured against the pump's own clock, which is the only clock the server has.
-     */
+    /** Closes a connection that has not joined inside the deadline — the one denial needing no frame at all. */
     #sweepJoinDeadline(nowSeconds: number): void {
         if (!Number.isFinite(nowSeconds)) return;
         const deadline = JOIN_DEADLINE_MS / 1000;
@@ -872,14 +675,7 @@ function asClientEnvelope(message: unknown): ClientToServer | undefined {
     }
 }
 
-/**
- * Every field, checked — not `Partial<JoinRequest>`, which claims the narrowing without doing it:
- * a field added to the type stays absent from the check, so a frame missing it still narrows.
- *
- * A frame that fails this is malformed and ignored like any other, so a peer speaking an older
- * vocabulary is closed by the join deadline rather than told; the `version` reject can only refuse a
- * peer whose frames still parse, which is why `PROTOCOL_VERSION` moved with these fields.
- */
+/** Every field, checked — not `Partial<JoinRequest>`, which claims the narrowing without doing it. */
 function isJoinRequest(message: object): message is JoinRequest {
     const m = message as Record<string, unknown>;
     return (
@@ -892,12 +688,7 @@ function isJoinRequest(message: object): message is JoinRequest {
     );
 }
 
-/**
- * An identity field: a string this server will compare, short enough to compare.
- *
- * Length-bounded like every other peer-chosen string here. Empty is legal and meaningful — it is how
- * a client says it declares no project, or holds no bundle yet.
- */
+/** An identity field: a string this server will compare, short enough to compare. Empty is legal and meaningful. */
 function isIdentityString(value: unknown): value is string {
     return typeof value === 'string' && value.length <= MAX_IDENTITY_LENGTH;
 }
@@ -906,8 +697,6 @@ function isInteractionFrame(message: object): message is InteractionFrame {
     const m = message as Record<string, unknown>;
     if (!Number.isSafeInteger(m['tick'])) return false;
     const events = m['events'];
-    // Length-bounded before the element walk, for the same reason `actions` is: the count is
-    // peer-chosen and both this validation and the dispatch behind it are linear in it.
     if (!Array.isArray(events) || events.length > MAX_INTERACTIONS_PER_FRAME) return false;
     return events.every(isInteraction);
 }
@@ -917,16 +706,13 @@ function isInteraction(value: unknown): value is Interaction {
     const e = value as Record<string, unknown>;
     switch (e['kind']) {
         case 'press':
-            // Both names become the event name of a dispatch, so both are length-bounded. `screen`
-            // is checked with `in` rather than by value: the wire rule is absent-not-undefined, and
-            // an explicitly-`undefined` key is a frame the codec could not have produced.
+            // `screen` is checked with `in` rather than by value: the wire rule is
+            // absent-not-undefined, and an explicit `undefined` is a frame no codec could produce.
             if (!isWidgetName(e['widget'])) return false;
             return !('screen' in e) || isWidgetName(e['screen']);
         case 'click':
         case 'hover-enter':
         case 'hover-exit':
-            // Only that it could name a handle. Whether it names one this player can reach is not
-            // decidable here — the hit was resolved against a camera the server does not hold.
             return Number.isSafeInteger(e['netId']) && (e['netId'] as number) >= 0;
         default:
             return false;
@@ -945,9 +731,6 @@ function isInputFrame(message: object): message is InputFrame {
     const m = message as Record<string, unknown>;
     if (!Number.isSafeInteger(m['tick']) || !Number.isSafeInteger(m['seq'])) return false;
     const actions = m['actions'];
-    // Length-bounded before the element walk: the count is peer-chosen, and both this validation and
-    // the fold-and-dispatch behind it are linear in it, so one frame could otherwise buy unbounded
-    // work that no per-frame rate limit sees.
     if (!Array.isArray(actions) || actions.length > MAX_ACTIONS_PER_FRAME) return false;
     return actions.every(isInputAction);
 }
@@ -956,37 +739,34 @@ function isInputAction(value: unknown): value is InputAction {
     if (typeof value !== 'object' || value === null) return false;
     const a = value as Record<string, unknown>;
     const action = a['action'];
-    // Length-bounded too: the name becomes a key in core's fold and the event name of a dispatch.
     if (typeof action !== 'string' || action === '' || action.length > MAX_ACTION_NAME_LENGTH) {
         return false;
     }
     if (a['on'] !== 'press' && a['on'] !== 'release' && a['on'] !== 'hold') return false;
-    // Checked with `in` rather than by value, because an explicitly-`undefined` key is a frame the
-    // codec could not have produced and the wire rule is absent-not-undefined. Finiteness is checked
-    // here rather than left to the codec: an axis sample reaches `fillIntent` unmodified, and core
-    // writes it straight into a `Float64Array`, so one non-finite sample poisons the world for good.
+    // Checked with `in` rather than by value, because an explicit `undefined` is a frame no codec
+    // could have produced and the wire rule is absent-not-undefined.
     return !('value' in a) || Number.isFinite(a['value']);
 }
 
 /** Untrusted: the server sanitizes and may replace it. */
 function sanitizeName(name: string): string {
-    // Controls and format characters both go. A control breaks a log line; a format character — a
-    // bidi override, a zero-width joiner, the byte-order mark — renders as nothing while reordering
-    // everything after it, which is a display name's whole griefing surface.
+    // Format characters go with the controls: a bidi override or a zero-width joiner renders as
+    // nothing while reordering everything after it, which is a display name's griefing surface.
     const stripped = name
         .normalize('NFC')
         .replace(/[\p{Cc}\p{Cf}]/gu, '')
         .trim();
-    // Cut by code point, never by UTF-16 unit, which would split a surrogate pair and leave a lone
-    // half; trimmed again because the cut can land on a space.
+    // Trimmed again because the code-point cut can land on a space.
     const capped = [...stripped].slice(0, MAX_NAME_LENGTH).join('').trim();
     return capped === '' ? 'player' : capped;
 }
 
-/**
- * Math's `Bounds` is an interface, so it has no implicit index signature and is not assignable to a
- * wire message — copied field by field rather than spread.
- */
+/** The message of an unknown throwable, since a `catch` binding is not an `Error`. */
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+/** Math's `Bounds` is an interface, so it has no implicit index signature and is copied field by field rather than spread. */
 function toWireBounds(bounds: Bounds): WireBounds {
     return { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom };
 }
@@ -1000,6 +780,6 @@ function assetManifestEntry(asset: RenderManifest['assets'][number]): {
     return {
         key: asset.key,
         kind: asset.kind,
-        ...(asset.meta === undefined ? {} : { meta: asset.meta }),
+        ...defined({ meta: asset.meta }),
     };
 }

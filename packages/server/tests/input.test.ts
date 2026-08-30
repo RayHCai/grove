@@ -1,7 +1,7 @@
-// The input buffer, admission, and the phases (DESIGN §4, §8). Fixtures are compiled by the build.
+// The input buffer, admission, and the phases. Fixtures are compiled by the build.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { TopDownMovement, clearRuntime } from '@platform/core';
+import { TopDownMovement, clearRuntime, entityKey } from '@platform/core';
 import { Dasher, Recorder, Rules } from '../dist/testkit/fixtures.js';
 import {
     HORIZON_CLAMP_TICKS,
@@ -23,7 +23,7 @@ afterEach(() => {
 function onAvatar<T>(h: Harness, playerId: string, klass: new () => object, name: string): T {
     const avatar = h.server.runtime.playerManager?.byId(playerId)?.avatar;
     avatar?.addScript(klass as never);
-    const host = `entity:${avatar?.entityId as unknown as number}`;
+    const host = entityKey(avatar?.entityId as unknown as number);
     return [...h.server.runtime.instances.forHost(host)].find((i) => i.className === name)
         ?.instance as T;
 }
@@ -32,7 +32,7 @@ function recorderOn(h: Harness, playerId: string): Recorder {
     return onAvatar<Recorder>(h, playerId, Recorder as never, 'Recorder');
 }
 
-describe('§4.3 check 1 — identity comes from the connection', () => {
+describe('admission check 1 — identity comes from the connection', () => {
     it('applies a frame to conn.player regardless of what the frame claims', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const first = h.joined('a');
@@ -51,7 +51,7 @@ describe('§4.3 check 1 — identity comes from the connection', () => {
     });
 });
 
-describe('§4.3 check 2 — the tick window', () => {
+describe('admission check 2 — the tick window', () => {
     it('applies an in-window frame on exactly the tick it names', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
@@ -106,7 +106,7 @@ describe('§4.3 check 2 — the tick window', () => {
     });
 });
 
-describe('§4.3 check 3 — the rate ceiling', () => {
+describe('admission check 3 — the rate ceiling', () => {
     it('refuses the excess and leaves other connections untouched', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const noisy = h.joined('a');
@@ -128,7 +128,7 @@ describe('§4.3 check 3 — the rate ceiling', () => {
     });
 });
 
-describe('§4.4 — ackSeq is the highest contiguous RESOLVED seq', () => {
+describe('ackSeq is the highest contiguous RESOLVED seq', () => {
     it('a refusal resolves its seq, so the ack advances past it', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
@@ -258,7 +258,7 @@ describe('§4.4 — ackSeq is the highest contiguous RESOLVED seq', () => {
     });
 });
 
-describe('§4.2 — the phases, synthesized from edges alone', () => {
+describe('the phases, synthesized from edges alone', () => {
     it('fires hold every tick while held, and only the declared phase', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
@@ -363,7 +363,7 @@ describe('§4.2 — the phases, synthesized from edges alone', () => {
     });
 });
 
-describe('§4.3 — an input frame before the join is refused', () => {
+describe('an input frame before the join is refused', () => {
     it('has no player to attribute to, so it changes nothing', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.connect();
@@ -374,7 +374,7 @@ describe('§4.3 — an input frame before the join is refused', () => {
     });
 });
 
-describe('§7 — a sustained rate breach closes that connection alone', () => {
+describe('a sustained rate breach closes that connection alone', () => {
     it('closes the flooder and leaves the others applying input', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const noisy = h.joined('a');

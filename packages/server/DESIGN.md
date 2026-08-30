@@ -12,17 +12,18 @@ owed. It never opens a socket, never reads `Date.now()`, and never re-implements
 It is driven by an injected clock over a `loopbackPair`; a socket listener belongs to the composition root,
 which `accept` is shaped for.
 
-| File            | Holds                                                                                     |
-| --------------- | ----------------------------------------------------------------------------------------- |
-| `server.ts`     | `GameServer`: registry, `accept`, join/reject/resync, `pump`, `setSimRate`, close path    |
-| `connection.ts` | `Connection` record; `AdmissionState` (resolution frontier, headroom, token bucket)       |
-| `input.ts`      | `InputBuffer` (tick-keyed, `drainThrough`), the admission checks, `runInputPass`          |
-| `driver.ts`     | `Driver`: accumulator, step cap + shed, send cadence, `deliver`→step, self-driven `start` |
-| `broadcast.ts`  | the three drains → `SendSet`, wire retyping, `encodeStateValue`, per-connection fan-out   |
-| `snapshot.ts`   | `buildSnapshot` — the join-time world walk; `ancestorsFirst`                              |
-| `chunk.ts`      | `splitSnapshot` — dividing a join snapshot one frame cannot carry                         |
-| `manifest.ts`   | `ManifestStore` — the live render manifest, its join payload and its pending additions    |
-| `constants.ts`  | engine constants, in ms with per-`simRate` tick conversions                               |
+| File            | Holds                                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `server.ts`     | `GameServer`: registry, `accept`, join/reject/resync, `pump`, `setSimRate`, close path; the inbound-frame narrowing |
+| `connection.ts` | `Connection` record; `AdmissionState` (resolution frontier, headroom, token bucket)                                 |
+| `input.ts`      | `InputBuffer` (tick-keyed, `drainThrough`), the admission checks, `runInputPass`                                    |
+| `driver.ts`     | `Driver`: accumulator, step cap + shed, send cadence, `deliver`→step, self-driven `start`                           |
+| `broadcast.ts`  | the three drains → `SendSet`, wire retyping, `encodeHostField` / `encodeStateValue`, the fan-out                    |
+| `snapshot.ts`   | `buildSnapshot` — the join-time world walk; `ancestorsFirst`                                                        |
+| `chunk.ts`      | `splitSnapshot` — dividing a join snapshot one frame cannot carry                                                   |
+| `manifest.ts`   | `ManifestStore` — the live render manifest, its join payload and its pending additions                              |
+| `constants.ts`  | engine constants, in ms with per-`simRate` tick conversions                                                         |
+| `errors.ts`     | `ServerError` and its `ServerErrorCode` union — every condition this package throws on                              |
 
 ---
 
@@ -100,8 +101,9 @@ may have loaded a bundle since it joined.
 A refusal is `Reject { reason, serverProtocolVersion }` **then** `close()` — a bare close is
 indistinguishable from a drop, and `version` and `identity` must never be retried while `full` is not a
 network error at all. `maxPlayers` is deliberately absent from `Welcome`. Inbound frames are narrowed
-structurally, not cast (`join-request`, `input`, `time-sync` only), against **every** field the type
-declares rather than a `Partial` of it — so a frame missing the identity fields is malformed like any other,
+structurally in `server.ts`, not cast (`join-request`, `input`, `interaction`, `time-sync` only), against
+**every** field the type declares rather than a `Partial` of it — so a frame missing the identity fields is
+malformed like any other,
 ignored, and closed by the join deadline; the `version` reject can only refuse a peer whose frames still
 parse. A **resync** re-sends `JoinRequest` on a joined connection: it re-arms `pendingJoin` and
 allocates no second `Player`, and it spends a control token (§4.3) — a resync is the most expensive thing
@@ -113,8 +115,9 @@ A joiner holds nothing, so it needs a complete picture; core's channels are delt
 is the private rewind form. `buildSnapshot(rt, forPlayer)` therefore reads live structures: `tick`,
 entities in `ancestorsFirst` order, the roster, and `@serverState` from **three** sources — all
 game-record fields, this player's own player-record fields (player-hosted state is scoped to its owner),
-and every live entity's entity-record fields — read through the same `serializeHostField` the per-tick diff
-uses, so a joiner's baseline and the deltas that follow it cannot describe a wrapper differently.
+and every live entity's entity-record fields — read through the same `encodeHostField` the per-tick diff
+uses, so a joiner's baseline and the deltas that follow it cannot disagree about what a wrapper is or
+about which fields are unrepresentable.
 
 `ancestorsFirst` is a real topological emit, not core's slot order: parenting is a post-hoc mutation, so
 `spawn(child); spawn(parent); child.attachTo(parent)` leaves the child in the lower slot, and the wire
@@ -338,7 +341,9 @@ would go out with an empty `template`.
   on `NaN`, which would abort the send for every peer). A read, never a write.
 - **State:** marks are addressed through a table built **forward** from `GAME_KEY`, the roster and
   `liveIds()` using core's own `playerKey`/`entityKey` — a core rename becomes a compile error, and a mark
-  naming a dead host misses the table and is dropped. Values go through `encodeStateValue` (`Entity` → netId,
+  naming a dead host misses the table and is dropped. A field is read by one function, `encodeHostField`,
+  which `buildSnapshot` calls too, so neither path can keep a field the other discards. Values inside it go
+  through `encodeStateValue` (`Entity` → netId,
   `Player` → id, plain objects/arrays recursed, cycle- and depth-guarded); game/entity marks are shared,
   player marks scoped to their owner, and one bucket per host so an address is named once however many
   fields it wrote. Anything unrepresentable is **dropped and counted** (`server.droppedMarks`) rather than
@@ -447,8 +452,12 @@ verb: it parks the driver and leaves every connection open.
 
 `NodeNext` + `verbatimModuleSyntax`: explicit `.js` on relative imports, `import type` where type-only, no
 cycles. The exported barrel drives core only as values (`loadGame`, `Loop`, `Runtime`) and declares no
-script, so nothing on this package's surface carries a decorator. Engine constants live in `constants.ts`,
-grouped by unit, never on the creator surface:
+script, so nothing on this package's surface carries a decorator.
+
+Everything this package throws is a `ServerError` carrying a `ServerErrorCode`, so a host branches on the
+code rather than on message text: `invalid-config` and `invalid-argument` are the caller's to fix,
+`no-pass-table` is a wiring fault, `no-timer` and `server-closed` are lifecycle misuse. Engine constants
+live in `constants.ts`, grouped by unit, never on the creator surface:
 
 | Constant                      | Value                 | Bounds                                                 |
 | ----------------------------- | --------------------- | ------------------------------------------------------ |

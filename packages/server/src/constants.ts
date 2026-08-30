@@ -1,9 +1,6 @@
-// Engine constants, not creator knobs. Network durations are stated in milliseconds and converted
-// per simRate, because a tick is 16.7 ms at 60 Hz and 50 ms at 20 Hz — a tick count sized for one
-// rate is the wrong wall-clock window at the other, in the checks that decide whether input counts.
-
 import { MAX_REWIND_MS } from '@platform/core';
 import { MAX_FRAME_BYTES } from '@platform/transport';
+import { serverError } from './errors.js';
 
 /** Both sides of the tick window: a frame older than the rewind limit is unusable, and the client's own lead is capped at the same span. */
 export const INPUT_WINDOW_MS = MAX_REWIND_MS;
@@ -59,24 +56,10 @@ export const MAX_UNJOINED_CONNECTIONS = 32;
 /** Ticks past the horizon that are clamped rather than refused — a healthy client at its deliberate lead, one tick of jitter early. */
 export const HORIZON_CLAMP_TICKS = 2;
 
-/**
- * Structural ops one send may carry; the rest are held for the next, in order.
- *
- * The one bound on what the server PRODUCES. Nothing else limits a journal, so a script spawning in a
- * loop mints an envelope past transport's frame cap — which every peer refuses before parsing, and a
- * refused frame makes the client resync, which asks for a full snapshot and is bigger. Sized so a full
- * budget of spawns stays an order of magnitude under `MAX_FRAME_BYTES`, and far above any legitimate
- * interval: a wave spawner passes, an unbounded loop is spread over the sends it actually needs.
- */
+/** Structural ops one send may carry, the rest held for the next: the one bound on what the server produces. */
 export const MAX_STRUCTURAL_OPS_PER_SEND = 2_048;
 
-/**
- * Bytes a server-minted frame targets, under transport's own cap.
- *
- * Derived from `MAX_FRAME_BYTES` rather than chosen, so the two cannot drift. The headroom covers the
- * envelope around a chunk's payload — transport's cap stays where it is, and a producer approaching it
- * chunks rather than asking for a bigger frame.
- */
+/** Bytes a server-minted frame targets — derived from transport's own cap rather than chosen, so the two cannot drift. */
 export const MAX_FRAME_PAYLOAD_BYTES = Math.floor(MAX_FRAME_BYTES * 0.75);
 
 function ticksFor(ms: number, simRate: number): number {
@@ -93,12 +76,7 @@ export function futureHorizonTicks(simRate: number): number {
     return ticksFor(INPUT_WINDOW_MS, simRate);
 }
 
-/**
- * Missing seqs one arrival may date, and how far above what has arrived a `seq` may reach.
- *
- * The window rather than a round number: seq and tick advance together, so a seq further ahead than the
- * window is wide names a tick that can never be applied, and dating a gap costs one map entry per seq.
- */
+/** Missing seqs one arrival may date: the window rather than a round number, since dating a gap costs one map entry per seq. */
 export function maxSeqGap(simRate: number): number {
     return pastGraceTicks(simRate) + futureHorizonTicks(simRate) + HORIZON_CLAMP_TICKS;
 }
@@ -124,14 +102,9 @@ export function ticksPerSend(simRate: number, sendRate: number): number {
     return Math.max(1, Math.round(simRate / sendRate));
 }
 
-/**
- * Throws unless `rate` is a positive finite number.
- *
- * `resolveConfig` fills defaults without validating, and a `simRate` of 0 makes `dt` infinite: the
- * accumulator never reaches it, so the server steps zero times forever with nothing reporting it.
- */
+/** Throws unless `rate` is a positive finite number — `resolveConfig` fills defaults without validating. */
 export function assertRate(name: string, rate: number): void {
     if (!Number.isFinite(rate) || rate <= 0) {
-        throw new RangeError(`${name} must be a positive finite number, received ${rate}`);
+        serverError('invalid-config', `${name} must be a positive finite number, received ${rate}`);
     }
 }

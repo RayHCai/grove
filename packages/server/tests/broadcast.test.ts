@@ -1,8 +1,8 @@
-// The drain and the fan-out (DESIGN §5, §8). Fixtures are compiled by the build.
+// The drain and the fan-out. Fixtures are compiled by the build.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SingleStructuralOp } from '@platform/core';
-import { GAME_KEY, clearRuntime } from '@platform/core';
+import { GAME_KEY, clearRuntime, entityKey } from '@platform/core';
 import { scriptId, templateId } from '@platform/project';
 import type { WireStructuralOp } from '@platform/protocol';
 import { Health, Rules, Squad, Standings, Wallet } from '../dist/testkit/fixtures.js';
@@ -18,7 +18,7 @@ function ops(peer: Peer): WireStructuralOp[] {
     return peer.states.flatMap((s) => s.structural);
 }
 
-describe('§5.2 — every envelope is tick-stamped, and the pair is joined by tick', () => {
+describe('every envelope is tick-stamped, and the pair is joined by tick', () => {
     it('carries the step tick, the per-connection ack, and a matching transform envelope', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
@@ -29,7 +29,7 @@ describe('§5.2 — every envelope is tick-stamped, and the pair is joined by ti
         expect(state?.tick).toBeGreaterThan(0);
         expect(state?.ackSeq).toBe(-1);
         // The join key is an EQUALITY: the client holds a transform envelope until the state
-        // envelope for its tick has been applied (protocol §3.3.2).
+        // envelope for its tick has been applied.
         const paired = peer.transforms.find((t) => t.tick === state?.tick);
         expect(paired).toBeDefined();
     });
@@ -40,7 +40,7 @@ describe('§5.2 — every envelope is tick-stamped, and the pair is joined by ti
         h.settle([peer]);
         h.pumpTicks(8);
 
-        // A wire rule rather than an optimization: §3.3.2 holds a transform envelope until the
+        // A wire rule rather than an optimization: the client holds a transform envelope until the
         // state envelope for its tick has been applied, so suppressing the empty ones would leave
         // every transform envelope in a quiet tick with no counterpart and nothing moving.
         const quiet = peer.states.filter((s) => s.structural.length === 0 && s.state.length === 0);
@@ -60,7 +60,7 @@ describe('§5.2 — every envelope is tick-stamped, and the pair is joined by ti
     });
 });
 
-describe('§5.3 — the drain runs once and the broadcast fans it out', () => {
+describe('the drain runs once and the broadcast fans it out', () => {
     it('a single spawn appears in EVERY connection’s envelope', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const one = h.joined('a');
@@ -249,7 +249,7 @@ describe('§5.3 — the drain runs once and the broadcast fans it out', () => {
     });
 });
 
-describe('§5.3 — state is addressed by host and scoped per player', () => {
+describe('state is addressed by host and scoped per player', () => {
     it('sends game state to everyone and player state only to its owner', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const one = h.joined('a');
@@ -283,7 +283,7 @@ describe('§5.3 — state is addressed by host and scoped per player', () => {
         h.pumpTicks(6);
         peer.clear();
 
-        const host = `entity:${crate.entityId as unknown as number}`;
+        const host = entityKey(crate.entityId as unknown as number);
         const health = [...h.server.runtime.instances.forHost(host)][0]?.instance as Health;
         health.health = 1;
         h.pumpTicks(6);
@@ -358,7 +358,7 @@ describe('§5.3 — state is addressed by host and scoped per player', () => {
     });
 });
 
-describe('§5.3 — wrapper state crosses as its wire form, not as a class', () => {
+describe('wrapper state crosses as its wire form, not as a class', () => {
     it('replicates a scoreboard write, and drops nothing doing it', () => {
         const h = harness({ config: { gameScripts: [Rules, Standings] } });
         const peer = h.joined('a');
@@ -441,7 +441,7 @@ describe('§5.3 — wrapper state crosses as its wire form, not as a class', () 
     });
 });
 
-describe('§5.3 — roster ops the journal has no arm for', () => {
+describe('roster ops the journal has no arm for', () => {
     it('tells existing peers about a join and a leave, in that order', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const first = h.joined('a');
@@ -468,7 +468,7 @@ describe('§5.3 — roster ops the journal has no arm for', () => {
     });
 });
 
-describe('§5.4 — the fan-out', () => {
+describe('the fan-out', () => {
     it('encodes the shared transform envelope once and sendEncoded per connection', () => {
         const codec = new CountingCodec();
         const h = harness({ config: { gameScripts: [Rules] }, codec });
@@ -477,8 +477,8 @@ describe('§5.4 — the fan-out', () => {
 
         const before = codec.encodes;
         h.pumpTicks(3); // exactly one send-tick at 60/20
-        // One encode for the whole broadcast, whatever the connection count — the shrinking residue
-        // §5.4 warns encode-once is, which after the envelope split is the transform envelope.
+        // One encode for the whole broadcast, whatever the connection count: after the envelope
+        // split the transform envelope is the whole of the shared subset.
         expect(codec.encodes - before).toBe(1);
     });
 
@@ -502,7 +502,7 @@ describe('§5.4 — the fan-out', () => {
     });
 });
 
-describe('§5.3 — a template instantiation crosses as one group', () => {
+describe('a template instantiation crosses as one group', () => {
     const TURRET = [
         {
             id: templateId('turret'),
@@ -592,7 +592,7 @@ describe('§5.3 — a template instantiation crosses as one group', () => {
     });
 });
 
-describe('§5.3 — the translation is exhaustive', () => {
+describe('the translation is exhaustive', () => {
     it('refuses a journal arm core does not declare', () => {
         // Half of the guarantee. The other half is the `never` default in `toWireSingle`:
         // `noImplicitReturns` is off, so an arm added to core's journal and not handled there
@@ -615,7 +615,7 @@ describe('§5.3 — the translation is exhaustive', () => {
     });
 });
 
-describe('§3.3 — a joiner is not told twice about what its snapshot already holds', () => {
+describe('a joiner is not told twice about what its snapshot already holds', () => {
     it('receives no structural op that predates its own snapshot', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const first = h.joined('a');
