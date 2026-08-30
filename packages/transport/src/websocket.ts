@@ -1,28 +1,11 @@
-// A Transport over one WebSocket, with two doors in because the two ends acquire their socket
-// differently: a client DIALS (`connectWebSocket`, resolving only once the socket is OPEN, so a
-// caller never holds an unconnected Transport) and a server is HANDED one its listener already
-// accepted (`webSocketTransport`). The listener itself stays outside this package — it needs a socket
-// library, and a leaf with no dependencies cannot have one.
-//
-// The socket is typed structurally rather than through `lib.dom` or `@types/ws`, because `src/`
-// declares neither; the three implementations that matter — a browser's global `WebSocket`, Node's,
-// and `ws` — agree on every member `WebSocketLike` names.
-//
-// Inbound is NOT pumped: the event loop delivers, so there is no `deliver()` and no `latency`. The
-// queue survives anyway, because registration still races arrival, and one FIFO carrying frames and
-// the close marker together is what keeps `onClose` behind every frame ahead of it however the two
-// handlers were registered.
-//
-// The seam has no error channel, and three failures a socket produces that loopback cannot need one:
-// a hostile frame that fails `decode`, a peer that stopped draining, and silence. Each arrives on a
-// socket event where a throw would land somewhere nothing can catch it, so each is reported through
-// `onError` and the connection closes behind it.
+// Two doors because a client dials and a server is handed a socket its listener already accepted;
+// the dial fires once and never retries, so reconnection belongs to whoever owns the session.
 
 import type { Codec } from './codec.js';
 import { MAX_FRAME_BYTES, jsonCodec } from './codec.js';
 import type { TransportErrorCode } from './errors.js';
 import { TransportError, transportError } from './errors.js';
-import { FrameInbox, validateRetentionCap } from './inbox.js';
+import { FrameInbox, retentionOverflowMessage, validateRetentionCap } from './inbox.js';
 import { DEFAULT_MAX_RETAINED_BYTES } from './transport.js';
 import type {
     ConnectOptions,
@@ -129,12 +112,8 @@ const DEFAULT_MAX_BUFFERED_BYTES = MAX_FRAME_BYTES;
 /**
  * Milliseconds between silence checks, and how many consecutive silent ones close the connection.
  *
- * Nothing is SENT: protocol's nine messages are the whole wire, and a browser cannot send a
- * WebSocket ping control frame anyway. Inbound traffic is what liveness means, and both directions
- * carry it unprompted — the server sends `state` every send-tick even when both its arrays are
- * empty, the client a `time-sync` every 2 s — so an empty 5 s window is already abnormal. Three of
- * them is 10–15 s (a frame may land just before a boundary), well past the client's own 1 s stall
- * detection, so a stall is reported and resynced long before the connection is killed.
+ * Three windows is 10–15 s, well past the client's own 1 s stall detection, so a stall is reported
+ * and resynced long before the connection is killed.
  */
 const HEARTBEAT_INTERVAL_MS = 5000;
 const MAX_MISSED_HEARTBEATS = 3;
@@ -208,7 +187,10 @@ class WebSocketEnd implements Transport {
     readonly #opts: Resolved;
     readonly #inbox: FrameInbox;
 
-    #closed = false;
+    /** `'closing'` is "we asked" and `'closed'` is "it is over"; one flag for both double-reports. */
+    #state: 'open' | 'closing' | 'closed' = 'open';
+    /** One cause per connection: an error event and the abnormal close behind it are one failure. */
+    #causeReported = false;
     /** Reported once rather than per frame: the frames were dropped, so repeating it is not news. */
     #overflowReported = false;
 
@@ -231,7 +213,12 @@ class WebSocketEnd implements Transport {
                 opts.report?.(
                     new TransportError(
                         'retention-overflow',
-                        `Retained ${retained} bytes for a handler that never registered, and this frame's ${bytes} would pass the ${opts.maxRetainedBytes}-byte cap. Frames are retained until onMessage registers, so a join sequence that throws before wiring it grows this inbox for the life of the connection. Register onMessage as soon as the transport exists, or raise maxRetainedBytes.`,
+                        retentionOverflowMessage(
+                            retained,
+                            bytes,
+                            opts.maxRetainedBytes,
+                            'life of the connection. Register onMessage as soon as the transport exists',
+                        ),
                     ),
                 );
             },
@@ -241,7 +228,7 @@ class WebSocketEnd implements Transport {
                 // closes rather than throwing into a socket event nothing can catch. An error that is
                 // not a `TransportError` is our defect and propagates.
                 if (!(error instanceof TransportError)) throw error;
-                opts.report?.(error);
+                this.#reportCause(error);
                 this.close();
             },
         });
@@ -262,7 +249,7 @@ class WebSocketEnd implements Transport {
 
     sendEncoded(frame: EncodedFrame): void {
         // A peer that dropped mid-fan-out must not abort the fan-out over the live ones.
-        if (this.#closed || this.#socket.readyState !== OPEN) return;
+        if (this.#state !== 'open' || this.#socket.readyState !== OPEN) return;
 
         if (this.#socket.bufferedAmount > this.#opts.maxBufferedBytes) {
             this.#fail(
@@ -286,8 +273,8 @@ class WebSocketEnd implements Transport {
     }
 
     close(): void {
-        if (this.#closed) return;
-        this.#closed = true;
+        if (this.#state !== 'open') return;
+        this.#state = 'closing';
         this.#stopHeartbeat();
         // No marker is queued here: the socket's own close event is the single source of one. That
         // event always arrives, because this end is only ever built around an OPEN socket it is
@@ -315,7 +302,7 @@ class WebSocketEnd implements Transport {
     #receive(frame: Frame): void {
         // The peer does not learn of a local close until its own socket reports one, and in that
         // window its frames would otherwise queue into an inbox nothing will ever drain.
-        if (this.#closed) return;
+        if (this.#state !== 'open') return;
 
         this.#inbox.enqueue(frame);
         // The event loop is the pump here, so a drain follows every arrival — which is why a backlog
@@ -327,8 +314,8 @@ class WebSocketEnd implements Transport {
         const code = closeCodeOf(event);
         // Reported only when this end did not ask: after a local `close()` an implementation may
         // still report 1006, and blaming the peer for our own teardown would be a false positive.
-        if (!this.#closed && code !== undefined && code !== NORMAL_CLOSURE && code !== GOING_AWAY) {
-            this.#opts.report?.(
+        if (code !== undefined && code !== NORMAL_CLOSURE && code !== GOING_AWAY) {
+            this.#reportCause(
                 new TransportError(
                     'socket-error',
                     `The connection closed with code ${code}, which neither end asked for — 1006 is a link that dropped without a close frame. onClose alone cannot tell this from a clean quit.`,
@@ -336,7 +323,7 @@ class WebSocketEnd implements Transport {
             );
         }
 
-        this.#closed = true;
+        this.#state = 'closed';
         this.#stopHeartbeat();
         // Rides the FIFO behind every frame already queued, so a handler registered later still sees
         // them in order and learns of the close last.
@@ -347,13 +334,24 @@ class WebSocketEnd implements Transport {
     #onSocketError(): void {
         // The close event follows an error on every implementation, and it is what fires `onClose`;
         // this only adds the cause. Most implementations put no message on the event.
-        if (this.#closed) return;
-        this.#opts.report?.(
+        this.#reportCause(
             new TransportError(
                 'socket-error',
                 'The WebSocket reported an error; the close that follows it is not a clean one.',
             ),
         );
+    }
+
+    /**
+     * Reports the cause of one connection's death, at most once.
+     *
+     * The ordinary browser failure is an `error` event and then a 1006 close, two views of one
+     * fault; and after a local `close()` nothing that follows is a fault at all.
+     */
+    #reportCause(error: TransportError): void {
+        if (this.#causeReported || this.#state !== 'open') return;
+        this.#causeReported = true;
+        this.#opts.report?.(error);
     }
 
     /** One silence window. Counts inbound frames, sends nothing — the wire has no ping to send. */
@@ -382,7 +380,7 @@ class WebSocketEnd implements Transport {
 
     /** Reports a coded cause the seam cannot carry, then closes. Ordered so the cause outlives it. */
     #fail(code: TransportErrorCode, message: string): void {
-        this.#opts.report?.(new TransportError(code, message));
+        this.#reportCause(new TransportError(code, message));
         this.close();
     }
 }
@@ -408,7 +406,9 @@ export function connectWebSocket(url: string, opts?: ConnectWebSocketOptions): P
             refuse(
                 new TransportError(
                     'connect-failed',
-                    `Could not create a socket for ${url}: ${(cause as Error).message}`,
+                    `Could not create a socket for ${url}: ${
+                        cause instanceof Error ? cause.message : String(cause)
+                    }`,
                     { cause },
                 ),
             );

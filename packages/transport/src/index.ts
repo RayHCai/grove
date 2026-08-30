@@ -2,8 +2,6 @@
 // drags a socket into the module graph; the conformance suite is `./testing` for the same reason
 // applied to vitest.
 
-export const PACKAGE_NAME = '@platform/transport';
-
 export type {
     Connect,
     ConnectOptions,

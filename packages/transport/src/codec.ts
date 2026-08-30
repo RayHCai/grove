@@ -1,10 +1,3 @@
-// Validate-then-encode in one direction, reject-then-decode in the other.
-//
-// A bare `JSON.parse(JSON.stringify(m))` is not enough: stringify DROPS `undefined`, functions and
-// symbols and turns `NaN`/`Infinity` into `null`, silently, so a frame carrying `{ t: NaN }` would
-// arrive changed while a binary codec carried it faithfully — the fidelity device would become a
-// source of the divergence it exists to prevent.
-//
 // Validation lives in the codec rather than the transport because the admissible set is the codec's
 // own, so swapping the injected codec swaps the validator with it.
 
@@ -26,13 +19,8 @@ export interface Codec {
 }
 
 /**
- * Nesting depth beyond which a frame is refused, on both directions.
- *
- * The two directions have different natural limits and the gap is exploitable: `JSON.parse` handles
- * depth in the hundreds of thousands while any walk over its result is bounded by heap, so a frame
- * nesting a few thousand deep is well-formed, a few tens of KB, under any byte cap, and used to be
- * enough to exhaust the stack. 128 is far above any envelope — a state diff is entity → component →
- * field — and far below where either walk strains.
+ * Nesting depth refused on both directions, because the gap between them is exploitable:
+ * `JSON.parse` handles hundreds of thousands of levels while a walk over its result is heap-bounded.
  */
 const MAX_DEPTH = 128;
 
@@ -71,16 +59,8 @@ export const RESERVED_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * How many values one message may expand to.
- *
- * MAX_DEPTH bounds the ancestor chain, not the work: the copy is made per REFERENCE, so a graph
- * sharing one object between two fields at each level doubles per level, and 23 objects nested 22
- * deep expand to a 75 MB frame while 27 exhaust a 4 GB heap — all of it far inside the depth cap and
- * far under any byte cap, because the INPUT is tiny. Counting emitted values is what turns that from
- * an out-of-memory kill into a named rejection.
- *
- * A million is roughly a megabyte of frame and two orders of magnitude above the largest payload the
- * suite builds, so it bounds the blowup without tripping on real traffic.
+ * How many values one message may expand to, since MAX_DEPTH bounds the ancestor chain and not the
+ * work: 23 objects sharing a child at each of 22 levels expand to a 75 MB frame from a tiny input.
  */
 const MAX_NODES = 1_000_000;
 
@@ -416,7 +396,7 @@ export const jsonCodec: Codec = {
             // debugging a mismatched peer needs it.
             transportError(
                 'malformed-frame',
-                `Frame is not valid JSON: ${(cause as Error).message}`,
+                `Frame is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`,
                 { cause },
             );
         }
