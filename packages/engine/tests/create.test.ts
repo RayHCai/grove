@@ -8,8 +8,9 @@ import { describe, expect, it } from 'vitest';
 import { ClientScript, ServerScript } from '@platform/core';
 import { ManualFrameSource, ScriptedInputDevice } from '@platform/client';
 import type { GameClient } from '@platform/client';
+import { defined } from '@platform/math';
 import { PROJECT_FORMAT_VERSION, assetId, scriptId, templateId } from '@platform/project';
-import { createNullRenderer } from '@platform/renderer/null';
+import { createReadyNullRenderer } from '@platform/renderer/null';
 import { ScriptRegistry } from '@platform/scripting';
 import type { ScriptEntry } from '@platform/scripting';
 import { loopbackPair } from '@platform/transport';
@@ -129,14 +130,16 @@ async function session(
     const shared = registry();
 
     constructed.length = 0;
-    const authority = createServer(server, pair.server, {
+    const authority = createServer(server, {
         scripts: shared,
         deliver: () => pair.deliver(),
     });
     const booted = constructed.splice(0);
+    // Taken after construction, as every host does: the world has to exist before a joiner is
+    // answered with a snapshot of it.
+    authority.accept(pair.server);
 
-    const renderer = createNullRenderer();
-    await renderer.init({ container: {} as never, design: { width: 800, height: 600 } });
+    const renderer = await createReadyNullRenderer({ design: { width: 800, height: 600 } });
 
     const frames = new ManualFrameSource();
     let now = 0;
@@ -150,7 +153,7 @@ async function session(
         project: client,
         scripts: shared,
         pump: () => pair.deliver(),
-        ...(opts.predict === undefined ? {} : { predict: opts.predict }),
+        ...defined({ predict: opts.predict }),
     });
     viewer.start();
 

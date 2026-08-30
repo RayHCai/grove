@@ -1,16 +1,14 @@
-// createServer: an authored project and a pipe in, a booted authority out.
-//
 // The narrowings are @platform/project's and the boot is @platform/server's, so what lives here is
-// the ORDER — validate, resolve the attached classes, build the world, and only then accept — since
-// a connection admitted ahead of the world joins a game that is not there yet.
+// the ORDER — validate, resolve the attached classes, then build the world — since the returned
+// server must not be able to accept a connection into a world that is not there yet.
 
 import type { KVStore } from '@platform/core';
+import { defined } from '@platform/math';
 import type { ProjectManifest, ScriptId, ScriptResolver } from '@platform/project';
-import { toGameManifest, toRenderManifest, validate } from '@platform/project';
+import { toGameManifest, toRenderManifest, toServerSettings, validate } from '@platform/project';
 import type { ScriptRegistry } from '@platform/scripting';
 import { GameServer } from '@platform/server';
 import type { GameServerOptions } from '@platform/server';
-import type { Transport } from '@platform/transport';
 import { projectClaim } from './identity.js';
 
 /** Where a joining client fetches this build's script chunk, and the hash the bytes must have. */
@@ -31,31 +29,28 @@ export interface CreateServerOptions extends Omit<GameServerOptions, 'config'> {
 }
 
 /**
- * Boots the authority for `project` and accepts `transport` as its first connection.
+ * Boots the authority for `project`, connected to nothing and running no clock.
  *
- * The transport is optional because a host with a listener has no connection yet when it builds the
- * server: it passes none and calls `accept` per socket. It does not start a clock either — `pump`
- * and `start` are the host's, and which one it calls decides whether the join deadline is swept.
+ * The caller calls `accept` per socket — passing the player id that makes `@serverState` survive a
+ * rejoin — and drives the world with `pump` or `start`, whichever it wants; only `pump` sweeps the
+ * join deadline.
  */
-export function createServer(
-    project: ProjectManifest,
-    transport?: Transport,
-    opts: CreateServerOptions = {},
-): GameServer {
+export function createServer(project: ProjectManifest, opts: CreateServerOptions = {}): GameServer {
     const { scripts, bundle, kv, ...forwarded } = opts;
     // A type is a compile-time claim and a saved project is bytes someone wrote, so this checks
     // rather than casts — and it is why the validator is not part of what a creator imports.
     const manifest = validate(project);
     const resolve: ScriptResolver = (id) => scripts?.resolve(id);
     const world = toGameManifest(manifest, { role: 'server', scripts: resolve });
-    const settings = manifest.settings;
+    const wire = toServerSettings(manifest);
 
-    const server = new GameServer({
+    // The constructor builds the world and runs every Game start handler to its first await, so the
+    // server this returns is already safe for the caller to accept a connection into.
+    return new GameServer({
         config: {
             simRate: world.simRate,
-            // Not on the game manifest: no reader in core has one, so both come off the settings.
-            sendRate: settings.sendRate,
-            maxPlayers: settings.maxPlayers,
+            sendRate: wire.sendRate,
+            maxPlayers: wire.maxPlayers,
             bounds: world.bounds,
             regions: world.regions,
             visuals: toRenderManifest(manifest),
@@ -67,19 +62,14 @@ export function createServer(
             // Whole attachments, not bare classes: a Game script has an inspector too, and dropping
             // its props here would leave one configured field silently at its initializer.
             gameScripts: world.gameScripts,
-            ...(scripts === undefined ? {} : { scripts }),
+            ...defined({ scripts }),
             project: {
                 ...projectClaim(manifest),
                 bundleHash: bundle?.hash ?? '',
                 bundleUrl: bundle?.url ?? '',
             },
-            ...(kv === undefined ? {} : { kv }),
+            ...defined({ kv }),
         },
         ...forwarded,
     });
-
-    // After the constructor, which builds the world and runs every Game start handler to its first
-    // await: a peer accepted before that would be joining a world still being assembled.
-    if (transport !== undefined) server.accept(transport);
-    return server;
 }
