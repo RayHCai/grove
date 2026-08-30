@@ -116,20 +116,3 @@ export function useRenderer(options: UseRendererOptions): UseRendererResult {
         error,
     };
 }
-
-/** Reads `phase`/`error` into a single line for the HUD. */
-export function describePhase(phase: RendererPhase, error: Error | null): string {
-    switch (phase) {
-        case 'idle':
-            return 'waiting for the container';
-        case 'initializing':
-            return 'initializing the renderer…';
-        case 'ready':
-            return 'ready';
-        case 'failed':
-            return `failed: ${error?.message ?? 'unknown error'}`;
-    }
-}
-
-/** Convenience re-export so consumers never need a second import for the callback type. */
-export type { IRenderer };

@@ -8,7 +8,7 @@
 import type { EmittingInputDevice, RawInputEvent } from '@platform/client';
 import { createDomInputDevice } from '@platform/client/browser';
 import type { IRenderer } from '@platform/renderer';
-import { CODE_AIM_Y, encodeAim } from './shared';
+import { CODE_AIM_Y, encodeAim } from './scripts/globals';
 
 export interface StageInputOptions {
     /** The element the canvas fills; pointer coordinates are taken relative to its box. */

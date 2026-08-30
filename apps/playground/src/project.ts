@@ -1,14 +1,15 @@
 // The authored project: one file describing the whole game, as an editor would save it.
 //
-// This is the input BOTH composition roots take. `createServer` validates it, narrows it to the
-// world a runtime is built from and to the manifest a renderer draws, and derives the identity the
-// handshake compares; `createClient` derives the same identity from the same object, which is what
-// makes a mismatch a refused join rather than two ends quietly running different games.
+// This is the input BOTH ends take. `GameInstance` validates it, narrows it to the world a runtime
+// is built from and to the manifest a renderer draws, and derives the identity the handshake
+// compares; `createClient` derives the same identity from the same object, which is what makes a
+// mismatch a refused join rather than two ends quietly running different games.
 //
-// It holds ids and no classes. A `ScriptId` here is resolved through the `ScriptRegistry` each half
-// passes separately — the server's holds every class, the browser's only what may run there — so
-// this one file is safe in both bundles. It is compiled by both projects for that reason, which is
-// also why it carries no decorator: only `tsc` lowers those, and Vite reads this from source.
+// It holds ids and no classes, and it imports nothing from `scripts/` but that file's globals. A
+// `ScriptId` here is resolved through the `ScriptRegistry` each half passes separately — the
+// server's holds every class, the browser's only what may run there — so this one file is safe in
+// both bundles. It is compiled by both projects for that reason, which is also why it carries no
+// decorator: only `tsc` lowers those, and Vite reads this from source.
 
 import { assetId, scriptId, templateId } from '@platform/project';
 import { PROJECT_FORMAT_VERSION } from '@platform/project';
@@ -30,8 +31,6 @@ import {
     MARKER_URL,
     MAX_PLAYERS,
     PLAYER_TINTS,
-    PROJECT_HASH,
-    PROJECT_ID,
     REGION_BONUS,
     REGION_COMPOST,
     RESULTS_SECONDS,
@@ -45,7 +44,20 @@ import {
     SCRIPT_RUNNER,
     WORLD,
     markerTemplate,
-} from './shared.js';
+} from './scripts/globals.js';
+
+/** What this project IS, on the handshake. Both composition roots derive their claim from these. */
+export const PROJECT_ID = 'grove-playground';
+
+/**
+ * The build of this file and everything it names, bumped by hand when it changes incompatibly.
+ *
+ * A tab left open across a `dev` restart holds the old bundle, and the constants in
+ * `scripts/globals.ts` — action names, templates, script ids, tints, the world extent, the match
+ * rules — are what both ends agree on. A mismatch used to show up as leaves drawn in the wrong
+ * place; now the server refuses the join and the tab says to reload.
+ */
+export const PROJECT_HASH = '4';
 
 /** Ticks per simulated second. */
 export const SIM_RATE = 60;
@@ -159,27 +171,34 @@ export const PROJECT: ProjectManifest = {
         { id: assetId(MARKER_ASSET), kind: 'texture', url: MARKER_URL, meta: MARKER_PIXELS },
     ],
 
+    // One entry per source module under `scripts/`, which is one script per file. `path` and
+    // `export` are how a loader reaches the class without parsing the module; `location` and `host`
+    // are restated from the base class and the type parameter it was written with, so `validate`
+    // can refuse an illegal attachment from this file alone.
     scriptModules: [
         {
-            path: 'src/server/game.ts',
+            path: 'src/scripts/game/rules.ts',
             scripts: [
                 { id: scriptId(SCRIPT_RULES), export: 'Rules', location: 'server', host: 'game' },
-                {
-                    id: scriptId(SCRIPT_HARVESTER),
-                    export: 'Harvester',
-                    location: 'server',
-                    host: 'entity',
-                },
-                { id: scriptId(SCRIPT_LEAF), export: 'Leaf', location: 'server', host: 'entity' },
-                // Declared but attached by nobody's list: a player is not a tray row, so these two
-                // are attached at the join. Naming them here is what makes the file the whole
-                // inventory of what this project can run.
+            ],
+        },
+        // Player-hosted, and named in no attachment list below: a player is not a tray row, so
+        // `Rules` attaches these two at the join. Declaring them is what makes this file the whole
+        // inventory of what the project can run.
+        {
+            path: 'src/scripts/players/clicker.ts',
+            scripts: [
                 {
                     id: scriptId(SCRIPT_CLICKER),
                     export: 'Clicker',
                     location: 'server',
                     host: 'player',
                 },
+            ],
+        },
+        {
+            path: 'src/scripts/players/profile.ts',
+            scripts: [
                 {
                     id: scriptId(SCRIPT_PROFILE),
                     export: 'Profile',
@@ -189,7 +208,7 @@ export const PROJECT: ProjectManifest = {
             ],
         },
         {
-            path: 'src/synced/runner.ts',
+            path: 'src/scripts/templates/avatar/runner.ts',
             scripts: [
                 {
                     id: scriptId(SCRIPT_RUNNER),
@@ -200,7 +219,24 @@ export const PROJECT: ProjectManifest = {
             ],
         },
         {
-            path: 'src/screens/lobby.ts',
+            path: 'src/scripts/templates/avatar/harvester.ts',
+            scripts: [
+                {
+                    id: scriptId(SCRIPT_HARVESTER),
+                    export: 'Harvester',
+                    location: 'server',
+                    host: 'entity',
+                },
+            ],
+        },
+        {
+            path: 'src/scripts/templates/leaf/leaf.ts',
+            scripts: [
+                { id: scriptId(SCRIPT_LEAF), export: 'Leaf', location: 'server', host: 'entity' },
+            ],
+        },
+        {
+            path: 'src/scripts/screens/lobby.ts',
             scripts: [
                 {
                     id: scriptId(SCRIPT_LOBBY),

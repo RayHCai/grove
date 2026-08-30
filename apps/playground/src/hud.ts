@@ -15,20 +15,22 @@ import { GAME_KEY, hud, playerKey, withRuntime } from '@platform/core';
 import type { IRenderer, NodeId } from '@platform/renderer';
 // The LOWERED copy: `LobbyScreen` carries decorators, and Vite's transform would hand them to the
 // browser verbatim. `tsc -p tsconfig.server.json` emits this, which is why `dev` runs it first.
-import { LobbyScreen } from '../dist/screens/lobby.js';
-import type { MatchPhase } from './shared';
+import { LobbyScreen } from '../dist/scripts/screens/lobby.js';
+import type { MatchPhase } from './scripts/globals';
 import {
     BOARD_SIZE,
     ROUND_SECONDS,
     SCREEN_LOBBY,
     SCREEN_RESULTS,
     STATE_BEST,
+    STATE_BOARD,
     STATE_LIFETIME,
     STATE_PHASE,
     STATE_PLAYER_COUNT,
     STATE_READY,
     STATE_READY_COUNT,
     STATE_ROUND,
+    STATE_SCORES,
     STATE_SECONDS_LEFT,
     STATE_SLOT,
     STATE_WASTED,
@@ -43,11 +45,7 @@ import {
     WIDGET_WASTED,
     WIDGET_WINNER,
     rankWidget,
-} from './shared';
-
-/** The fields the game host keeps its two wrappers under, as the rules declare them. */
-const FIELD_SCORES = 'scores';
-const FIELD_BOARD = 'board';
+} from './scripts/globals';
 
 /** Where the in-canvas clock sits on the UI surface, and how it is drawn. */
 const CLOCK_OFFSET_Y = 24;
@@ -186,8 +184,8 @@ export class HudBridge {
     #read(rt: Runtime): MatchState {
         const me = this.#client.localPlayer;
         const mine = me === null ? undefined : playerKey(me.id);
-        const scores = field<Scoreboard>(rt, GAME_KEY, FIELD_SCORES);
-        const board = field<Leaderboard>(rt, GAME_KEY, FIELD_BOARD);
+        const scores = field<Scoreboard>(rt, GAME_KEY, STATE_SCORES);
+        const board = field<Leaderboard>(rt, GAME_KEY, STATE_BOARD);
 
         return {
             phase: field<MatchPhase>(rt, GAME_KEY, STATE_PHASE) ?? 'lobby',

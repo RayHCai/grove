@@ -11,19 +11,20 @@ import { describe, it, expect, afterEach } from 'vitest';
 import type { GameClient } from '@platform/client';
 import { ManualFrameSource, ScriptedInputDevice } from '@platform/client';
 import type { EntityId, Runtime } from '@platform/core';
-import { GAME_KEY, MemoryKVStore, playerKey } from '@platform/core';
+import { GAME_KEY, MemoryKVStore, entityKey, playerKey } from '@platform/core';
 import { createClient } from '@platform/engine/host';
-import { createNullRenderer } from '@platform/renderer/null';
+import { createReadyNullRenderer } from '@platform/renderer/null';
 import type { IRenderer } from '@platform/renderer';
+import type { GameInstance } from '@platform/glue';
 import type { GameServer } from '@platform/server';
 import { loopbackPair } from '@platform/transport';
 import type { LoopbackPair } from '@platform/transport';
-import { createGameServer } from '../dist/server/host.js';
-import { resetWorld } from '../dist/server/game.js';
+import { createGameInstance } from '../dist/server/host.js';
+import { resetSession } from '../dist/scripts/session.js';
 import { HudBridge, pressWidget } from '../src/hud';
 import { pickLeaf } from '../src/pick';
 import { PROJECT } from '../src/project';
-import { CLIENT_SCRIPTS } from '../src/scripts';
+import { CLIENT_SCRIPTS } from '../src/client-registry';
 import {
     AVATAR_STEP,
     AVATAR_TEMPLATE,
@@ -35,12 +36,14 @@ import {
     CODE_UP,
     CROWN_TEMPLATE,
     DESIGN,
+    LEAF_SPEED,
     LEAF_TAG,
     LEAF_TEMPLATE,
     PLAYER_TINTS,
     SCREEN_LOBBY,
     STATE_LIFETIME,
     STATE_PHASE,
+    STATE_PLAYER_COUNT,
     STATE_READY,
     STATE_READY_COUNT,
     STATE_RIPE,
@@ -52,8 +55,8 @@ import {
     WORLD,
     encodeAim,
     markerTemplate,
-} from '../src/shared';
-import { LEAF_SPEED, dropBand } from '../src/server/leaf';
+} from '../src/scripts/globals';
+import { dropBand } from '../dist/scripts/templates/leaf/leaf.js';
 
 const TICK = 1 / 60;
 
@@ -73,7 +76,7 @@ interface Tab {
  * microtask queue rather than assuming the join completed inside the pump.
  */
 class Session {
-    readonly server: GameServer;
+    readonly instance: GameInstance;
     readonly store = new MemoryKVStore();
     readonly #pairs: LoopbackPair[] = [];
     readonly #tabs: Tab[] = [];
@@ -81,8 +84,11 @@ class Session {
 
     constructor(store?: MemoryKVStore) {
         if (store !== undefined) (this as { store: MemoryKVStore }).store = store;
-        this.server = createGameServer({
+        // The same call `main.ts` makes, minus the socket in front of it.
+        this.instance = createGameInstance({
             kv: this.store,
+            // The clock this suite turns by hand, in place of the wall clock a socket host uses.
+            now: () => this.#now,
             // The driver calls this first, every pump, so no test ever orders delivery itself.
             deliver: () => {
                 for (const pair of this.#pairs) pair.deliver();
@@ -90,14 +96,17 @@ class Session {
         });
     }
 
+    /** The authority, for the assertions that read the world the server actually holds. */
+    get server(): GameServer {
+        return this.instance.server;
+    }
+
     async join(name: string, identity = name): Promise<Tab> {
         const pair = loopbackPair();
         this.#pairs.push(pair);
-        expect(this.server.accept(pair.server, identity)).not.toBeNull();
+        expect(this.instance.accept(pair.server, identity)).not.toBeNull();
 
-        const renderer = createNullRenderer();
-        // The null backend measures no container and never touches this.
-        await renderer.init({ container: null as unknown as HTMLElement, design: DESIGN });
+        const renderer = await createReadyNullRenderer({ design: DESIGN });
 
         const frames = new ManualFrameSource();
         const device = new ScriptedInputDevice();
@@ -132,7 +141,7 @@ class Session {
     async step(ticks: number): Promise<void> {
         for (let i = 0; i < ticks; i++) {
             this.#now += TICK;
-            this.server.pump(this.#now);
+            this.instance.pump();
             for (const tab of this.#tabs) {
                 tab.frames.frame(this.#now);
                 // The host's own after-frame work, exactly as `use-game.ts` runs it.
@@ -140,7 +149,7 @@ class Session {
             }
             // An identified join awaits a store read before it allocates a Player, so the admission
             // finishes on the microtask queue rather than inside the pump that received it.
-            await settle();
+            await flushMicrotasks();
         }
     }
 
@@ -184,15 +193,19 @@ class Session {
             tab.bridge.dispose();
             tab.client.destroy({ ownsRenderer: true });
         }
-        this.server.close();
+        this.instance.close();
         // The Game captured at start is module state; a second server in this process must not
         // inherit the first's.
-        resetWorld();
+        resetSession();
     }
 }
 
-/** Yields long enough for the admission's promise chain to run to completion. */
-async function settle(): Promise<void> {
+/**
+ * Turns the microtask queue six times, enough for the admission's promise chain.
+ *
+ * Not a macrotask flush: nothing on a timer or in I/O runs here.
+ */
+async function flushMicrotasks(): Promise<void> {
     for (let i = 0; i < 6; i++) await Promise.resolve();
 }
 
@@ -331,7 +344,7 @@ describe('a session over the real wire', () => {
         await session.live(tab);
 
         const rt = runtimeOf(tab);
-        const attached = rt.instances.forHost(`entity:${avatarOf(tab) as number}`);
+        const attached = rt.instances.forHost(entityKey(avatarOf(tab) as number));
         const runner = attached.find((instance) => instance.props !== undefined);
         expect(runner).toBeDefined();
         // Configured in `project.ts`, not read from a constant on this side: an inspector value
@@ -629,7 +642,7 @@ describe('the results screen and the lobby after it', () => {
         b.client.destroy({ ownsRenderer: true });
         // The roster still holds the leaver when `@onPlayerLeave` runs — the removal is last — so
         // the recount is told who to leave out rather than counting them one last time.
-        await session.stepUntil(() => gameField<number>(a, 'playerCount') === 1, 200);
+        await session.stepUntil(() => gameField<number>(a, STATE_PLAYER_COUNT) === 1, 200);
         expect(phaseOf(a)).toBe('playing');
     });
 
@@ -794,7 +807,7 @@ describe('what outlives a session', () => {
         expect(banked).toBeGreaterThan(0);
 
         session.dispose();
-        await settle();
+        await flushMicrotasks();
 
         session = new Session(store);
         const back = await session.join('one', 'stable-id');
@@ -824,7 +837,7 @@ describe('what outlives a session', () => {
         pressWidget(tab.client, WIDGET_READY, SCREEN_LOBBY);
         await session.stepUntil(() => (gameField<number>(tab, STATE_READY_COUNT) ?? 0) === 1, 120);
         session.dispose();
-        await settle();
+        await flushMicrotasks();
 
         // `ready` rides the same host record `lifetimeLeaves` does, so it is written through on the
         // leave — a rejoin that trusted the save would come back already readied, and the first
@@ -885,5 +898,5 @@ describe('the wire itself', () => {
 function ripe(tab: Tab, id: EntityId): boolean {
     const rt = runtimeOf(tab);
     if (!rt.entities.isAlive(id)) return false;
-    return rt.hosts.get(`entity:${id as number}`)?.record.values.get(STATE_RIPE) === true;
+    return rt.hosts.get(entityKey(id as number))?.record.values.get(STATE_RIPE) === true;
 }

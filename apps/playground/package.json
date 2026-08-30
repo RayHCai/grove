@@ -17,6 +17,7 @@
         "@platform/client": "workspace:*",
         "@platform/core": "workspace:*",
         "@platform/engine": "workspace:*",
+        "@platform/glue": "workspace:*",
         "@platform/math": "workspace:*",
         "@platform/project": "workspace:*",
         "@platform/protocol": "workspace:*",
@@ -25,13 +26,11 @@
         "@platform/server": "workspace:*",
         "@platform/transport": "workspace:*",
         "react": "^19.2.8",
-        "react-dom": "^19.2.8",
-        "ws": "^8.21.3"
+        "react-dom": "^19.2.8"
     },
     "devDependencies": {
         "@types/react": "^19.2.18",
         "@types/react-dom": "^19.2.4",
-        "@types/ws": "^8.18.1",
         "@vitejs/plugin-react": "^6.0.5",
         "typescript": "^7.0.2",
         "vite": "^8.2.0",
