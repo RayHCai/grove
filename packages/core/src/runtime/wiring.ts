@@ -1,4 +1,5 @@
 import type { ScriptProps } from '@platform/project';
+import { defined } from '@platform/math';
 import type { EntityId } from '../ids.js';
 import { LoadError } from '../errors.js';
 import type { BaseScript, ScriptLocation } from '../script/index.js';
@@ -15,7 +16,8 @@ import type { Player } from './player.js';
 import type { Camera } from './camera.js';
 import type { HUDScreen } from './hud.js';
 import type { Entity } from './entity.js';
-import { entityKey, playerKey, GAME_KEY } from './hosts.js';
+import { cameraKey, entityKey, playerKey, screenKey, GAME_KEY } from './hosts.js';
+import type { HostKind } from './hosts.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- attach accepts any host-typed class
 type AnyScriptClass = new (props?: ScriptProps) => BaseScript<any>;
@@ -36,34 +38,43 @@ export class Wiring {
      */
     attachToEntity(id: EntityId, klass: AnyScriptClass, props?: ScriptProps): object {
         const entity = this.#rt.entityManager.facade(id);
-        const instance = this.#attach(entityKey(id as number), entity, klass, undefined, props);
+        const instance = this.#attach(
+            'entity',
+            entityKey(id as number),
+            entity,
+            klass,
+            undefined,
+            props,
+        );
         const script = this.#rt.scriptIdOf?.(klass);
         if (script !== undefined) {
             this.#rt.channels.markStructural({
                 kind: 'attach',
                 id,
                 script,
-                ...(props === undefined ? {} : { props }),
+                ...defined({ props }),
             });
         }
         return instance;
     }
 
     attachToPlayer(player: Player, klass: AnyScriptClass, props?: ScriptProps): object {
-        return this.#attach(playerKey(player.id), player, klass, player, props);
+        return this.#attach('player', playerKey(player.id), player, klass, player, props);
     }
 
     attachToGame(game: object, klass: AnyScriptClass, props?: ScriptProps): object {
-        return this.#attach(GAME_KEY, game, klass, undefined, props);
+        return this.#attach('game', GAME_KEY, game, klass, undefined, props);
     }
 
     attachToCamera(camera: Camera, klass: AnyScriptClass, props?: ScriptProps): object {
-        return this.#attach(`camera:${camera.player.id}`, camera, klass, camera.player, props);
+        const player = camera.player;
+        return this.#attach('camera', cameraKey(player.id), camera, klass, player, props);
     }
 
     attachToScreen(screen: HUDScreen, klass: AnyScriptClass, props?: ScriptProps): object {
         return this.#attach(
-            `screen:${screen.name}`,
+            'screen',
+            screenKey(screen.name),
             screen,
             klass,
             this.#rt.localPlayer ?? undefined,
@@ -91,6 +102,7 @@ export class Wiring {
     }
 
     #attach(
+        kind: HostKind,
         hostKey: string,
         host: object,
         klass: AnyScriptClass,
@@ -98,7 +110,7 @@ export class Wiring {
         props?: ScriptProps,
     ): object {
         const location = (klass as unknown as { __location: ScriptLocation }).__location;
-        this.#reject(klass, hostKey, location);
+        this.#reject(klass, kind, location);
 
         const entry = this.#rt.hosts.ensure(hostKey);
         // A wrapper on this host marks its key on the state channel through the record.
@@ -195,8 +207,7 @@ export class Wiring {
         }
     }
 
-    #reject(klass: AnyScriptClass, hostKey: string, location: ScriptLocation): void {
-        const kind = hostKey.split(':')[0];
+    #reject(klass: AnyScriptClass, kind: HostKind, location: ScriptLocation): void {
         if (location === 'synced' && (kind === 'camera' || kind === 'screen')) {
             throw new LoadError(
                 `SyncedScript on a ${kind} host has no authoritative copy to reconcile`,

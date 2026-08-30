@@ -34,7 +34,7 @@ function faultyMover(rt: Runtime): Player {
  * an owner — the ambient invocation is where the owning instance comes from.
  */
 function inHandler(rt: Runtime, fn: () => void): { instance: object; id: number } {
-    const e = rt.gameInstance!.spawn('crate', 0, 0);
+    const e = rt.wired.gameInstance.spawn('crate', 0, 0);
     e.addScript(Nester as never);
     const si = rt.instances.forHost(entityKey(e.entityId as number))[0]!;
     (si.instance as { afterNestedSend: (() => void) | null }).afterNestedSend = fn;
@@ -144,7 +144,7 @@ describe('a countdown', () => {
 describe('the dispatcher boundary', () => {
     it('contains a throw from READING the handler, not only from calling it', () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.addScript(Faulty as never);
         const si = rt.instances.forHost(entityKey(e.entityId as number))[0]!;
         // A handler declared as an accessor makes the property read itself creator code; the lookup

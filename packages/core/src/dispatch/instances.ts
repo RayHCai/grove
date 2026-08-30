@@ -2,6 +2,7 @@
 // keyed by method alone, one player's cooldown would gate every other player's.
 
 import type { ScriptProps } from '@platform/project';
+import { defined } from '@platform/math';
 import type { HandlerDecl, ScriptLocation } from '../script/index.js';
 import { getMetadata } from '../script/index.js';
 import type { GuardOwner, ScopeId } from './scope-tree.js';
@@ -43,7 +44,7 @@ export function makeInstance(
         location: locationOf(klass),
         handlers: meta?.handlers ?? [],
         hostScopeId,
-        ...(props === undefined ? {} : { props }),
+        ...defined({ props }),
     };
 }
 

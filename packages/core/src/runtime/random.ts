@@ -37,7 +37,7 @@ export class RuntimeRandom implements Random {
     }
 
     pointIn(region: string): Vec3 {
-        const b = this.#rt.regions?.bounds(region);
+        const b = this.#rt.wiredOrNull?.regions.bounds(region);
         if (!b) return vec3();
         const lo = Math.min(b.left, b.right);
         const hi = Math.max(b.left, b.right);
@@ -58,5 +58,5 @@ export const random: Random = {
 
 function resolve(): Random {
     if (!hasRuntime()) throw new Error('random used before a runtime exists — call loadGame first');
-    return currentRuntime().random ?? new RuntimeRandom(currentRuntime());
+    return currentRuntime().wiredOrNull?.random ?? new RuntimeRandom(currentRuntime());
 }

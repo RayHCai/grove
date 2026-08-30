@@ -5,5 +5,5 @@ import { currentRuntime, hasRuntime } from './runtime.js';
 
 export function request(name: string, payload?: Record<string, unknown>): void {
     if (!hasRuntime()) return;
-    currentRuntime().requestSink?.(name, payload);
+    currentRuntime().wiredOrNull?.requestSink(name, payload);
 }

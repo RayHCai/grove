@@ -19,7 +19,7 @@ export interface FindQuery {
     near?: { of: Entity | Vec3; within: number };
     /**
      * Resolve against the world as the acting client saw it — server-side, input-originated
-     * handlers only. `WorldQuery.find` does not honour it yet; only `Entity.getTouching` does.
+     * handlers only. `find` reads it on a `near` query alone; a tag- or region-only one is live.
      */
     asSeen?: boolean;
 }
@@ -29,11 +29,11 @@ export abstract class Game {
     protected rt!: Runtime;
 
     get players(): Player[] {
-        return this.rt.playerManager?.players ?? [];
+        return this.rt.wired.playerManager.players;
     }
 
     get random(): Random {
-        return this.rt.random!;
+        return this.rt.wired.random;
     }
 
     get entities(): Entity[] {
@@ -50,7 +50,7 @@ export abstract class Game {
     }
 
     find(query: FindQuery): Entity[] {
-        return this.rt.query!.find(query);
+        return this.rt.wired.query.find(query);
     }
 
     pause(): void {
@@ -62,7 +62,7 @@ export abstract class Game {
     }
 
     addScript(script: new (props?: ScriptProps) => BaseScript<Game>, props?: ScriptProps): this {
-        this.rt.wiring?.attachToGame(this, script as never, props);
+        this.rt.wired.wiring.attachToGame(this, script as never, props);
         return this;
     }
 }
@@ -78,8 +78,7 @@ export class RuntimeGame extends Game {
 // A Proxy so the const never captures a stale instance across createRuntime / withRuntime.
 export const game: Game = new Proxy({} as Game, {
     get(_t, prop) {
-        const g = currentRuntime().gameInstance;
-        if (!g) throw new Error('game used before loadGame');
+        const g = currentRuntime().wired.gameInstance;
         // Unbound on purpose: a bound copy pins the runtime it was read from, while `this` on a
         // `game.spawn(...)` call is this proxy and so resolves again through here.
         return (g as unknown as Record<string | symbol, unknown>)[prop];
@@ -103,8 +102,8 @@ export class WorldQuery {
             // asSeen resolves against the lag ring's latest capture, which marks nothing, so a
             // historical query stays invisible to replication.
             const bp =
-                (query.asSeen ? this.#rt.lagRing?.broadphaseAtLatest() : null) ??
-                this.#rt.broadphase!;
+                (query.asSeen ? this.#rt.wired.lagRing.broadphaseAtLatest() : null) ??
+                this.#rt.wired.broadphase;
             ids = bp.near(p.x, p.y, query.near.within);
         } else {
             ids = this.#rt.entities.liveIds();
@@ -114,7 +113,10 @@ export class WorldQuery {
             .map((id) => this.#rt.entityManager.facade(id))
             .filter((e) => {
                 if (query.tag !== undefined && !e.hasTag(query.tag)) return false;
-                if (query.in !== undefined && !this.#rt.regions?.contains(query.in, e.position))
+                if (
+                    query.in !== undefined &&
+                    !this.#rt.wired.regions.contains(query.in, e.position)
+                )
                     return false;
                 return true;
             });

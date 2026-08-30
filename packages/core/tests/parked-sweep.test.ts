@@ -7,6 +7,7 @@ import { Cooldown } from '../dist/testkit/fixtures.js';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import { Loop } from '../src/loop/loop.js';
+import { instanceOf } from './helpers.js';
 
 afterEach(() => clearRuntime());
 
@@ -17,7 +18,7 @@ describe('parked-invocation sweep', () => {
 
         // The entity and its script exist BEFORE the snapshot, so the rewind keeps them;
         // only the parked INVOCATION (started after the snapshot) is swept.
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.addScript(Cooldown as never);
         const inst = instanceOf<Cooldown>(rt, e, 'Cooldown');
 
@@ -52,14 +53,3 @@ describe('parked-invocation sweep', () => {
         expect(rt.tick).toBe(3);
     });
 });
-
-function instanceOf<T>(
-    rt: ReturnType<typeof loadGame>,
-    e: { entityId: unknown },
-    className: string,
-): T {
-    for (const si of rt.instances.forHost(`entity:${e.entityId as number}`)) {
-        if (si.className === className) return si.instance as T;
-    }
-    throw new Error(`${className} not attached`);
-}

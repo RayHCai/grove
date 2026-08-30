@@ -1,6 +1,7 @@
 // Every collaborator the facades reach for is constructed here, so runtime.ts stays declarations.
 
 import type { GameManifest as ProjectGameManifest, ScriptId, ScriptProps } from '@platform/project';
+import { defined } from '@platform/math';
 import type { EntityId } from '../ids.js';
 import type { HandlerKind, ScriptLocation } from '../script/index.js';
 import { Broadphase } from '../world/broadphase.js';
@@ -74,41 +75,46 @@ export function loadGame(manifest: GameManifest = {}, opts: LoadOptions = {}): R
     if (manifest.simRate) rt.setSimRate(manifest.simRate);
 
     if (manifest.bounds) rt.worldBounds = manifest.bounds;
-    rt.regions = new RegionIndex();
-    for (const r of manifest.regions ?? []) rt.regions.define(r.name, r.bounds);
-    rt.hud = new HUDState();
     if (opts.scriptIdOf !== undefined) rt.scriptIdOf = opts.scriptIdOf;
-    rt.templates = TemplateRegistry.from((manifest.templates ?? []) as TemplateDef[]);
+
+    const regions = new RegionIndex();
+    for (const r of manifest.regions ?? []) regions.define(r.name, r.bounds);
+    const assets = new AssetRegistry();
+    for (const a of manifest.assets ?? []) assets.define(new Asset(a.key, a.kind, a.meta));
 
     rt.entityManager.makeFacade = (id: EntityId) => new Entity(id, rt);
     rt.entityManager.dispatchEnd = (id: EntityId) => {
-        void dispatchToHostKind(rt, entityKey(id as number), 'onEnd', '@end', { alive: false });
+        void dispatchAt(rt, entityKey(id as number), 'onEnd', '@end', { extra: { alive: false } });
     };
-    rt.playerManager = new PlayerManager(rt);
-    rt.random = new RuntimeRandom(rt);
-    rt.roster = new Roster(rt);
-    rt.contacts = new ContactSource(rt);
-    rt.query = new WorldQuery(rt);
-    rt.broadphase = new Broadphase(liveTransformView(rt));
-    rt.lagRing = new LagRing(rt.transforms, rt.entities, rt.simRate);
-    rt.wiring = new Wiring(rt);
-    rt.gameInstance = new RuntimeGame(rt);
 
-    const registry = new AssetRegistry();
-    for (const a of manifest.assets ?? []) registry.define(new Asset(a.key, a.kind, a.meta));
-    rt.assets = registry;
-
-    rt.makeCamera = (player: Player) => new Camera(rt, player);
-    rt.makeStorage = (player: Player) => new Storage(rt.kv, `player:${player.id}`);
-    rt.send = (id, event, payload) => dispatchTo(rt, id, event, payload);
-    rt.requestSink = (name, payload) => deliverRequest(rt, name, payload);
-    rt.passes = makePasses(rt);
+    const wiring = new Wiring(rt);
+    const gameInstance = new RuntimeGame(rt);
+    rt.install({
+        playerManager: new PlayerManager(rt),
+        contacts: new ContactSource(rt),
+        wiring,
+        lagRing: new LagRing(rt.transforms, rt.entities, rt.simRate),
+        roster: new Roster(rt),
+        send: (id, event, payload) => dispatchTo(rt, id, event, payload),
+        makeCamera: (player: Player) => new Camera(rt, player),
+        makeStorage: (player: Player) => new Storage(rt.kv, `player:${player.id}`),
+        requestSink: (name, payload) => deliverRequest(rt, name, payload),
+        random: new RuntimeRandom(rt),
+        assets,
+        gameInstance,
+        query: new WorldQuery(rt),
+        broadphase: new Broadphase(liveTransformView(rt)),
+        regions,
+        templates: TemplateRegistry.from((manifest.templates ?? []) as TemplateDef[]),
+        hud: new HUDState(),
+        passes: makePasses(rt),
+    });
 
     // Wire and hoist only; @onStart waits for startGame, so a handler sees a built world.
     for (const spec of manifest.gameScripts ?? []) {
         const { klass, props } =
             typeof spec === 'function' ? { klass: spec, props: undefined } : spec;
-        rt.wiring.attachToGame(rt.gameInstance, klass as never, props);
+        wiring.attachToGame(gameInstance, klass as never, props);
     }
 
     // After the Game scripts are hoisted and before any @onStart: the placed world is what a start
@@ -146,13 +152,13 @@ function drainStarts(rt: Runtime, dispatch: DispatchOptions): Promise<void> {
 
 /** The world stopped existing, so every attached script's @onEnd runs — the mirror of startGame. */
 export function endGame(rt: Runtime): Promise<void> {
-    return dispatchLifecycle(rt, 'onEnd', '@end');
+    return dispatchEach(rt, 'onEnd', '@end');
 }
 
 /** Creates the player record, then lets @onPlayerJoin decide spawn or spectate. */
 export function joinPlayer(rt: Runtime, id: string, name: string): Player {
-    const player = rt.playerManager!.create(id, name);
-    void dispatchToHostKind(rt, GAME_KEY, 'onPlayerJoin', '@playerJoin', { player });
+    const player = rt.wired.playerManager.create(id, name);
+    void dispatchAt(rt, GAME_KEY, 'onPlayerJoin', '@playerJoin', { extra: { player } });
     return player;
 }
 
@@ -163,13 +169,14 @@ export function joinPlayer(rt: Runtime, id: string, name: string): Player {
  * player and everything hoisted onto its record.
  */
 export function leavePlayer(rt: Runtime, id: string): void {
-    const player = rt.playerManager?.byId(id);
+    const players = rt.wired.playerManager;
+    const player = players.byId(id);
     if (!player) return;
     const ended = { player, alive: false };
-    void dispatchToHostKind(rt, playerKey(id), 'onEnd', '@end', ended);
-    void dispatchToHostKind(rt, cameraKey(id), 'onEnd', '@end', ended);
-    void dispatchToHostKind(rt, GAME_KEY, 'onPlayerLeave', '@playerLeave', { player });
-    rt.playerManager?.remove(id);
+    void dispatchAt(rt, playerKey(id), 'onEnd', '@end', { extra: ended });
+    void dispatchAt(rt, cameraKey(id), 'onEnd', '@end', { extra: ended });
+    void dispatchAt(rt, GAME_KEY, 'onPlayerLeave', '@playerLeave', { extra: { player } });
+    players.remove(id);
 }
 
 /** A HUD widget press, as either endpoint hands one to core. */
@@ -199,8 +206,8 @@ export function pressWidget(rt: Runtime, press: WidgetPress): Promise<void> {
                 'onPress',
                 press.widget,
                 hostKey,
-                tickCtx(rt, press.player === undefined ? {} : { player: press.player }),
-                { activeLocations: roleLocations(rt), tick: rt.tick },
+                tickCtx(rt, defined({ player: press.player })),
+                tickDispatch(rt),
             ),
         );
     }
@@ -229,13 +236,9 @@ export function pointerHit(
     player?: Player,
 ): Promise<void> {
     if (!rt.entities.isAlive(id)) return Promise.resolve();
-    return dispatchToHostKind(
-        rt,
-        entityKey(id as number),
-        edge,
-        POINTER_EVENT[edge],
-        player === undefined ? { other: rt.entityManager.facade(id) } : { player },
-    );
+    return dispatchAt(rt, entityKey(id as number), edge, POINTER_EVENT[edge], {
+        extra: player === undefined ? { other: rt.entityManager.facade(id) } : { player },
+    });
 }
 
 /** The per-tick half of a DispatchCtx; `extra` carries whatever the event itself supplies. */
@@ -247,35 +250,51 @@ function roleLocations(rt: Runtime): ReadonlySet<ScriptLocation> {
     return activeLocationsFor(rt.isServer ? 'server' : 'client');
 }
 
-function dispatchLifecycle(rt: Runtime, kind: 'onEnd', event: string): Promise<void> {
-    const pending: Promise<void>[] = [];
-    for (const si of rt.instances.all()) {
-        pending.push(
-            rt.dispatcher.dispatch([si], kind, event, '', tickCtx(rt), {
-                activeLocations: roleLocations(rt),
-                tick: rt.tick,
-            }),
-        );
-    }
-    return Promise.all(pending).then(() => undefined);
+/** What a dispatch outside the loop runs under: this role's locations, at the tick last adopted. */
+function tickDispatch(rt: Runtime): DispatchOptions {
+    return { activeLocations: roleLocations(rt), tick: rt.tick };
+}
+
+interface DispatchOverrides {
+    extra?: Omit<Partial<DispatchCtx>, 'dt'>;
+    /** The loop's own options, which carry `replay`; omitted means this tick's role default. */
+    dispatch?: DispatchOptions;
 }
 
 /** Fires one kind at one host's scripts, in attachment order. */
-function dispatchToHostKind(
+function dispatchAt(
     rt: Runtime,
     hostKey: string,
     kind: HandlerKind,
     event: string,
-    extra?: Omit<Partial<DispatchCtx>, 'dt'>,
+    opts: DispatchOverrides = {},
 ): Promise<void> {
     return rt.dispatcher.dispatch(
         rt.instances.forHost(hostKey),
         kind,
         event,
         hostKey,
-        tickCtx(rt, extra),
-        { activeLocations: roleLocations(rt), tick: rt.tick },
+        tickCtx(rt, opts.extra),
+        opts.dispatch ?? tickDispatch(rt),
     );
+}
+
+/** Fires one kind at every attached script, one dispatch each so each keeps its own ctx. */
+function dispatchEach(
+    rt: Runtime,
+    kind: HandlerKind,
+    event: string,
+    opts: DispatchOverrides & { only?: ScriptLocation } = {},
+): Promise<void> {
+    const dispatch = opts.dispatch ?? tickDispatch(rt);
+    const pending: Promise<void>[] = [];
+    for (const si of rt.instances.all()) {
+        if (opts.only !== undefined && si.location !== opts.only) continue;
+        pending.push(
+            rt.dispatcher.dispatch([si], kind, event, '', tickCtx(rt, opts.extra), dispatch),
+        );
+    }
+    return Promise.all(pending).then(() => undefined);
 }
 
 /** Loopback delivery for request(): every server-located @onRequest handler, in place. */
@@ -285,18 +304,12 @@ function deliverRequest(
     payload: Record<string, unknown> | undefined,
 ): void {
     // ctx.player is engine-supplied and unforgeable; in loopback that is the local player.
-    const player = rt.localPlayer ?? rt.playerManager?.players[0] ?? undefined;
-    for (const si of rt.instances.all()) {
-        if (si.location !== 'server') continue;
-        void rt.dispatcher.dispatch(
-            [si],
-            'onRequest',
-            name,
-            '',
-            tickCtx(rt, { data: payload ?? {}, player, from: null, viewTick: rt.tick }),
-            { activeLocations: activeLocationsFor('server'), tick: rt.tick },
-        );
-    }
+    const player = rt.localPlayer ?? rt.wired.playerManager.players[0] ?? undefined;
+    void dispatchEach(rt, 'onRequest', name, {
+        only: 'server',
+        extra: { data: payload ?? {}, player, from: null, viewTick: rt.tick },
+        dispatch: { activeLocations: activeLocationsFor('server'), tick: rt.tick },
+    });
 }
 
 function dispatchTo(
@@ -306,24 +319,12 @@ function dispatchTo(
     payload: Record<string, unknown> | undefined,
 ): Promise<void> {
     if (!rt.entities.isAlive(id)) return Promise.resolve();
-    const instances = rt.instances.forHost(entityKey(id as number));
-    return rt.dispatcher.dispatch(
-        instances,
-        'onEvent',
-        event,
-        String(id as number),
-        tickCtx(rt, { data: payload ?? {}, from: null }),
-        { activeLocations: roleLocations(rt), tick: rt.tick },
-    );
+    return dispatchAt(rt, entityKey(id as number), 'onEvent', event, {
+        extra: { data: payload ?? {}, from: null },
+    });
 }
 
 function makePasses(rt: Runtime): TickPasses {
-    const dispatchKind = (dispatch: DispatchOptions, kind: HandlerKind, event: string) => {
-        for (const si of rt.instances.all()) {
-            void rt.dispatcher.dispatch([si], kind, event, '', tickCtx(rt), dispatch);
-        }
-    };
-
     // Held by the table rather than allocated per tick: the contact walk is O(n²) and the region
     // walk visits every live entity per region, so both run at simRate over the whole world.
     const entered: Array<[EntityId, EntityId]> = [];
@@ -339,7 +340,7 @@ function makePasses(rt: Runtime): TickPasses {
             // Core owns no input source; the client and tests dispatch input events themselves.
         },
         movement(dt) {
-            for (const player of rt.playerManager?.players ?? []) {
+            for (const player of rt.wired.playerManager.players) {
                 const movement = player.movement;
                 if (!movement) continue;
                 // A destroyed avatar leaves its movement instance live, and the physics sink would
@@ -350,27 +351,23 @@ function makePasses(rt: Runtime): TickPasses {
             }
         },
         contacts(dispatch) {
-            for (const [a, b] of rt.contacts?.entered(entered) ?? []) {
+            for (const [a, b] of rt.wired.contacts.entered(entered)) {
                 fireCollide(rt, a, b, dispatch);
                 fireCollide(rt, b, a, dispatch);
             }
         },
         regions(dispatch) {
-            const regions = rt.regions;
-            if (!regions) return;
             const ids = rt.entities.liveIds(liveIds);
-            for (const crossing of regions.crossings(ids, posX, posY)) {
+            for (const crossing of rt.wired.regions.crossings(ids, posX, posY)) {
                 // A destroyed entity leaves every region it was in on the tick it dies, and firing
                 // @onExit there would run a handler on a host whose @onEnd has not gone out yet.
                 if (!crossing.entered && !rt.entities.isAlive(crossing.id)) continue;
-                const self = crossing.id as number;
-                void rt.dispatcher.dispatch(
-                    rt.instances.forHost(entityKey(self)),
+                void dispatchAt(
+                    rt,
+                    entityKey(crossing.id as number),
                     crossing.entered ? 'onEnter' : 'onExit',
                     crossing.region,
-                    String(self),
-                    tickCtx(rt),
-                    dispatch,
+                    { dispatch },
                 );
             }
         },
@@ -394,7 +391,7 @@ function makePasses(rt: Runtime): TickPasses {
                 ...dispatch,
                 activeLocations: activeLocationsFor('server'),
             };
-            dispatchKind(simUpdate, 'onUpdate', '@update');
+            void dispatchEach(rt, 'onUpdate', '@update', { dispatch: simUpdate });
         },
     };
 }
@@ -405,16 +402,9 @@ function fireCollide(
     other: EntityId,
     dispatch: DispatchOptions,
 ): void {
-    const instances = rt.instances.forHost(entityKey(self as number));
+    const hostKey = entityKey(self as number);
     const otherEntity = rt.entityManager.facade(other);
     for (const tag of rt.tags.tagsOf(other)) {
-        void rt.dispatcher.dispatch(
-            instances,
-            'onCollide',
-            tag,
-            String(self as number),
-            tickCtx(rt, { other: otherEntity }),
-            dispatch,
-        );
+        void dispatchAt(rt, hostKey, 'onCollide', tag, { extra: { other: otherEntity }, dispatch });
     }
 }

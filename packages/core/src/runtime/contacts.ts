@@ -102,7 +102,7 @@ export class ContactSource {
 
     /** Reads a past capture and marks nothing, so an `asSeen` query is invisible to replication. */
     #historicalBroadphase(): Broadphase {
-        return this.#rt.lagRing?.broadphaseAtLatest(this.#halfExtent) ?? this.#live;
+        return this.#rt.wired.lagRing.broadphaseAtLatest(this.#halfExtent) ?? this.#live;
     }
 }
 

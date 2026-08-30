@@ -4,13 +4,15 @@ import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import { BREAKER_THRESHOLD } from '../src/config.js';
 import { activeLocationsFor } from '../src/runtime/wiring.js';
+import { entityKey } from '../src/runtime/hosts.js';
+import { instanceOf } from './helpers.js';
 
 afterEach(() => clearRuntime());
 
 describe('concurrency', () => {
     it('ignore drops a re-entry while the instance handler is running', async () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         const inst = e.addScript(Cooldown as never) && instanceOf<Cooldown>(rt, e, 'Cooldown');
 
         void e.send('attack');
@@ -25,7 +27,7 @@ describe('concurrency', () => {
 
     it('restart cancels the running invocation and starts fresh', async () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.addScript(Aimer as never);
         const inst = instanceOf<Aimer>(rt, e, 'Aimer');
 
@@ -41,8 +43,8 @@ describe('concurrency', () => {
 
     it('per-instance locking: two entities do not gate each other', () => {
         const rt = loadGame();
-        const a = rt.gameInstance!.spawn('crate', 0, 0);
-        const b = rt.gameInstance!.spawn('crate', 0, 0);
+        const a = rt.wired.gameInstance.spawn('crate', 0, 0);
+        const b = rt.wired.gameInstance.spawn('crate', 0, 0);
         a.addScript(Cooldown as never);
         b.addScript(Cooldown as never);
         void a.send('attack');
@@ -55,7 +57,7 @@ describe('concurrency', () => {
 describe('error boundary', () => {
     it('a throwing handler is caught, logged, and the world continues', async () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.addScript(Faulty as never);
         await e.send('boom');
         expect(rt.log.records.length).toBeGreaterThanOrEqual(1);
@@ -65,7 +67,7 @@ describe('error boundary', () => {
 
     it('the breaker disables a handler after ~100 consecutive throws', async () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.addScript(Faulty as never);
         for (let i = 0; i < BREAKER_THRESHOLD + 5; i++) await e.send('boom');
         const disabled = rt.log.records.some((r) => r.disabled === true);
@@ -76,7 +78,7 @@ describe('error boundary', () => {
 describe('input phase matching', () => {
     it('an onEvent dispatch naming a phase reaches only handlers declaring that phase', () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.addScript(PhaseProbe as never);
         const probe = instanceOf<PhaseProbe>(rt, e, 'PhaseProbe');
 
@@ -93,7 +95,7 @@ describe('input phase matching', () => {
 
     it('an UNPHASED dispatch still reaches every handler on the action — Entity.send', () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.addScript(PhaseProbe as never);
         const probe = instanceOf<PhaseProbe>(rt, e, 'PhaseProbe');
 
@@ -103,17 +105,6 @@ describe('input phase matching', () => {
         expect([probe.presses, probe.releases, probe.holds]).toStrictEqual([1, 1, 1]);
     });
 });
-
-function instanceOf<T>(
-    rt: ReturnType<typeof loadGame>,
-    e: { entityId: unknown },
-    className: string,
-): T {
-    for (const si of rt.instances.forHost(`entity:${e.entityId as number}`)) {
-        if (si.className === className) return si.instance as T;
-    }
-    throw new Error(`${className} not attached`);
-}
 
 function tick(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, 0));
@@ -126,7 +117,7 @@ function fire(
     action: string,
     phase: 'press' | 'release' | 'hold',
 ): void {
-    const hostKey = `entity:${e.entityId as number}`;
+    const hostKey = entityKey(e.entityId as number);
     void rt.dispatcher.dispatch(
         rt.instances.forHost(hostKey),
         'onEvent',

@@ -78,7 +78,7 @@ export class Dispatcher {
     readonly #log: DispatchLog;
     #depth = 0;
 
-    /** Counts `class#method#message`. Nothing reads it yet, so no throw is actually suppressed. */
+    /** Counts `class#method#message` so a throw storm logs once and `throwCount` still has the total. */
     readonly #dedup = new Map<string, number>();
 
     #onTrip: ((trip: BreakerTrip) => void) | null = null;

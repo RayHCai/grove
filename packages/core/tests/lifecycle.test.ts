@@ -45,7 +45,7 @@ describe('@onRequest loopback', () => {
 describe('wire-time rejections', () => {
     it('rejects @onRequest on a non-ServerScript', () => {
         const rt = loadGame();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         expect(() => e.addScript(SyncedWithRequest as never)).toThrow(/@onRequest/);
     });
 });
@@ -65,7 +65,7 @@ describe('leavePlayer', () => {
 
         let rosterAtLeave = -1;
         roll.probe = () => {
-            rosterAtLeave = rt.playerManager!.players.length;
+            rosterAtLeave = rt.wired.playerManager.players.length;
         };
         leavePlayer(rt, 'p1');
         await tick();
@@ -74,7 +74,7 @@ describe('leavePlayer', () => {
         // The handler is told about a player it must still be able to read: `player.avatar` and the
         // roster are both gone once `remove` has run.
         expect(rosterAtLeave).toBe(2);
-        expect(rt.playerManager!.players.map((p) => p.id)).toStrictEqual(['p2']);
+        expect(rt.wired.playerManager.players.map((p) => p.id)).toStrictEqual(['p2']);
         expect(rt.hosts.get('player:p1')).toBeUndefined();
     });
 

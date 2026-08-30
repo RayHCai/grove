@@ -16,8 +16,8 @@ describe('scoped snapshot', () => {
     it('restores in-scope transforms and leaves out-of-scope ones untouched', () => {
         const rt = world();
         const loop = new Loop(rt);
-        const mine = rt.gameInstance!.spawn('crate', 10, 10);
-        const theirs = rt.gameInstance!.spawn('crate', -900, -900);
+        const mine = rt.wired.gameInstance.spawn('crate', 10, 10);
+        const theirs = rt.wired.gameInstance.spawn('crate', -900, -900);
 
         const snap = loop.snapshot(new Set([mine.entityId]));
         mine.setPosition(11, 11);
@@ -34,7 +34,9 @@ describe('scoped snapshot', () => {
         const rt = world();
         const loop = new Loop(rt);
         // Past the 64-slot initial buffer, so the scoped branch has to grow it.
-        const spawned = Array.from({ length: 80 }, (_, i) => rt.gameInstance!.spawn('crate', i, 0));
+        const spawned = Array.from({ length: 80 }, (_, i) =>
+            rt.wired.gameInstance.spawn('crate', i, 0),
+        );
         const far = spawned[79]!;
 
         const snap = loop.snapshot(new Set([far.entityId]));
@@ -47,8 +49,8 @@ describe('scoped snapshot', () => {
     it('restores in-scope tags without dropping the tags of entities outside it', () => {
         const rt = world();
         const loop = new Loop(rt);
-        const mine = rt.gameInstance!.spawn('crate', 0, 0).tag('mine');
-        const theirs = rt.gameInstance!.spawn('crate', 50, 50).tag('theirs');
+        const mine = rt.wired.gameInstance.spawn('crate', 0, 0).tag('mine');
+        const theirs = rt.wired.gameInstance.spawn('crate', 50, 50).tag('theirs');
 
         const snap = loop.snapshot(new Set([mine.entityId]));
         mine.untag('mine').tag('changed');
@@ -62,7 +64,7 @@ describe('scoped snapshot', () => {
     it('drops an in-scope tag added after the capture', () => {
         const rt = world();
         const loop = new Loop(rt);
-        const mine = rt.gameInstance!.spawn('crate', 0, 0);
+        const mine = rt.wired.gameInstance.spawn('crate', 0, 0);
 
         const snap = loop.snapshot(new Set([mine.entityId]));
         mine.tag('predicted');
@@ -74,8 +76,8 @@ describe('scoped snapshot', () => {
     it('keeps a timer owned by a host outside the scope', () => {
         const rt = world();
         const loop = new Loop(rt);
-        const mine = rt.gameInstance!.spawn('crate', 0, 0);
-        const theirs = rt.gameInstance!.spawn('crate', 1, 1);
+        const mine = rt.wired.gameInstance.spawn('crate', 0, 0);
+        const theirs = rt.wired.gameInstance.spawn('crate', 1, 1);
 
         let theirsFired = 0;
         rt.timers.every(1, rt.hosts.scopeForEntity(theirs.entityId as unknown as number), () => {
@@ -95,8 +97,8 @@ describe('scoped snapshot', () => {
     it('a whole snapshot still replaces everything', () => {
         const rt = world();
         const loop = new Loop(rt);
-        const a = rt.gameInstance!.spawn('crate', 1, 1);
-        const b = rt.gameInstance!.spawn('crate', 2, 2);
+        const a = rt.wired.gameInstance.spawn('crate', 1, 1);
+        const b = rt.wired.gameInstance.spawn('crate', 2, 2);
 
         const snap = loop.snapshot();
         a.setPosition(90, 90);

@@ -1,16 +1,12 @@
-// Rectangles. `Bounds` is edge-named rather than origin+size, matching api_spec.ts:57.
-//
-// ORIENTATION: the edge names are read in the space that produced them, so `top` and
-// `bottom` compare differently depending on the space's y direction:
-//
-//   world  (y-up)    top    >  bottom    — `viewport`, `worldBoundsOf`, `localBoundsOf`
-//   screen (y-down)  bottom >  top       — `stageRect`, `screenBoundsOf`
-//
-// Nothing here assumes a direction: `boundsWidth` and `boundsHeight` return the absolute
-// extent, and `boundsOverlap` compares each axis against its own min/max. That keeps one
-// set of helpers usable from both spaces.
+// Nothing here assumes a y direction, because one set of helpers has to serve both a y-up world
+// rect (`top > bottom`) and a y-down screen rect (`bottom > top`).
 
-/** An axis-aligned rectangle, named by its edges. Matches api_spec.ts:57. */
+/**
+ * An axis-aligned rectangle, named by its edges.
+ *
+ * Mutable where `Vec3` is readonly: every helper below writes through one, and `docs/api_spec.ts`
+ * declares the creator-facing shape this way.
+ */
 export interface Bounds {
     left: number;
     right: number;
@@ -91,12 +87,12 @@ export function boundsContains(b: Bounds, x: number, y: number): boolean {
 }
 
 /**
- * Grows `b` outward by `margin` on all four sides, writing into `out`.
+ * Grows `b` outward by `margin` on all four sides, writing into `out`. Allocation-free.
  *
  * Direction-aware: each edge moves away from the rectangle's interior, so a y-up rect
  * grows `top` up and a y-down rect grows `top` down.
  */
-export function boundsExpand(b: Bounds, margin: number, out: Bounds = bounds()): Bounds {
+export function boundsExpand(out: Bounds, b: Bounds, margin: number): Bounds {
     const xUp = b.right >= b.left ? margin : -margin;
     const yUp = b.top >= b.bottom ? margin : -margin;
     out.left = b.left - xUp;
@@ -104,9 +100,4 @@ export function boundsExpand(b: Bounds, margin: number, out: Bounds = bounds()):
     out.top = b.top + yUp;
     out.bottom = b.bottom - yUp;
     return out;
-}
-
-/** A `Size` from a rectangle's extents. */
-export function boundsSize(b: Bounds): Size {
-    return { width: boundsWidth(b), height: boundsHeight(b) };
 }

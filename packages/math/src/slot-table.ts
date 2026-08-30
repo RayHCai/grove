@@ -75,7 +75,7 @@ export class SlotTable<Id extends number, R> {
 
         // `release` already advanced this slot's generation, so the handle minted here
         // cannot equal the one that was freed.
-        const generation = this.#generations[reused] ?? FIRST_GENERATION;
+        const generation = this.#generationAt(reused);
         this.#records[reused] = record;
         this.#live++;
         return this.#mint(reused, generation);
@@ -99,8 +99,7 @@ export class SlotTable<Id extends number, R> {
         // no separate range check.
         if (this.#records[index] == null) return 0 as unknown as Id;
 
-        const generation = this.#generations[index] ?? FIRST_GENERATION;
-        return this.#mint(index, generation);
+        return this.#mint(index, this.#generationAt(index));
     }
 
     /** The mutable record for a live slot; null when free. */
@@ -110,8 +109,8 @@ export class SlotTable<Id extends number, R> {
 
     /** The mutable record a handle addresses; null for the null / a stale handle. */
     record(id: Id): R | null {
-        const index = this.indexOf(id);
-        return index >= 0 ? this.#records[index]! : null;
+        // `recordAt` reads `undefined` for the -1 a rejected handle yields, so no guard is needed.
+        return this.recordAt(this.indexOf(id));
     }
 
     exists(id: Id): boolean {
@@ -130,7 +129,7 @@ export class SlotTable<Id extends number, R> {
         if (this.#records[index] == null) return;
 
         this.#records[index] = null;
-        this.#generations[index] = nextGeneration(this.#generations[index] ?? FIRST_GENERATION);
+        this.#generations[index] = nextGeneration(this.#generationAt(index));
         this.#freeList.push(index);
         this.#live--;
     }
@@ -161,7 +160,7 @@ export class SlotTable<Id extends number, R> {
             if (this.#records[index] == null) continue;
 
             this.#records[index] = null;
-            this.#generations[index] = nextGeneration(this.#generations[index] ?? FIRST_GENERATION);
+            this.#generations[index] = nextGeneration(this.#generationAt(index));
             this.#live--;
         }
 
@@ -212,6 +211,11 @@ export class SlotTable<Id extends number, R> {
 
     #mint(index: number, generation: number): Id {
         return packHandle(index, generation) as unknown as Id;
+    }
+
+    /** `#generations` is invariantly as long as `#records`; the fallback only satisfies the index check. */
+    #generationAt(index: number): number {
+        return this.#generations[index] ?? FIRST_GENERATION;
     }
 }
 
