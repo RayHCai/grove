@@ -1,6 +1,6 @@
 // The read-side view of this game's replicated state, named once.
 //
-// `@serverState` hoists onto its host (§6.1), so `health` declared on Vitals reads as
+// `@serverState` hoists onto its host, so `health` declared on Vitals reads as
 // `player.health` anywhere — but only the panel knows what is attached, so a plain
 // `Player` is untyped today. These accessors are the cast, in one deletable place.
 //
@@ -37,5 +37,5 @@ export const fighter = (player: Player) => player as Fighter;
 export const world = () => game as World;
 
 // Same wart one level down: knobs live on the attached subclass, `player.movement`
-// is typed as the base (§4.1). Optional rather than `!`: absent while spectating.
+// is typed as the base. Optional rather than `!`: absent while spectating.
 export const movementOf = (player: Player) => player.movement as TopDownMovement | undefined;

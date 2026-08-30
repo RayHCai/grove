@@ -1,4 +1,4 @@
-// The `fighter` template — a player's avatar, the body identity drives (§3.2).
+// The `fighter` template — a player's avatar, the body identity drives.
 //
 //   Sprout   SyncedScript<Entity>   the tag, and movement tuning
 //   Gunplay  SyncedScript<Entity>   firing, and the crate pickup
@@ -7,7 +7,7 @@
 //
 // Mostly synced, so the shooter sees their own shot this frame and the server's copy
 // decides whether it landed. `Wilt` is the exception and says why. The panel fills
-// the movement slot with `TopDownMovement`, so `Sprout` only tunes a number (§4.1).
+// the movement slot with `TopDownMovement`, so `Sprout` only tunes a number.
 
 import {
     ServerScript,
@@ -26,7 +26,7 @@ import { fighter, movementOf } from './state.js';
 import { SLOTS, WEAPONS } from './weapons.js';
 import { Shot } from './shot.js';
 
-// A knob, not a subclass — a subclass is for a new mechanic (§4.1).
+// A knob, not a subclass — a subclass is for a new mechanic.
 export class Sprout extends SyncedScript<Entity> {
     @onStart
     stand() {
@@ -37,7 +37,7 @@ export class Sprout extends SyncedScript<Entity> {
 }
 
 export class Gunplay extends SyncedScript<Entity> {
-    // `ignore` IS the fire rate: the lock is held across the cooldown await (§5.7).
+    // `ignore` IS the fire rate: the lock is held across the cooldown await.
     @onEvent('shoot', { concurrency: 'ignore' })
     async fire() {
         const me = fighter(this.host.owner!);
@@ -84,7 +84,7 @@ export class Gunplay extends SyncedScript<Entity> {
     }
 }
 
-// One door in for every source of damage: a pellet, the ring, a future trap (§5.8).
+// One door in for every source of damage: a pellet, the ring, a future trap.
 export class Hitbox extends SyncedScript<Entity> {
     @onEvent('hit')
     hurt(ctx: Ctx) {
@@ -98,8 +98,7 @@ export class Hitbox extends SyncedScript<Entity> {
 }
 
 // Server-only: crediting a kill is not a client's call. A client re-producing the
-// synced `hit` reaches Hitbox and skips this — handlers run where their class says
-// (§5.8).
+// synced `hit` reaches Hitbox and skips this — handlers run where their class says.
 export class Wilt extends ServerScript<Entity> {
     @onEvent('down')
     async fall(ctx: Ctx) {
