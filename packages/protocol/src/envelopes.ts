@@ -2,7 +2,7 @@
 // `interface` (an interface gets no implicit index signature), no `readonly` field or array, and an
 // optional field means the key is ABSENT rather than explicitly `undefined`.
 
-import type { ScriptId, ScriptProps, TemplateId } from '@platform/project';
+import type { AssetId, ScriptId, ScriptProps, TemplateId } from '@platform/project';
 import type { JsonValue } from '@platform/transport';
 import type { NetId, PlayerId, ProjectId } from './ids.js';
 
@@ -38,11 +38,7 @@ export type JoinRequest = {
 
     /** Which project this client believes it is playing. */
     projectId: ProjectId;
-    /**
-     * Which build of it. The two ends predict by replaying one input through the same script code,
-     * so different bytes diverge silently and the correction path reports it as jitter — which is
-     * why this is refused at the handshake rather than reconciled later.
-     */
+    /** Which build of it: different bytes diverge silently, and the drift reads as jitter. */
     projectHash: string;
     /** The script bundle this client already holds, or `''` for none — a joiner has fetched none. */
     bundleHash: string;
@@ -61,29 +57,16 @@ export type Welcome = {
     /** What the authority is running. A joiner disagreeing with these never reaches this envelope. */
     projectId: ProjectId;
     projectHash: string;
-    /**
-     * Lowercase-hex SHA-256 of the bytes at {@link Welcome.bundleUrl}, or `''` when there is no
-     * bundle. The client verifies against this BEFORE evaluating, which is the whole mechanism.
-     */
+    /** Lowercase-hex SHA-256 of the bytes at {@link Welcome.bundleUrl}, or `''` when there is none. */
     bundleHash: string;
-    /**
-     * Where to fetch the script bundle — over HTTP, never this socket, which carries no bytes a
-     * client executes. `''` when the client's own build already holds the code.
-     *
-     * The second wire field that makes a client act on the network rather than just parse, and the
-     * more dangerous one: an asset is data and this is executable, so the receiver constrains the
-     * scheme exactly as it does {@link WireAssetRef.url}.
-     */
+    /** Fetched over HTTP, never this socket, which carries no bytes a client executes. */
     bundleUrl: string;
 
     /** Fixed timestep and broadcast cadence. Panel-authored, so the client cannot assume 60/20. */
     simRate: number;
     sendRate: number;
 
-    /**
-     * The world's fixed extent and its named regions — build-time constants a joiner can no more
-     * guess than the two rates, and a client that defaulted them answers region queries wrongly.
-     */
+    /** Build-time constants a joiner can no more guess than the two rates. */
     bounds: WireBounds;
     regions: WireRegion[];
 
@@ -91,18 +74,9 @@ export type Welcome = {
     clientSentMs: number;
     serverSentMs: number;
 
-    /**
-     * A full picture, not a delta. The tick rides here rather than on a field of its own, so the
-     * tick a joiner seeds from and the tick its initial world describes cannot disagree.
-     */
+    /** The tick rides on the snapshot, so what a joiner seeds from and what it describes agree. */
     snapshot: WorldSnapshot;
-    /**
-     * How many `SnapshotChunk` frames preceded this one, whose contents belong to `snapshot`.
-     *
-     * ABSENT when the whole world fitted in this frame, which is the ordinary case. The count rides
-     * here rather than on the chunks so the `Welcome` remains the single frame that completes a join:
-     * a receiver holding a partial set has not been told a join happened at all.
-     */
+    /** How many `SnapshotChunk` frames preceded this one. ABSENT when the world fitted in one. */
     snapshotChunks?: number;
     /** What the renderer needs to draw a netId at all. */
     visuals: RenderManifest;
@@ -111,20 +85,7 @@ export type Welcome = {
     reconnectToken?: string;
 };
 
-/**
- * Server → client, ahead of a `Welcome` whose world does not fit in one frame.
- *
- * Transport refuses a frame over `MAX_FRAME_BYTES` before parsing it, and a refused `Welcome` is
- * unrecoverable on its own: the client's answer to a broken session is a resync, which asks for the
- * same snapshot again. So a producer that approaches the cap divides its payload here rather than
- * asking for a bigger frame — the cap bounds what one parse allocates, and raising it would give that
- * bound away for every peer.
- *
- * Only `entities` and `state` are split; the roster and the two rates are bounded by `maxPlayers` and
- * by being scalars, so they stay on the `Welcome`. Chunks precede it and carry no tick of their own:
- * they describe the tick their `Welcome`'s snapshot names, and a set with no `Welcome` behind it is
- * never applied.
- */
+/** Server → client, ahead of a `Welcome` whose world does not fit in one frame. */
 export type SnapshotChunk = {
     kind: 'snapshot-chunk';
     /** Position in the sequence, from zero. The receiver applies them in this order and no other. */
@@ -137,9 +98,8 @@ export type SnapshotChunk = {
 /**
  * Server → client instead of a `Welcome`, immediately before `close()`.
  *
- * A refusal with no envelope reaches the client as a bare socket close, indistinguishable from a
- * dropped connection — and the correct responses invert: a drop should retry, a version mismatch
- * must never retry.
+ * A refusal with no envelope arrives as a bare close, indistinguishable from a dropped connection —
+ * and the correct responses invert: a drop should retry, a version mismatch must never.
  */
 export type Reject = {
     kind: 'reject';
@@ -148,20 +108,10 @@ export type Reject = {
     serverProtocolVersion: number;
 };
 
-/**
- * Coarse on purpose: finer detail belongs in a log, not on a wire an unauthenticated peer reaches.
- *
- * `identity` covers every disagreement about WHAT is being run — project, build or held bundle —
- * and says nothing about which, for the same reason.
- */
+/** Coarse on purpose: detail belongs in a log, not on a wire an unauthenticated peer reaches. */
 export type RejectReason = 'version' | 'full' | 'identity';
 
-/**
- * Server → client, every send-tick. RELIABLE — every op must arrive, in order.
- *
- * Sent even when both arrays are empty, because a `TransformEnvelope` is held until the
- * `StateEnvelope` for its tick has been applied.
- */
+/** Server → client, every send-tick. RELIABLE — every op must arrive, in order. */
 export type StateEnvelope = {
     kind: 'state';
     tick: number;
@@ -171,9 +121,6 @@ export type StateEnvelope = {
      * Spare ticks the EARLIEST input this ack resolved had on arrival
      * (`frame.tick - serverTickOnArrival`) — the earliest rather than the mean, because a lead
      * sized to the mean drops the tail, which a player feels as occasional unresponsiveness.
-     *
-     * ABSENT when this ack resolved no input, never `undefined`; a client that receives no sample
-     * holds its current lead.
      */
     earliestHeadroom?: number;
     /** Ordered journal, applied verbatim — the ops do not commute, and a dropped op is unrecoverable. */
@@ -207,20 +154,10 @@ export type WireSingleStructuralOp =
     /** Carries the roster because nothing else on the wire names a player. */
     | { kind: 'player-join'; player: PlayerSnapshot }
     | { kind: 'player-leave'; id: PlayerId }
-    /**
-     * Which script runs on which entity — on the wire nowhere else, and named by the id the bundle
-     * stamped rather than by a class name, which a minifier rewrites and no receiver could resolve.
-     */
+    /** Which script runs on which entity — on the wire nowhere else. */
     | ({ kind: 'attach'; netId: NetId } & WireScriptAttachment);
 
-/**
- * Every op one template instantiation produced, applied as one.
- *
- * A BOUNDARY, never permission to reorder: the ops inside stay in the order they were journaled,
- * parents ahead of children, and the group itself sits in journal order among the rest. It is flat
- * — a subtree is emitted depth-first, so one level is all the boundary needs, and a nesting shape
- * would force a receiver to cap depth before it could bound the walk at all.
- */
+/** Every op one template instantiation produced, applied as one. A BOUNDARY, not a reordering. */
 export type WireStructuralGroup = { kind: 'group'; ops: WireSingleStructuralOp[] };
 
 /** One entry in the ordered structural journal. */
@@ -229,12 +166,7 @@ export type WireStructuralOp = WireSingleStructuralOp | WireStructuralGroup;
 /** The `kind` of a structural op, for exhaustiveness checks over the journal. */
 export type WireStructuralOpKind = WireStructuralOp['kind'];
 
-/**
- * One script on one entity, as both the `attach` op and a spawn's overrides carry it.
- *
- * `props` are the values an inspector configured this attachment with — absent when it was
- * configured with none, never `undefined`.
- */
+/** One script on one entity, as both the `attach` op and a spawn's overrides carry it. */
 export type WireScriptAttachment = { script: ScriptId; props?: ScriptProps };
 
 /**
@@ -247,36 +179,25 @@ export type StateHostAddr =
 /**
  * One host's `@serverState` writes for this tick, as a field → value map.
  *
- * Grouped under the host rather than one entry per field, because the address is the larger half of
- * a per-field entry and an entity with several dirty fields would repeat it verbatim each time.
- * Field names therefore travel as KEYS, which is what puts them under the codec's reserved-key
- * check — so a field named `__proto__` is refused rather than applied, and the sender must drop it.
- *
- * Scoping rides the discriminant — a `player` diff appears only in its owner's envelope while a
- * `game` diff goes to everyone.
+ * Grouped under the host because the address is the larger half of a per-field entry, and scoping
+ * rides the discriminant: a `player` diff reaches only its owner where a `game` diff reaches all.
  */
 export type StateDiff = { host: StateHostAddr; fields: { [field: string]: JsonValue } };
 
 /**
  * The data wrappers whose state replicates, named by the tag their payload carries.
  *
- * Restated rather than imported from core, for the reason `InputPhase` is: importing would put the
- * simulation in a client's module graph. Parity-locked to core's `WrapperKind` through the dev-only
- * reference, so adding a fifth wrapper there breaks this.
+ * Restated rather than imported from core, as `InputPhase` is, because importing would put the
+ * simulation in a client's module graph. Parity-locked to core's `WrapperKind`.
  */
 export type WireWrapperKind = 'Scoreboard' | 'Leaderboard' | 'Inventory' | 'Team';
 
 /**
- * A wrapper's state as one `StateDiff` field value.
- *
- * A wrapper is a class, which no codec can carry, so it travels as this tagged form — and the TAG is
- * what a receiver holding no scripts rebuilds the class from, which is why every constructor
- * argument appears here: `Leaderboard`'s order decides what `top` means, `Team`'s name is its
- * identity, and `Inventory`'s player is the one it belongs to.
+ * A wrapper's state as one `StateDiff` field value: the tag, plus every constructor argument, since
+ * a receiver holding no scripts rebuilds the class from this alone.
  *
  * Maps travel as entry PAIRS rather than as objects, so a creator-chosen item name or player id can
- * never land in key position — the codec's reserved-key check is about keys, and an inventory item
- * called `__proto__` would otherwise be a refused frame rather than an ordinary one.
+ * never land in key position, where the codec's reserved-key check would refuse the whole frame.
  */
 export type WireWrapperState =
     | { kind: 'Scoreboard'; scores: Array<[string, number]> }
@@ -302,58 +223,34 @@ export type WireTransform = {
 };
 
 /**
- * One dirty entity's current transform.
- *
- * Flattened rather than nested, because this is the highest-volume type on the wire and a nesting
- * level costs two braces per entity per send-tick under JSON.
+ * One dirty entity's current transform. Flattened rather than nested, because this is the
+ * highest-volume type on the wire and a nesting level costs two braces per entity per send-tick.
  */
 export type TransformDiff = WireTransform & { netId: NetId };
 
-/**
- * One entity as a joiner, interest re-entrant, or spawn must receive it: enough to RECONSTRUCT,
- * not just enough to draw.
- */
+/** One entity as a joiner, interest re-entrant, or spawn must receive it: enough to RECONSTRUCT. */
 export type EntitySnapshot = {
     netId: NetId;
-    /**
-     * The template it instances — the authoring id, not a free string: it keys the render manifest
-     * on one end and a template registry on the other, and both are saved-file identities.
-     */
+    /** Keys the render manifest on one end and a template registry on the other. */
     template: TemplateId;
     /** Where it sits in the hierarchy. `null` = a child of the world root. */
     parent: NetId | null;
     /**
      * The owning player's id, or `null` for an unowned body. Required rather than optional: a
-     * client cannot infer it, and inferring from the template is wrong for any game with more than
-     * one player-owned entity.
+     * client cannot infer it, and the template is wrong for any game with two player-owned kinds.
      */
     owner: PlayerId | null;
     /** Every tag currently on it — what `game.find` queries. */
     tags: string[];
     /** All seven fields, none of them defaultable. */
     transform: WireTransform;
-    /**
-     * What this instance carries beyond its template.
-     *
-     * ABSENT for an entity the template describes whole, which is the ordinary case and the reason
-     * `template` earns its place: a spawn is then one id and a transform.
-     */
+    /** ABSENT for an entity the template describes whole, which is the ordinary case. */
     overrides?: EntityOverrides;
 };
 
-/**
- * Per-instance deviations from a template.
- *
- * It exists because `attach` is a delta and a joiner holds no earlier state to apply one against:
- * the ops tell a live client which scripts came and went, and this is the same fact as a baseline.
- */
+/** Per-instance deviations from a template — the baseline a delta `attach` has none for. */
 export type EntityOverrides = {
-    /**
-     * Every script on it, in attachment order — the whole list, not a merge over the template's.
-     *
-     * ABSENT when nothing is attached; a template that attaches nothing and an entity that lost its
-     * attachments are the same picture, and a receiver that runs no scripts cares about neither.
-     */
+    /** Every script, in attachment order — the whole list, not a merge over the template's. */
     scripts?: WireScriptAttachment[];
 };
 
@@ -390,7 +287,7 @@ export type WireRegion = { name: string; bounds: WireBounds };
  * `readonly` fields, so it cannot cross a wire; this is core's manifest-entry shape instead.
  */
 export type WireAssetRef = {
-    key: string;
+    key: AssetId;
     kind: WireAssetKind;
     /** Core loads nothing — the panel does — so a client handed a key with no source cannot fetch it. */
     url: string;
@@ -403,18 +300,16 @@ export type WireAssetKind = 'texture' | 'atlas' | 'audio' | 'font' | 'clip' | 'e
 /**
  * How to draw the entities of one template.
  *
- * It deliberately carries NO transform: those fields are per-entity and authoritative from the
- * simulation, so carrying them here too would give the client two sources for one value. A
- * {@link TemplateChild} is the one thing beneath it that does carry one, because nothing simulates
- * a child and its offset therefore has no other source.
+ * It carries NO transform: those fields are per-entity and authoritative from the simulation, so
+ * carrying them here too would give the client two sources for one value.
  */
 export type TemplateVisual = SpriteTemplateVisual | GroupTemplateVisual;
 
 /** A template whose entities draw a sprite. `texture` keys into {@link WireAssetRef}. */
 export type SpriteTemplateVisual = {
-    template: string;
+    template: TemplateId;
     kind: 'sprite';
-    texture: string;
+    texture: AssetId;
     /** 0..1 pivot inside the art. Absent = centered, the renderer's own default. */
     anchorX?: number;
     anchorY?: number;
@@ -425,31 +320,25 @@ export type SpriteTemplateVisual = {
 
 /** A template whose entities are positional pivots, drawing whatever `children` hangs beneath them. */
 export type GroupTemplateVisual = {
-    template: string;
+    template: TemplateId;
     kind: 'group';
-    /**
-     * The art every entity of this template draws, as a subtree the client builds in one call.
-     *
-     * ABSENT for a bare pivot, never `undefined`. Recursive, so a receiver has to bound depth and
-     * total node count as well as each level's cardinality — one number per level bounds neither.
-     */
+    /** The art every entity of this template draws, as a subtree the client builds in one call. */
     children?: TemplateChild[];
 };
 
 /**
  * One node inside a group template's subtree: art the TEMPLATE owns, not an entity.
  *
- * This is the one place a visual carries a transform, and the reason the rule differs here is that
- * nothing simulates a child — no `WireTransform` will ever name it, so its offset from the parent
- * node has no second source to disagree with. Every field is local to the parent node, and only
- * the offset reaches descendants: the renderer composes position and visibility and nothing else.
+ * The one place a visual carries a transform, because nothing simulates a child and no
+ * `WireTransform` will ever name it. Only the offset reaches descendants: the renderer composes
+ * position and visibility and nothing else.
  */
 export type TemplateChild = SpriteTemplateChild | GroupTemplateChild;
 
 /** Art under a template's root. `texture` keys into {@link WireAssetRef}, as a sprite visual's does. */
 export type SpriteTemplateChild = {
     kind: 'sprite';
-    texture: string;
+    texture: AssetId;
     /** Local to the parent node, in world units. Absent = 0, never `undefined`. */
     offsetX?: number;
     offsetY?: number;
@@ -473,8 +362,7 @@ export type SpriteTemplateChild = {
  * A pivot under a template's root, and the arm that nests.
  *
  * It carries the offset and `layer` and nothing else: a group has no art, so rotation, scale and
- * alpha would be inert on it, and omitting them is what stops an author reading one as "rotates
- * its children".
+ * alpha would be inert, and omitting them stops an author reading one as "rotates its children".
  */
 export type GroupTemplateChild = {
     kind: 'group';
@@ -491,18 +379,7 @@ export type GroupTemplateChild = {
  */
 export type RenderManifest = { assets: WireAssetRef[]; templates: TemplateVisual[] };
 
-/**
- * Server → client: templates that came into use after this client joined, and the assets they need.
- *
- * `Welcome.visuals` is a baseline, not the whole manifest for a session — a template first used at
- * tick 5000 is in no earlier joiner's copy, so without this arm every entity of it draws as the
- * placeholder for the rest of the session while a client joining a second later sees it correctly.
- *
- * ADDITIONS, never a replacement: the client merges rather than swapping, so an entry it is already
- * drawing with is not re-fetched. It carries no tick, because a visual is not tick-ordered state —
- * but the server sends it AHEAD of the `state` envelope that first spawns an entity using it, or the
- * node is created against a table that does not know the template yet.
- */
+/** Server → client: render-manifest ADDITIONS, which the client merges rather than swapping. */
 export type ManifestUpdate = { kind: 'manifest'; visuals: RenderManifest };
 
 /** Client → server, on the refresh interval. The join's sample rides `JoinRequest.clientSentMs`. */
@@ -553,20 +430,10 @@ export type InputAction = {
     value?: number;
 };
 
-/**
- * Which edge of a sustained input this is. Restates core's `EventPhase` rather than importing it,
- * which would put the simulation in a client's module graph just to parse a frame.
- */
+/** Which edge of a sustained input this is. Restates core's `EventPhase`, never imports it. */
 export type InputPhase = 'press' | 'release' | 'hold';
 
-/**
- * Client → server, at most one per tick. HUD presses and pointer hits the client already resolved.
- *
- * Apart from `InputFrame` because these are not actions: they carry no phase, they are not folded
- * into held/axis state, and they are not replayed — so putting them in `actions[]` would make every
- * one of those rules conditional on a name. Unacked and unbuffered for the same reason: a press is
- * one discrete event, and a lost one is lost rather than re-derivable from a later sample.
- */
+/** Client → server, at most one per tick. HUD presses and pointer hits, already resolved. */
 export type InteractionFrame = {
     kind: 'interaction';
     /** The client tick it happened on, the same index an `InputFrame` carries. */
@@ -574,14 +441,7 @@ export type InteractionFrame = {
     events: Interaction[];
 };
 
-/**
- * One interaction, already resolved against the client's own HUD layout and camera.
- *
- * Neither half is recomputable by the authority — a widget's hit box is panel layout the server does
- * not hold, and a cursor position means nothing without that client's camera — so both arrive as the
- * peer's claim, named by widget and by `netId` respectively. The server checks the entity is alive
- * and nothing more; a handler that grants something must check reach itself.
- */
+/** One interaction, already resolved against the client's own HUD layout and camera. */
 export type Interaction =
     | { kind: 'press'; widget: string; screen?: string }
     | { kind: 'click'; netId: NetId }
