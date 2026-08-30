@@ -6,12 +6,12 @@
 // even when it has to overwrite a stale non-zero `z` already sitting in `out`.
 
 import { describe, it, expect } from 'vitest';
-import type { MutableVec3, Vec3Like } from '../src/vec3.js';
+import type { MutableVec3 } from '../src/vec3.js';
 import {
     vec3,
     vec3Set,
     vec3Copy,
-    vec3Z,
+    vec3Dist2D,
     vec3Length,
     vec3LengthSq,
     vec3Normalize,
@@ -109,27 +109,25 @@ describe('vec3Copy', () => {
     });
 });
 
-describe('vec3Z', () => {
-    it('reads 0 for an omitted z', () => {
-        expect(vec3Z({ x: 1, y: 2 })).toBe(0);
+describe('vec3Dist2D', () => {
+    it('measures the xy plane only, so a pure z separation reads as 0', () => {
+        expect(vec3Dist2D({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 10 })).toBe(0);
     });
 
-    it('reads an explicit z, including 0 and negatives', () => {
-        expect(vec3Z({ x: 1, y: 2, z: 5 })).toBe(5);
-        expect(vec3Z({ x: 1, y: 2, z: 0 })).toBe(0);
-        expect(vec3Z({ x: 1, y: 2, z: -2.5 })).toBe(-2.5);
+    it('disagrees with the length of the difference whenever z differs', () => {
+        const a = { x: 0, y: 0, z: 0 };
+        const b = { x: 3, y: 4, z: 12 };
+        expect(vec3Dist2D(a, b)).toBe(5);
+        expect(vec3Length(b)).toBe(13);
     });
 
-    it('applies the default only to a missing z, not to a falsy one', () => {
-        // `-0` survives `?? 0` but a `|| 0` fallback would flatten it to `+0`, so this
-        // is the assertion that pins the nullish default rather than a truthiness test.
-        expect(Object.is(vec3Z({ x: 1, y: 2, z: -0 }), -0)).toBe(true);
+    it('is symmetric and reads an omitted z as 0', () => {
+        expect(vec3Dist2D({ x: 1, y: 2 }, { x: 4, y: 6 })).toBe(5);
+        expect(vec3Dist2D({ x: 4, y: 6 }, { x: 1, y: 2 })).toBe(5);
     });
 
-    it('agrees with the default vec3Copy applies', () => {
-        const src: Vec3Like = { x: 3, y: 4 };
-        const out = vec3Copy(vec3(), src);
-        expect(out.z).toBe(vec3Z(src));
+    it('is 0 for a point against itself', () => {
+        expect(vec3Dist2D({ x: -7.5, y: 3 }, { x: -7.5, y: 3 })).toBe(0);
     });
 });
 
@@ -191,7 +189,7 @@ describe('index re-exports', () => {
         expect(math.vec3).toBe(vec3);
         expect(math.vec3Set).toBe(vec3Set);
         expect(math.vec3Copy).toBe(vec3Copy);
-        expect(math.vec3Z).toBe(vec3Z);
+        expect(math.vec3Dist2D).toBe(vec3Dist2D);
     });
 
     it('exposes the Vec3 and Vec3Like types', () => {
@@ -199,6 +197,6 @@ describe('index re-exports', () => {
         // also pins that a Vec3 is usable wherever a Vec3Like is asked for.
         const point: math.Vec3 = vec3(1, 2, 3);
         const like: math.Vec3Like = point;
-        expect(vec3Z(like)).toBe(3);
+        expect(vec3Length(like)).toBeCloseTo(Math.sqrt(14), 12);
     });
 });

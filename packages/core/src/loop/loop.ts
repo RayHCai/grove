@@ -5,7 +5,6 @@ import type { EntityId } from '../ids.js';
 import type { Scope, Snapshot } from './store-registry.js';
 import type { Runtime } from '../runtime/runtime.js';
 import { withRuntime } from '../runtime/runtime.js';
-import { entityKey } from '../runtime/hosts.js';
 import type { DispatchOptions } from '../dispatch/dispatcher.js';
 import { activeLocationsFor } from '../runtime/wiring.js';
 
@@ -41,28 +40,29 @@ export class Loop {
         };
         const dt = 1 / this.#rt.simRate;
 
-        const passes = this.#rt.passes;
+        const wired = this.#rt.wired;
+        const passes = wired.passes;
 
         // Pass order is part of the simulation contract; reordering changes results.
-        passes?.starts(dispatch);
+        passes.starts(dispatch);
 
-        passes?.input(dispatch);
+        passes.input(dispatch);
 
-        passes?.movement(dt, opts.scope);
+        passes.movement(dt, opts.scope);
 
-        passes?.contacts(dispatch);
+        passes.contacts(dispatch);
 
-        passes?.regions(dispatch);
+        passes.regions(dispatch);
 
         this.#rt.timers.advance();
         this.#rt.tweens.advance();
-        passes?.countdowns(dispatch);
+        passes.countdowns(dispatch);
 
-        passes?.update(dispatch, dt, opts.scope);
+        passes.update(dispatch, dt, opts.scope);
 
         this.#rt.entityManager.drainDestroyed();
 
-        if (this.#rt.isServer) this.#rt.lagRing?.capture(tick);
+        if (this.#rt.isServer) wired.lagRing.capture(tick);
     }
 
     /** Captures every registered store at the current tick, scoped or whole. */
@@ -77,5 +77,3 @@ export class Loop {
         this.#rt.scopes.sweepAfterTick(snapshot.tick);
     }
 }
-
-export { entityKey };

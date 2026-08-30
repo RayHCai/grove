@@ -10,6 +10,7 @@ import { clearRuntime } from '../src/runtime/runtime.js';
 import { MAX_TEMPLATE_DEPTH, TemplateRegistry, instantiate } from '../src/world/templates.js';
 import type { TemplateDef } from '../src/world/templates.js';
 import type { SingleStructuralOp, StructuralOp } from '../src/state/channels.js';
+import { entityKey } from '../src/runtime/hosts.js';
 
 afterEach(() => clearRuntime());
 
@@ -53,10 +54,10 @@ describe('the registry answers what a spawn key means', () => {
     it('leaves a key it does not hold spawnable as one bare entity', () => {
         const rt = world();
         rt.channels.clear();
-        const crate = rt.gameInstance!.spawn('crate', 3, 4);
+        const crate = rt.wired.gameInstance.spawn('crate', 3, 4);
 
         expect(crate.position.x).toBe(3);
-        expect([...rt.instances.forHost(`entity:${crate.entityId as number}`)]).toHaveLength(0);
+        expect([...rt.instances.forHost(entityKey(crate.entityId as number))]).toHaveLength(0);
         // One op, not a group: a boundary around a single op bounds nothing and every consumer
         // would pay an unwrap for the ordinary spawn.
         expect(rt.channels.drainStructural()).toStrictEqual([
@@ -69,7 +70,7 @@ describe('instantiating a template', () => {
     it('mints the whole subtree, parents before children, as ONE journaled group', () => {
         const rt = world();
         rt.channels.clear();
-        const turret = rt.gameInstance!.spawn('turret', 100, 50);
+        const turret = rt.wired.gameInstance.spawn('turret', 100, 50);
 
         const journal = rt.channels.drainStructural();
         expect(journal).toHaveLength(1);
@@ -94,7 +95,7 @@ describe('instantiating a template', () => {
 
     it('places the root at the spawn point and every child at its own local offset', () => {
         const rt = world();
-        const turret = rt.gameInstance!.spawn('turret', 100, 50);
+        const turret = rt.wired.gameInstance.spawn('turret', 100, 50);
         const barrel = turret.children[0]!;
         const sight = barrel.children[0]!;
 
@@ -107,8 +108,8 @@ describe('instantiating a template', () => {
 
     it('attaches the template’s scripts before anything could read the entity', () => {
         const rt = world();
-        const turret = rt.gameInstance!.spawn('turret', 0, 0);
-        const attached = [...rt.instances.forHost(`entity:${turret.entityId as number}`)];
+        const turret = rt.wired.gameInstance.spawn('turret', 0, 0);
+        const attached = [...rt.instances.forHost(entityKey(turret.entityId as number))];
         expect(attached.map((si) => si.className)).toStrictEqual(['Target']);
         // Hoisted onto the host too, so `entity.health` and `this.health` are one value.
         expect((turret as unknown as { health: number }).health).toBe(3);
@@ -124,7 +125,7 @@ describe('instantiating a template', () => {
     it('journals an attach naming the id the bundle stamped, never a class name', () => {
         const rt = world();
         rt.channels.clear();
-        const turret = rt.gameInstance!.spawn('turret', 0, 0);
+        const turret = rt.wired.gameInstance.spawn('turret', 0, 0);
         const attach = flatten(rt.channels.drainStructural()).find((op) => op.kind === 'attach');
         expect(attach).toStrictEqual({
             kind: 'attach',
@@ -136,7 +137,7 @@ describe('instantiating a template', () => {
     it('journals no attach for a class the bundle never stamped', () => {
         const rt = loadGame({ templates: TURRET });
         rt.channels.clear();
-        rt.gameInstance!.spawn('turret', 0, 0);
+        rt.wired.gameInstance.spawn('turret', 0, 0);
         // Attached locally all the same: the op names an id, and nothing on the wire names a class.
         expect(flatten(rt.channels.drainStructural()).some((op) => op.kind === 'attach')).toBe(
             false,
@@ -161,16 +162,16 @@ describe('a group is a replication boundary, not a visibility one', () => {
         const rt = world();
         // Inside the same synchronous call the group is still open, and `spawn` has already
         // returned live handles — the mirror of destroy, which is logical-now and torn down later.
-        const turret = rt.gameInstance!.spawn('turret', 0, 0);
+        const turret = rt.wired.gameInstance.spawn('turret', 0, 0);
         expect(turret.alive).toBe(true);
         expect(rt.entities.liveIds()).toHaveLength(3);
-        expect(rt.gameInstance!.entities).toHaveLength(3);
+        expect(rt.wired.gameInstance.entities).toHaveLength(3);
     });
 
     it('flattens a nested instantiation into one boundary rather than one per level', () => {
         const rt = world();
         rt.channels.clear();
-        rt.gameInstance!.spawn('turret', 0, 0);
+        rt.wired.gameInstance.spawn('turret', 0, 0);
         const journal = rt.channels.drainStructural();
         // Both child templates opened their own group and neither produced an op: the whole
         // subtree is one instantiation, and a receiver gains nothing from being told where the
@@ -204,13 +205,13 @@ describe('the placed world is built before any @onStart', () => {
 
         // One `sight` for the root, then the turret's own three.
         expect(rt.entities.liveIds()).toHaveLength(4);
-        const root = rt.gameInstance!.find({ tag: 'anchor' })[0]!;
+        const root = rt.wired.gameInstance.find({ tag: 'anchor' })[0]!;
         const turret = root.children[0]!;
         expect(rt.entities.record(turret.entityId)?.template).toBe('turret');
         expect(turret.position.x).toBe(20);
         // The template's own attachment and the record's, in that order.
         expect(
-            [...rt.instances.forHost(`entity:${turret.entityId as number}`)].map(
+            [...rt.instances.forHost(entityKey(turret.entityId as number))].map(
                 (si) => si.className,
             ),
         ).toStrictEqual(['Target', 'Wallet']);

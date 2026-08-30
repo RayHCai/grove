@@ -2,17 +2,14 @@
 // Pure, dependency-free primitives: vectors, bounds, easing, scalar helpers, seeded random,
 // deterministic transcendentals, generation-packed handles, the slot table, typed-array growth.
 
-export const PACKAGE_NAME = '@platform/math';
-
 export type { Vec3, MutableVec3, Vec3Like } from './vec3.js';
 export {
     vec3,
     vec3Set,
     vec3Copy,
-    vec3Z,
     vec3Length,
     vec3LengthSq,
-    vec3Dist,
+    vec3Dist2D,
     vec3Normalize,
 } from './vec3.js';
 
@@ -27,12 +24,13 @@ export {
     boundsOverlap,
     boundsContains,
     boundsExpand,
-    boundsSize,
 } from './bounds.js';
 
 export { DEG2RAD, RAD2DEG, clamp, lerp, approach } from './scalar.js';
 
-export { finiteOr, positiveOr } from './numeric.js';
+export { finiteOr, isFiniteNumber, positiveOr } from './numeric.js';
+
+export { defined } from './optional.js';
 
 export {
     INDEX_RANGE,

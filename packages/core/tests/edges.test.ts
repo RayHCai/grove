@@ -11,6 +11,8 @@ import type { Runtime } from '../src/runtime/runtime.js';
 import { Loop } from '../src/loop/loop.js';
 import { Countdown } from '../src/runtime/wrappers.js';
 import type { Entity } from '../src/runtime/entity.js';
+import { entityKey } from '../src/runtime/hosts.js';
+import { instanceOf } from './helpers.js';
 
 afterEach(() => clearRuntime());
 
@@ -26,17 +28,13 @@ function boxed(entity: Entity): Entity {
     return entity;
 }
 
-function scriptOn(rt: Runtime, entity: Entity): Edges {
-    return [...rt.instances.forHost(`entity:${entity.entityId as number}`)][0]!.instance as Edges;
-}
-
 describe('region enter and exit', () => {
     it('fires exactly once per crossing, not once per tick inside', () => {
         const rt = world();
         const loop = new Loop(rt);
-        const e = rt.gameInstance!.spawn('walker', 100, 0);
+        const e = rt.wired.gameInstance.spawn('walker', 100, 0);
         e.addScript(Edges as never);
-        const script = scriptOn(rt, e);
+        const script = instanceOf<Edges>(rt, e, 'Edges');
 
         loop.step(1); // outside
         expect(script.entered).toStrictEqual([]);
@@ -60,9 +58,9 @@ describe('region enter and exit', () => {
     it('does not fire @onExit for an entity that left by being destroyed', () => {
         const rt = world();
         const loop = new Loop(rt);
-        const e = rt.gameInstance!.spawn('walker', 0, 0);
+        const e = rt.wired.gameInstance.spawn('walker', 0, 0);
         e.addScript(Edges as never);
-        const script = scriptOn(rt, e);
+        const script = instanceOf<Edges>(rt, e, 'Edges');
 
         loop.step(1);
         expect(script.entered).toStrictEqual(['arena']);
@@ -80,10 +78,10 @@ describe('@onCollide is the enter edge', () => {
     it('fires once while two bodies stay overlapped, and again after they separate', () => {
         const rt = world();
         const loop = new Loop(rt);
-        const self = boxed(rt.gameInstance!.spawn('walker', 200, 0));
-        boxed(rt.gameInstance!.spawn('spike', 300, 0)).tag('hazard');
+        const self = boxed(rt.wired.gameInstance.spawn('walker', 200, 0));
+        boxed(rt.wired.gameInstance.spawn('spike', 300, 0)).tag('hazard');
         self.addScript(Edges as never);
-        const script = scriptOn(rt, self);
+        const script = instanceOf<Edges>(rt, self, 'Edges');
 
         loop.step(1); // apart
         expect(script.contacts).toBe(0);
@@ -105,10 +103,10 @@ describe('@onEnd', () => {
     it('runs at the destroy drain, while the host record is still readable', () => {
         const rt = world();
         const loop = new Loop(rt);
-        const e = rt.gameInstance!.spawn('walker', 200, 0);
+        const e = rt.wired.gameInstance.spawn('walker', 200, 0);
         e.addScript(Edges as never);
-        const script = scriptOn(rt, e);
-        const key = `entity:${e.entityId as number}`;
+        const script = instanceOf<Edges>(rt, e, 'Edges');
+        const key = entityKey(e.entityId as number);
 
         let hostAtEnd = false;
         script.probe = () => {
@@ -132,20 +130,20 @@ describe('@onEnd', () => {
 
         let rosterAtEnd = -1;
         script.probe = () => {
-            rosterAtEnd = rt.playerManager!.players.length;
+            rosterAtEnd = rt.wired.playerManager.players.length;
         };
 
         leavePlayer(rt, 'p1');
         expect(script.ends).toBe(1);
         expect(rosterAtEnd).toBe(1);
-        expect(rt.playerManager!.byId('p1')).toBeNull();
+        expect(rt.wired.playerManager.byId('p1')).toBeNull();
     });
 
     it('endGame runs it at every attached host, because the world ending ends all of them', async () => {
         const rt = world();
-        const e = rt.gameInstance!.spawn('walker', 0, 0);
+        const e = rt.wired.gameInstance.spawn('walker', 0, 0);
         e.addScript(Edges as never);
-        const script = scriptOn(rt, e);
+        const script = instanceOf<Edges>(rt, e, 'Edges');
 
         await endGame(rt);
         expect(script.ends).toBe(1);

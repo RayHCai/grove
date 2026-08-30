@@ -21,10 +21,10 @@ describe('lag ring', () => {
     it('a capture answers in real EntityIds, so a historical hit resolves to the right entity', () => {
         const rt = loadGame({ simRate: 60, bounds: bounds(-1000, 1000, 1000, -1000) });
         const loop = new Loop(rt);
-        const crate = rt.gameInstance!.spawn('crate', 0, 0);
+        const crate = rt.wired.gameInstance.spawn('crate', 0, 0);
         loop.step(1);
 
-        const hits = rt.lagRing!.broadphaseAt(1, () => 0)!.near(0, 0, 5);
+        const hits = rt.wired.lagRing.broadphaseAt(1, () => 0)!.near(0, 0, 5);
         expect(hits).toContain(crate.entityId);
         expect(rt.entities.exists(hits[0]!)).toBe(true);
     });
@@ -34,7 +34,7 @@ describe('lag ring', () => {
         const loop = new Loop(rt);
 
         // Tick 1: an entity sits at the origin; the ring captures it there.
-        const shooter = rt.gameInstance!.spawn('crate', 0, 0);
+        const shooter = rt.wired.gameInstance.spawn('crate', 0, 0);
         loop.step(1);
 
         // Ticks 2-3: it moves far away in the live world.
@@ -43,10 +43,10 @@ describe('lag ring', () => {
         loop.step(3);
 
         // A query 'as seen' near the origin finds the past position; a live query does not.
-        const pastBp = rt.lagRing!.broadphaseAt(1, () => 0);
+        const pastBp = rt.wired.lagRing.broadphaseAt(1, () => 0);
         expect(pastBp).not.toBeNull();
         const pastHits = pastBp!.near(0, 0, 5);
-        const liveHits = rt.broadphase!.near(0, 0, 5);
+        const liveHits = rt.wired.broadphase.near(0, 0, 5);
 
         expect(pastHits.length).toBeGreaterThanOrEqual(1); // it was here at tick 1
         expect(liveHits.length).toBe(0); // it is not here now
@@ -58,12 +58,12 @@ describe('lag ring', () => {
     it('a historical query marks no replication channel', () => {
         const rt = loadGame({ simRate: 60, bounds: bounds(-1000, 1000, 1000, -1000) });
         const loop = new Loop(rt);
-        rt.gameInstance!.spawn('crate', 0, 0);
+        rt.wired.gameInstance.spawn('crate', 0, 0);
         loop.step(1);
         rt.channels.drainStructural(); // clear the spawn mark
         rt.transforms.consumeDirty(); // clear the spawn-time transform mark
 
-        rt.lagRing!.broadphaseAt(1, () => 0)?.near(0, 0, 100);
+        rt.wired.lagRing.broadphaseAt(1, () => 0)?.near(0, 0, 100);
 
         // A historical query reads a buffer and marks nothing.
         expect(rt.channels.structuralCount).toBe(0);

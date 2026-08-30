@@ -13,7 +13,7 @@ describe('replication channels', () => {
         const rt = loadGame();
         rt.channels.clear();
         rt.transforms.consumeDirty();
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         expect(rt.channels.structuralCount).toBeGreaterThanOrEqual(1);
         rt.channels.drainStructural();
         rt.transforms.consumeDirty(); // clear the spawn-time position mark
@@ -27,7 +27,7 @@ describe('replication channels', () => {
     it('the channels are not captured by snapshot — a restore leaves live marks alone', () => {
         const rt = loadGame();
         const loop = new Loop(rt);
-        const e = rt.gameInstance!.spawn('crate', 0, 0);
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         loop.step(1);
         const snap = loop.snapshot();
 
@@ -49,8 +49,8 @@ describe('replication channels', () => {
 describe('detach marks the structural channel', () => {
     it('a detach journals reparent to NO_ENTITY, and attachTo marks only the new parent', () => {
         const rt = loadGame();
-        const parent = rt.gameInstance!.spawn('parent', 0, 0);
-        const child = rt.gameInstance!.spawn('child', 0, 0);
+        const parent = rt.wired.gameInstance.spawn('parent', 0, 0);
+        const child = rt.wired.gameInstance.spawn('child', 0, 0);
         rt.channels.drainStructural();
 
         child.attachTo(parent);
@@ -69,7 +69,7 @@ describe('detach marks the structural channel', () => {
 
     it('detaching an unparented entity marks nothing', () => {
         const rt = loadGame();
-        const loose = rt.gameInstance!.spawn('loose', 0, 0);
+        const loose = rt.wired.gameInstance.spawn('loose', 0, 0);
         rt.channels.drainStructural();
         loose.detach();
         expect(rt.channels.structuralCount).toBe(0);

@@ -62,7 +62,7 @@ export class Camera {
     }
 
     addScript(script: new (props?: ScriptProps) => BaseScript<Camera>, props?: ScriptProps): this {
-        this.#rt.wiring?.attachToCamera(this, script as never, props);
+        this.#rt.wired.wiring.attachToCamera(this, script as never, props);
         return this;
     }
 }

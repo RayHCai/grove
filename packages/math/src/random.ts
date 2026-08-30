@@ -1,6 +1,6 @@
-// Seeded PRNG. Client and server draw the same numbers in the same order (§1.2).
-// Uses a 128-bit xoshiro128** — deterministic, fast, period 2^128-1. The state is
-// four 32-bit words, advanced with exact integer arithmetic only.
+// Seeded PRNG, so a prediction on the client draws the same numbers in the same order as the
+// authority and reconciles. xoshiro128**: four 32-bit words, advanced with exact integer
+// arithmetic only, period 2^128-1.
 
 function rotl(x: number, k: number): number {
     return ((x << k) | (x >>> (32 - k))) >>> 0;

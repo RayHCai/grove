@@ -18,7 +18,6 @@ import {
     boundsOverlap,
     boundsContains,
     boundsExpand,
-    boundsSize,
 } from '../src/bounds.js';
 import * as math from '../src/index.js';
 
@@ -195,20 +194,20 @@ describe('boundsContains', () => {
 
 describe('boundsExpand', () => {
     it('grows a y-up rect outward: top increases, bottom decreases', () => {
-        const out = boundsExpand(worldRect(), 64);
+        const out = boundsExpand(bounds(), worldRect(), 64);
         expect(out).toEqual({ left: -224, right: 224, top: 164, bottom: -164 });
         expect(boundsHeight(out)).toBe(200 + 128);
     });
 
     it('grows a y-down rect outward: top decreases, bottom increases', () => {
-        const out = boundsExpand(screenRect(), 10);
+        const out = boundsExpand(bounds(), screenRect(), 10);
         expect(out).toEqual({ left: -10, right: 970, top: -10, bottom: 550 });
         expect(boundsHeight(out)).toBe(540 + 20);
     });
 
     it('grows an x-reversed rect outward too', () => {
         // right < left, so left must increase and right must decrease.
-        expect(boundsExpand(bounds(160, -160, 100, -100), 40)).toEqual({
+        expect(boundsExpand(bounds(), bounds(160, -160, 100, -100), 40)).toEqual({
             left: 200,
             right: -200,
             top: 140,
@@ -218,20 +217,20 @@ describe('boundsExpand', () => {
 
     it('always adds 2 x margin to both extents regardless of orientation', () => {
         for (const b of [worldRect(), screenRect(), bounds(160, -160, -100, 100)]) {
-            const out = boundsExpand(b, 7);
+            const out = boundsExpand(bounds(), b, 7);
             expect(boundsWidth(out)).toBe(boundsWidth(b) + 14);
             expect(boundsHeight(out)).toBe(boundsHeight(b) + 14);
         }
     });
 
     it('shrinks on a negative margin', () => {
-        expect(boundsExpand(worldRect(), -10)).toEqual({
+        expect(boundsExpand(bounds(), worldRect(), -10)).toEqual({
             left: -150,
             right: 150,
             top: 90,
             bottom: -90,
         });
-        expect(boundsExpand(screenRect(), -10)).toEqual({
+        expect(boundsExpand(bounds(), screenRect(), -10)).toEqual({
             left: 10,
             right: 950,
             top: 10,
@@ -240,26 +239,19 @@ describe('boundsExpand', () => {
     });
 
     it('is a no-op on a zero margin', () => {
-        expect(boundsExpand(worldRect(), 0)).toEqual(worldRect());
+        expect(boundsExpand(bounds(), worldRect(), 0)).toEqual(worldRect());
     });
 
     it('returns the out object it was handed and leaves the source untouched', () => {
         const src = worldRect();
         const out = bounds();
-        expect(boundsExpand(src, 5, out)).toBe(out);
+        expect(boundsExpand(out, src, 5)).toBe(out);
         expect(src).toEqual(worldRect());
-    });
-
-    it('allocates a fresh rect when out is omitted', () => {
-        const src = worldRect();
-        const out = boundsExpand(src, 5);
-        expect(out).not.toBe(src);
-        expect(boundsExpand(src, 5)).not.toBe(out);
     });
 
     it('is safe in place, with out aliased to the source', () => {
         const b = worldRect();
-        const out = boundsExpand(b, 64, b);
+        const out = boundsExpand(b, b, 64);
         expect(out).toBe(b);
         expect(b).toEqual({ left: -224, right: 224, top: 164, bottom: -164 });
     });
@@ -267,32 +259,12 @@ describe('boundsExpand', () => {
     it('treats a degenerate rect as y-up and x-forward', () => {
         // top === bottom and left === right are ties; the `>=` comparisons pick the
         // positive direction, so a point expands into a well-formed y-up square.
-        expect(boundsExpand(bounds(0, 0, 0, 0), 3)).toEqual({
+        expect(boundsExpand(bounds(), bounds(0, 0, 0, 0), 3)).toEqual({
             left: -3,
             right: 3,
             top: 3,
             bottom: -3,
         });
-    });
-});
-
-describe('boundsSize', () => {
-    it('reports absolute extents for a y-up rect', () => {
-        expect(boundsSize(worldRect())).toEqual({ width: 320, height: 200 });
-    });
-
-    it('reports absolute extents for a y-down rect', () => {
-        expect(boundsSize(screenRect())).toEqual({ width: 960, height: 540 });
-    });
-
-    it('never reports a negative dimension', () => {
-        const s = boundsSize(bounds(10, -10, -5, 5));
-        expect(s).toEqual({ width: 20, height: 10 });
-    });
-
-    it('allocates a fresh Size per call', () => {
-        const b = worldRect();
-        expect(boundsSize(b)).not.toBe(boundsSize(b));
     });
 });
 
@@ -337,13 +309,12 @@ describe('index re-exports', () => {
         expect(math.boundsOverlap).toBe(boundsOverlap);
         expect(math.boundsContains).toBe(boundsContains);
         expect(math.boundsExpand).toBe(boundsExpand);
-        expect(math.boundsSize).toBe(boundsSize);
     });
 
     it('exposes the Bounds and Size types', () => {
         // Type-only: fails to compile if either name stops being re-exported.
         const b: math.Bounds = worldRect();
-        const s: math.Size = boundsSize(b);
+        const s: math.Size = { width: boundsWidth(b), height: boundsHeight(b) };
         expect(s.width).toBe(320);
     });
 });

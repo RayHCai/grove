@@ -2,7 +2,7 @@
 // destroy() is logical-now, teardown-at-end-of-tick.
 
 import type { Vec3, Easing, Bounds } from '@platform/math';
-import { atan2, vec3, vec3Dist, RAD2DEG } from '@platform/math';
+import { atan2, vec3, vec3Dist2D, RAD2DEG } from '@platform/math';
 import type { EntityId } from '../ids.js';
 import { NO_ENTITY } from '../ids.js';
 import type { ScriptProps } from '@platform/project';
@@ -28,6 +28,8 @@ export interface Animation {
 export class Entity {
     readonly #id: EntityId;
     readonly #rt: Runtime;
+    /** The tag `say` marked, since clearing one is marking the removal of the exact string sent. */
+    #bubble: string | null = null;
 
     constructor(id: EntityId, rt: Runtime) {
         this.#id = id;
@@ -46,7 +48,7 @@ export class Entity {
     get owner(): Player | null {
         const rec = this.#rt.entities.record(this.#id);
         if (!rec || rec.ownerId === '') return null;
-        return this.#rt.playerManager?.byId(rec.ownerId) ?? null;
+        return this.#rt.wired.playerManager.byId(rec.ownerId);
     }
 
     get position(): Vec3 {
@@ -139,7 +141,7 @@ export class Entity {
     }
 
     distanceTo(target: Entity | Vec3): number {
-        return vec3Dist(this.position, resolvePoint(target));
+        return vec3Dist2D(this.position, resolvePoint(target));
     }
 
     glideTo(x: number, y: number, seconds: number, easing?: Easing): Promise<void> {
@@ -268,7 +270,7 @@ export class Entity {
     animation?: Animation;
 
     getTouching(tag?: string, opts?: { asSeen?: boolean }): Entity[] {
-        return this.#rt.contacts?.touching(this.#id, tag, opts?.asSeen ?? false) ?? [];
+        return this.#rt.wired.contacts.touching(this.#id, tag, opts?.asSeen ?? false);
     }
 
     isTouching(tag?: string, opts?: { asSeen?: boolean }): boolean {
@@ -302,16 +304,17 @@ export class Entity {
     say(text: string): this;
     say(text: string, seconds: number): Promise<void>;
     say(text: string, seconds?: number): this | Promise<void> {
-        this.#rt.channels.markStructural({
-            kind: 'tag',
-            id: this.#id,
-            // Capped here rather than at the renderer: this string goes on the wire, so an
-            // unbounded one is a per-tick broadcast of whatever a client can talk the game into.
-            tag: `say:${text.slice(0, MAX_BUBBLE_LENGTH)}`,
-            added: true,
+        // Capped here rather than at the renderer: this string goes on the wire, so an unbounded
+        // one is a per-tick broadcast of whatever a client can talk the game into.
+        const tag = `say:${text.slice(0, MAX_BUBBLE_LENGTH)}`;
+        this.clearSay();
+        this.#bubble = tag;
+        this.#rt.channels.markStructural({ kind: 'tag', id: this.#id, tag, added: true });
+        if (seconds === undefined) return this;
+        return this.#rt.timers.sleep(seconds, this.#hostScope()).then(() => {
+            // Its own bubble only: a say() during the sleep already replaced this one.
+            if (this.#bubble === tag) this.clearSay();
         });
-        if (seconds !== undefined) return this.#rt.timers.sleep(seconds, this.#hostScope());
-        return this;
     }
 
     think(text: string): this;
@@ -323,6 +326,10 @@ export class Entity {
     }
 
     clearSay(): this {
+        const tag = this.#bubble;
+        if (tag === null) return this;
+        this.#bubble = null;
+        this.#rt.channels.markStructural({ kind: 'tag', id: this.#id, tag, added: false });
         return this;
     }
 
@@ -335,12 +342,12 @@ export class Entity {
     }
 
     addScript(script: new (props?: ScriptProps) => BaseScript<Entity>, props?: ScriptProps): this {
-        this.#rt.wiring?.attachToEntity(this.#id, script as never, props);
+        this.#rt.wired.wiring.attachToEntity(this.#id, script as never, props);
         return this;
     }
 
     send(event: string, payload?: Record<string, unknown>): Promise<void> {
-        return this.#rt.send?.(this.#id, event, payload) ?? Promise.resolve();
+        return this.#rt.wired.send(this.#id, event, payload);
     }
 
     /** Unparents without marking; returns false if it had no parent. */
@@ -364,7 +371,7 @@ export class Entity {
         const id = this.#id;
         const store = this.#rt.transforms;
         return {
-            key: `entity:${id as number}`,
+            key: entityKey(id as number),
             get(prop: string): number {
                 switch (prop) {
                     case 'x':

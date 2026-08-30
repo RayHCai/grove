@@ -17,7 +17,8 @@ import { TagIndex } from '../world/tag-index.js';
 import { EntityManager } from '../world/entity-manager.js';
 import { ReplicationChannels } from '../state/channels.js';
 import type { HandlerErrorRecord } from '../errors.js';
-import { ENTITY_KEY_PREFIX, HostTable } from './hosts.js';
+import { LoadError } from '../errors.js';
+import { entityIdOfKey, HostTable } from './hosts.js';
 import { PRNGStore } from './prng-store.js';
 import { ManualClock, MemoryKVStore, NullEffectSink, NullHUDSink } from './seams.js';
 import type { Clock, EffectSink, HUDSink, KVStore, PhysicsSink } from './seams.js';
@@ -59,6 +60,44 @@ export interface TickPasses {
     /** Takes the dispatch options for `replay` alone: a re-run tick must not spend a countdown twice. */
     countdowns(dispatch: DispatchOptions): void;
     update(dispatch: DispatchOptions, dt: number, scope: ReadonlySet<EntityId> | undefined): void;
+}
+
+/**
+ * The collaborators `loadGame` builds, installed as one object so no facade can see half a world.
+ *
+ * Separate from the stores the constructor makes because a store-level test builds a `Runtime` with
+ * no world behind it, and reaching one of these there is a mistake worth a message.
+ */
+export interface Wired {
+    readonly playerManager: PlayerManager;
+    readonly contacts: ContactSource;
+    readonly wiring: Wiring;
+    readonly lagRing: LagRing;
+    readonly roster: Roster;
+    readonly send: (
+        id: EntityId,
+        event: string,
+        payload?: Record<string, unknown>,
+    ) => Promise<void>;
+    /** Injected so the player facade need not import Camera and Storage. */
+    readonly makeCamera: (player: Player) => Camera;
+    readonly makeStorage: (player: Player) => Storage;
+    /** Client→server request delivery; loadGame installs the loopback sink. */
+    readonly requestSink: (name: string, payload?: Record<string, unknown>) => void;
+    readonly random: Random;
+    /** The manifest's asset table; the `assets` const resolves through here. */
+    readonly assets: Assets;
+    readonly gameInstance: Game;
+    readonly query: WorldQuery;
+    /** Broadphase over the live transform store, never a lag-ring buffer. */
+    readonly broadphase: Broadphase;
+    readonly regions: RegionIndex;
+    /** What a spawn key means; a key it does not hold spawns one bare entity. */
+    readonly templates: TemplateRegistry;
+    /** The screens and widgets the `hud` const is a facade over; one per world. */
+    readonly hud: HUDState;
+    /** Mutable: an endpoint swaps the pass table as prediction starts and stops. */
+    passes: TickPasses;
 }
 
 /** A logged handler throw or engine warning. */
@@ -125,32 +164,12 @@ export class Runtime {
     /** Whether this runtime is authoritative; only a server captures the lag ring. */
     isServer = true;
 
-    // Optional so a store-level test can construct a Runtime bare; loadGame fills them in.
-    playerManager?: PlayerManager;
-    contacts?: ContactSource;
-    wiring?: Wiring;
-    lagRing?: LagRing;
-    roster?: Roster;
-    send?: (id: EntityId, event: string, payload?: Record<string, unknown>) => Promise<void>;
-    /** Injected so the player facade need not import Camera and Storage. */
-    makeCamera?: (player: Player) => Camera;
-    makeStorage?: (player: Player) => Storage;
+    #wired: Wired | null = null;
+
     /** The local player on a client runtime; undefined on the server. */
     localPlayer?: Player | null;
     /** Persisted @serverState from a previous session, keyed by (hostId, field). */
     persisted?: PersistedSource;
-    /** Client→server request delivery; loadGame installs the loopback sink. */
-    requestSink?: (name: string, payload?: Record<string, unknown>) => void;
-    random?: Random;
-    /** The manifest's asset table; the `assets` const resolves through here. */
-    assets?: Assets;
-    gameInstance?: Game;
-    query?: WorldQuery;
-    /** Broadphase over the live transform store, never a lag-ring buffer. */
-    broadphase?: Broadphase;
-    regions?: RegionIndex;
-    /** What a spawn key means; a key it does not hold spawns one bare entity. */
-    templates?: TemplateRegistry;
     /**
      * The id the bundle stamped on a class, for the `attach` op that names it on the wire.
      *
@@ -158,12 +177,48 @@ export class Runtime {
      * that builds one, which imports core.
      */
     scriptIdOf?: (klass: abstract new (...args: never[]) => object) => ScriptId | undefined;
-    /** The screens and widgets the `hud` const is a facade over; one per world, built by loadGame. */
-    hud?: HUDState;
     worldBounds?: Bounds;
-    passes?: TickPasses;
     /** For the host's accumulator to honour; `step` runs a tick regardless. */
     paused = false;
+
+    /** Everything `loadGame` built. */
+    get wired(): Wired {
+        if (this.#wired === null) throw new LoadError('runtime not loaded — call loadGame() first');
+        return this.#wired;
+    }
+
+    /** The same set, or null — for the facades whose contract is to no-op outside a loaded world. */
+    get wiredOrNull(): Wired | null {
+        return this.#wired;
+    }
+
+    /** @internal — `loadGame` installs the whole set at once. */
+    install(wired: Wired): void {
+        this.#wired = wired;
+    }
+
+    // Delegating accessors so a consumer outside core reaches the same objects; core reads `wired`.
+    get playerManager(): PlayerManager {
+        return this.wired.playerManager;
+    }
+    get wiring(): Wiring {
+        return this.wired.wiring;
+    }
+    get lagRing(): LagRing {
+        return this.wired.lagRing;
+    }
+    get gameInstance(): Game {
+        return this.wired.gameInstance;
+    }
+    get assets(): Assets {
+        return this.wired.assets;
+    }
+    get passes(): TickPasses {
+        return this.wired.passes;
+    }
+    set passes(passes: TickPasses) {
+        this.wired.passes = passes;
+    }
 
     constructor() {
         // Registration order is capture and apply order.
@@ -203,9 +258,8 @@ export class Runtime {
     // snapshot — which the client takes every frame — well past a whole frame's budget.
     #entityForScope(scopeId: number): number {
         const key = this.hosts.keyForScope(scopeId);
-        if (key === undefined || !key.startsWith(ENTITY_KEY_PREFIX)) return -1;
-        const id = Number(key.slice(ENTITY_KEY_PREFIX.length));
-        return Number.isSafeInteger(id) ? entityIndex(id as EntityId) : -1;
+        const id = key === undefined ? undefined : entityIdOfKey(key);
+        return id === undefined ? -1 : entityIndex(id);
     }
 }
 

@@ -1,17 +1,7 @@
-// Vectors. Two concrete forms and one parameter form:
-//
-//   Vec3        — readonly. The creator-facing type, re-exported by @platform/engine.
-//                 Returned by Entity.position, Camera.position, etc. The guarantee is
-//                 that `entity.position.x = 5` is a compile error (DESIGN §9.2).
-//   MutableVec3 — writable. What `vec3()` returns and what out-param helpers take.
-//                 Internal to engine packages; never in a creator-facing return type.
-//   Vec3Like    — the parameter form. Permits an omitted `z`, accepted anywhere a
-//                 position or direction is passed in.
-//
-// MutableVec3 is assignable to Vec3 (wider → narrower), so engine code that produces
-// a vector returns Vec3 without a cast. Only code that WRITES needs MutableVec3.
+// MutableVec3 is assignable to Vec3, so engine code that produces a vector returns the readonly
+// type without a cast; only code that writes needs the mutable one.
 
-/** A point or direction, readonly. The creator-facing type. Matches api_spec.ts:37. */
+/** A point or direction. Readonly, so `entity.position.x = 5` is a compile error. */
 export interface Vec3 {
     readonly x: number;
     readonly y: number;
@@ -53,11 +43,6 @@ export function vec3Copy(out: MutableVec3, src: Vec3Like): MutableVec3 {
     return out;
 }
 
-/** `src.z` with the documented default applied. */
-export function vec3Z(src: Vec3Like): number {
-    return src.z ?? 0;
-}
-
 /** Euclidean length of a vector. */
 export function vec3Length(v: Vec3Like): number {
     const x = v.x;
@@ -74,8 +59,8 @@ export function vec3LengthSq(v: Vec3Like): number {
     return x * x + y * y + z * z;
 }
 
-/** Distance between two points. Euclidean over x/y, ignoring z (core DESIGN §12.13). */
-export function vec3Dist(a: Vec3Like, b: Vec3Like): number {
+/** Distance in the xy plane. `z` is deliberately ignored, unlike {@link vec3Length}. */
+export function vec3Dist2D(a: Vec3Like, b: Vec3Like): number {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     return Math.sqrt(dx * dx + dy * dy);

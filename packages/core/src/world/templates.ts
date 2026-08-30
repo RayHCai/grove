@@ -10,6 +10,7 @@ import type {
     ScriptProps,
     TemplateId,
 } from '@platform/project';
+import { defined } from '@platform/math';
 import { LoadError } from '../errors.js';
 import type { EntityId } from '../ids.js';
 import type { Entity } from '../runtime/entity.js';
@@ -107,7 +108,7 @@ export interface InstantiateOptions {
  * and torn down at the end of the tick.
  */
 export function instantiate(rt: Runtime, template: string, opts: InstantiateOptions = {}): Entity {
-    const def = rt.templates?.get(template);
+    const def = rt.wired.templates.get(template);
     const extra = opts.scripts ?? [];
     if (def === undefined && extra.length === 0 && (opts.tags ?? []).length === 0) {
         // A key the registry does not hold is one bare entity, which is what an ad-hoc spawn has
@@ -143,7 +144,7 @@ export function instantiatePlaced(rt: Runtime, entities: readonly PlacedEntity[]
             y: record.transform?.y ?? 0,
             tags: record.tags,
             scripts: record.scripts,
-            ...(record.transform === undefined ? {} : { transform: record.transform }),
+            ...defined({ transform: record.transform }),
         });
         minted.set(record.id, entity);
         if (record.parent === null) continue;
@@ -173,13 +174,13 @@ function mintChildren(
                 `template "${def.id}" mints more than ${MAX_TEMPLATE_NODES} entities`,
             );
         }
-        const childDef = rt.templates?.get(child.template);
+        const childDef = rt.wired.templates.get(child.template);
         // The offset is local to the parent node, which is all hierarchy carries.
         const entity = spawnNode(rt, child.template, {
             x: child.transform?.x ?? 0,
             y: child.transform?.y ?? 0,
             ownerId,
-            ...(child.transform === undefined ? {} : { transform: child.transform }),
+            ...defined({ transform: child.transform }),
         });
         attachAll(rt, entity.entityId, childDef?.scripts ?? []);
         // After the scripts, so the reparent op follows this node's own attach ops and a client
@@ -197,7 +198,7 @@ function spawnNode(rt: Runtime, template: string, at: InstantiateOptions): Entit
 
 function attachAll(rt: Runtime, id: EntityId, attachments: readonly TemplateAttachment[]): void {
     for (const attachment of attachments) {
-        rt.wiring?.attachToEntity(id, attachment.klass as AnyScriptClass, attachment.props);
+        rt.wired.wiring.attachToEntity(id, attachment.klass as AnyScriptClass, attachment.props);
     }
 }
 

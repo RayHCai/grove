@@ -13,8 +13,8 @@ import {
 } from '../src/runtime/wrappers.js';
 import { createHostRecord } from '../src/state/host-record.js';
 import { createRuntime, clearRuntime } from '../src/runtime/runtime.js';
+import type { Wired } from '../src/runtime/runtime.js';
 import type { Player } from '../src/runtime/player.js';
-import type { PlayerManager } from '../src/runtime/player.js';
 
 // A minimal Player stand-in — the wrappers key by `.id` only.
 const player = (id: string) => ({ id, name: id }) as unknown as Player;
@@ -22,7 +22,7 @@ const player = (id: string) => ({ id, name: id }) as unknown as Player;
 // top()/players() resolve ids through the current runtime, so a lookup needs one to live on.
 function withPlayerLookup(): void {
     const rt = createRuntime();
-    rt.playerManager = { byId: (id: string) => player(id) } as unknown as PlayerManager;
+    rt.install({ playerManager: { byId: (id: string) => player(id) } } as unknown as Wired);
 }
 
 afterEach(() => {

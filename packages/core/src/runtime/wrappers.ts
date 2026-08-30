@@ -439,5 +439,5 @@ export class Storage {
 function playerLookup(): (id: string) => Player | null {
     if (!hasRuntime()) return () => null;
     const rt = currentRuntime();
-    return (id: string) => rt.playerManager?.byId(id) ?? null;
+    return (id: string) => rt.wiredOrNull?.playerManager.byId(id) ?? null;
 }

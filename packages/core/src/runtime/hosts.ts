@@ -2,6 +2,7 @@
 
 import type { ScopeId } from '../dispatch/scope-tree.js';
 import { NO_SCOPE } from '../dispatch/scope-tree.js';
+import type { EntityId } from '../ids.js';
 import type { HostRecord } from '../state/host-record.js';
 import { createHostRecord } from '../state/host-record.js';
 import type { ScopeTree } from '../dispatch/scope-tree.js';
@@ -69,11 +70,21 @@ export class HostTable {
     }
 }
 
+/** The five host kinds, which every attach site knows structurally rather than by parsing a key. */
+export type HostKind = 'game' | 'player' | 'entity' | 'camera' | 'screen';
+
 export const ENTITY_KEY_PREFIX = 'entity:';
 export const SCREEN_KEY_PREFIX = 'screen:';
 
 export function entityKey(id: number): string {
     return `${ENTITY_KEY_PREFIX}${id}`;
+}
+
+/** The entity a host key names, or undefined for any other kind of host. */
+export function entityIdOfKey(key: string): EntityId | undefined {
+    if (!key.startsWith(ENTITY_KEY_PREFIX)) return undefined;
+    const id = Number(key.slice(ENTITY_KEY_PREFIX.length));
+    return Number.isSafeInteger(id) ? (id as EntityId) : undefined;
 }
 
 export function playerKey(id: string): string {
