@@ -1,7 +1,5 @@
 // Types only, one dependency: both endpoints agree here and nowhere else.
 
-export const PACKAGE_NAME = '@platform/protocol';
-
 export type { NetId, PlayerId, ProjectId } from './ids.js';
 export { PROTOCOL_VERSION } from './version.js';
 

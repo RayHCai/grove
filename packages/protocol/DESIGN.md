@@ -11,22 +11,22 @@ drift. Types only: no bytes move here, no frame is validated here. It sits above
 
 ## 1. Contents
 
-| File               | Holds                                                          |
-| ------------------ | -------------------------------------------------------------- |
-| `src/ids.ts`       | `NetId`, `PlayerId`, `ProjectId`                               |
-| `src/version.ts`   | `PROTOCOL_VERSION = 2`                                         |
-| `src/envelopes.ts` | all eleven messages, both direction unions, every payload type |
-| `src/index.ts`     | the barrel, grouped by concern; `PACKAGE_NAME`                 |
+| File               | Holds                                                    |
+| ------------------ | -------------------------------------------------------- |
+| `src/ids.ts`       | `NetId`, `PlayerId`, `ProjectId`                         |
+| `src/version.ts`   | `PROTOCOL_VERSION = 2`                                   |
+| `src/envelopes.ts` | every message, both direction unions, every payload type |
+| `src/index.ts`     | the barrel, grouped by concern                           |
 
-Runtime values exported: `PACKAGE_NAME`, `PROTOCOL_VERSION`. Everything else is a type.
+`PROTOCOL_VERSION` is the only runtime value exported. Everything else is a type.
 
 Dependencies: `@platform/transport` — `src` imports exactly one type from it, `JsonValue` — and
-`@platform/project`, whose authoring ids are exempt from the restatement rule in §5. `@platform/core` is
+`@platform/project`, whose authoring ids are exempt from the restatement rule below. `@platform/core` is
 a **devDependency**, reachable only from the dev-only reference, so it cannot enter the shipped module graph.
 
-## 2. The eleven messages
+## 2. The messages
 
-A message not in one of the two unions is not on the wire.
+A message not in one of the two unions is not on the wire, and this table is that list.
 
 | `kind`            | Union            | Notes                                                                     |
 | ----------------- | ---------------- | ------------------------------------------------------------------------- |
@@ -119,9 +119,10 @@ flattened `TransformDiff` free.
   `owner`, `tags` — because transform is dropped first under backpressure and a static entity is dirty exactly
   once. The duplicate transform in the same tick's `transform` envelope is deliberate. `template` is a
   `TemplateId` rather than a free string: it keys the render manifest on one end and a saved file on the
-  other, and a rename that misses one of them should not typecheck. `overrides` is absent for an entity its
-  template describes whole, which is why `template` earns its place — an ordinary spawn is one id and a
-  transform.
+  other, and a rename that misses one of them should not typecheck. Both ends of that join declare the id —
+  a `TemplateVisual`'s `template` too, as `texture` and `WireAssetRef.key` both declare `AssetId`.
+  `overrides` is absent for an entity its template describes whole, which is why `template` earns its
+  place — an ordinary spawn is one id and a transform.
 - **Every array and string arriving from a peer is bounded by the receiver**, cardinality and length both, and
   bounded _before_ the element walk — the count is peer-chosen and both validation and the work behind it are
   linear in it. No type here expresses a cap, because a cap is a receiver's policy and not a shape. Three layers
