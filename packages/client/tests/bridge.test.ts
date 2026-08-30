@@ -3,7 +3,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
-import { createNullRenderer } from '@platform/renderer/null';
+import { createReadyNullRenderer } from '@platform/renderer/null';
 import { NO_NODE } from '@platform/renderer';
 import type { IRenderer, NodeId, NodePatch } from '@platform/renderer';
 import type {
@@ -15,6 +15,7 @@ import type {
     WireTransform,
 } from '@platform/protocol';
 import type { EntityId } from '@platform/core';
+import { assetId, templateId } from '@platform/project';
 import { RenderBridge } from '../src/bridge.js';
 import { MAX_TEMPLATE_DEPTH, MAX_TEMPLATE_NODES } from '../src/constants.js';
 import { Mirror } from '../src/mirror.js';
@@ -27,14 +28,14 @@ const SEND_INTERVAL = 1 / SEND_RATE;
 
 /** A nested group template: a base sprite, and a barrel one level down under its own pivot. */
 const TURRET: GroupTemplateVisual = {
-    template: 'turret',
+    template: templateId('turret'),
     kind: 'group',
     children: [
-        { kind: 'sprite', texture: 'base.png' },
+        { kind: 'sprite', texture: assetId('base.png') },
         {
             kind: 'group',
             offsetY: 12,
-            children: [{ kind: 'sprite', texture: 'barrel.png', offsetY: 6, rotation: 0 }],
+            children: [{ kind: 'sprite', texture: assetId('barrel.png'), offsetY: 6, rotation: 0 }],
         },
     ],
 };
@@ -46,9 +47,8 @@ function stateEnvelope(structural: WireStructuralOp[] = [], tick = 1): StateEnve
 /**
  * The null renderer plus a record of every `updateNodes` batch, for the patch-count assertions.
  *
- * `init` is awaited rather than skipped: before it, the renderer's node store does not exist and
- * `createNode` returns `NO_NODE` silently — so an uninitialized harness would pass the delta tests for
- * the wrong reason and fail every assertion about what was drawn.
+ * Initialized rather than bare: an uninitialized harness would pass the delta tests for the wrong
+ * reason and fail every assertion about what was drawn.
  */
 async function harness(sendRate = SEND_RATE): Promise<{
     renderer: IRenderer;
@@ -56,8 +56,7 @@ async function harness(sendRate = SEND_RATE): Promise<{
     mirror: Mirror;
     bridge: RenderBridge;
 }> {
-    const renderer = createNullRenderer();
-    await renderer.init({ container: {} as never, design: { width: 800, height: 600 } });
+    const renderer = await createReadyNullRenderer({ design: { width: 800, height: 600 } });
     const batches: NodePatch[][] = [];
     const realUpdate = renderer.updateNodes.bind(renderer);
     renderer.updateNodes = (patches: readonly NodePatch[]): void => {
@@ -502,18 +501,18 @@ describe('the manifest and the template table', () => {
         const { bridge, renderer } = await harness();
         await bridge.loadManifest({
             assets: [
-                { key: 'js', kind: 'texture', url: 'javascript:alert(1)' },
-                { key: 'data', kind: 'texture', url: 'data:image/png;base64,AAAA' },
-                { key: 'file', kind: 'atlas', url: 'file:///etc/passwd' },
+                { key: assetId('js'), kind: 'texture', url: 'javascript:alert(1)' },
+                { key: assetId('data'), kind: 'texture', url: 'data:image/png;base64,AAAA' },
+                { key: assetId('file'), kind: 'atlas', url: 'file:///etc/passwd' },
                 // Lexical evasions the parse normalizes away before the check.
-                { key: 'spaced', kind: 'texture', url: '  javascript:alert(1)' },
-                { key: 'cased', kind: 'texture', url: 'JavaScript:alert(1)' },
-                { key: 'newline', kind: 'texture', url: 'java\nscript:alert(1)' },
+                { key: assetId('spaced'), kind: 'texture', url: '  javascript:alert(1)' },
+                { key: assetId('cased'), kind: 'texture', url: 'JavaScript:alert(1)' },
+                { key: assetId('newline'), kind: 'texture', url: 'java\nscript:alert(1)' },
                 // Ours to construct, never the server's to name.
-                { key: 'blob', kind: 'texture', url: 'blob:http://localhost/8f3c-1' },
+                { key: assetId('blob'), kind: 'texture', url: 'blob:http://localhost/8f3c-1' },
                 // The legitimate shapes: a relative path, and an absolute https one.
-                { key: 'ok-rel', kind: 'texture', url: '/coin.png' },
-                { key: 'ok-abs', kind: 'texture', url: 'https://cdn.example/coin.png' },
+                { key: assetId('ok-rel'), kind: 'texture', url: '/coin.png' },
+                { key: assetId('ok-abs'), kind: 'texture', url: 'https://cdn.example/coin.png' },
             ],
             templates: [],
         });
@@ -528,9 +527,9 @@ describe('the manifest and the template table', () => {
         // `loadAssets` refuses it by throwing, which would take the rest of the manifest with it.
         await bridge.loadManifest({
             assets: [
-                { key: 'blank', kind: 'texture', url: '' },
-                { key: 'absent', kind: 'atlas', url: undefined as unknown as string },
-                { key: 'ok', kind: 'texture', url: '/coin.png' },
+                { key: assetId('blank'), kind: 'texture', url: '' },
+                { key: assetId('absent'), kind: 'atlas', url: undefined as unknown as string },
+                { key: assetId('ok'), kind: 'texture', url: '/coin.png' },
             ],
             templates: [],
         });
@@ -541,14 +540,18 @@ describe('the manifest and the template table', () => {
     it('merges a later manifest in rather than replacing what the join established', async () => {
         const { mirror, bridge, renderer } = await harness();
         await bridge.loadManifest({
-            assets: [{ key: 'coin.png', kind: 'texture', url: '/coin.png' }],
-            templates: [{ template: 'coin', kind: 'sprite', texture: 'coin.png' }],
+            assets: [{ key: assetId('coin.png'), kind: 'texture', url: '/coin.png' }],
+            templates: [
+                { template: templateId('coin'), kind: 'sprite', texture: assetId('coin.png') },
+            ],
         });
 
         // What a mid-session `manifest` envelope carries: the additions alone.
         await bridge.loadManifest({
-            assets: [{ key: 'gem.png', kind: 'texture', url: '/gem.png' }],
-            templates: [{ template: 'gem', kind: 'sprite', texture: 'gem.png' }],
+            assets: [{ key: assetId('gem.png'), kind: 'texture', url: '/gem.png' }],
+            templates: [
+                { template: templateId('gem'), kind: 'sprite', texture: assetId('gem.png') },
+            ],
         });
 
         expect(
@@ -575,7 +578,7 @@ describe('the manifest and the template table', () => {
     it('does not re-fetch an asset it has already declared', async () => {
         const { bridge, renderer } = await harness();
         const manifest = {
-            assets: [{ key: 'coin.png', kind: 'texture' as const, url: '/coin.png' }],
+            assets: [{ key: assetId('coin.png'), kind: 'texture' as const, url: '/coin.png' }],
             templates: [],
         };
         await bridge.loadManifest(manifest);
@@ -591,7 +594,7 @@ describe('the manifest and the template table', () => {
         return harness().then(({ mirror, bridge, renderer }) => {
             void bridge.loadManifest({
                 assets: [],
-                templates: [{ template: 'late', kind: 'group' }],
+                templates: [{ template: templateId('late'), kind: 'group' }],
             });
             const delta = mirror.applyState(
                 stateEnvelope([{ kind: 'spawn', snapshot: entity(9, 'late') }]),
@@ -608,13 +611,20 @@ describe('the manifest and the template table', () => {
         await bridge.loadManifest({
             assets: [
                 {
-                    key: 'coin.png',
+                    key: assetId('coin.png'),
                     kind: 'texture',
                     url: '/coin.png',
                     meta: { width: 16, height: 16 },
                 },
             ],
-            templates: [{ template: 'coin', kind: 'sprite', texture: 'coin.png', tint: 0xff0000 }],
+            templates: [
+                {
+                    template: templateId('coin'),
+                    kind: 'sprite',
+                    texture: assetId('coin.png'),
+                    tint: 0xff0000,
+                },
+            ],
         });
         const delta = mirror.applyState(
             stateEnvelope([{ kind: 'spawn', snapshot: entity(1, 'coin') }]),
@@ -628,7 +638,10 @@ describe('the manifest and the template table', () => {
 
     it('makes a group template a group node, with no art', async () => {
         const { mirror, bridge, renderer } = await harness();
-        void bridge.loadManifest({ assets: [], templates: [{ template: 'pivot', kind: 'group' }] });
+        void bridge.loadManifest({
+            assets: [],
+            templates: [{ template: templateId('pivot'), kind: 'group' }],
+        });
         const delta = mirror.applyState(
             stateEnvelope([{ kind: 'spawn', snapshot: entity(1, 'pivot') }]),
         );
@@ -715,10 +728,10 @@ describe('the manifest and the template table', () => {
             assets: [],
             templates: [
                 {
-                    template: 'banner',
+                    template: templateId('banner'),
                     kind: 'group',
                     // Far enough out that the child clears the viewport and the cull margin.
-                    children: [{ kind: 'sprite', texture: 'far.png', offsetX: 5000 }],
+                    children: [{ kind: 'sprite', texture: assetId('far.png'), offsetX: 5000 }],
                 },
             ],
         });
@@ -751,13 +764,13 @@ describe('the manifest and the template table', () => {
         // Recursive, so a per-level cardinality cap bounds nothing: the receiver bounds depth too, and
         // refuses the whole template rather than half-drawing it.
         const { mirror, bridge, renderer } = await harness();
-        let deep: TemplateChild = { kind: 'sprite', texture: 'tip.png' };
+        let deep: TemplateChild = { kind: 'sprite', texture: assetId('tip.png') };
         for (let i = 0; i < MAX_TEMPLATE_DEPTH + 1; i++) {
             deep = { kind: 'group', children: [deep] };
         }
         await bridge.loadManifest({
             assets: [],
-            templates: [{ template: 'deep', kind: 'group', children: [deep] }],
+            templates: [{ template: templateId('deep'), kind: 'group', children: [deep] }],
         });
 
         const delta = mirror.applyState(
@@ -773,10 +786,10 @@ describe('the manifest and the template table', () => {
         const { bridge, mirror, renderer } = await harness();
         const wide: TemplateChild[] = [];
         for (let i = 0; i <= MAX_TEMPLATE_NODES; i++)
-            wide.push({ kind: 'sprite', texture: 'x.png' });
+            wide.push({ kind: 'sprite', texture: assetId('x.png') });
         await bridge.loadManifest({
             assets: [],
-            templates: [{ template: 'wide', kind: 'group', children: wide }],
+            templates: [{ template: templateId('wide'), kind: 'group', children: wide }],
         });
 
         bridge.reconcile(
@@ -792,18 +805,18 @@ describe('the manifest and the template table', () => {
         const packed: TemplateChild[] = [];
         // Root plus this group fills the batch to the cap, so its two siblings have nowhere to go.
         for (let i = 0; i < MAX_TEMPLATE_NODES - 2; i++) {
-            packed.push({ kind: 'sprite', texture: 'x.png' });
+            packed.push({ kind: 'sprite', texture: assetId('x.png') });
         }
         await bridge.loadManifest({
             assets: [],
             templates: [
                 {
-                    template: 'packed',
+                    template: templateId('packed'),
                     kind: 'group',
                     children: [
                         { kind: 'group', children: packed },
-                        { kind: 'sprite', texture: 'x.png' },
-                        { kind: 'sprite', texture: 'x.png' },
+                        { kind: 'sprite', texture: assetId('x.png') },
+                        { kind: 'sprite', texture: assetId('x.png') },
                     ],
                 },
             ],
@@ -823,11 +836,11 @@ describe('the manifest and the template table', () => {
             assets: [],
             templates: [
                 {
-                    template: 'broken',
+                    template: templateId('broken'),
                     kind: 'group',
                     children: [
-                        { kind: 'sprite', texture: 'ok.png' },
-                        { kind: 'sprite', texture: '' },
+                        { kind: 'sprite', texture: assetId('ok.png') },
+                        { kind: 'sprite', texture: assetId('') },
                     ],
                 },
             ],
@@ -852,10 +865,10 @@ describe('the manifest and the template table', () => {
         };
         await bridge.loadManifest({
             assets: [
-                { key: 'art', kind: 'texture', url: '/a.png' },
-                { key: 'boom', kind: 'audio', url: '/b.mp3' },
-                { key: 'walk', kind: 'clip', url: '/c.json' },
-                { key: 'sheet', kind: 'atlas', url: '/d.json' },
+                { key: assetId('art'), kind: 'texture', url: '/a.png' },
+                { key: assetId('boom'), kind: 'audio', url: '/b.mp3' },
+                { key: assetId('walk'), kind: 'clip', url: '/c.json' },
+                { key: assetId('sheet'), kind: 'atlas', url: '/d.json' },
             ],
             templates: [],
         });

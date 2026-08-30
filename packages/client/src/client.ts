@@ -13,16 +13,15 @@ import {
     pointerHit as dispatchPointer,
     pressWidget as dispatchPress,
 } from '@platform/core';
+import { defined } from '@platform/math';
 import type { CameraState, IRenderer } from '@platform/renderer';
 import type {
     InputAction,
     InputFrame,
     Interaction,
     InteractionFrame,
-    NetId,
     RateChange,
     ServerToClient,
-    SnapshotChunk,
     StateEnvelope,
     TimeSyncReply,
     Welcome,
@@ -33,7 +32,6 @@ import {
     ACK_STALL_TICKS,
     BUNDLE_DEADLINE_SECONDS,
     DEFAULT_VIEWPORT,
-    MAX_SNAPSHOT_CHUNKS,
     STALL_SECONDS,
     SYNC_INTERVAL_SECONDS,
 } from './constants.js';
@@ -42,6 +40,7 @@ import type { Binding, ResolvedEdge } from './bindings.js';
 import { ClientClock } from './clock.js';
 import { RenderBridge } from './bridge.js';
 import {
+    SnapshotChunks,
     asServerEnvelope,
     isUsableWelcome,
     joinRequest,
@@ -53,7 +52,7 @@ import {
 import type { ClientProject, ClockSource } from './handshake.js';
 import { unidentifiedProject } from './handshake.js';
 import type { BundleSource } from './bundle.js';
-import { BundleError, loadBundle } from './bundle.js';
+import { BundleLoadError, loadBundle } from './bundle.js';
 import type { FrameSource, InputDevice, RawInputEvent } from './input.js';
 import { ClientHUDSink } from './hud-sink.js';
 import { Lifecycle } from './lifecycle.js';
@@ -160,15 +159,8 @@ export class GameClient {
     /** Envelopes delivered since the last frame — drained in arrival order. */
     readonly #inbox: ServerToClient[] = [];
 
-    /**
-     * Snapshot chunks held for the `Welcome` that names how many there are.
-     *
-     * Held rather than applied: a chunk carries no tick and describes a world the client has not been
-     * told it is joining, so a set with no `Welcome` behind it is never written anywhere.
-     */
-    readonly #chunks: SnapshotChunk[] = [];
-    /** Chunks refused as unusable — over the cap, or arriving for a join already answered. */
-    #chunksDropped = 0;
+    /** The pieces of a snapshot too big for one frame, held for the `Welcome` that counts them. */
+    readonly #chunks = new SnapshotChunks();
 
     #seq = 0;
     /** Edges resolved but not yet framed: coalesced per (action, tick) at flush. */
@@ -225,20 +217,19 @@ export class GameClient {
         return this.#lifecycle;
     }
 
+    /**
+     * The mirrored world, for a host that needs the runtime behind it — a HUD bridge, an inspector.
+     *
+     * These three hand out the live collaborator, not a copy: writing through one (`simulate(null)`,
+     * `ring.reset()`) breaks invariants this file holds from the outside, where nothing checks.
+     * Everything a dev console wants is on `stats()` instead.
+     */
     get mirror(): Mirror | undefined {
         return this.#mirror;
     }
 
-    get bindings(): BindingTable {
-        return this.#bindings;
-    }
-
     get ring(): InputRing {
         return this.#ring;
-    }
-
-    get clock(): ClientClock | undefined {
-        return this.#clock;
     }
 
     get actions(): ActionStates {
@@ -265,7 +256,7 @@ export class GameClient {
             const player = this.localPlayer;
             void dispatchPress(rt, {
                 widget,
-                ...(screen === undefined ? {} : { screen }),
+                ...defined({ screen }),
                 ...(player === null ? {} : { player }),
             });
         }
@@ -273,7 +264,7 @@ export class GameClient {
         this.#interactions.push({
             kind: 'press',
             widget,
-            ...(screen === undefined ? {} : { screen }),
+            ...defined({ screen }),
         });
     }
 
@@ -327,7 +318,7 @@ export class GameClient {
             predictedTick: predictedTick < 0 ? depictedTick : predictedTick,
             resimulations: predicted?.counters.resimulations ?? 0,
             cappedReplays: predicted?.counters.cappedReplays ?? 0,
-            snapshotChunksDropped: this.#chunksDropped,
+            snapshotChunksDropped: this.#chunks.dropped,
         };
     }
 
@@ -349,6 +340,11 @@ export class GameClient {
         frames.start((now) => this.frame(now));
     }
 
+    /** The injected wall clock in ms — the base every wire stamp is in, and never `#now`'s. */
+    #nowMs(): number {
+        return this.#opts.clock.nowSeconds() * 1000;
+    }
+
     /**
      * The join request, stamped now and carrying the bundle this client currently holds.
      *
@@ -357,7 +353,7 @@ export class GameClient {
      * has moved on refuses rather than letting the two run different code.
      */
     #joinFrame(): ReturnType<typeof joinRequest> {
-        this.#joinSentMs = this.#opts.clock.nowSeconds() * 1000;
+        this.#joinSentMs = this.#nowMs();
         const declared = this.#opts.project ?? unidentifiedProject();
         return joinRequest(
             this.#opts.name,
@@ -381,8 +377,7 @@ export class GameClient {
         // 0..N ticks. The push is below rather than inside this, because it is display work at display
         // rate: a frame that advanced three ticks still pushes once.
         if (this.#lifecycle.state !== 'failed' && this.#clock !== undefined) {
-            this.#clock.advance(nowSeconds, this.#ticks);
-            this.#flushInput(this.#ticks);
+            this.#flushInput(this.#clock.advance(nowSeconds, this.#ticks).at(-1));
             this.#flushInteractions();
         }
 
@@ -473,7 +468,7 @@ export class GameClient {
                 this.#onWelcome(envelope);
                 return;
             case 'snapshot-chunk':
-                this.#onSnapshotChunk(envelope);
+                this.#chunks.offer(envelope, this.#welcome !== undefined);
                 return;
             case 'reject':
                 this.#lifecycle.fail({
@@ -503,6 +498,12 @@ export class GameClient {
             case 'rate-change':
                 this.#onRateChange(envelope);
                 return;
+            default: {
+                // A ninth envelope kind must not compile to a silent no-op here: this is the sole
+                // router for inbound traffic, and one presents as a server that stopped working.
+                const unreachable: never = envelope;
+                return unreachable;
+            }
         }
     }
 
@@ -518,7 +519,7 @@ export class GameClient {
         if (this.#welcome !== undefined || this.#loadingSince !== undefined) return;
         // Folded in before anything reads the snapshot, so every path below sees one whole world and
         // chunking stays invisible past this line.
-        if (!this.#foldChunks(welcome)) {
+        if (!this.#chunks.foldInto(welcome)) {
             this.#lifecycle.fail({
                 kind: 'peer',
                 message: 'the snapshot chunks did not add up to the set the Welcome named',
@@ -536,7 +537,7 @@ export class GameClient {
 
         // Measured against the stamp we recorded at send, on the clock that produced it: the echoed
         // `clientSentMs` is peer-controlled, and reading it would let a server dictate our lead.
-        this.#rtt = rttSeconds(this.#opts.clock.nowSeconds() * 1000, this.#joinSentMs);
+        this.#rtt = rttSeconds(this.#nowMs(), this.#joinSentMs);
 
         // Nothing to fetch, or this process already holds exactly these bytes: the session opens on
         // this frame, and the pre-live state is never entered.
@@ -577,7 +578,7 @@ export class GameClient {
             this.#lifecycle.fail({
                 kind: 'bundle',
                 message:
-                    error instanceof BundleError || error instanceof Error
+                    error instanceof BundleLoadError || error instanceof Error
                         ? error.message
                         : String(error),
             });
@@ -600,7 +601,7 @@ export class GameClient {
             simRate: welcome.simRate,
             bounds: wireBounds(welcome.bounds),
             regions: welcome.regions.map((r) => ({ name: r.name, bounds: wireBounds(r.bounds) })),
-            ...(this.#opts.scripts === undefined ? {} : { scripts: this.#opts.scripts }),
+            ...defined({ scripts: this.#opts.scripts }),
         });
         // `sendRate` is the interval between transforms, and so the interval the render path buffers over:
         // without it an entity nothing local predicts holds its pose until the next envelope.
@@ -680,53 +681,12 @@ export class GameClient {
         // depicted tick changes: see `#checkNotBehind` and `#checkLiveness`.
     }
 
-    /**
-     * Buffers one chunk of a snapshot too big for a single frame.
-     *
-     * Bounded on arrival rather than at the fold: the count the `Welcome` will name has not been seen
-     * yet, so this is the only place that can refuse to keep growing. A chunk for a join already
-     * answered is dropped — a live session's world comes from deltas, never from a chunk.
-     */
-    #onSnapshotChunk(chunk: SnapshotChunk): void {
-        if (this.#welcome !== undefined || this.#chunks.length >= MAX_SNAPSHOT_CHUNKS) {
-            this.#chunksDropped++;
-            return;
-        }
-        this.#chunks.push(chunk);
-    }
-
-    /**
-     * Prepends every held chunk to the welcome's own snapshot, in index order.
-     *
-     * False when the set does not match what the `Welcome` named — a short set would open a session
-     * on a world missing entities the server believes it sent, which reads later as a mirror bug
-     * rather than as the truncated join it is.
-     */
-    #foldChunks(welcome: Welcome): boolean {
-        const expected = welcome.snapshotChunks ?? 0;
-        if (this.#chunks.length !== expected) return false;
-        const held = this.#chunks.splice(0);
-        if (expected === 0) return true;
-
-        // The wire is FIFO, so arrival order is already emission order; sorting states the invariant
-        // the fold depends on rather than trusting it, and a duplicate index shows up as a gap.
-        held.sort((a, b) => a.index - b.index);
-        if (held.some((chunk, at) => chunk.index !== at)) return false;
-
-        const snapshot = welcome.snapshot;
-        // Ahead of the welcome's own, because `entities` is parents-before-children across the whole
-        // set and the chunks carry the earlier half of that order.
-        snapshot.entities = [...held.flatMap((c) => c.entities), ...snapshot.entities];
-        snapshot.state = [...held.flatMap((c) => c.state), ...snapshot.state];
-        return true;
-    }
-
     #onTimeSyncReply(reply: TimeSyncReply): void {
         // Only a reply echoing the stamp we sent is ours; the interval is measured off our own clock.
         const sentMs = this.#lastSyncSentMs;
         if (sentMs === undefined || reply.clientSentMs !== sentMs) return;
         this.#lastSyncSentMs = undefined;
-        this.#rtt = rttSeconds(this.#opts.clock.nowSeconds() * 1000, sentMs);
+        this.#rtt = rttSeconds(this.#nowMs(), sentMs);
     }
 
     #onRateChange(change: RateChange): void {
@@ -750,7 +710,7 @@ export class GameClient {
             // Immediately, not from the frame loop: a hidden tab stops being driven, so a release left for
             // the next frame waits until the player returns. Exempt from the `stalled` refusal too.
             this.#pending.push(...this.#edges);
-            this.#flushInput(this.#clock === undefined ? [] : [this.#clock.localTick], true);
+            this.#flushInput(this.#clock?.localTick, { exempt: 'focus-loss' });
             return;
         }
 
@@ -759,24 +719,24 @@ export class GameClient {
     }
 
     /**
-     * Frames the pending edges for the ticks just advanced and sends them — one frame per tick carrying
-     * every action for that tick, which is what makes `seq` and `tick` advance together so `ackSeq` names
-     * a tick boundary.
+     * Frames the pending edges and sends them, stamped with the newest tick this frame advanced.
+     *
+     * One frame per frame that advanced a tick, not one per tick: every edge since the last flush
+     * belongs to the last tick advanced, the earliest it could apply on. `seq` and `tick` still move
+     * together, so `ackSeq` names a tick boundary. `undefined` is a frame that advanced none.
      *
      * Empty frames are not sent.
      */
-    #flushInput(ticks: readonly number[], force = false): void {
+    #flushInput(tick: number | undefined, release?: { exempt: 'focus-loss' }): void {
         const clock = this.#clock;
         if (clock === undefined) return;
-        if (!force && !this.#lifecycle.acceptsInput) {
+        if (release === undefined && !this.#lifecycle.acceptsInput) {
             // Dropped rather than held: they are stamped against a tick the server will refuse as too old.
             this.#pending.length = 0;
             return;
         }
-        const tick = ticks.at(-1);
         if (tick === undefined) return;
 
-        // Every edge since the last flush belongs to the last tick advanced — the earliest it could apply on.
         this.#actions.advanceTick();
         if (this.#pending.length === 0) return;
 
@@ -883,15 +843,17 @@ export class GameClient {
      */
     #checkLiveness(): void {
         const state = this.#lifecycle.state;
+        const clock = this.#clock;
+        if (clock === undefined) return;
         if (state !== 'live' && state !== 'stalled') return;
 
         const since = this.#lastEnvelopeAt;
         const drought = since !== undefined && this.#now - since >= STALL_SECONDS;
 
         // In the session's own ticks, not frames: counting frames fires 7× early on 144 Hz over a 20 Hz sim.
-        const simRate = this.#clock?.simRate ?? 60;
         const ackFrozen =
-            this.#ring.size > 0 && this.#now - this.#ackSeqStillAt >= ACK_STALL_TICKS / simRate;
+            this.#ring.size > 0 &&
+            this.#now - this.#ackSeqStillAt >= ACK_STALL_TICKS / clock.simRate;
 
         if (drought || ackFrozen) this.#stall();
         else if (state === 'stalled') {
@@ -911,7 +873,7 @@ export class GameClient {
         if (this.#lifecycle.state !== 'live') return;
         if (this.#now - this.#lastSyncAt < SYNC_INTERVAL_SECONDS) return;
         this.#lastSyncAt = this.#now;
-        const sentMs = this.#opts.clock.nowSeconds() * 1000;
+        const sentMs = this.#nowMs();
         this.#lastSyncSentMs = sentMs;
         this.#guard(() => send(this.#opts.transport, timeSync(sentMs)));
     }
@@ -947,7 +909,7 @@ export class GameClient {
         this.#welcome = undefined;
         // The next join answers with its own set; a chunk held from this one describes a world at a
         // tick the new session will not be seeded from.
-        this.#chunks.length = 0;
+        this.#chunks.clear();
         this.#mirror = undefined;
         this.#bridge = undefined;
         this.#clock = undefined;
@@ -1026,11 +988,6 @@ export class GameClient {
             this.#opts.frames.stop();
         }
     }
-}
-
-/** A netId as the wire spells it — for tests and a `FakeServer`, which mint them. */
-export function netId(n: number): NetId {
-    return n as NetId;
 }
 
 /** The two envelopes that write the world. Everything else leaves a predicted pose standing. */

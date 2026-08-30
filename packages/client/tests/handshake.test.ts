@@ -3,12 +3,14 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
-import { createNullRenderer } from '@platform/renderer/null';
+import { defined } from '@platform/math';
+import { createReadyNullRenderer } from '@platform/renderer/null';
 import type { IRenderer } from '@platform/renderer';
 import { loopbackPair } from '@platform/transport';
 import type { LoopbackPair } from '@platform/transport';
 import { PROTOCOL_VERSION } from '@platform/protocol';
-import { GameClient, netId } from '../src/client.js';
+import { assetId } from '@platform/project';
+import { GameClient } from '../src/client.js';
 import {
     ACK_STALL_TICKS,
     BUNDLE_DEADLINE_SECONDS,
@@ -19,12 +21,12 @@ import type { Binding } from '../src/bindings.js';
 import type { BundleSource } from '../src/bundle.js';
 import type { ClientProject } from '../src/handshake.js';
 import { ManualFrameSource, ScriptedInputDevice } from '../src/input.js';
-import { FakeServer, entity, transformDiff } from './fake-server.js';
+import { FakeServer, entity, netId, transformDiff } from './fake-server.js';
 import type { FakeServerOptions } from './fake-server.js';
 
 const TICK = 1 / 60;
 
-/** Lets every pending microtask run, so a resolved fetch reaches its continuation. */
+/** Yields a macrotask, so a resolved fetch and anything queued on a timer both continue. */
 function settle(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -114,8 +116,7 @@ async function harness(
 ): Promise<Harness> {
     const pair = loopbackPair({ latency: clientOpts.latency ?? 1 });
     const server = new FakeServer(pair.server, opts);
-    const renderer = createNullRenderer();
-    await renderer.init({ container: {} as never, design: { width: 800, height: 600 } });
+    const renderer = await createReadyNullRenderer({ design: { width: 800, height: 600 } });
 
     const frames = new ManualFrameSource();
     const device = new ScriptedInputDevice();
@@ -130,8 +131,7 @@ async function harness(
         name: 'Ray',
         bindings: clientOpts.bindings ?? [],
         pump: () => pair.deliver(),
-        ...(clientOpts.project === undefined ? {} : { project: clientOpts.project }),
-        ...(clientOpts.bundle === undefined ? {} : { bundle: clientOpts.bundle }),
+        ...defined({ project: clientOpts.project, bundle: clientOpts.bundle }),
     });
 
     const simRate = opts.simRate ?? 60;
@@ -233,7 +233,7 @@ describe('the join sequence', () => {
         // The tick the counter seeds from and the tick its initial world describes cannot disagree, so
         // the mirror is at the server's tick and the counter LEADS it — the only sound statement.
         expect(h.client.mirror!.depictedTick).toBeGreaterThanOrEqual(900);
-        expect(h.client.clock!.localTick).toBeGreaterThanOrEqual(h.client.mirror!.depictedTick);
+        expect(h.client.stats().localTick).toBeGreaterThanOrEqual(h.client.mirror!.depictedTick);
     });
 
     it('applies the join snapshot through the one path', async () => {
@@ -262,7 +262,7 @@ describe('the join sequence', () => {
         const h = await harness();
         h.run(4);
         expect(h.client.stats().rttSeconds).toBeGreaterThan(0);
-        expect(h.client.clock!.currentLeadSeconds).toBeGreaterThan(0);
+        expect(h.client.stats().currentLeadSeconds).toBeGreaterThan(0);
     });
 });
 
@@ -846,7 +846,7 @@ describe('resync', () => {
         // One join, so no resync happened at any point.
         expect(h.server.joins).toHaveLength(1);
         // And the invariant genuinely holds throughout, rather than being unchecked.
-        expect(h.client.clock!.localTick).toBeGreaterThanOrEqual(h.client.mirror!.depictedTick);
+        expect(h.client.stats().localTick).toBeGreaterThanOrEqual(h.client.mirror!.depictedTick);
     });
 
     it('does not resync at 20 Hz either, where the one-tick lead floor has least room', async () => {
@@ -1020,7 +1020,7 @@ describe('an untrusted frame ends up as state, never as a throw', () => {
         const h = await harness(
             {
                 visuals: {
-                    assets: [{ key: 'art', kind: 'texture', url: '/a.png' }],
+                    assets: [{ key: assetId('art'), kind: 'texture', url: '/a.png' }],
                     templates: [],
                 },
             },
@@ -1029,7 +1029,7 @@ describe('an untrusted frame ends up as state, never as a throw', () => {
         h.renderer.loadAssets = (): Promise<never> => Promise.reject(new Error('offline'));
         h.client.start();
         untilLive(h);
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await settle();
         h.run(1);
         expect(h.client.state).toBe('live');
         expect(h.client.stats().assetLoadFailed).toBe(1);

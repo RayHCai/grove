@@ -23,6 +23,7 @@ import type {
     TemplateVisual,
     WireAssetRef,
 } from '@platform/protocol';
+import { isFiniteNumber } from '@platform/math';
 import {
     CORRECTION_SMOOTH_SECONDS,
     MAX_FRAME_DT,
@@ -749,10 +750,6 @@ function childDesc(child: TemplateChild, parentInBatch: number): SubtreeNodeDesc
     if (isFiniteNumber(child.layer)) desc.layer = child.layer;
     if (child.neverCull !== undefined) desc.neverCull = child.neverCull;
     return desc;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-    return typeof value === 'number' && Number.isFinite(value);
 }
 
 /** Core's kinds are not the renderer's, and `audio`/`clip`/`effect` are not renderer assets at all. */

@@ -32,7 +32,9 @@ export class ClientHUDSink implements HUDSink {
 
     /** Every widget code has written, in first-write order. */
     get widgets(): HUDWidgetView[] {
-        return [...this.#widgets].map(([name, state]) => ({ name, ...state }));
+        const out: HUDWidgetView[] = [];
+        for (const [name, state] of this.#widgets) out.push({ name, ...state });
+        return out;
     }
 
     /** Open screen names, bottom to top. */

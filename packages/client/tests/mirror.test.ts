@@ -3,7 +3,15 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ScriptLocation } from '@platform/core';
-import { Player, Scoreboard, ServerScript, SyncedScript, clearRuntime } from '@platform/core';
+import {
+    Player,
+    Scoreboard,
+    ServerScript,
+    SyncedScript,
+    clearRuntime,
+    entityKey,
+} from '@platform/core';
+import { defined } from '@platform/math';
 import type { ScriptId } from '@platform/project';
 import type {
     NetId,
@@ -23,7 +31,7 @@ function mirror(over: { simRate?: number; scripts?: ScriptIndex } = {}): Mirror 
         simRate: over.simRate ?? 60,
         bounds: BOUNDS,
         regions: [],
-        ...(over.scripts === undefined ? {} : { scripts: over.scripts }),
+        ...defined({ scripts: over.scripts }),
     });
 }
 
@@ -545,7 +553,7 @@ describe('@serverState lands in the host record', () => {
             }),
         );
         const local = delta.added[0]! as number;
-        expect(m.runtime.hosts.get(`entity:${local}`)?.record.values.get('hp')).toBe(3);
+        expect(m.runtime.hosts.get(entityKey(local))?.record.values.get('hp')).toBe(3);
     });
 
     it('marks nothing when writing the record', () => {

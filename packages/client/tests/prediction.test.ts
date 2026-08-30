@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime, entityKey } from '@platform/core';
 import type { EntityId } from '@platform/core';
-import { createNullRenderer } from '@platform/renderer/null';
+import { createReadyNullRenderer } from '@platform/renderer/null';
 import type { IRenderer, NodePatch } from '@platform/renderer';
 import type {
     InputFrame,
@@ -56,8 +56,7 @@ function stateEnvelope(
 }
 
 async function harness(): Promise<Harness> {
-    const renderer = createNullRenderer();
-    await renderer.init({ container: {} as never, design: { width: 800, height: 600 } });
+    const renderer = await createReadyNullRenderer({ design: { width: 800, height: 600 } });
     const batches: NodePatch[][] = [];
     const realUpdate = renderer.updateNodes.bind(renderer);
     renderer.updateNodes = (patches: readonly NodePatch[]): void => {
@@ -496,8 +495,7 @@ describe('a whole session predicts', () => {
         const server = new FakeServer(pair.server, {
             entities: [entity(1, 'slider', { owner: PLAYER })],
         });
-        const renderer = createNullRenderer();
-        await renderer.init({ container: {} as never, design: { width: 800, height: 600 } });
+        const renderer = await createReadyNullRenderer({ design: { width: 800, height: 600 } });
         const frames = new ManualFrameSource();
         const device = new ScriptedInputDevice();
         let now = 0;

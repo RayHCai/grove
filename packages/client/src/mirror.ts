@@ -5,7 +5,7 @@
 // private stores, so a hand-rolled mirror would be thrown away to get it. Idle, every pass is a no-op:
 // simulating is something the client may do only over an authoritative baseline it can rewind to.
 
-import type { EntityId, Runtime, ScriptLocation, TickPasses } from '@platform/core';
+import type { AnyScriptClass, EntityId, Runtime, ScriptLocation, TickPasses } from '@platform/core';
 import {
     GAME_KEY,
     Loop,
@@ -491,7 +491,7 @@ export class Mirror {
             this.counters.droppedAttach++;
             return;
         }
-        this.#rt.wiring?.attachToEntity(local, klass as never, attachment.props);
+        this.#rt.wiring?.attachToEntity(local, klass as AnyScriptClass, attachment.props);
     }
 
     #destroy(netId: NetId, delta: MirrorDelta): void {
@@ -550,7 +550,11 @@ export class Mirror {
             case 'entity': {
                 const local = this.#resolve(host.netId);
                 // The full packed local EntityId, not the slot index.
-                return local === undefined ? undefined : entityKey(local as number);
+                return local === undefined ? undefined : entityKey(local);
+            }
+            default: {
+                const unreachable: never = host;
+                return unreachable;
             }
         }
     }
