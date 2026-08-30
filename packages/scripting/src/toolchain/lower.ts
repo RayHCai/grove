@@ -1,6 +1,4 @@
-// Stage one, and it has to be first: core's scripts use TC39 standard decorators and `tsc` is the
-// only tool in this repo that lowers them. A bundler run over the source emits them verbatim, the
-// runtime then refuses to parse the file, and the metadata tables a chunk is for come out empty.
+// tsc is the only tool in this repo that lowers TC39 decorators, so it has to run before the linker.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
@@ -19,7 +17,9 @@ export interface LowerOptions {
 export function lowerScripts(options: LowerOptions): string {
     const tsconfig = path.resolve(options.tsconfig);
     const outDir = path.resolve(options.outDir);
-    if (!existsSync(tsconfig)) throw new BundleError(`${tsconfig} does not exist`);
+    if (!existsSync(tsconfig)) {
+        throw new BundleError('tsconfig-missing', `${tsconfig} does not exist`);
+    }
 
     rmSync(outDir, { recursive: true, force: true });
     const result = spawnSync(
@@ -28,11 +28,13 @@ export function lowerScripts(options: LowerOptions): string {
         { encoding: 'utf8', windowsHide: true },
     );
     if (result.error) {
-        throw new BundleError(`tsc could not be started: ${result.error.message}`);
+        throw new BundleError('tsc-unavailable', 'tsc could not be started', {
+            cause: result.error,
+        });
     }
     if (result.status !== 0) {
         const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
-        throw new BundleError(`tsc failed on ${tsconfig}:\n${output}`);
+        throw new BundleError('tsc-failed', `tsc failed on ${tsconfig}:\n${output}`);
     }
     return outDir;
 }

@@ -1,7 +1,5 @@
-// The rule is scoped, which is why it cannot be an oxlint rule: `Date.now()` is perfectly legal in
-// a ClientScript and a refusal in a SyncedScript, and no lint config can express the difference.
-// It is also lexical — a helper a synced script calls is not inside it, and the shim is what stands
-// behind that edge.
+// The pass is lexical: a helper a synced script calls is not inside it, and neither is
+// `globalThis['Da' + 'te']`.
 
 import type { Diagnostic } from '../errors.js';
 import { DeterminismError, formatDiagnostic } from '../errors.js';
@@ -9,16 +7,13 @@ import type { Redirect } from '../policy.js';
 import { ALIASED_MATH, COMPUTED_MATH, DENIED_GLOBALS, DENIED_MATH } from '../policy.js';
 import { asNodes, forEachChild, isNode, nodeName, patternNames, positionAt } from './ast.js';
 import type { Node } from './ast.js';
-import type { Analysis, Module } from './analyze.js';
+import type { SyncedClass } from './analyze.js';
 
 /** Every denied reference inside a `SyncedScript` subclass, sorted by file and position. */
-export function checkDeterminism(analysis: Analysis): Diagnostic[] {
+export function checkDeterminism(synced: readonly SyncedClass[]): Diagnostic[] {
     const found: Diagnostic[] = [];
-    for (const mod of analysis.modules) {
-        for (const klass of mod.classes) {
-            if (klass.location !== 'synced') continue;
-            new Walk(mod, klass.local, found).run(klass.node);
-        }
+    for (const klass of synced) {
+        new Walk(klass, found).run();
     }
     return found.toSorted(
         (a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column,
@@ -26,8 +21,8 @@ export function checkDeterminism(analysis: Analysis): Diagnostic[] {
 }
 
 /** Fails the build, naming every refusal. */
-export function assertDeterminism(analysis: Analysis): void {
-    const diagnostics = checkDeterminism(analysis);
+export function assertDeterminism(synced: readonly SyncedClass[]): void {
+    const diagnostics = checkDeterminism(synced);
     if (diagnostics.length === 0) return;
     const lines = diagnostics.map((d) => `  ${formatDiagnostic(d)}`).join('\n');
     throw new DeterminismError(
@@ -37,20 +32,18 @@ export function assertDeterminism(analysis: Analysis): void {
 }
 
 class Walk {
-    readonly #mod: Module;
-    readonly #klass: string;
+    readonly #klass: SyncedClass;
     readonly #out: Diagnostic[];
     readonly #scopes: Set<string>[];
 
-    constructor(mod: Module, klass: string, out: Diagnostic[]) {
-        this.#mod = mod;
+    constructor(klass: SyncedClass, out: Diagnostic[]) {
         this.#klass = klass;
         this.#out = out;
-        this.#scopes = [new Set(mod.bindings.keys())];
+        this.#scopes = [new Set(klass.bindings)];
     }
 
-    run(root: Node): void {
-        this.#visit(root);
+    run(): void {
+        this.#visit(this.#klass.node);
     }
 
     #visit(node: Node): void {
@@ -72,8 +65,7 @@ class Walk {
     }
 
     #member(node: Node): void {
-        const object = node.object;
-        const objectName = isNode(object) ? nodeName(object) : undefined;
+        const objectName = nodeName(node.object);
         const member = node.computed === true ? undefined : nodeName(node.property);
 
         if (objectName && !this.#shadowed(objectName)) {
@@ -100,12 +92,12 @@ class Walk {
     }
 
     #report(node: Node, found: string, redirect: Redirect): void {
-        const { line, column } = positionAt(this.#mod.lines, node.start);
+        const { line, column } = positionAt(this.#klass.lines, node.start);
         this.#out.push({
-            file: this.#mod.file,
+            file: this.#klass.file,
             line,
             column,
-            klass: this.#klass,
+            klass: this.#klass.local,
             found,
             use: redirect.use,
             because: redirect.because,

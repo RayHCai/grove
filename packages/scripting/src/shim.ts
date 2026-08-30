@@ -1,7 +1,5 @@
-// Defense in depth, and nothing more: the static pass is the mechanism, and it is the only one of
-// the two that can see `SyncedScript` scope. This shim guards a whole realm, so it belongs on the
-// realm a chunk is evaluated in — never on the host application's, where a ClientScript's `Date` is
-// perfectly legal and this would break it.
+// This guards a whole realm, so it belongs only on one that runs synced code alone — never on a
+// host application's, where a ClientScript's `Date` is legal and this would break it.
 
 import { DENIED_GLOBALS, DENIED_MATH } from './policy.js';
 import { DeterminismError } from './errors.js';
@@ -20,7 +18,12 @@ export interface Shim {
     dispose(): void;
 }
 
-/** Replaces the denied globals with accessors that throw, and `Math` with one that keeps its exact members. */
+/**
+ * Replaces the denied globals with accessors that throw, and `Math` with one that keeps its exact members.
+ *
+ * The static pass is the mechanism; this is for an embedder that evaluates synced code in a realm
+ * of its own.
+ */
 export function installDeterminismShim(options: ShimOptions = {}): Shim {
     const target = (options.target ?? globalThis) as Record<string, unknown>;
     const allow = new Set(options.allow ?? []);

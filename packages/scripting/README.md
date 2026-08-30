@@ -128,10 +128,15 @@ block, and `.oxlintrc.json`'s repo-wide `Math.*` pin — and they agree. A list 
 The pass is lexical. A helper a synced script calls is not inside it, and neither is
 `globalThis['Da' + 'te']`.
 
-## The shim is not the mechanism
+## The shim, and who it is for
+
+**Determinism here is enforced at build time and nowhere else.** The static pass above is the whole
+mechanism: nothing in this repo evaluates a chunk in a realm of its own, so the lexical hole the
+pass names — a helper a synced script calls — is not closed by anything downstream.
 
 `installDeterminismShim({ target })` replaces the refused globals with accessors that throw, and
-`Math` with one that keeps its exact members. It is **defense in depth behind the static pass**, and
-it guards a whole realm — so it belongs on the realm a chunk is evaluated in, a `vm` context or a
-worker, never on the host application's, where a `ClientScript`'s `Date` is perfectly legal and this
-would break it. Deleting the static pass and keeping this is not the same thing.
+`Math` with one that keeps its exact members. It guards a whole **realm**, which is why nothing here
+installs it: a `SideChunk` is evaluated in the page's own realm, where a `ClientScript`'s `Date` is
+perfectly legal and this would break it. It is exported for an embedder that gives synced code a
+realm to itself — a `vm` context or a worker — and that embedder owns both the `target` and the
+`dispose()`.

@@ -1,7 +1,5 @@
-// A class's location is its base class, and the base is reached by following imports across the
-// project — so the whole source tree is read at once and the hierarchy resolved over it. Locations
-// come out of this pass, not out of the runtime: `__location` is a static field, and reading it
-// would mean evaluating a creator's module to decide which chunk it belongs in.
+// Locations come out of this pass and never off the runtime's `__location` static, because reading
+// that would mean evaluating a creator's module to decide which chunk it belongs in.
 
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
@@ -19,7 +17,7 @@ export interface AnalyzeOptions {
     readonly baseModules?: readonly string[] | undefined;
 }
 
-/** One script class the project declares. */
+/** One script class the project declares, at a location the analysis resolved. */
 export interface ScriptClassInfo {
     /** POSIX, relative to `srcDir`. */
     readonly file: string;
@@ -28,34 +26,47 @@ export interface ScriptClassInfo {
     /** The binding name inside the module. */
     readonly local: string;
     /** The name it is exported under, `default` included; undefined for one kept private. */
-    readonly exported: string | undefined;
+    readonly export: string | undefined;
     readonly location: ScriptLocation;
 }
 
+/** One `SyncedScript` subclass, carrying everything the determinism pass walks it with. */
+export interface SyncedClass {
+    /** POSIX, relative to `srcDir`. */
+    readonly file: string;
+    /** The binding name inside the module. */
+    readonly local: string;
+    /** The class declaration or expression itself. */
+    readonly node: Node;
+    /** Offsets of each line start in the module, for turning a node position into line and column. */
+    readonly lines: readonly number[];
+    /** The module's top-level names; one shadows the denied global it shares a name with. */
+    readonly bindings: readonly string[];
+}
+
 export interface Analysis {
-    readonly root: string;
     readonly modules: readonly Module[];
     /** Sorted by file, then by declaration name. */
     readonly scripts: readonly ScriptClassInfo[];
+    /** What `checkDeterminism` takes: every synced class, abstract links in the chain included. */
+    readonly synced: readonly SyncedClass[];
 }
 
 export interface ClassRecord {
     readonly local: string;
-    exportedAs: string | undefined;
+    /** The name it is exported under, `default` included; undefined for one kept private. */
+    readonly export: string | undefined;
     readonly superName: string | undefined;
     /** An abstract or ambient class is a link in the chain, never a class an attach site takes. */
     readonly attachable: boolean;
     readonly node: Node;
-    location: ScriptLocation | undefined;
 }
 
 export interface Module {
     readonly file: string;
     readonly module: string;
     readonly absPath: string;
-    readonly text: string;
     readonly lines: readonly number[];
-    readonly program: Node;
     readonly bindings: ReadonlyMap<string, Binding>;
     readonly exports: ReadonlyMap<string, ExportTarget>;
     readonly starExports: readonly string[];
@@ -80,25 +91,37 @@ export function analyzeScripts(options: AnalyzeOptions): Analysis {
     const byPath = new Map(modules.map((m) => [pathKey(m.absPath), m]));
     const resolver = new Resolver(byPath, baseModules);
     const scripts: ScriptClassInfo[] = [];
+    const synced: SyncedClass[] = [];
     for (const mod of modules) {
+        const bindings = [...mod.bindings.keys()];
         for (const klass of mod.classes) {
             const resolved = resolver.locateClass(mod, klass, new Set());
-            if (resolved.kind !== 'location' || !klass.attachable) continue;
+            if (resolved.kind !== 'location') continue;
+            if (resolved.location === 'synced') {
+                synced.push({
+                    file: mod.file,
+                    local: klass.local,
+                    node: klass.node,
+                    lines: mod.lines,
+                    bindings,
+                });
+            }
+            if (!klass.attachable) continue;
             scripts.push({
                 file: mod.file,
                 module: mod.module,
                 local: klass.local,
-                exported: klass.exportedAs,
+                export: klass.export,
                 location: resolved.location,
             });
         }
     }
     return {
-        root,
         modules,
         scripts: scripts.toSorted(
             (a, b) => a.file.localeCompare(b.file) || a.local.localeCompare(b.local),
         ),
+        synced,
     };
 }
 
@@ -119,6 +142,7 @@ const BASE_LOCATIONS: ReadonlyMap<string, ScriptLocation> = new Map([
 class Resolver {
     readonly #byPath: ReadonlyMap<string, Module>;
     readonly #baseModules: ReadonlySet<string>;
+    readonly #located = new Map<ClassRecord, Resolution>();
 
     constructor(byPath: ReadonlyMap<string, Module>, baseModules: ReadonlySet<string>) {
         this.#byPath = byPath;
@@ -126,10 +150,11 @@ class Resolver {
     }
 
     locateClass(mod: Module, klass: ClassRecord, seen: Set<string>): Resolution {
-        if (klass.location) return { kind: 'location', location: klass.location };
+        const memo = this.#located.get(klass);
+        if (memo) return memo;
         if (!klass.superName) return UNKNOWN;
         const resolved = this.#name(mod, klass.superName, seen);
-        if (resolved.kind === 'location') klass.location = resolved.location;
+        if (resolved.kind === 'location') this.#located.set(klass, resolved);
         return resolved;
     }
 
@@ -191,7 +216,7 @@ function readModule(root: string, absPath: string): Module {
     const bindings = new Map<string, Binding>();
     const exports = new Map<string, ExportTarget>();
     const starExports: string[] = [];
-    const classes: ClassRecord[] = [];
+    const classes: Draft<ClassRecord>[] = [];
 
     for (const statement of asNodes(program.body)) {
         collect(statement, { bindings, exports, starExports, classes });
@@ -199,19 +224,15 @@ function readModule(root: string, absPath: string): Module {
     // `export { Runner }` names a class declared earlier, so the export name is known only here.
     for (const [exported, target] of exports) {
         if (target.kind !== 'local') continue;
-        const binding = bindings.get(target.name);
-        if (binding?.kind === 'class' && binding.klass.exportedAs === undefined) {
-            binding.klass.exportedAs = exported;
-        }
+        const klass = classes.findLast((k) => k.local === target.name);
+        if (klass && klass.export === undefined) klass.export = exported;
     }
 
     return {
         file,
         module: file.replace(/\.ts$/, ''),
         absPath,
-        text,
         lines: lineStarts(text),
-        program,
         bindings,
         exports,
         starExports,
@@ -219,11 +240,14 @@ function readModule(root: string, absPath: string): Module {
     };
 }
 
+// An export name is known only once the whole module is read, so records are filled in place.
+type Draft<T> = { -readonly [K in keyof T]: T[K] };
+
 interface Collector {
     readonly bindings: Map<string, Binding>;
     readonly exports: Map<string, ExportTarget>;
     readonly starExports: string[];
-    readonly classes: ClassRecord[];
+    readonly classes: Draft<ClassRecord>[];
 }
 
 function collect(statement: Node, into: Collector): void {
@@ -309,16 +333,15 @@ function collect(statement: Node, into: Collector): void {
     }
 }
 
-function declareClass(node: Node, exportedAs: string | undefined, into: Collector): void {
-    const local = nodeName(node.id) ?? exportedAs;
+function declareClass(node: Node, exported: string | undefined, into: Collector): void {
+    const local = nodeName(node.id) ?? exported;
     if (!local) return;
-    const klass: ClassRecord = {
+    const klass: Draft<ClassRecord> = {
         local,
-        exportedAs,
+        export: exported,
         superName: nodeName(node.superClass),
         attachable: node.abstract !== true && node.declare !== true,
         node,
-        location: undefined,
     };
     into.bindings.set(local, { kind: 'class', klass });
     into.classes.push(klass);
@@ -354,8 +377,8 @@ function sourceFiles(root: string): string[] {
         let entries;
         try {
             entries = readdirSync(dir, { withFileTypes: true });
-        } catch {
-            throw new BundleError(`${dir} is not a readable source directory`);
+        } catch (err) {
+            throw new BundleError('source-unreadable', `${dir} could not be read`, { cause: err });
         }
         for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
             const child = path.join(dir, entry.name);

@@ -9,8 +9,8 @@ import { assertDeterminism, checkDeterminism } from '../src/toolchain/check.js';
 import { DeterminismError } from '../src/errors.js';
 import { FIXTURES } from './helpers.js';
 
-const clean = analyzeScripts({ srcDir: path.join(FIXTURES, 'project', 'src') });
-const dirty = analyzeScripts({ srcDir: path.join(FIXTURES, 'nondeterministic', 'src') });
+const clean = analyzeScripts({ srcDir: path.join(FIXTURES, 'project', 'src') }).synced;
+const dirty = analyzeScripts({ srcDir: path.join(FIXTURES, 'nondeterministic', 'src') }).synced;
 const refused = (file: string): string[] =>
     checkDeterminism(dirty)
         .filter((d) => d.file === file)

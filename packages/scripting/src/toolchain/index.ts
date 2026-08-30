@@ -1,33 +1,22 @@
-// @platform/scripting/toolchain
-// The build-time half: it reads a project's sources, refuses the ones a SyncedScript may not run,
-// lowers with tsc and links one chunk per side. Node only — never import this from a browser graph.
+// Node only — never import this from a browser graph, which would pull tsc and rolldown into it.
 
 import { BundleError } from '../errors.js';
 import type { Analysis, ScriptClassInfo } from './analyze.js';
 import { analyzeScripts } from './analyze.js';
 import { assertDeterminism } from './check.js';
 import { lowerScripts } from './lower.js';
-import type { ScriptBundle, ScriptDeclaration } from './link.js';
+import type { ScriptBundle, ScriptDeclaration, ScriptRef } from './link.js';
 import { linkChunks } from './link.js';
 
-export type { AnalyzeOptions, Analysis, ScriptClassInfo, Module, ClassRecord } from './analyze.js';
+export type { AnalyzeOptions, Analysis, ScriptClassInfo, SyncedClass } from './analyze.js';
 export { analyzeScripts, DEFAULT_BASE_MODULES } from './analyze.js';
 export { checkDeterminism, assertDeterminism } from './check.js';
 export type { LowerOptions } from './lower.js';
 export { lowerScripts } from './lower.js';
-export type { LinkOptions, ScriptBundle, ScriptDeclaration, SideChunk } from './link.js';
+export type { LinkOptions, ScriptBundle, ScriptDeclaration, ScriptRef, SideChunk } from './link.js';
 export { linkChunks } from './link.js';
-export type { Diagnostic } from '../errors.js';
+export type { BundleErrorCode, Diagnostic } from '../errors.js';
 export { BundleError, DeterminismError, formatDiagnostic } from '../errors.js';
-
-/** One class the project wants stamped, named the way the manifest names it. */
-export interface ScriptRef<Id extends string = string> {
-    readonly id: Id;
-    /** POSIX, relative to `srcDir`, without an extension. */
-    readonly module: string;
-    /** The name the module exports it under; `default` for a default export. */
-    readonly export: string;
-}
 
 export interface BuildOptions<Id extends string = string> {
     /** The creator project's tsconfig, whose `rootDir` must be `srcDir`. */
@@ -55,7 +44,7 @@ export async function buildScriptBundle<Id extends string = string>(
         srcDir: options.srcDir,
         baseModules: options.baseModules,
     });
-    assertDeterminism(analysis);
+    assertDeterminism(analysis.synced);
 
     const scripts = declarationsFor(analysis, options.scripts);
     lowerScripts({ tsconfig: options.tsconfig, outDir: options.loweredDir });
@@ -70,20 +59,23 @@ function declarationsFor<Id extends string>(
         ? refs.map((ref) => ({ ...ref, location: locate(analysis, ref).location }))
         : analysis.scripts
               .filter(
-                  (script): script is ScriptClassInfo & { exported: string } =>
-                      script.exported !== undefined,
+                  (script): script is ScriptClassInfo & { export: string } =>
+                      script.export !== undefined,
               )
               .map((script) => ({
-                  id: `${script.module}#${script.exported}` as Id,
+                  id: `${script.module}#${script.export}` as Id,
                   module: script.module,
-                  export: script.exported,
+                  export: script.export,
                   location: script.location,
               }));
 
     const seen = new Set<string>();
     for (const declaration of declarations) {
         if (seen.has(declaration.id)) {
-            throw new BundleError(`two script classes claim the id "${declaration.id}"`);
+            throw new BundleError(
+                'duplicate-id',
+                `two script classes claim the id "${declaration.id}"`,
+            );
         }
         seen.add(declaration.id);
     }
@@ -92,10 +84,11 @@ function declarationsFor<Id extends string>(
 
 function locate<Id extends string>(analysis: Analysis, ref: ScriptRef<Id>): ScriptClassInfo {
     const found = analysis.scripts.find(
-        (script) => script.module === ref.module && script.exported === ref.export,
+        (script) => script.module === ref.module && script.export === ref.export,
     );
     if (!found) {
         throw new BundleError(
+            'unknown-script',
             `${ref.module} exports no script class named ${ref.export} — a script class extends ServerScript, ClientScript or SyncedScript`,
         );
     }
