@@ -506,7 +506,7 @@ Any entity can display a bubble. This is the smallest possible dialogue primitiv
 ```ts
 entity.say('Hello!'); // persists until cleared or replaced
 await entity.say('Watch out!', 2); // auto-clears after 2s; awaitable
-entity.think('Hmm...'); // thought-bubble variant
+entity.think('Hmm...'); // thought-bubble variant; the bubble itself is not drawn yet
 entity.clearSay();
 ```
 
