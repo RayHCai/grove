@@ -27,7 +27,7 @@ import {
     WIDGET_WINNER,
     rankWidget,
     tintCss,
-} from './shared';
+} from './scripts/globals';
 
 interface HudView {
     widgets: Map<string, HUDWidgetView>;

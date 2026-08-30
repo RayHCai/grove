@@ -22,12 +22,15 @@
         "jsx": "react-jsx",
         "types": ["vite/client"]
     },
-    // `src/server` is the Node half: decorator syntax, `ws`, and NodeNext resolution. It is a
-    // project of its own (`tsconfig.server.json`) and never reaches the browser bundle. `src/synced`
-    // and `src/screens` belong to that project too — the browser runs both, but as the `dist` copies
-    // `tsc` lowered, since decorator syntax through Vite's transform reaches the runtime verbatim.
+    // `src/server` is the Node half: decorator syntax, `ws`, and NodeNext resolution. `src/scripts`
+    // is the game, and every file in it but `globals.ts` carries decorators. Both belong to
+    // `tsconfig.server.json`, and the browser reaches the two scripts it runs as the `dist/scripts`
+    // copies `tsc` lowered — decorator syntax through Vite's transform reaches the runtime verbatim.
+    //
+    // Excluding a directory only drops it from the ROOT file set, so `scripts/globals.ts` is still
+    // type-checked here: `project.ts` imports it, and TypeScript follows an import wherever it goes.
     "include": ["src/**/*.ts", "src/**/*.tsx"],
-    "exclude": ["src/server", "src/synced", "src/screens"],
+    "exclude": ["src/server", "src/scripts"],
     "references": [
         {
             "path": "../../packages/core"

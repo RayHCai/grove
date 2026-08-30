@@ -8,9 +8,9 @@
         // taking the browser project's `ESNext`/`bundler` — nothing bundles this, Node resolves it.
         "types": ["node"],
 
-        // `src/server/game.ts` declares the game's scripts, and `tsc` is the only tool here that
-        // lowers TC39 standard decorators: Vite's oxc transform emits them verbatim and Node then
-        // refuses to parse them. This is why the server half is a separate project at all.
+        // `src/scripts/` declares the game's scripts, and `tsc` is the only tool here that lowers
+        // TC39 standard decorators: Vite's oxc transform emits them verbatim and Node then refuses
+        // to parse them. This is why the server half is a separate project at all.
         "lib": ["ES2023", "ESNext.Decorators"],
 
         // Emitted so `tests/` can import the LOWERED classes and still see their types. `composite`
@@ -20,16 +20,13 @@
         "declaration": true,
         "declarationMap": true
     },
-    // `src/synced` and `src/screens` are compiled here too, though the browser runs both: this project
-    // is defined by what lowers the decorators, and the browser imports the `dist/` output it emits.
-    // `src/project.ts` is here because the server boots from it, and in the browser's project because
-    // the client claims the same identity from it — it carries no decorator, so both may read it.
-    "include": [
-        "src/shared.ts",
-        "src/project.ts",
-        "src/server/**/*.ts",
-        "src/synced/**/*.ts",
-        "src/screens/**/*.ts"
-    ],
+    // The whole game plus the process that hosts it. `src/scripts` is here in its entirety even
+    // though the browser runs two of its files: this project is defined by what lowers the
+    // decorators, and the browser imports the `dist/scripts/` output it emits.
+    //
+    // `src/project.ts` and `src/hosting.ts` are in BOTH projects — the server boots from them and
+    // the browser claims the same identity and dials the same address. Neither carries a decorator,
+    // which is what makes that legal.
+    "include": ["src/hosting.ts", "src/project.ts", "src/scripts/**/*.ts", "src/server/**/*.ts"],
     "references": []
 }

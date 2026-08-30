@@ -7,7 +7,7 @@
 
 import type { EntityId, Runtime } from '@platform/core';
 import { SEND_RATE } from './project';
-import { LEAF_HALF, LEAF_SCALE, LEAF_SPEED, LEAF_TAG } from './shared';
+import { LEAF_HALF, LEAF_SCALE, LEAF_SPEED, LEAF_TAG } from './scripts/globals';
 
 /**
  * How far behind its simulated pose a leaf is DRAWN, in world px.

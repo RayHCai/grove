@@ -10,7 +10,7 @@ import {
     tintCss,
     tintFor,
     tintSlot,
-} from '../src/shared';
+} from '../src/scripts/globals';
 
 describe('the aim encoding', () => {
     it('round-trips a click', () => {

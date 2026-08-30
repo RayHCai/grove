@@ -3,9 +3,6 @@
 import { describe, it, expect } from 'vitest';
 import { bounds } from '@platform/math';
 import {
-    EDGE_MARGIN,
-    LEAF_SPEED,
-    LEAF_SPIN,
     clampToWorld,
     dropBand,
     exitX,
@@ -14,15 +11,18 @@ import {
     popValue,
     spawnX,
     stepLeaf,
-} from '../src/server/leaf';
+} from '../dist/scripts/templates/leaf/leaf.js';
 import {
     AVATAR_HALF,
     BADGE_BONUS,
+    EDGE_MARGIN,
     HARVEST_POINTS,
     LEAF_HALF,
+    LEAF_SPEED,
+    LEAF_SPIN,
     POP_POINTS,
     RIPE_MULTIPLIER,
-} from '../src/shared';
+} from '../src/scripts/globals';
 
 const WORLD = bounds(-480, 480, 270, -270);
 

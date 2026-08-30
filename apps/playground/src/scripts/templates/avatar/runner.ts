@@ -1,17 +1,12 @@
-// The one script both ends run.
+// The `player` template's movement, and the one script both ends run.
 //
-// `SyncedScript` is the location that runs on a server AND on a client, which is what makes it the only
-// kind prediction can replay: a `ServerScript` is filtered out of a client tick and would never be
-// dispatched to. The authority simulates this on the tick it receives the input; the client simulates it
-// on the tick it SENDS the input, and rewinds to whatever the authority then says.
-//
-// It is a separate project directory because of how it is compiled, not because of where it runs: `tsc`
-// is the only tool here that lowers standard decorators, so the browser imports the emitted `dist/`
-// copy rather than this source.
+// `SyncedScript` is the location that runs on a server AND on a client, which is what makes it the
+// only kind prediction can replay: a `ServerScript` is filtered out of a client tick and would never
+// be dispatched to. The authority simulates this on the tick it receives the input; the client
+// simulates it on the tick it SENDS the input, and rewinds to whatever the authority then says.
 
-import { SyncedScript, onEventHold } from '@platform/core';
-import type { Entity } from '@platform/core';
-import { clamp } from '@platform/math';
+import type { Entity } from '@platform/engine';
+import { SyncedScript, clamp, onEventHold } from '@platform/engine';
 import {
     ACTION_DOWN,
     ACTION_LEFT,
@@ -20,14 +15,14 @@ import {
     AVATAR_HALF,
     AVATAR_STEP,
     WORLD,
-} from '../shared.js';
+} from '../../globals.js';
 
 /**
  * Moves the avatar a fixed step per held tick, on both axes.
  *
- * A constant rather than a speed integrated over `dt`: both ends run at the session's `simRate` and a
- * held tick is a held tick, so the two arrive at the same number without a rounding argument. Two keys
- * held at once each dispatch their own `hold`, so a diagonal is the two steps taken in sequence.
+ * A constant rather than a speed integrated over `dt`: both ends run at the session's `simRate` and
+ * a held tick is a held tick, so the two arrive at the same number without a rounding argument. Two
+ * keys held at once each dispatch their own `hold`, so a diagonal is the two steps taken in turn.
  */
 export class Runner extends SyncedScript<Entity> {
     /**
@@ -62,8 +57,8 @@ export class Runner extends SyncedScript<Entity> {
     #moveBy(dx: number, dy: number): void {
         const host = this.host;
         const at = host.position;
-        // Clamped rather than free: an avatar walked off the stage is gone for good, and the clamp is
-        // part of the simulation both ends replay. The vertical clamp keeps the whole body on the
+        // Clamped rather than free: an avatar walked off the stage is gone for good, and the clamp
+        // is part of the simulation both ends replay. The vertical clamp keeps the whole body on the
         // stage, so a leaf at the extreme of the drop band is still reachable.
         host.setPosition(
             clamp(at.x + dx, WORLD.left, WORLD.right),
