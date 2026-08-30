@@ -239,16 +239,16 @@ declare module '@platform/engine' {
         hide(): this; // (B)
 
         // TODO: check how Scratch/Unity store, load, play and interrupt animations
-        play(clip: AssetRef, opts?: { loop?: boolean }): Promise<void>; // (B) frame animation
-        stopAnimation(): this; // (B)
-        playEffect(name: AssetRef, opts?: { loop?: boolean }): this; // (B) cosmetic, client-side
+        play(clip: AssetRef, opts?: { loop?: boolean }): Promise<void>; // (B) frame animation; `opts` is accepted and ignored
+        stopAnimation(): this; // (B) accepted and ignored — nothing interrupts a clip yet
+        playEffect(name: AssetRef, opts?: { loop?: boolean }): this; // (B) cosmetic, client-side; `opts` is accepted and ignored
 
         // Speech bubbles — replicated, one per entity, engine-placed. No per-player scope: a
         // bubble is entity state everyone sees, so a private message is a HUD widget (§3.7).
         say(text: string): this; // (B) persists
         say(text: string, seconds: number): Promise<void>; // (B) auto-clears
-        think(text: string): this; // (B)
-        think(text: string, seconds: number): Promise<void>;
+        think(text: string): this; // (B) accepted and ignored — no thought bubble is drawn
+        think(text: string, seconds: number): Promise<void>; // awaits seconds; draws nothing
         clearSay(): this; // (B)
 
         // lifecycle
