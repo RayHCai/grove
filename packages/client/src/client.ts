@@ -9,12 +9,14 @@ import {
     clearRuntime,
     createActionStates,
     currentRuntime,
+    displayUpdate,
     hasRuntime,
     pointerHit as dispatchPointer,
     pressWidget as dispatchPress,
 } from '@platform/core';
 import { defined } from '@platform/math';
-import type { CameraState, IRenderer } from '@platform/renderer';
+import type { CameraState, IRenderer, PickOptions } from '@platform/renderer';
+import { NO_NODE } from '@platform/renderer';
 import type {
     InputAction,
     InputFrame,
@@ -32,6 +34,7 @@ import {
     ACK_STALL_TICKS,
     BUNDLE_DEADLINE_SECONDS,
     DEFAULT_VIEWPORT,
+    MAX_FRAME_DT,
     STALL_SECONDS,
     SYNC_INTERVAL_SECONDS,
 } from './constants.js';
@@ -174,6 +177,8 @@ export class GameClient {
     #lastSyncSentMs: number | undefined;
     /** All four of these are in the FRAME source's seconds, which is the only base `#now` ever holds. */
     #now = 0;
+    /** The previous frame's stamp, for the display delta. Undefined before the first frame. */
+    #lastFrameAt: number | undefined;
     #lastEnvelopeAt: number | undefined;
     #lastSyncAt = 0;
     #ackSeqStillAt = 0;
@@ -286,6 +291,32 @@ export class GameClient {
         this.#interactions.push({ kind: POINTER_WIRE_KIND[edge], netId: net });
     }
 
+    /**
+     * The entity drawn under `screenPoint`, or `undefined` — the other half of a pointer hit.
+     *
+     * `client.pointer(edge, local)` takes an entity handle, and nothing below this could produce
+     * one: the renderer knows nodes, the mirror knows entities, and only this class holds the map
+     * between them. Composed here so a host never has to.
+     *
+     * It picks against what is DRAWN, which is why it is correct and a hand-rolled test against
+     * `rt.transforms` is not: the render bridge buffers every entity it does not predict by one
+     * send interval, so the simulated pose is up to that far from the sprite a person clicked.
+     *
+     * A template that draws a subtree contributes several nodes and one entity, so a hit on a
+     * descendant walks up until a node names one — a click on a shadow is a click on its avatar.
+     */
+    entityAt(screenPoint: { x: number; y: number }, opts?: PickOptions): EntityId | undefined {
+        const bridge = this.#bridge;
+        if (bridge === undefined) return undefined;
+        let node = this.#opts.renderer.nodeAt(screenPoint, opts);
+        while (node !== NO_NODE) {
+            const local = bridge.entityFor(node);
+            if (local !== undefined) return local;
+            node = this.#opts.renderer.parentOf(node);
+        }
+        return undefined;
+    }
+
     /** The local player, once the roster carries them. */
     get localPlayer(): Player | null {
         const id = this.#welcome?.yourPlayerId;
@@ -389,11 +420,34 @@ export class GameClient {
         this.#checkLiveness();
         this.#maybeSync();
 
+        // Client-located `@onUpdate`, once, at display rate — after prediction so a screen reads the
+        // world it is about to be shown, and before the push so a handler that moved a camera or
+        // wrote a widget is reflected on this frame rather than the next.
+        this.#displayUpdate(nowSeconds);
+
         if (this.#bridge !== undefined) {
             this.#bridge.pushTransforms(nowSeconds);
             this.#bridge.pushCamera(this.#cameraState());
         }
         this.#opts.renderer.render();
+    }
+
+    /**
+     * Runs every `ClientScript`'s `@onUpdate` for this frame.
+     *
+     * Neither tick pass can: both narrow to server-located handlers, because a `SyncedScript`'s
+     * update belongs to the simulation and firing it here as well would run it twice. `dt` is the
+     * real frame delta, clamped, so a handler easing something is not handed a backwards or an
+     * unbounded step after a tab has been hidden.
+     */
+    #displayUpdate(nowSeconds: number): void {
+        const rt = this.#mirror?.runtime;
+        const previous = this.#lastFrameAt;
+        this.#lastFrameAt = nowSeconds;
+        if (rt === undefined || this.#lifecycle.state === 'failed') return;
+        const dt =
+            previous === undefined ? 0 : Math.min(Math.max(nowSeconds - previous, 0), MAX_FRAME_DT);
+        displayUpdate(rt, dt);
     }
 
     /**

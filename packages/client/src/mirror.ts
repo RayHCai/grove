@@ -12,6 +12,7 @@ import {
     entityKey,
     loadGame,
     playerKey,
+    hoistReplicated,
     restoreHostField,
     Player,
 } from '@platform/core';
@@ -532,8 +533,29 @@ export class Mirror {
         const fields = diff.fields;
         if (typeof fields !== 'object' || fields === null) return;
         const record = this.#rt.hosts.ensure(key).record;
+        // Resolved once per diff rather than per field, and only when a facade exists to hoist onto.
+        const host = this.#facadeFor(diff.host);
         for (const [field, value] of Object.entries(fields)) {
             restoreHostField(record, field, value);
+            // The authoritative side gets this from wiring, when the script declaring the field
+            // attaches. Nothing attaches a Game or Player script here, so without this the values
+            // just applied would be reachable from no creator-facing name at all — and reading them
+            // is the entire job of the client code that draws them.
+            if (host !== undefined) hoistReplicated(host, field, record.values);
+        }
+    }
+
+    /** The object a `ClientScript` names this host by, or undefined for one with no facade here. */
+    #facadeFor(host: StateHostAddr): object | undefined {
+        switch (host.kind) {
+            case 'game':
+                return this.#rt.gameInstance ?? undefined;
+            case 'player':
+                return this.#rt.playerManager?.byId(host.id) ?? undefined;
+            case 'entity': {
+                const local = this.#index.local(host.netId);
+                return local === undefined ? undefined : this.#rt.entityManager.facade(local);
+            }
         }
     }
 
