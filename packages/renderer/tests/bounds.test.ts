@@ -259,7 +259,11 @@ describe('rotatedHalfExtents — 45 degrees', () => {
 
     it('makes a non-square rect SQUARE at 45, both half-extents (hx + hy) / sqrt(2)', () => {
         const r = rotatedHalfExtents(10, 20, 45);
-        expect(r.hx).toBe(r.hy);
+        // Close, not identical: `45 * DEG2RAD` is not π/4, so sine and cosine of it genuinely
+        // differ in the last bit — `Math.sin` and `Math.cos` disagree there too. A `toBe` here
+        // passed only while the deterministic cosine was derived from the sine and inherited its
+        // rounding, which made two different values come out equal for the wrong reason.
+        expect(r.hx).toBeCloseTo(r.hy, 12);
         expect(r.hx).toBeCloseTo(30 * Math.SQRT1_2, 7);
     });
 
