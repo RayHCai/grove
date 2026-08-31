@@ -264,6 +264,19 @@ declare module '@platform/engine' {
         // from a handler that may run twice. No removeScript in MVP.
         addScript(script: new () => BaseScript<Entity>): this;
 
+        // The running INSTANCE of a class attached to this entity, or null. The one thing an
+        // import cannot express: a module reference names a class, and a script needs the
+        // object holding this host's state.
+        //
+        // Exact class identity, never instanceof — two subclasses of one base are different
+        // scripts, and a query for the base would otherwise answer with whichever was
+        // attached first. Null is the ordinary answer, not a fault: the class may not be
+        // attached here, and on a client it is only attached if this end's location runs it.
+        //
+        //   const hp = leaf.getScript(Health);
+        //   if (hp !== null) hp.damage(1);
+        getScript<T extends BaseScript<Entity>>(script: ScriptQuery<T>): T | null;
+
         // NO entity.movement: a movement class drives a player's avatar and nothing else, so
         // the accessor is player.movement. A non-player body uses the motion verbs above
         // from an ordinary script (§4.1).
@@ -393,6 +406,9 @@ declare module '@platform/engine' {
         // spawns the avatar and attaches its camera with no join handler (§3.6). This is the
         // code path for THIS player only; semantics match Entity.addScript.
         addScript(script: new () => BaseScript<Player>): this;
+
+        // This player's instance of a class. Semantics match Entity.getScript.
+        getScript<T extends BaseScript<Player>>(script: ScriptQuery<T>): T | null;
     }
 
     // ─── hud ───────────────────────────────────────────────────────
@@ -528,6 +544,13 @@ declare module '@platform/engine' {
         // Not tray-attached: there is one Game, so its scripts come from the game's own
         // inspector. Load-time, before @onStart.
         addScript(script: new () => BaseScript<Game>): this;
+
+        // The Game's instance of a class, and the common case: `game.getScript(Rules)` is how
+        // any script reaches the one object holding the match. Semantics match
+        // Entity.getScript — including the null, which on a client is the usual answer, since
+        // a ServerScript is not attached there. A client reads the same values through the
+        // @serverState the authority replicated onto this facade instead.
+        getScript<T extends BaseScript<Game>>(script: ScriptQuery<T>): T | null;
     }
 
     // The one Game. A const like hud, random and assets, not a member on BaseScript: every
@@ -578,6 +601,10 @@ declare module '@platform/engine' {
         // The object this script is attached to.
         readonly host: H;
     }
+
+    // A script class as `getScript` names one. Abstract-tolerant, so a base class is a legal
+    // query — and the match is still on that exact class, not on its subclasses.
+    type ScriptQuery<T> = abstract new (...args: never[]) => T;
 
     // Server only, and authoritative. The trust boundary lives here: @onRequest is
     // declarable on this base and no other. Exempt from the determinism rules — no second
