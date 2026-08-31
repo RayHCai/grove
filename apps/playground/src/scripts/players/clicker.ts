@@ -4,17 +4,10 @@
 // per-player rather than a handler on `Rules`.
 
 import type { Ctx, Player } from '@platform/engine';
-import { ServerScript, onEvent, onEventHold, onUpdate } from '@platform/engine';
-import {
-    ACTION_AIM_Y,
-    ACTION_CLEAR,
-    ACTION_SPAWN,
-    STATE_SLOT,
-    decodeAim,
-    tintSlot,
-} from '../globals.js';
-import { currentRules } from '../session.js';
-import { readState } from '../state.js';
+import { ServerScript, game, onEvent, onEventHold, onUpdate } from '@platform/engine';
+import { ACTION_AIM_Y, ACTION_CLEAR, ACTION_SPAWN, decodeAim } from '../globals.js';
+import { Rules } from '../game/rules.js';
+import { slotOf } from '../game/slots.js';
 import { liveLeaves, spawnLeaf } from '../templates/leaf/leaf.js';
 
 /**
@@ -49,9 +42,8 @@ export class Clicker extends ServerScript<Player> {
      */
     @onUpdate
     apply(): void {
-        const rules = currentRules();
+        const rules = game.getScript(Rules);
         if (rules === null) return;
-        const game = rules.host;
         const lobby = rules.phase === 'lobby';
 
         if (this.#clearing) {
@@ -61,13 +53,7 @@ export class Clicker extends ServerScript<Player> {
 
         while (this.#pending > 0) {
             this.#pending -= 1;
-            if (lobby) spawnLeaf(game, this.#aimY, this.#slot());
+            if (lobby) spawnLeaf(game, this.#aimY, slotOf(this.host));
         }
-    }
-
-    /** This player's palette seat, which is the colour anything they plant is badged with. */
-    #slot(): number {
-        const held = readState(this.host, STATE_SLOT);
-        return tintSlot(typeof held === 'number' ? held : 0);
     }
 }

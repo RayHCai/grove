@@ -17,8 +17,7 @@ import { createPerformanceClock } from '@platform/client/browser';
 import { createClient } from '@platform/engine/host';
 import type { CameraState, IRenderer } from '@platform/renderer';
 import { connectWebSocket } from '@platform/transport/websocket';
-import { HudBridge, pressWidget } from './hud';
-import { pickLeaf } from './pick';
+import { ClockNode, openHud, pressWidget } from './hud';
 import { PROJECT } from './project';
 import { CLIENT_SCRIPTS } from './client-registry';
 import { BINDINGS, CODE_CLEAR, SCREEN_LOBBY, WIDGET_READY } from './scripts/globals';
@@ -91,24 +90,25 @@ export function useGame(opts: UseGameOptions): UseGameResult {
         // never goes away.
         let cancelled = false;
         let client: GameClient | null = null;
-        let bridge: HudBridge | null = null;
+        let clock: ClockNode | null = null;
         let unsubscribe: (() => void) | null = null;
 
         const device = createStageInputDevice({
             container,
             renderer,
-            // A pointer hit is resolved here and nowhere lower: the entity a click landed on is a
-            // claim about this tab's own camera, which no authority can recompute.
-            onWorldPress: (x, y) => {
-                const mirror = client?.mirror;
-                if (mirror === undefined) return;
-                const hit = pickLeaf(mirror.runtime, x, y);
+            // The entity a click landed on is a claim about this tab's own camera, which no
+            // authority can recompute — but the client resolves it, because only the client holds
+            // both the node map and the interpolation delay the drawn pose carries.
+            onScreenPress: (x, y) => {
+                const hit = client?.entityAt({ x, y });
                 if (hit !== undefined) client?.pointer('onClick', hit);
             },
         });
-        // The bridge runs BEHIND the client's own frame: it reads state the drain just applied, so
-        // running it first would show every widget one frame stale.
-        const frames = createCountingFrameSource(fpsRef, () => bridge?.sync());
+        // The clock node runs BEHIND the client's own frame: it reads state the drain just applied,
+        // so running it first would show a value one frame stale.
+        const frames = createCountingFrameSource(fpsRef, () => {
+            if (client !== null) clock?.sync(client);
+        });
 
         emitRef.current = (code: string, down: boolean) => device.emit({ kind: 'key', code, down });
 
@@ -138,12 +138,15 @@ export function useGame(opts: UseGameOptions): UseGameResult {
                 });
 
                 clientRef.current = client;
-                bridge = new HudBridge({ client, renderer });
+                clock = new ClockNode(renderer);
                 setHud(client.hud);
 
                 unsubscribe = client.lifecycle.onChange((next: SessionState) => {
                     setState(next);
                     setFailure(describeFailure(client));
+                    // The mirror exists from the welcome onward, and the screens are registered
+                    // against it — a resync builds a new one, so this runs again for that too.
+                    if (next === 'live' && client !== null) openHud(client);
                 });
                 client.start();
                 setState(client.state);
@@ -152,8 +155,8 @@ export function useGame(opts: UseGameOptions): UseGameResult {
                 // neither of these, so the teardown it could not do happens here.
                 if (cancelled) {
                     unsubscribe();
-                    bridge.dispose();
-                    bridge = null;
+                    clock.dispose();
+                    clock = null;
                     client.destroy();
                 }
             } catch (cause) {
@@ -173,8 +176,8 @@ export function useGame(opts: UseGameOptions): UseGameResult {
             setHud(null);
             // Before the client's own teardown, because both reach the renderer and only this one
             // knows which node is the clock's.
-            bridge?.dispose();
-            bridge = null;
+            clock?.dispose();
+            clock = null;
             // `ownsRenderer` is left false: `useRenderer` built the renderer and destroys it.
             if (client !== null) client.destroy();
             else device.dispose();

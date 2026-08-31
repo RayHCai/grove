@@ -18,9 +18,8 @@ export const ACTION_CLEAR = 'clear';
 /**
  * Held on WASD; both ends run the same script and move the avatar.
  *
- * Two axes, not one: a leaf drifts across the stage at whatever height the round dropped it, so an
- * avatar that could only move left and right would be able to reach one height out of the world's
- * whole extent — and the `bonus` band would be somewhere it could never stand.
+ * Two axes, not one: a leaf drifts at whatever height the round dropped it, so a left-right-only
+ * avatar could reach one height out of the world's whole extent.
  */
 export const ACTION_LEFT = 'left';
 export const ACTION_RIGHT = 'right';
@@ -36,12 +35,7 @@ export const CODE_RIGHT = 'keys:KeyD';
 export const CODE_UP = 'keys:KeyW';
 export const CODE_DOWN = 'keys:KeyS';
 
-/**
- * The bindings this stage plays under.
- *
- * Structurally assignable to `@platform/client`'s `Binding` without importing it, which is what
- * keeps this file free of every package.
- */
+/** Structurally assignable to `@platform/client`'s `Binding`, which is what keeps this file free of it. */
 export type StageBinding =
     | { kind: 'button'; code: string; action: string }
     | { kind: 'axis'; code: string; action: string };
@@ -61,9 +55,8 @@ export const BINDINGS: StageBinding[] = [
 /**
  * Added to the aim axis before it goes on the wire, and taken off on arrival.
  *
- * A value of exactly 0 is read as a neutral axis and dropped by the client's quantizer before it
- * has ever sent one, which would silently swallow the first click on the stage's centre line. The
- * bias keeps every legal world y clear of zero; it cancels out on both sides and means nothing.
+ * A value of exactly 0 reads as a neutral axis and the client's quantizer drops it, which would
+ * swallow the first click on the stage's centre line. It cancels out on both sides and means nothing.
  */
 export const AIM_BIAS = 1000;
 
@@ -80,11 +73,10 @@ export const WORLD = { left: -480, right: 480, top: 270, bottom: -270 } as const
 export const DESIGN = { width: 960, height: 540 } as const;
 
 /**
- * The two named rectangles the round is played across.
+ * The two named rectangles the round is played across: `bonus` ripens a leaf, `compost` wilts one.
  *
- * `bonus` ripens a leaf that drifts through it, worth double to whoever harvests it; `compost` is
- * the strip a leaf nobody caught wilts into. Both are `@onEnter`/`@onExit` on the leaf, which is
- * what makes them regions rather than an `x >` test in the drift pass.
+ * Both are `@onEnter`/`@onExit` on the leaf, which is what makes them regions rather than an `x >`
+ * test in the drift pass.
  */
 export const REGION_BONUS = 'bonus';
 export const REGION_COMPOST = 'compost';
@@ -103,32 +95,19 @@ export const MARKER_PIXELS = { width: 8, height: 8 } as const;
 /** The leaf itself, drawn the same for everyone. */
 export const LEAF_TEMPLATE = 'leaf';
 
-/**
- * The avatar, and the shadow its own template mints beneath it.
- *
- * `'player'` is the name core's roster spawns an avatar under, so naming the template this is what
- * lets `player.spawn()` mint it with no roster configuration at all.
- */
+/** `'player'` is the name core's roster spawns an avatar under, so `player.spawn()` needs no config. */
 export const AVATAR_TEMPLATE = 'player';
 export const AVATAR_SHADOW_TEMPLATE = 'player-shadow';
 
-/**
- * The winner's crown: declared mid-session rather than at boot.
- *
- * A template nothing has spawned yet needs no manifest entry, so this one is announced through
- * `declareVisuals` the first time a round is won.
- */
+/** Announced through `declareVisuals` on the first win: an unspawned template needs no manifest entry. */
 export const CROWN_TEMPLATE = 'crown';
 
 /**
  * One tint per palette seat.
  *
- * Colour is the only per-entity marker this wire can carry — a transform diff holds position,
- * rotation, scale, opacity and layer and nothing else — so the tint rides the TEMPLATE, and a
- * template per seat is what makes it per player. The badge is drawn from a white sprite rather than
- * the leaf, because a tint MULTIPLIES: `leaf.png` is green, so a red tint would return mud instead
- * of red. Eight hues, well separated on a dark stage, and {@link MAX_PLAYERS} is eight for that
- * reason — two concurrent players sharing a colour would make the ripe-for badge unreadable.
+ * A transform diff carries no colour, so the tint rides the TEMPLATE and a template per seat is what
+ * makes it per player. Eight hues, well separated on a dark stage — two concurrent players sharing
+ * one would make the ripe-for badge unreadable.
  */
 export const PLAYER_TINTS = [
     0x52b788, // green
@@ -170,20 +149,14 @@ export const AVATAR_STEP = 4;
 /**
  * Where it stands, how large it draws, and how wide its harvest reach is.
  *
- * `marker.png` is 8x8, so {@link AVATAR_SCALE} is what makes the body 40 world px across — the same
- * width as the collider `Harvester` gives it. A sprite narrower than its own reach reads as leaves
- * being caught out of thin air.
+ * `marker.png` is 8x8, so {@link AVATAR_SCALE} draws the body 40 world px across — the same width as
+ * the collider `Harvester` gives it, since a sprite narrower than its reach reads as thin-air catches.
  */
 export const AVATAR_Y = -200;
 export const AVATAR_HALF = 20;
 export const AVATAR_SCALE = 5;
 
-/**
- * Where a seat's avatar starts, spread across the stage so no two spawn inside each other.
- *
- * Derived from {@link WORLD} rather than a fixed step: a fixed one put the last seat past the right
- * edge, and `teleportTo` does not clamp.
- */
+/** Derived from {@link WORLD} rather than a fixed step, which put the last seat past the right edge. */
 export function avatarX(slot: number): number {
     const usable = WORLD.right - WORLD.left - 2 * AVATAR_HALF;
     return WORLD.left + AVATAR_HALF + (usable * (tintSlot(slot) + 0.5)) / MAX_PLAYERS;
@@ -195,9 +168,8 @@ export const LEAF_TAG = 'leaf';
 /**
  * How large a leaf draws, half the box it is caught through, and how fast it crosses.
  *
- * All three are read by both halves: the authority makes the box a collider an avatar harvests
- * through and moves it at that speed, and the browser hit-tests a click against the same box —
- * offset by the distance the sprite is drawn behind, since it draws one send interval late.
+ * Read by both halves: the authority makes the box a collider, and the browser hit-tests a click
+ * against the same box — offset by the send interval the sprite is drawn behind.
  */
 export const LEAF_SCALE = 3;
 export const LEAF_HALF = 22;
@@ -209,20 +181,14 @@ export const LEAF_SPIN = 90;
 /** How much wider a leaf draws while it is ripe, so `bonus` is legible without a second sprite. */
 export const RIPE_SCALE = LEAF_SCALE * 1.35;
 
-/**
- * Half a sprite's width, in world px, used as the off-stage margin.
- *
- * A leaf spawns this far left of the world's left edge and is retired this far right of its right
- * edge, so it slides fully into view and fully out rather than popping.
- */
+/** The off-stage margin: a leaf enters and retires this far out, so it slides rather than popping. */
 export const EDGE_MARGIN = 32;
 
 /**
  * The badge parented above each leaf: how big, how far above, and how solid.
  *
- * `marker.png` is 8x8, so scale 2 draws it at 16 world px — a third of a leaf, large enough to read
- * as a colour at a glance without competing with the art. It does not inherit its parent's
- * rotation, so it rides upright over a tumbling leaf.
+ * `marker.png` is 8x8, so scale 2 draws it a third of a leaf — legible as a colour without competing
+ * with the art.
  */
 export const MARKER_SCALE = 2;
 export const MARKER_OFFSET_Y = 34;
@@ -254,9 +220,8 @@ export const BOARD_SIZE = 5;
 /**
  * Game-hosted, so every peer sees them.
  *
- * They are constants because the browser reads them off a host record BY NAME — the field is
- * written by a `ServerScript` the browser never links, so a typo would read `undefined` forever
- * rather than failing to compile.
+ * Constants because the browser reads them off a host record BY NAME: the field is written by a
+ * `ServerScript` the browser never links, so a typo would read `undefined` rather than fail to compile.
  */
 export const STATE_PHASE = 'phase';
 export const STATE_SECONDS_LEFT = 'secondsLeft';
@@ -268,13 +233,7 @@ export const STATE_ROUND = 'round';
 export const STATE_SCORES = 'scores';
 export const STATE_BOARD = 'board';
 
-/**
- * Player-hosted, and so replicated only to the player they belong to.
- *
- * `slot` is the palette seat the rules assigned, NOT `player.index`: core allocates indices from a
- * counter a leave never lowers, so after eight tabs have come and gone a ninth would take index 8
- * and share both a hue and a spawn point with whoever still holds index 0.
- */
+/** Player-hosted, and so replicated only to the player they belong to. `slot` is the seat, not `player.index`. */
 export const STATE_READY = 'ready';
 export const STATE_LIFETIME = 'lifetimeLeaves';
 export const STATE_BEST = 'bestRound';
@@ -282,7 +241,6 @@ export const STATE_SLOT = 'slot';
 
 /** Entity-hosted, on a leaf. */
 export const STATE_RIPE = 'ripe';
-export const STATE_BADGE_SLOT = 'badgeSlot';
 
 /**
  * The widgets and screens this game writes.
@@ -306,6 +264,8 @@ export function rankWidget(row: number): string {
     return `rank-${row}`;
 }
 
+/** Always open: the overlay whose script IS the HUD, and which opens the other two. */
+export const SCREEN_HUD = 'hud';
 export const SCREEN_LOBBY = 'lobby';
 export const SCREEN_RESULTS = 'results';
 
@@ -320,3 +280,4 @@ export const SCRIPT_RUNNER = 'runner';
 export const SCRIPT_HARVESTER = 'harvester';
 export const SCRIPT_LEAF = 'leaf-script';
 export const SCRIPT_LOBBY = 'lobby-screen';
+export const SCRIPT_HUD = 'hud-screen';

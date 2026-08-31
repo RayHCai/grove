@@ -193,6 +193,12 @@
             }
         },
         {
+            "files": ["apps/playground/src/scripts/**", "examples/games/**"],
+            "rules": {
+                "import/no-cycle": "off"
+            }
+        },
+        {
             "files": [
                 "apps/editor/src/index.ts",
                 "apps/platform/src/index.ts",

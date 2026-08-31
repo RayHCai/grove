@@ -42,10 +42,11 @@ what is inside it, and could load a different game without changing.
 ```
 src/scripts/                    THE GAME. @platform/engine + these files, and nothing else.
 ├── globals.ts                  the variables panel: every tunable, name and key. Imports NOTHING.
-├── session.ts                  the live match, and the one capability the host grants
-├── state.ts                    the one place a replicated field is reached by name
+├── session.ts                  the one capability the host grants, and the game's ask for it
+├── state.ts                    reading a replicated field by name, on a client that holds no script
 ├── game/
-│   └── rules.ts                Rules            → the Game
+│   ├── rules.ts                Rules            → the Game
+│   └── slots.ts                which palette seat a player holds, and where it stands them
 ├── players/
 │   ├── clicker.ts              Clicker          → every Player, at the join
 │   └── profile.ts              Profile          → every Player, and the only persisted thing
@@ -56,6 +57,7 @@ src/scripts/                    THE GAME. @platform/engine + these files, and no
 │   └── leaf/
 │       └── leaf.ts             Leaf      (server) — the regions, the click, and the leaf's own maths
 └── screens/
+    ├── hud.ts                  HudScreen   (client) — the whole interface, once a frame
     └── lobby.ts                LobbyScreen (client) — the ready button's local half
 ```
 
@@ -70,8 +72,7 @@ src/                            THE SHELL. It knows about engines, sockets and R
 ├── HudPanel.tsx                the interface, drawn from ClientHUDSink and nothing else
 ├── use-renderer.ts             renderer lifecycle: init, assets, teardown. No frame loop.
 ├── use-game.ts                 dial -> createClient -> the frame that drives it
-├── hud.ts                      replicated state -> hud verbs, and the `ui` clock node
-├── pick.ts                     screen point -> entity handle, for a pointer hit
+├── hud.ts                      registers the screens, opens the first, and the `ui` clock node
 ├── stage-input.ts              the device seam, and the screen -> world conversion
 ├── Inspector.tsx / NetPanel.tsx   polled debug panels
 └── server/                     the Node process — tsc, NodeNext, no DOM
@@ -90,10 +91,15 @@ it, the project file describe a world with it, and the browser shell draw a HUD 
 any of the three learning about the other two.
 
 **A script reaches another script by importing it.** `Rules` calls `spawnLeaf` and `stepLeaf` from
-the leaf's own module rather than restating either. The one thing imports cannot express is a
-_running instance_ on another host — the runtime exposes no "get me that host's script" — so
-`session.ts` holds the live `Rules` and every other script asks it. Its `Rules` import is type-only
-and must stay that way, or the cycle closes at runtime.
+the leaf's own module rather than restating either. A running _instance_ on another host is
+`host.getScript(Class)` — `game.getScript(Rules)` is how a leaf reaches the match it is falling
+through, and it answers by exact class identity, so a subclass is not the class asked for.
+
+That makes the import graph cyclic, and `import/no-cycle` is off under `scripts/` for it. It is not a
+defect being waved through: `Rules` attaches `Clicker` and `Leaf` asks for `Rules`, and in a hosted
+project neither is an import at all — every script is loaded into one namespace and names the others
+directly. Files are how this repo spells that, and every edge is inside a method body, so nothing is
+read at module-eval time and the cycle has no runtime shape.
 
 **`GameInstance` is the boot order.** `src/server/host.ts` hands `src/project.ts` to
 `@platform/glue`, whose constructor validates the file, resolves each attachment's class through the
@@ -134,13 +140,13 @@ A click is not a spawn, and a ready press is not a round.
 1. `stage-input.ts` converts the pointer to world space — `getBoundingClientRect` then
    `renderer.screenToWorld` — and emits it as an axis **ahead of** the button, so the server has
    folded this tick's aim before it dispatches the press that reads it.
-2. The same conversion feeds `pick.ts`, which resolves which leaf was under the cursor and calls
-   `client.pointer('onClick', local)`. That rides the **interaction frame**, not an input action:
-   the entity a click landed on is a claim about this tab's own camera, which no authority can
-   recompute, so the server checks only that the entity is alive. The hit test offsets each leaf by
-   one send interval of travel, because the render bridge draws everything it does not predict that
-   far behind the pose `rt.transforms` holds — testing the simulated pose puts the box half a leaf
-   off the art at 240 px/s.
+2. The same press, in canvas pixels this time, goes to `client.entityAt`, and whatever it names is
+   sent as `client.pointer('onClick', local)`. That rides the **interaction frame**, not an input
+   action: the entity a click landed on is a claim about this tab's own camera, which no authority
+   can recompute, so the server checks only that the entity is alive. Picking asks the RENDERER,
+   which is what makes it right by construction — the bridge draws everything this tab does not
+   predict one send interval behind the pose `rt.transforms` holds, and the renderer holds the pose
+   it drew. Testing the simulated pose instead puts the box half a leaf off the art at 240 px/s.
 3. `Rules.@onPress('ready')` answers the HUD press the same way — engine-supplied `ctx.player`, no
    frame that could claim to be someone else. When every seated player has readied, the round starts
    for everyone, because `phase` is Game-hosted `@serverState`.
@@ -163,31 +169,40 @@ predicts **only** its own avatar: another tab's moves when an envelope says so.
 
 There is no HUD envelope in the protocol, and there cannot be: a HUD is one client's, so `hud.*`
 writes into whichever runtime is current and pushes what changed at that runtime's sink. The
-authority's HUD state reaches nobody. What crosses is `@serverState`, and `src/hud.ts` is the
-client-side half that turns it back into widgets:
+authority's HUD state reaches nobody. What crosses is `@serverState`, and the client-side half that
+turns it back into widgets is **a script in the game** — `HudScreen`, a `ClientScript<HUDScreen>`
+whose `@onUpdate` the client dispatches at display rate:
 
 ```
 Rules writes @serverState / a Scoreboard  ->  wire  ->  the mirror's host records
-   -> HudBridge, inside withRuntime(mirror.runtime), calls hud.text / number / bar / open
-      -> ClientHUDSink collects it and tells React to look again
-         -> HudPanel renders client.hud.widgets — it decides layout and nothing else
-            -> the ready button calls pressWidget -> InteractionFrame -> Rules.@onPress
+   -> the mirror hoists each field onto the Game or Player facade it belongs to
+      -> GameClient.frame calls displayUpdate -> HudScreen.render reads them and calls hud.*
+         -> ClientHUDSink collects it and tells React to look again
+            -> HudPanel renders client.hud.widgets — it decides layout and nothing else
+               -> the ready button calls pressWidget -> InteractionFrame -> Rules.@onPress
 ```
 
-`LobbyScreen` is the one class in this app that runs only in a browser. It answers the press
-locally — the button says "asked" on the frame it was pressed — and the bridge corrects the label
-when the authority's `readyCount` lands. That is the whole reason a screen script exists: a
-`ClientScript`'s `@onUpdate` is dispatched by neither tick pass, so anything per-frame is the host's
-to run, but `hud.open` dispatches a screen's `@onStart` inside the call that opened it.
+The hoist is what makes the read work at all. A mirror attaches no `Rules`, so there is no instance
+to hold `phase` — the value lives in the host record the envelope filled, and core defines a
+read-only accessor for it on the facade as it lands. `game.phase` on the tab that draws it and
+`this.phase` on the authority that wrote it are then the same name for the same number.
 
-That last fact decides an ordering. The bridge opens and closes screens **before** its own widget
-writes, because a screen's `@onStart` runs inside `hud.open` — opened afterwards, `LobbyScreen`'s
-static placeholder would overwrite the authoritative label, and the diff would not put it back until
-`readyCount` next moved.
+`src/hud.ts` keeps exactly what a script cannot do: register the screen classes and open the first
+one — a hosted project's panel would, and this app has none — and draw the clock node, because
+`hud.*` writes widgets and a renderer node is not one.
 
-Every write is diffed before it is made. `hud.*` notifies the sink on every call and the sink
-notifies React, so writing the same number every frame would re-render the interface at the frame
-rate to say nothing had changed.
+`LobbyScreen` is the local half of the ready button. It answers the press immediately — the button
+says "asked" on the frame it was pressed — and the next authoritative `readyCount` corrects the
+label. `HudScreen` opens and closes it, which is a screen deciding which menu is up, and that is
+where the decision belongs: the phase is the only input and `render` already reads it every frame.
+
+The switch runs **before** the widget writes in that same `render`, because a screen's `@onStart`
+runs inside `hud.open` — opened afterwards, `LobbyScreen`'s static placeholder would overwrite the
+authoritative label, and nothing would put it back until `readyCount` next moved.
+
+Nothing in `render` diffs. Writing an unchanged widget is free because `ClientHUDSink` compares
+before it notifies — without that, a value written every frame would re-render the interface at the
+frame rate to say nothing had changed.
 
 The round clock is the exception that is drawn rather than laid out: one `kind: 'text'` node on the
 renderer's `ui` surface, anchored `top-center`. Text is legal only there — a text node on a
@@ -198,8 +213,8 @@ camera-transformed surface throws, and world text is an asset instead.
 - **The renderer lives in a ref, never in state**, and the client owns the frame. `GameClient.frame`
   drains the socket, advances the tick clock, flushes input, pushes transforms and calls `render()`
   — so `use-renderer` deliberately has no loop of its own, or every frame would present twice. The
-  HUD bridge runs immediately behind it, from the same frame source, or every widget is one frame
-  stale.
+  display-rate script pass is inside that same `frame`, after the socket drain and before the push,
+  which is what keeps a widget from being a frame behind the pose drawn beside it.
 - **Textures are loaded before the session starts.** A sprite whose texture arrives after its node
   was created is never repointed, and the client's bridge starts its manifest load without awaiting
   it — so every leaf already in the world at join would draw a placeholder for the rest of the
