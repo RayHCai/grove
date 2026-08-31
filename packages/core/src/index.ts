@@ -130,6 +130,7 @@ export type {
     Movement,
     PointerEdge,
     Random,
+    ScriptQuery,
     SoundHandle,
     SoundOptions,
     TickPasses,
