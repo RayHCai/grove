@@ -628,14 +628,21 @@ describe('a round', () => {
         // Cross to the far side first, so the next leaf has the whole stage to reach us in.
         await session.hold(tab, CODE_RIGHT, 200);
 
-        await session.stepUntil(() => leavesIn(tab) > 0, 120);
-        const target = leafIds(tab).reduce((lowest, id) =>
-            rt.transforms.posX(id) < rt.transforms.posX(lowest) ? id : lowest,
-        );
-        const dy = rt.transforms.posY(target) - rt.transforms.posY(avatarOf(tab));
-        await session.hold(tab, dy > 0 ? CODE_UP : CODE_DOWN, Math.ceil(Math.abs(dy) / 4));
+        // Re-aim each pass rather than steering once at the first leaf seen: leaf heights are
+        // `game.random`'s, so a single manoeuvre only lands when the stream happens to drop one
+        // within reach — which makes the test a property of the seed rather than of the harvest.
+        for (let attempt = 0; attempt < 12 && scoreWidget(tab) === 0; attempt++) {
+            await session.stepUntil(() => leavesIn(tab) > 0, 200);
+            const target = leafIds(tab).reduce((lowest, id) =>
+                rt.transforms.posX(id) < rt.transforms.posX(lowest) ? id : lowest,
+            );
+            const dy = rt.transforms.posY(target) - rt.transforms.posY(avatarOf(tab));
+            if (Math.abs(dy) >= 1) {
+                await session.hold(tab, dy > 0 ? CODE_UP : CODE_DOWN, Math.ceil(Math.abs(dy) / 4));
+            }
+            await session.step(30);
+        }
 
-        await session.stepUntil(() => scoreWidget(tab) > 0, 400);
         expect(scoreWidget(tab)).toBeGreaterThan(0);
         // A harvest is worth more than the click that steals it.
         expect(scoreWidget(tab)).toBeGreaterThanOrEqual(2);
