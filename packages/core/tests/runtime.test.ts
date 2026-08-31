@@ -9,12 +9,17 @@ import type { Runtime } from '../src/runtime/runtime.js';
 import { game } from '../src/runtime/game.js';
 import { HUDScreen, hud } from '../src/runtime/hud.js';
 import { Countdown } from '../src/runtime/wrappers.js';
+import { entityKey } from '../src/runtime/hosts.js';
+import { instanceOf } from './helpers.js';
 import { bounds } from '@platform/math';
 
 const BOUNDS = bounds(-500, 500, 500, -500);
 
+/** The server world every test here starts from; a HUD test builds its own client one. */
+let server: Runtime;
+
 beforeEach(() => {
-    loadGame({ role: 'server', bounds: BOUNDS });
+    server = loadGame({ role: 'server', bounds: BOUNDS });
 });
 afterEach(() => clearRuntime());
 
@@ -49,10 +54,25 @@ describe('runtime end to end', () => {
     });
 
     it('returns the same facade for one id (=== identity)', () => {
-        const a = game.spawn('crate', 0, 0);
-        const again = game.find({ tag: 'x' });
-        void again;
+        const a = game.spawn('crate', 0, 0).tag('box');
+        // Every route to the entity is the same object, which is what lets a creator hold one and
+        // compare it against whatever a query hands back later.
         expect(game.entities[0]).toBe(a);
+        expect(game.find({ tag: 'box' })[0]).toBe(a);
+        expect(server.entityManager.facade(a.entityId)).toBe(a);
+    });
+
+    it('does not hand a reused slot the facade of the entity that freed it', () => {
+        const first = game.spawn('crate', 0, 0);
+        first.destroy();
+        server.entityManager.drainDestroyed();
+
+        const second = game.spawn('crate', 0, 0);
+        // The slot index is the same; the generation is not. Caching on the index alone would
+        // return `first` here, and a handler holding it would write through a dead facade.
+        expect(second).not.toBe(first);
+        expect(second.alive).toBe(true);
+        expect(first.alive).toBe(false);
     });
 
     it('destroy is logical-now: alive flips false before teardown drains', async () => {
@@ -66,12 +86,26 @@ describe('runtime end to end', () => {
     it('hoists @serverState onto the entity host record and mutates through it', async () => {
         const e = game.spawn('crate', 0, 0);
         e.addScript(Target as never);
+        const record = server.hosts.get(entityKey(e.entityId as number))!.record;
+        const script = instanceOf<{ health: number }>(server, e, 'Target');
+
+        // The record is what replicates, so all three spellings have to be one value — a hoist that
+        // left the instance holding its own copy passes every `alive` assertion below and still
+        // sends the initializer over the wire forever.
+        expect(record.values.get('health')).toBe(3);
+        expect((e as unknown as { health: number }).health).toBe(3);
+        expect(script.health).toBe(3);
+
         await e.send('damage', { amount: 1 });
-        // health started at 3, now 2 — read it back off the same record via a fresh handler
+        expect(record.values.get('health')).toBe(2);
+        expect((e as unknown as { health: number }).health).toBe(2);
+        expect(script.health).toBe(2);
+
         await e.send('damage', { amount: 1 });
         expect(e.alive).toBe(true); // 3 - 1 - 1 = 1, still up
         await e.send('damage', { amount: 1 });
         expect(e.alive).toBe(false); // reached 0
+        expect(record.values.get('downed')).toBe(true);
     });
 
     it('a send to a dead entity is a no-op that resolves', async () => {
