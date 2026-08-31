@@ -5,8 +5,15 @@
 // Not public surface — exported only so the test suite can reach it, and the one place in this package
 // that declares a script at all: `src/` proper drives core as values and attaches nothing.
 
-import type { Entity } from '@platform/core';
-import { SyncedScript, onEventHold, serverState } from '@platform/core';
+import type { Entity, HUDScreen } from '@platform/core';
+import {
+    ClientScript,
+    SyncedScript,
+    hud,
+    onEventHold,
+    onUpdate,
+    serverState,
+} from '@platform/core';
 
 /** Moves its host once per tick while `right` is held — one tick of replay, made visible. */
 export class Slider extends SyncedScript<Entity> {
@@ -19,5 +26,36 @@ export class Slider extends SyncedScript<Entity> {
     slide(): void {
         this.host.moveBy(Slider.speed, 0);
         this.steps += 1;
+    }
+}
+
+/**
+ * A screen that redraws every frame — the authored HUD pattern, and the one handler no tick runs.
+ *
+ * `label` is static so a test can change what it writes without reaching into an instance the
+ * runtime owns.
+ */
+export class Overlay extends ClientScript<HUDScreen> {
+    static frames = 0;
+    static label = 'a';
+
+    @onUpdate
+    render(): void {
+        Overlay.frames += 1;
+        hud.text('title', Overlay.label);
+    }
+}
+
+/**
+ * The same handler on a SYNCED script, which the simulation already runs.
+ *
+ * Its counter staying at zero across a frame is what proves the display pass does not double it.
+ */
+export class Drift extends SyncedScript<Entity> {
+    static frames = 0;
+
+    @onUpdate
+    step(): void {
+        Drift.frames += 1;
     }
 }

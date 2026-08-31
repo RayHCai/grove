@@ -95,6 +95,8 @@ export class RenderBridge {
      * believe they owned it, and neither would be wrong about its own nodes.
      */
     readonly #nodeFor = new Map<EntityId, NodeId>();
+    /** The reverse edge, so a picked node can name the entity a pointer hit. */
+    readonly #entityFor = new Map<NodeId, EntityId>();
     readonly #templates = new Map<string, TemplateVisual>();
     /**
      * Every asset name this bridge has declared to the renderer, as the renderer's own intent map.
@@ -456,6 +458,7 @@ export class RenderBridge {
     clear(): void {
         for (const node of this.#nodeFor.values()) this.#renderer.destroyNode(node);
         this.#nodeFor.clear();
+        this.#entityFor.clear();
         this.#parentOf.clear();
         this.#childrenOf.clear();
         // Unlike the template table, which survives: an offset describes a node that no longer exists.
@@ -473,6 +476,17 @@ export class RenderBridge {
         return this.#nodeFor.get(local);
     }
 
+    /**
+     * The entity a node stands for, or undefined.
+     *
+     * Only an entity's ROOT node is in the map. A template that draws a subtree contributes several
+     * nodes and one entity, so a caller that picked a descendant walks up parents until this
+     * answers — which is what `GameClient.entityAt` does.
+     */
+    entityFor(node: NodeId): EntityId | undefined {
+        return this.#entityFor.get(node);
+    }
+
     #create(local: EntityId): void {
         if (this.#nodeFor.has(local)) return;
         const rt = this.#view.runtime;
@@ -481,6 +495,7 @@ export class RenderBridge {
         this.#fillTransform(transform, local);
         const node = this.#rootNode(template, transform);
         this.#nodeFor.set(local, node);
+        this.#entityFor.set(node, local);
 
         // After creation: the parent's node may be created in this same batch, spawn-order first.
         const parent = rt.entities.record(local)?.parent;
@@ -605,6 +620,8 @@ export class RenderBridge {
 
         this.#unlink(local);
         for (const id of this.#doomed) {
+            const doomedNode = this.#nodeFor.get(id);
+            if (doomedNode !== undefined) this.#entityFor.delete(doomedNode);
             this.#nodeFor.delete(id);
             this.#parentOf.delete(id);
             this.#childrenOf.delete(id);
