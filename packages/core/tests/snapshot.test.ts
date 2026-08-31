@@ -66,22 +66,34 @@ function deterministicRun(): { x: number; y: number; z: number } {
 }
 
 describe('registry coverage', () => {
-    it('every registered store declares a scoping mode with no default', () => {
+    it('registers exactly these stores, in capture order', () => {
+        // Order is capture and apply order, so it is part of the contract rather than an artifact
+        // of how the constructor happens to read. A `toContain` per name pins neither.
         const rt = loadGame();
-        for (const store of rt.registry.stores) {
-            expect(store.storeName).toBeTruthy();
-            expect(['filtered', 'whole', 'derived']).toContain(store.scopeMode);
-        }
+        expect(rt.registry.stores.map((s) => s.storeName)).toStrictEqual([
+            'entities',
+            'transforms',
+            'tags',
+            'prng',
+            'breaker',
+            'timers',
+        ]);
     });
 
-    it('registers the load-bearing stores including the PRNG', () => {
+    it('declares the scoping mode each store actually needs', () => {
+        // The exact map, not merely "some legal mode": a `whole` store silently becoming `filtered`
+        // is how a scoped rewind starts restoring a partial PRNG stream, and every symptom of that
+        // shows up ticks later as a desync with nothing pointing back here.
         const rt = loadGame();
-        const names = rt.registry.stores.map((s) => s.storeName);
-        expect(names).toContain('prng'); // the easiest to miss
-        expect(names).toContain('transforms');
-        expect(names).toContain('entities');
-        expect(names).toContain('tags');
-        expect(names).toContain('breaker');
-        expect(names).toContain('timers');
+        const modes = Object.fromEntries(rt.registry.stores.map((s) => [s.storeName, s.scopeMode]));
+        expect(modes).toStrictEqual({
+            // The scope names entities, so these three narrow to the slots it holds.
+            entities: 'whole', // …except this one: a subset still needs every slot's generation,
+            transforms: 'filtered', //  or a handle the scope excluded stops reading as stale.
+            tags: 'filtered',
+            timers: 'filtered', // by owning host scope rather than by slot
+            prng: 'whole', // one interleaved stream, with no per-entity subsequence to take
+            breaker: 'whole', // keyed by instance id, which no set of entity ids narrows
+        });
     });
 });

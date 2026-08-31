@@ -118,10 +118,12 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   "am I still touching"; a contact has no exit handler.
 - **Snapshot completeness is a registry, not a list.** A `SnapshotStore` declares `storeName`, a `scopeMode`
   (`filtered` | `whole` | `derived`, no default) and `createBuffer`/`capture(into, scope)`/`apply`. Six stores
-  register, in capture order: `entities`, `transforms`, `tags`, `prng` (whole — one interleaved stream, no
-  per-entity subsequence), `breaker` (whole — keyed by instance id, which no set of entity ids narrows),
-  `timers`. `TweenEngine` and the host records are **not** stores, so a rewind restores transforms but neither
-  an in-flight tween nor a `@serverState` value.
+  register, in capture order: `entities` (whole — a scoped subset would still need every slot's generation, or
+  a handle the scope excluded stops reading as stale), `transforms` (filtered), `tags` (filtered), `prng`
+  (whole — one interleaved stream, no per-entity subsequence), `breaker` (whole — keyed by instance id, which
+  no set of entity ids narrows), `timers` (filtered, by owning host scope). `TweenEngine` and the host records
+  are **not** stores, so a rewind restores transforms but neither an in-flight tween nor a `@serverState`
+  value.
 - **A `filtered` buffer records its own coverage**, and `apply` writes only that: the slots for `transforms` and
   `tags`, the owning host scopes for `timers`. Restoring the whole range instead would overwrite every
   out-of-scope entity with the slots the capture never filled, which is the client's remote entities.
