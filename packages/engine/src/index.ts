@@ -132,4 +132,5 @@ export type {
     HandlerDecorator,
     StateDecorator,
     Host,
+    ScriptQuery,
 } from '@platform/core';
