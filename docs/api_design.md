@@ -881,6 +881,10 @@ Present-tense is the default and covers every non-shot case. The flag pulls the 
 @onHoverExit             // ctx.player
 ```
 
+**Which entity was clicked is decided on the client, and cannot be otherwise.** The hit is a claim about that player's own camera, viewport and zoom, none of which the authority has a copy of — so the client resolves the pointer against **what it drew**, not against the poses it holds. Those differ on purpose: everything outside the local player's predicted scope is drawn a send interval behind its simulated pose and interpolated between the two either side, so hit-testing the simulation puts the box off the art by a whole send interval of travel. The renderer holds the pose it drew, which is why picking is a renderer query.
+
+The authority therefore validates what it can — that the entity is alive — and the handler decides the rest. Whether the clicking player could plausibly reach the thing they clicked is game logic, and a game where the answer is "they need not" (a long-range pick) is as legitimate as one where reach is checked.
+
 ### 5.6 Context object
 
 `ctx` carries **only event data**: `ctx.player`, `ctx.other`, `ctx.value`, `ctx.data`, `ctx.from`, `ctx.dt`, `ctx.alive`. The host is `this.host`; the world is the ambient `game` (§3.4). Long-lived async handlers must respect `ctx.alive`; `sleep` and the timed motion verbs auto-cancel when their host dies.
@@ -988,6 +992,17 @@ There is no return value. A handler answers by writing `@serverState` the sender
 - **Concurrency defaults to `ignore`**, matching a key press: a send is instantaneous, and overlapping invocations on one instance are almost always the bug (§5.7). Override per handler as usual.
 - **Recursion is bounded.** A send chain that re-enters the same handler is cut off at an engine depth limit with a creator-visible error, the same way the tick watchdog handles a synchronous infinite loop.
 - **Names share the namespace with panel actions.** The panel rejects a send name that collides with a declared action, so `@onEvent('jump')` never has two unrelated sources.
+
+**Reaching a script directly is `getScript`, and it is the other half of this.** `send` addresses an entity by name and needs no knowledge of what is attached; `host.getScript(Class)` addresses one attached script and hands back the running instance, so a leaf can ask the Game's `Rules` what phase it is in without a round trip through an event and a `@serverState` reply:
+
+```ts
+const rules = game.getScript(Rules); // null if it isn't attached here
+if (rules !== null) rules.award(ctx.player, 1);
+```
+
+It is on `Entity`, `Player` and `Game` alike, and it matches on **exact class identity** — two subclasses of one base are two scripts, and a query for the base answering with whichever attached first would be a silent wrong answer rather than a null. **Null is ordinary.** The class may not be attached to that host at all, and on a client it is attached only if this end's location runs it — so `game.getScript(Rules)` where `Rules` is a `ServerScript` is null in every browser. A client reads those same values as the `@serverState` the authority replicated onto the facade; the accessor is there under the name the authority wrote it under, with or without an instance behind it.
+
+What this replaces is a module-level `let` holding the rules object, which is per-process rather than per-world: a second world in one process overwrites the first's, and every script that read the slot then writes into the wrong game. `getScript` holds nothing, so there is no slot to overwrite.
 
 **Blocks:** one block — send ⟨event⟩ to ⟨target⟩ with labeled payload slots — plus the existing `@onEvent` hat, which needs no change: the payload reads as a `ctx.data` reporter in the same shape as `ctx.value`.
 
@@ -1480,6 +1495,10 @@ hud.text('status', this.localPlayer === game.tagged ? 'You are it!' : 'Run!');
 ```
 
 Server code that needs to push a message to one player's screen writes per-player `@serverState` (§6.1) and lets that player's client script read it. One direction, one mechanism.
+
+**A replicated value is readable on a client with no script instance behind it.** The screen script that draws `game.phase` is a `ClientScript`; the `Rules` that declared `phase` is a `ServerScript` and is attached on the authority only. So the accessor `@serverState` installs would not exist on the machine that draws it — which would make the whole pattern above a null read. It does exist: replication defines the accessor on the `Game` or `Player` facade as the value lands, reading through the host record the envelope filled. `this.phase` where it is written and `game.phase` where it is drawn are the same name for the same number, and `getScript` (§5.8) is not the route — it is null there, correctly.
+
+**Write unconditionally; do not diff.** A `hud.*` call whose value is unchanged does not notify, so a render pass that rewrites every widget every frame costs a comparison per widget and no redraw. Hand-rolled diffing in the script buys nothing and is the usual source of a widget stuck on a stale value.
 
 **Widget names are unique across the whole HUD, panel-enforced.** This is what keeps the widget verbs on `HUD` rather than on `HUDScreen`: `hud.text('score', 12)` stays one block with one dropdown, and the block tier never learns that screens exist. The cost is that two menus cannot both have a widget literally named `back` — the panel resolves that at authoring time by qualifying the name (`pause-back`), which is a rename in a dropdown rather than a concept in the API. The alternative — per-screen namespaces and a `hud.screen('shop').text(…)` lookup — duplicates all nine verbs onto a second class and adds a two-step resolution rule to pay for a collision the editor can prevent.
 
