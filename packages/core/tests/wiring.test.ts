@@ -2,7 +2,19 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ScriptId, TemplateId } from '@platform/project';
-import { Configured, Greeter, LateJoiner } from '../dist/testkit/fixtures.js';
+import {
+    Configured,
+    FaultyMovement,
+    Greeter,
+    LateJoiner,
+    RivalWallet,
+    Roll,
+    SyncedRoster,
+    TickOverridingMovement,
+    Viewfinder,
+    Wallet,
+} from '../dist/testkit/fixtures.js';
+import { LoadError } from '../src/errors.js';
 import { Loop } from '../src/loop/loop.js';
 import { joinPlayer, loadGame, startGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
@@ -179,3 +191,100 @@ describe('startGame drains the first batch', () => {
         expect(rt.instances.pendingStartCount).toBe(0);
     });
 });
+
+// Every rejection is a LoadError rather than a logged warning: a half-hoisted host record matches
+// no declaration, so continuing past one leaves a world whose scripts silently never fire.
+describe('wire-time rejections', () => {
+    it('refuses a SyncedScript on a camera host, which has no authoritative copy', () => {
+        const rt = loadGame({ role: 'client' });
+        const player = joinPlayer(rt, 'p1', 'Ada');
+        expect(() => player.camera.addScript(Viewfinder as never)).toThrow(LoadError);
+        expect(() => player.camera.addScript(Viewfinder as never)).toThrow(/camera/);
+    });
+
+    it('refuses a roster handler off a Game host', () => {
+        // `ctx.player` on a join is the roster's business, and an entity-hosted copy would fire
+        // once per entity for every join in the world.
+        const rt = loadGame();
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
+        expect(() => e.addScript(Roll as never)).toThrow(/@onPlayerJoin/);
+    });
+
+    it('refuses a roster handler off a ServerScript, even on the Game host', () => {
+        const rt = loadGame();
+        expect(() => rt.wired.gameInstance.addScript(SyncedRoster as never)).toThrow(
+            /@onPlayerJoin/,
+        );
+    });
+
+    it('refuses two @serverState fields claiming one name on a host', () => {
+        // The record is one map: the second hoist would overwrite the first class's value and both
+        // scripts would then be writing through one another.
+        const rt = loadGame();
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
+        e.addScript(Wallet as never);
+        expect(() => e.addScript(RivalWallet as never)).toThrow(LoadError);
+        expect(() => e.addScript(RivalWallet as never)).toThrow(/credits/);
+    });
+
+    it('lets one class declare a name a DIFFERENT host already uses', () => {
+        const rt = loadGame();
+        const a = rt.wired.gameInstance.spawn('crate', 0, 0);
+        const b = rt.wired.gameInstance.spawn('crate', 0, 0);
+        a.addScript(Wallet as never);
+        expect(() => b.addScript(Wallet as never)).not.toThrow();
+    });
+
+    it('refuses a movement class that overrides tick', () => {
+        // The stage order in `tick` is the contract both endpoints replay, so an override is a
+        // desync rather than a customisation — and the message names the hooks that are not.
+        const rt = loadGame();
+        const player = joinPlayer(rt, 'p1', 'Ada');
+        player.spawn();
+        expect(() => player.setMovement(TickOverridingMovement as never)).toThrow(
+            /overrides tick\(\)/,
+        );
+        expect(() => player.setMovement(TickOverridingMovement as never)).toThrow(/accelerate/);
+    });
+
+    it('allows a movement class that overrides only the stages it may', () => {
+        const rt = loadGame();
+        const player = joinPlayer(rt, 'p1', 'Ada');
+        player.spawn();
+        expect(() => player.setMovement(FaultyMovement as never)).not.toThrow();
+    });
+});
+
+describe('persisted seeding', () => {
+    it('prefers a stored value over the field initializer', () => {
+        const rt = loadGame();
+        rt.persisted = stored({ credits: 500 });
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
+        e.addScript(Wallet as never);
+        expect((e as unknown as { credits: number }).credits).toBe(500);
+    });
+
+    it('discards a stored value whose type no longer matches the declaration', () => {
+        // A creator who changed `credits` from a number to something else gets the new
+        // initializer, not last week's number arriving where a string is now expected.
+        const rt = loadGame();
+        rt.persisted = stored({ credits: 'five hundred' });
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
+        e.addScript(Wallet as never);
+        expect((e as unknown as { credits: number }).credits).toBe(10);
+    });
+
+    it('seeds each field independently', () => {
+        const rt = loadGame();
+        rt.persisted = stored({ credits: 7, label: 42 });
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
+        e.addScript(Wallet as never);
+        expect((e as unknown as { credits: number }).credits).toBe(7);
+        expect((e as unknown as { label: string }).label).toBe('anon'); // tag mismatch, discarded
+    });
+});
+
+/** A `PersistedSource` holding one bag of values for every host that asks. */
+function stored(values: Record<string, unknown>): { get(hostId: string, field: string): unknown } {
+    return { get: (_hostId, field) => values[field] };
+}
