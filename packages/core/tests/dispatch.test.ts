@@ -37,8 +37,9 @@ describe('concurrency', () => {
 
         inst.release();
         await tick();
-        // Only the live invocation can finish; the cancelled one never resumes past its await.
-        expect(inst.finishes).toBeLessThanOrEqual(1);
+        // Exactly one, not "at most one": the fixture's release resolves the live invocation's own
+        // await, so a restart that cancelled BOTH would leave this at zero and read as a pass.
+        expect(inst.finishes).toBe(1);
     });
 
     it('per-instance locking: two entities do not gate each other', () => {
