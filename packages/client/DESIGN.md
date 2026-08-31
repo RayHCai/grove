@@ -31,13 +31,14 @@ Deps: `core`, `math`, `protocol`, `renderer`, `transport`. Never `server`. No Re
 | [src/handshake.ts](src/handshake.ts)   | Join/time-sync builders, envelope narrowing, welcome validation, snapshot reassembly, reject text |
 | [src/bundle.ts](src/bundle.ts)         | `BundleSource` seam, and the fetch → bound → hash → compare → evaluate order                      |
 | [src/lifecycle.ts](src/lifecycle.ts)   | `Lifecycle` — `SessionState`, `FailureReason`, input gating                                       |
-| [src/bridge.ts](src/bridge.ts)         | `RenderBridge` — `EntityId → NodeId`, manifest, dirty-set push, interpolation, camera             |
+| [src/bridge.ts](src/bridge.ts)         | `RenderBridge` — `EntityId ↔ NodeId`, manifest, dirty-set push, interpolation, camera             |
 | [src/hud-sink.ts](src/hud-sink.ts)     | `ClientHUDSink` — core's HUD seam: widget records and the open screen stack                       |
 | [src/constants.ts](src/constants.ts)   | Engine constants, each stating its unit                                                           |
 | [src/browser/](src/browser/)           | DOM adapters behind the `./browser` subpath                                                       |
 
 Two exports: `.` (no DOM) and `./browser` (`createRafFrameSource`, `createPerformanceClock`,
-`createDomInputDevice`, `pollGamepads`, `createBrowserBundleSource`). The root barrel publishes four values
+`createDomInputDevice`, `createCanvasInputDevice`, `canvasPoint`, `pollGamepads`,
+`createBrowserBundleSource`). The root barrel publishes four values
 — `GameClient`, `ClientHUDSink`, `ManualFrameSource`, `ScriptedInputDevice` — plus the seam types a host
 implements and the types `GameClient`'s own members are declared as. Everything else in the table above is
 exported as a **type only**, so nothing outside can construct a second mirror, clock or ring, forge a
@@ -67,7 +68,13 @@ browser passes rAF and a headless host drives it by hand.
    replayed on the frame it was sent; only while `live`.
 5. `#checkBundleDeadline()` → `bundle` failure; `#checkNotBehind()` → resync; `#checkLiveness()` → `stalled`
    in **both** directions; `#maybeSync()`.
-6. `bridge.pushTransforms(now)`, `bridge.pushCamera()`, `renderer.render()`.
+6. `#displayUpdate(now)` — core's `displayUpdate` over the mirror's runtime: every `client`-located
+   instance's `@onUpdate`, once, with the wall dt between frames clamped to `MAX_FRAME_DT`. Here and not
+   in step 3, because this is a render pass and not a tick — a frame that advanced three ticks still runs it
+   once, and a frame that advanced none still runs it. After the drain so it reads what just landed, before
+   the push so a widget and the pose beside it describe the same frame. Skipped once the session has
+   `failed`: the runtime is still there, and running a HUD over a dead session draws a live-looking one.
+7. `bridge.pushTransforms(now)`, `bridge.pushCamera()`, `renderer.render()`.
 
 The push is after tick advance, not inside it: a frame that advanced three ticks still pushes once.
 `start()` registers handlers _before_ sending the `JoinRequest`, so ordering never depends on transport
@@ -171,8 +178,15 @@ exists to keep at zero.
 `@serverState` arrives as one `StateDiff` per host carrying a `fields` bag, and lands in
 `hosts.ensure(key).record` through core's `restoreHostField` — one `StateDiff` per host, its `fields` map
 walked with `Object.entries` — keyed with core's own `GAME_KEY` /
-`playerKey` / `entityKey` helpers — with no scripts there is no hoisted accessor, and the record is the one a
-hoist would land on. `restoreHostField` rather than a bare `set`, because a wrapper field's value is a
+`playerKey` / `entityKey` helpers — the record being exactly the one a hoist would land on. Each field is
+then passed to core's `hoistReplicated` against the facade that host names — `rt.gameInstance`,
+`playerManager.byId`, `entityManager.facade` — which defines the read-only accessor a script would have
+installed had one been attached. Without it a mirror runs no `Rules`, so nothing ever defines `phase`, and
+the `ClientScript` drawing the HUD reads `undefined` off a value that is sitting in the record beside it.
+It is resolved once per diff rather than per field, and a host with no facade here is skipped — structural
+ops are applied before state in the same envelope, so the join or spawn that mints one has already run, and
+an entity whose `netId` is unmapped was already dropped by the key lookup above.
+`restoreHostField` rather than a bare `set`, because a wrapper field's value is a
 wrapper: one already on the record is `restore()`d in place, since a script may hold that same instance, and
 one the client does not have is revived from the payload's own tag — a `Scoreboard` arrives with its methods,
 not as a decoded blob. `channels.clear()` discards structural and state marks (no consumer here) but
@@ -238,6 +252,20 @@ under it, and shallowly, which keeps a bound `Countdown` the live object a timer
 throw is contained, so a UI bug cannot unwind into the handler that wrote the widget. A resync clears it: the
 HUD belongs to the world being discarded.
 
+**A widget write that changes nothing does not notify**, which is what makes the authored pattern — a
+`ClientScript<HUDScreen>` whose `@onUpdate` rewrites every widget every frame — cost a comparison per widget
+rather than a re-render per frame. The comparison is field-by-field over the record; a bound `Countdown` is
+compared by identity, because it is a live object whose own ticking is the change and equality on it would
+report none. Diffing here rather than in the script is deliberate: it is one implementation instead of one
+per game, and a game that hand-rolls it is the usual source of a widget stuck on a stale value.
+
+`GameClient.entityAt(screenPoint, opts?)` is the pointer's other half: `renderer.nodeAt` for the topmost
+drawn node, then the bridge's `NodeId → EntityId` map, walking `parentOf` until one answers — a hit on a
+child node (a nameplate, a badge) names the entity that owns it, which is what a person clicking means.
+`undefined` before the bridge exists. Picking asks the renderer rather than `rt.transforms` because the
+renderer holds **what was drawn**, and everything outside the predicted scope is drawn a send interval
+behind its simulated pose; hit-testing the simulation puts the box off the art by that much travel.
+
 `GameClient.pressWidget(widget, screen?)` and `.pointer(edge, local)` are the two ways in. Each dispatches
 locally **unconditionally** — hover, press animation, selection and disabled styling are client state and
 must not go dead because the session stalled — and queues an `interaction` event for the authority only while
@@ -286,7 +314,13 @@ tick**, stamped with the newest one — the earliest tick every edge since the l
 coalesced per `(action, phase)`, empty frames unsent, so `seq` and `tick` advance together and `ackSeq`
 names a tick boundary. `BindingTable` is per player, context-filtered, pure, and tracks held
 codes; a key bound as an axis half goes through the axis path via `polarity`. Cursor axes quantize against
-`AXIS_QUANTUM * viewport extent`, so wire volume is zoom-invariant; a return to neutral always sends. The
+`AXIS_QUANTUM * viewport extent`, so wire volume is zoom-invariant; a return to neutral always sends. That
+last rule is why `createCanvasInputDevice` leaves the forwarded event's coordinates alone: the viewport is
+in **world** units and the raw event is in browser CSS pixels, so feeding a cursor axis world coordinates
+looks like the missing half — but exactly `0` reads as a return to neutral, which would silently swallow
+every press on the world's centre line. A game that wants a pointer on the wire emits its own axis from
+`onPress`, biased clear of zero, and the adapter reports the press in canvas pixels and world units for it
+to do that with. The
 context-filtered view is cached and invalidated by `setContext`/`add`/`rebind`, because `resolve` runs per
 raw event and a pointer move would otherwise allocate a filtered array twice per event. `rebind` replaces
 an action's **button** bindings only, so rebinding keys keeps the gamepad axis driving the same action.
