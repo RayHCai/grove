@@ -59,6 +59,12 @@ renderer.render();
 - **A context loss needs no caller rebuild path.** Store mutations apply immediately, GPU
   operations queue, and node ids survive — so the frame loop needs no branch.
 - **`cullMargin` is world pixels**, not CSS pixels, so 64 means the same slack at every zoom.
+- **`nodeAt(screenPoint)` picks against what was DRAWN**, which is the whole reason it lives here.
+  It takes canvas pixels — the same space `screenToWorld` takes — tests each node's
+  `screenBoundsOf`, and returns the topmost by surface order, then layer, then creation order, or
+  `NO_NODE`. Groups and invisible nodes are never hit, and `{ surface }` narrows it to one. A caller
+  holding poses of its own could hit-test those instead, and would be wrong by whatever the caller
+  interpolates or buffers away.
 - **`inspect()` is the only method for tooling**, and the only one that allocates per call. It
   returns a copied `SceneSnapshot` — roots per surface in draw order, every live node, the view
   state — because enumeration is impossible through the per-node queries, which all walk down from a
