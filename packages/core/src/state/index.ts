@@ -14,4 +14,5 @@ export {
     authoredValue,
     redirectState,
     hasNoDataProperty,
+    hoistReplicated,
 } from './backing.js';

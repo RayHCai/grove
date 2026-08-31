@@ -71,6 +71,7 @@ export {
     leavePlayer,
     pressWidget,
     pointerHit,
+    displayUpdate,
 } from './load-game.js';
 export type {
     GameManifest,
@@ -80,6 +81,8 @@ export type {
     WidgetPress,
 } from './load-game.js';
 
+export { scriptOnHost } from './get-script.js';
+export type { ScriptQuery } from './get-script.js';
 export { Roster } from './roster.js';
 export { RegionIndex } from './regions.js';
 export type { RegionCrossing } from './regions.js';

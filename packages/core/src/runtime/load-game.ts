@@ -21,7 +21,7 @@ import { Entity } from './entity.js';
 import { Asset, AssetRegistry } from './assets.js';
 import { tickMovement } from './movement-pass.js';
 import { Wiring, activeLocationsFor } from './wiring.js';
-import { createRuntime } from './runtime.js';
+import { createRuntime, withRuntime } from './runtime.js';
 import type { Runtime, TickPasses } from './runtime.js';
 import type { DispatchCtx, DispatchOptions } from '../dispatch/dispatcher.js';
 import {
@@ -196,23 +196,59 @@ export interface WidgetPress {
  * rule lives here rather than at either endpoint because both dispatch the same press.
  */
 export function pressWidget(rt: Runtime, press: WidgetPress): Promise<void> {
-    const onScreen = press.screen === undefined ? undefined : screenKey(press.screen);
-    const pending: Promise<void>[] = [];
-    for (const [hostKey, si] of rt.instances.entries()) {
-        if (hostKey.startsWith(SCREEN_KEY_PREFIX) && hostKey !== onScreen) continue;
-        pending.push(
-            rt.dispatcher.dispatch(
-                [si],
-                'onPress',
-                press.widget,
-                hostKey,
-                tickCtx(rt, defined({ player: press.player })),
-                tickDispatch(rt),
-            ),
-        );
-    }
-    return Promise.all(pending).then(() => undefined);
+    // Under `rt`, like a tick is: a handler reached from here writes widgets through `hud`, which
+    // resolves the AMBIENT runtime — so without this a press dispatched outside a tick lands in
+    // whichever world `loadGame` ran last. One client per page hides it; a process holding a server
+    // and two clients does not.
+    return withRuntime(rt, () => {
+        const onScreen = press.screen === undefined ? undefined : screenKey(press.screen);
+        const pending: Promise<void>[] = [];
+        for (const [hostKey, si] of rt.instances.entries()) {
+            if (hostKey.startsWith(SCREEN_KEY_PREFIX) && hostKey !== onScreen) continue;
+            pending.push(
+                rt.dispatcher.dispatch(
+                    [si],
+                    'onPress',
+                    press.widget,
+                    hostKey,
+                    tickCtx(rt, defined({ player: press.player })),
+                    tickDispatch(rt),
+                ),
+            );
+        }
+        return Promise.all(pending).then(() => undefined);
+    });
 }
+
+/**
+ * Runs every CLIENT-located `@onUpdate` once, at display rate.
+ *
+ * `@onUpdate` on a `ClientScript` is specified to fire per frame rather than per tick, and no tick
+ * pass can do it: core's update pass and the client's both narrow to server-located handlers, since
+ * a synced script's update belongs to the simulation and firing it here as well would double it.
+ * So the frame loop calls this, and `location === 'client'` is the whole filter.
+ *
+ * `dt` is the DISPLAY delta, not `1 / simRate` — a handler easing a bar or a camera is drawing, and
+ * the tick length would make it stutter on any monitor that is not the sim rate.
+ */
+export function displayUpdate(rt: Runtime, dtSeconds: number): void {
+    withRuntime(rt, () => {
+        for (const [hostKey, si] of rt.instances.entries()) {
+            if (si.location !== 'client') continue;
+            void rt.dispatcher.dispatch(
+                [si],
+                'onUpdate',
+                '@update',
+                hostKey,
+                { data: {}, dt: dtSeconds, alive: true },
+                { activeLocations: CLIENT_ONLY, tick: rt.tick },
+            );
+        }
+    });
+}
+
+/** The one location this pass runs, named once rather than rebuilt per frame. */
+const CLIENT_ONLY: ReadonlySet<ScriptLocation> = new Set(['client']);
 
 /** Which pointer edge a hit carries. Each is its own handler kind, so the kind IS the edge. */
 export type PointerEdge = 'onClick' | 'onHoverEnter' | 'onHoverExit';
@@ -236,9 +272,12 @@ export function pointerHit(
     player?: Player,
 ): Promise<void> {
     if (!rt.entities.isAlive(id)) return Promise.resolve();
-    return dispatchAt(rt, entityKey(id as number), edge, POINTER_EVENT[edge], {
-        extra: player === undefined ? { other: rt.entityManager.facade(id) } : { player },
-    });
+    // Ambient runtime established for the same reason `pressWidget` establishes it.
+    return withRuntime(rt, () =>
+        dispatchAt(rt, entityKey(id as number), edge, POINTER_EVENT[edge], {
+            extra: player === undefined ? { other: rt.entityManager.facade(id) } : { player },
+        }),
+    );
 }
 
 /** The per-tick half of a DispatchCtx; `extra` carries whatever the event itself supplies. */

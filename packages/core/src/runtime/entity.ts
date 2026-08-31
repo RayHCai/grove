@@ -8,6 +8,8 @@ import { NO_ENTITY } from '../ids.js';
 import type { ScriptProps } from '@platform/project';
 import type { BaseScript } from '../script/bases.js';
 import type { Runtime } from './runtime.js';
+import type { ScriptQuery } from './get-script.js';
+import { scriptOnHost } from './get-script.js';
 import { entityKey } from './hosts.js';
 import type { TweenTarget } from '../loop/tweens.js';
 import type { AssetRef } from './assets.js';
@@ -344,6 +346,16 @@ export class Entity {
     addScript(script: new (props?: ScriptProps) => BaseScript<Entity>, props?: ScriptProps): this {
         this.#rt.wired.wiring.attachToEntity(this.#id, script as never, props);
         return this;
+    }
+
+    /**
+     * This entity's instance of `script`, or `null` when it carries none.
+     *
+     * The typed way to reach another host's `@serverState` — `leaf.getScript(Leaf)?.ripe` rather
+     * than a cast against a field the `Entity` type cannot declare.
+     */
+    getScript<T extends BaseScript<Entity>>(script: ScriptQuery<T>): T | null {
+        return scriptOnHost(this.#rt, entityKey(this.#id as number), script);
     }
 
     send(event: string, payload?: Record<string, unknown>): Promise<void> {
