@@ -318,7 +318,13 @@ function dispatchAt(
     );
 }
 
-/** Fires one kind at every attached script, one dispatch each so each keeps its own ctx. */
+/**
+ * Fires one kind at every attached script, one dispatch each so each keeps its own ctx.
+ *
+ * Over `entries` rather than `all` for the host key alone: it is what the error boundary logs as
+ * `hostId`, and passing the empty string here left every `@onUpdate`, `@onRequest` and `endGame`
+ * throw naming no host — the three paths whose records are hardest to place without one.
+ */
 function dispatchEach(
     rt: Runtime,
     kind: HandlerKind,
@@ -327,10 +333,10 @@ function dispatchEach(
 ): Promise<void> {
     const dispatch = opts.dispatch ?? tickDispatch(rt);
     const pending: Promise<void>[] = [];
-    for (const si of rt.instances.all()) {
+    for (const [hostKey, si] of rt.instances.entries()) {
         if (opts.only !== undefined && si.location !== opts.only) continue;
         pending.push(
-            rt.dispatcher.dispatch([si], kind, event, '', tickCtx(rt, opts.extra), dispatch),
+            rt.dispatcher.dispatch([si], kind, event, hostKey, tickCtx(rt, opts.extra), dispatch),
         );
     }
     return Promise.all(pending).then(() => undefined);
