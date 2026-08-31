@@ -1,4 +1,4 @@
-// Easing curves. Each maps t ∈ [0,1] to a value in [0,1] (with overshoot for bounce).
+// Easing curves. Each maps t ∈ [0,1] to a value in [0,1], and all but `bounce` do it monotonically.
 // Pure arithmetic, so a curve is deterministic by construction.
 
 export type Easing = 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'bounce';
@@ -15,6 +15,10 @@ export function ease(t: number, curve: Easing): number {
             return 1 - (1 - t) * (1 - t) * (1 - t);
         case 'bounce':
             return easeOutBounce(t);
+        default:
+            // A curve name off the union reaches here from a manifest or the wire, and returning
+            // undefined would make every interpolated value NaN for the life of the tween.
+            return t;
     }
 }
 
