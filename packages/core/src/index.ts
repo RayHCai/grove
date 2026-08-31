@@ -16,6 +16,7 @@ export type { Snapshot, SnapshotStore } from './loop/index.js';
 export type { AnyScriptClass, TransformBuffer } from './world/index.js';
 
 export type { HostRecord, SingleStructuralOp, StateMark, StructuralOp } from './state/index.js';
+export { hoistReplicated } from './state/index.js';
 
 export {
     BaseScript,
@@ -103,6 +104,7 @@ export {
     leavePlayer,
     pressWidget,
     pointerHit,
+    displayUpdate,
     activeLocationsFor,
     GAME_KEY,
     entityKey,
