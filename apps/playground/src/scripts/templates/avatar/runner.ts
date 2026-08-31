@@ -1,9 +1,7 @@
 // The `player` template's movement, and the one script both ends run.
 //
-// `SyncedScript` is the location that runs on a server AND on a client, which is what makes it the
-// only kind prediction can replay: a `ServerScript` is filtered out of a client tick and would never
-// be dispatched to. The authority simulates this on the tick it receives the input; the client
-// simulates it on the tick it SENDS the input, and rewinds to whatever the authority then says.
+// `SyncedScript` runs on a server AND on a client, which is what makes it the only kind prediction
+// can replay — a `ServerScript` is filtered out of a client tick and never dispatched to.
 
 import type { Entity } from '@platform/engine';
 import { SyncedScript, clamp, onEventHold } from '@platform/engine';
@@ -20,17 +18,15 @@ import {
 /**
  * Moves the avatar a fixed step per held tick, on both axes.
  *
- * A constant rather than a speed integrated over `dt`: both ends run at the session's `simRate` and
- * a held tick is a held tick, so the two arrive at the same number without a rounding argument. Two
- * keys held at once each dispatch their own `hold`, so a diagonal is the two steps taken in turn.
+ * A constant rather than a speed integrated over `dt`: both ends run at the session's `simRate`, so
+ * the two arrive at the same number without a rounding argument.
  */
 export class Runner extends SyncedScript<Entity> {
     /**
      * World units one held tick moves the avatar, configured on the template attachment.
      *
-     * The props ride the `attach` op, so the browser is told this number rather than reading a
-     * constant of its own — but it still defaults, because an attachment that carries none must
-     * move at the same speed rather than by `NaN`.
+     * Still defaults, because an attachment carrying no props must move at the same speed rather
+     * than by `NaN`.
      */
     step = AVATAR_STEP;
 

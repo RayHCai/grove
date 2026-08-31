@@ -1,16 +1,17 @@
-// The one place a `@serverState` field is reached by name.
+// Reading a `@serverState` field by name, on a client.
 //
-// The decorator hoists an accessor onto the host at attach time, but a host facade's TYPE declares
-// no such member — so every read and write of a replicated field has to leave the type system. It
-// leaves it here and nowhere else, so there is a single audited step to replace when the runtime can
-// hand back a typed view.
+// The value lives on the host RECORD and the mirror hoists an accessor onto the facade as each diff
+// lands, so `game.phase` on the tab drawing it and `this.phase` on the authority that wrote it are
+// one slot. What neither end can do is TYPE it: `Player`, `Entity` and `Game` declare no such member.
+//
+// Where an instance exists — anywhere on the server — use `host.getScript(Profile)?.credits`, which
+// is typed. This is for the client, where the state has arrived but the script that declares it
+// never attached.
 
-/** Reads a `@serverState` field off a host facade, which declares no such member. */
-export function readState<T = unknown>(host: object, field: string): T | undefined {
-    return (host as unknown as Record<string, unknown>)[field] as T | undefined;
-}
+/** A host facade, or nothing — a screen script may run a frame before its player is seated. */
+type Host = object | null | undefined;
 
-/** Writes one, for the same reason. */
-export function writeState(host: object, field: string, value: unknown): void {
-    (host as unknown as Record<string, unknown>)[field] = value;
+export function readState<T = unknown>(host: Host, field: string): T | undefined {
+    if (host === null || host === undefined) return undefined;
+    return (host as Record<string, unknown>)[field] as T | undefined;
 }
