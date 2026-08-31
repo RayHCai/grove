@@ -37,7 +37,9 @@ export class SeededRandom {
 
     /** Returns a float in [0, 1). */
     next(): number {
-        const result = rotl(Math.imul(this.#s1, 5), 7);
+        // Both multiplies: the `*9` is the second half of xoshiro128**'s scrambler, and without it
+        // the low bits of the output carry the state's own linear structure straight through.
+        const result = Math.imul(rotl(Math.imul(this.#s1, 5), 7), 9) >>> 0;
         const t = (this.#s1 << 9) >>> 0;
 
         this.#s2 ^= this.#s0;
@@ -48,7 +50,7 @@ export class SeededRandom {
         this.#s2 ^= t;
         this.#s3 = rotl(this.#s3, 11);
 
-        return (result >>> 0) / 0x1_0000_0000;
+        return result / 0x1_0000_0000;
     }
 
     between(min: number, max: number): number {
