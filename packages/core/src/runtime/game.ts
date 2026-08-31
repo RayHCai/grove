@@ -9,6 +9,9 @@ import type { BaseScript } from '../script/bases.js';
 import { instantiate } from '../world/templates.js';
 import type { Runtime } from './runtime.js';
 import { currentRuntime } from './runtime.js';
+import type { ScriptQuery } from './get-script.js';
+import { scriptOnHost } from './get-script.js';
+import { GAME_KEY } from './hosts.js';
 import type { Entity } from './entity.js';
 import type { Player } from './player.js';
 import type { Random } from './random.js';
@@ -64,6 +67,17 @@ export abstract class Game {
     addScript(script: new (props?: ScriptProps) => BaseScript<Game>, props?: ScriptProps): this {
         this.rt.wired.wiring.attachToGame(this, script as never, props);
         return this;
+    }
+
+    /**
+     * The Game's instance of `script`, or `null` when none is attached.
+     *
+     * This is how a script on any other host reaches the session's rules — `game.getScript(Rules)`
+     * rather than a module-level slot the Game publishes itself into, which is per-process and so
+     * belongs to whichever world loaded last.
+     */
+    getScript<T extends BaseScript<Game>>(script: ScriptQuery<T>): T | null {
+        return scriptOnHost(this.rt, GAME_KEY, script);
     }
 }
 

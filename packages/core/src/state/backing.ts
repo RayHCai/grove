@@ -15,6 +15,30 @@ interface StateHolder {
     [STATE_MARK]?: (field: string) => void;
 }
 
+/**
+ * Puts a replicated field on a host FACADE, read-only, reading through the record.
+ *
+ * The authoritative side gets this for free: wiring hoists each `@serverState` field onto the host
+ * when the script that declares it attaches. A mirror attaches no such script — it runs none on a
+ * Game or a Player — so without this the values a client received would sit in a record nothing
+ * reachable from creator code could name, and `this.localPlayer.credits` would read `undefined` on
+ * the one machine that is supposed to draw it.
+ *
+ * Read-only by construction. Client code reads the world and asks; it never tells, and a setter here
+ * would be a write to authoritative state that no channel carries and no server would ever see.
+ * Idempotent per field, so the per-envelope call costs a `hasOwnProperty` after the first.
+ */
+export function hoistReplicated(host: object, field: string, values: Map<string, unknown>): void {
+    if (Object.prototype.hasOwnProperty.call(host, field)) return;
+    Object.defineProperty(host, field, {
+        configurable: true,
+        enumerable: true,
+        get() {
+            return values.get(field);
+        },
+    });
+}
+
 /** Installs `field`'s accessor pair, moving the authored value into a local backing map. */
 export function installStateAccessor(instance: object, field: string): void {
     const holder = instance as StateHolder & Record<string, unknown>;

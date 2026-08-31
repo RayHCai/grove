@@ -128,6 +128,12 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
 - `restore(s)` applies the buffers, resets `rt.tick`, then sweeps parked invocations newer than `s.tick`,
   releasing their concurrency locks. Bit-exactness is claimed for synchronous handlers only — a parked
   continuation is a heap closure no buffer holds.
+- **Client-located `@onUpdate` is not pass 9, and is not a tick at all.** Both update passes force the
+  server's active locations, so a `ClientScript`'s handler never fires from `step`. `displayUpdate(rt, dt)`
+  is the separate entry point the endpoint calls once per rendered frame: `client`-located instances only,
+  `dt` in wall seconds rather than `1/simRate`, no tick advance, no snapshot, no replay. That is the whole
+  reason it can be safe at display rate — nothing it does is replicated or reconciled, so there is no second
+  machine that has to agree about how many times it ran.
 - **The lag ring** (`lag-ring.ts`) holds `ceil(simRate * 250ms / 1000)` reused transform buffers, each with
   the live id list of its tick; a historical query builds a throwaway `Broadphase` over one and marks nothing.
   The ids are real `EntityId`s, generation included, because every caller feeds the results straight back into
@@ -140,6 +146,13 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   own property and installs an accessor pair that reads a redirectable target symbol at call time. Wiring
   points that target at the host record's `values` map, installs the mark closure, and defines the same
   accessor on the host object — so `this.credits` and `player.credits` are one value and one mark per write.
+- **`hoistReplicated(host, field, values)` is the same accessor without a script**, and it is why a receiver
+  running no scripts can still read a replicated field by name. Wiring installs the pair above because it has
+  an instance to hoist from; a mirror has none — the value arrives in the host record and stops there, so
+  `game.phase` on the machine that draws it would be `undefined` while being present on the wire. This
+  defines a **read-only** accessor reading through the same `values` map, so the two ends spell one value one
+  way. Read-only because there is no authority behind it: a write here would be a local lie the next envelope
+  silently overwrites.
 - **Ctor props land between construction and the hoist**, and that ordering is the whole correctness
   argument: the hoist moves each field's authored value into the host record, so a prop written after it
   would be overwritten by the initializer it exists to override. Written there it goes through the accessor

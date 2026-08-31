@@ -10,6 +10,8 @@ import type { Entity } from './entity.js';
 import type { Camera } from './camera.js';
 import type { Storage } from './wrappers.js';
 import type { BaseMovement } from './movement.js';
+import type { ScriptQuery } from './get-script.js';
+import { scriptOnHost } from './get-script.js';
 import { cameraKey, playerKey } from './hosts.js';
 
 export interface Cursor {
@@ -157,6 +159,17 @@ export class Player {
     addScript(script: new (props?: ScriptProps) => BaseScript<Player>, props?: ScriptProps): this {
         this.#rt.wired.wiring.attachToPlayer(this, script, props);
         return this;
+    }
+
+    /**
+     * This player's instance of `script`, or `null` when it carries none.
+     *
+     * The typed way to reach another host's `@serverState` — `player.getScript(Profile)?.credits`
+     * rather than a cast against a field the `Player` type cannot declare — and the way one script
+     * calls another's method without a module-level slot to publish it through.
+     */
+    getScript<T extends BaseScript<Player>>(script: ScriptQuery<T>): T | null {
+        return scriptOnHost(this.#rt, playerKey(this.id), script);
     }
 }
 
