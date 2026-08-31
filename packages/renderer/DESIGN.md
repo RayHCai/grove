@@ -199,6 +199,15 @@ kill a level load; unknown unload names are reported, not thrown.
   `createSubtree` has it, through a `parentInBatch` that must name an EARLIER desc, and it rolls the
   whole batch back if one desc throws, since the caller holds no handle to a half-built subtree.
 - A group has no `art`: its rotation/scale/alpha/tint are stored and queryable but inert.
+- `nodeAt(screenPoint, opts?)` is **screen space in, `NodeId` out** — the same CSS pixels
+  `screenToWorld` takes, so one conversion serves both. It walks the live index once against each
+  node's `screenBoundsOf`, keeping the topmost by the draw order the surfaces above define, then
+  `layer`, then index — the same three keys the renderer sorts by, so the answer is the node a person
+  sees on top. Groups are skipped (no art, so nothing was drawn to hit) as are invisible nodes, whose
+  hidden state includes an ancestor's; `{ surface }` narrows the walk to one. `NO_NODE` on a miss,
+  before `init`, and after `destroy` — never `null`, matching `inspect`. It belongs here rather than
+  in a caller because the renderer holds the pose it **drew**: a caller with its own poses is off by
+  whatever it interpolates or buffers away between the simulation and the frame.
 - `inspect()` is the only tooling method, and the only one that allocates **per node** — a fully
   copied `SceneSnapshot`, because bounds come from reused scratch rects and handing them out would
   alias every node onto the last one's extent. The bounds and transform queries allocate one rect per

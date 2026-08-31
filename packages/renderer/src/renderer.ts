@@ -259,6 +259,11 @@ export interface SceneSnapshot {
     counts: { nodes: number; culled: number; surfaces: number; assets: number };
 }
 
+export interface PickOptions {
+    /** Restrict the hit test to one surface. Default: every enabled surface. */
+    surface?: Surface;
+}
+
 export interface InspectOptions {
     /** Restrict to one surface. Default: every enabled surface. */
     surface?: Surface;
@@ -370,6 +375,14 @@ export interface IRenderer {
     worldBoundsOf(id: NodeId): Bounds | null;
     /** Screen space, for UI hit-testing. */
     screenBoundsOf(id: NodeId): Bounds | null;
+    /**
+     * The topmost node covering `screenPoint`, or `NO_NODE` — the pointer's question, answered.
+     *
+     * Screen space, y-down, which is the space a pointer event arrives in, so one call serves a UI
+     * widget and a world sprite alike. Groups and invisible nodes are never hit; "topmost" is
+     * surface order, then `layer`, then most recently created.
+     */
+    nodeAt(screenPoint: Vec3Like, opts?: PickOptions): NodeId;
     screenPositionOf(id: NodeId, out?: MutableVec3): MutableVec3 | null;
     worldToScreen(point: Vec3Like, out?: MutableVec3): MutableVec3;
     screenToWorld(point: Vec3Like, out?: MutableVec3): MutableVec3;

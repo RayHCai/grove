@@ -20,6 +20,7 @@ import type {
     CameraState,
     ContextState,
     InspectOptions,
+    PickOptions,
     NodeDesc,
     NodePatch,
     RendererEvents,
@@ -34,7 +35,7 @@ import type {
 import type { NodeId } from '../node-id.js';
 import { NO_NODE } from '../node-id.js';
 import { rendererError } from '../errors.js';
-import { DEFAULT_SURFACES, isCameraTransformed, isSurface } from '../surfaces.js';
+import { DEFAULT_SURFACES, isCameraTransformed, isSurface, surfaceOrder } from '../surfaces.js';
 import type { NodeKind, NodeRecord } from '../node-store.js';
 import { NodeStore } from '../node-store.js';
 import { TransformStore } from '../transform-store.js';
@@ -116,6 +117,8 @@ export class RendererCore {
     readonly #viewport: Bounds = bounds();
     readonly #scratchLocal: Bounds = bounds();
     readonly #scratchWorld: Bounds = bounds();
+    /** Reused by `nodeAt`, which a pointer event may call several times a frame. */
+    readonly #pickScratch: number[] = [];
     readonly #scratchIndices: number[] = [];
     readonly #dirtyOut: number[] = [];
     readonly #resolvedOut: number[] = [];
@@ -633,6 +636,56 @@ export class RendererCore {
         const bottomRight = this.worldToScreen({ x: world.right, y: world.bottom }, vec3());
         // y-down after projection: `bottom > top`.
         return boundsSet(bounds(), topLeft.x, bottomRight.x, topLeft.y, bottomRight.y);
+    }
+
+    /**
+     * The topmost node whose art covers `screenPoint`, or `NO_NODE`.
+     *
+     * Screen space, y-down — the space a pointer event arrives in — so one call answers for a UI
+     * widget and a world sprite alike, and a caller never has to know which surface it hit before
+     * it can ask. The bounds are each node's own screen AABB, which is what `screenBoundsOf`
+     * already computes for both kinds.
+     *
+     * "Topmost" is draw order read backwards: greatest surface first, then greatest `layer`, then
+     * the most recently created — the same three keys the draw walk uses, so what a pointer picks
+     * is what a person sees on top.
+     *
+     * Groups are never hit: a group has no art, so it has no extent to cover a pixel with. An
+     * invisible node is never hit either, whether it was hidden itself or inherited it.
+     */
+    nodeAt(screenPoint: Vec3Like, opts: PickOptions = {}): NodeId {
+        this.xf.resolve();
+        let best = NO_NODE;
+        let bestSurface = -1;
+        let bestLayer = -Infinity;
+        let bestIndex = -1;
+
+        for (const index of this.nodes.liveIndices(this.#pickScratch)) {
+            const record = this.nodes.recordAt(index);
+            if (record === null) continue;
+            if (opts.surface !== undefined && record.surface !== opts.surface) continue;
+            // A group draws nothing, so nothing of it is under the cursor.
+            if (record.kind === 'group') continue;
+            if (!this.xf.resolvedVisible(index)) continue;
+
+            const order = surfaceOrder(record.surface);
+            // Cheaper than the bounds below, and it decides the winner on its own.
+            if (order < bestSurface) continue;
+            if (order === bestSurface && record.layer < bestLayer) continue;
+            if (order === bestSurface && record.layer === bestLayer && index < bestIndex) continue;
+
+            const box = this.screenBoundsOf(this.nodes.idAt(index));
+            if (box === null) continue;
+            if (screenPoint.x < box.left || screenPoint.x > box.right) continue;
+            // Screen bounds are y-down, so `top` is the smaller number.
+            if (screenPoint.y < box.top || screenPoint.y > box.bottom) continue;
+
+            best = this.nodes.idAt(index);
+            bestSurface = order;
+            bestLayer = record.layer;
+            bestIndex = index;
+        }
+        return best;
     }
 
     screenPositionOf(id: NodeId, out: MutableVec3 = vec3()): MutableVec3 | null {
