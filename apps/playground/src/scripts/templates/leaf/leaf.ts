@@ -5,7 +5,7 @@
 // any of those numbers — they call in.
 
 import type { Ctx, Entity, Game } from '@platform/engine';
-import { ServerScript, onClick, onEnter, onExit, serverState } from '@platform/engine';
+import { ServerScript, game, onClick, onEnter, onExit, serverState } from '@platform/engine';
 import {
     BADGE_BONUS,
     EDGE_MARGIN,
@@ -26,11 +26,9 @@ import {
     REGION_COMPOST,
     RIPE_MULTIPLIER,
     RIPE_SCALE,
-    STATE_BADGE_SLOT,
     markerTemplate,
 } from '../../globals.js';
-import { currentRules } from '../../session.js';
-import { writeState } from '../../state.js';
+import { Rules } from '../../game/rules.js';
 
 /** An axis-aligned rectangle, as the engine's `Bounds` declares one. */
 interface Rect {
@@ -57,9 +55,9 @@ export function clampToWorld(y: number, bounds: Rect): number {
 }
 
 /**
- * The band a dropped leaf may enter at, inset so one never rides the very edge of the stage.
+ * The band a dropped leaf may enter at.
  *
- * The inset is the harvest half-box: an avatar cannot reach above the world's top edge, so a leaf
+ * Inset by the harvest half-box: an avatar cannot reach above the world's top edge, so a leaf
  * spawned there would be uncatchable rather than merely hard.
  */
 export function dropBand(bounds: Rect): { low: number; high: number } {
@@ -71,12 +69,7 @@ export interface LeafStep {
     rotation: number;
 }
 
-/**
- * One tick of drift.
- *
- * Rotation is kept in [0, 360) so the value stays readable and never drifts toward the precision
- * loss a monotonically growing angle would eventually hit.
- */
+/** One tick of drift. Rotation stays in [0, 360) rather than growing toward precision loss. */
 export function stepLeaf(x: number, rotation: number, dt: number): LeafStep {
     return { x: x + LEAF_SPEED * dt, rotation: (rotation + LEAF_SPIN * dt) % 360 };
 }
@@ -89,9 +82,8 @@ export function hasExited(x: number, bounds: Rect): boolean {
 /**
  * What one harvest is worth.
  *
- * Ripening multiplies and the badge adds, in that order: the badge is a flat reward for crossing
- * the stage to the leaf that is yours, and multiplying it too would make one lucky leaf decide a
- * round. A click takes neither — popping is the cheap steal, not the way to win.
+ * Ripening multiplies and the badge adds, in that order: multiplying the badge too would make one
+ * lucky leaf decide a round.
  */
 export function harvestValue(opts: { ripe: boolean; badgedForHarvester: boolean }): number {
     const base = opts.ripe ? HARVEST_POINTS * RIPE_MULTIPLIER : HARVEST_POINTS;
@@ -105,18 +97,12 @@ export function popValue(): number {
 /**
  * Spawns one leaf, plus the badge parented above it in the seat it is ripe for.
  *
- * The tint rides the badge's template, so `badgeSlot` picks which one — a transform diff carries no
- * colour, and a template is the only per-entity route a tint has to the wire. The seat is written
- * to the leaf's own `@serverState` as well, because the scoring rule needs the number and a
- * template key is not one.
- *
- * Ownership is deliberately left unset. The server destroys every entity whose `ownerId` matches a
- * departing player, so an owned leaf would vanish from every other tab the moment the tab that
- * dropped it closed — and a leaf belongs to the round rather than to a person.
+ * Left unowned deliberately: the server destroys every entity whose `ownerId` matches a departing
+ * player, and a leaf belongs to the round rather than to a person.
  */
-export function spawnLeaf(game: Game, worldY: number, badgeSlot: number): Entity {
-    const bounds = game.bounds;
-    const leaf = game.spawn(LEAF_TEMPLATE, spawnX(bounds), clampToWorld(worldY, bounds));
+export function spawnLeaf(world: Game, worldY: number, badgeSlot: number): Entity {
+    const bounds = world.bounds;
+    const leaf = world.spawn(LEAF_TEMPLATE, spawnX(bounds), clampToWorld(worldY, bounds));
     leaf.tag(LEAF_TAG);
     leaf.setRotation(0);
     leaf.setScale(LEAF_SCALE);
@@ -128,13 +114,14 @@ export function spawnLeaf(game: Game, worldY: number, badgeSlot: number): Entity
         isTrigger: true,
         bounds: { left: -LEAF_HALF, right: LEAF_HALF, top: LEAF_HALF, bottom: -LEAF_HALF },
     };
-    // The template attached `Leaf` inside `spawn`, so the accessor this writes through is already
-    // hoisted onto the facade — attaching is synchronous, and only `@onStart` waits for a pass.
-    writeState(leaf, STATE_BADGE_SLOT, badgeSlot);
+    // The template attached `Leaf` inside `spawn` — attaching is synchronous, and only `@onStart`
+    // waits for a pass — so the instance is already here to write through.
+    const script = leaf.getScript(Leaf);
+    if (script !== null) script.badgeSlot = badgeSlot;
 
     // Follows its parent's position but inherits neither its rotation nor its scale, which is what
-    // keeps the badge upright over a tumbling leaf — and gives the inspector a real two-level tree.
-    const badge = game.spawn(markerTemplate(badgeSlot), 0, MARKER_OFFSET_Y);
+    // keeps the badge upright over a tumbling leaf.
+    const badge = world.spawn(markerTemplate(badgeSlot), 0, MARKER_OFFSET_Y);
     badge.setScale(MARKER_SCALE);
     badge.opacity = MARKER_OPACITY;
     badge.layer = MARKER_LAYER;
@@ -143,15 +130,15 @@ export function spawnLeaf(game: Game, worldY: number, badgeSlot: number): Entity
 }
 
 /** Every leaf currently on the stage. The badges are not leaves; the tag is what says so. */
-export function liveLeaves(game: Game): Entity[] {
-    return game.find({ tag: LEAF_TAG });
+export function liveLeaves(world: Game): Entity[] {
+    return world.find({ tag: LEAF_TAG });
 }
 
 /**
  * On every leaf: what the two regions do to it, and what a click does.
  *
- * `@onEnter` / `@onExit` dispatch to ENTITY hosts only, which is why this rides the leaf rather
- * than the Game — a region handler on a Game-hosted script never fires at all.
+ * `@onEnter` / `@onExit` dispatch to ENTITY hosts only, so a region handler on a Game-hosted script
+ * would never fire.
  */
 export class Leaf extends ServerScript<Entity> {
     /** Entity-hosted, so it replicates: the browser reads it to explain why a leaf draws large. */
@@ -170,26 +157,22 @@ export class Leaf extends ServerScript<Entity> {
         this.host.setScale(LEAF_SCALE);
     }
 
-    /**
-     * The strip a leaf nobody caught wilts into. It is destroyed HERE rather than at the world's
-     * edge, which is what makes the drift pass's own reap a backstop rather than the rule.
-     */
+    /** Destroyed HERE rather than at the world's edge, which makes the drift pass's reap a backstop. */
     @onEnter(REGION_COMPOST)
     compost(): void {
-        currentRules()?.noteWasted();
+        game.getScript(Rules)?.noteWasted();
         this.host.destroy();
     }
 
     /**
      * A pointer hit the browser resolved against its own camera, which no authority can recompute.
      *
-     * The server checks only that the entity is alive; whether the clicking player could plausibly
-     * reach it is this handler's business, and here the answer is deliberately that they need not —
-     * popping is the long-range steal, and it is worth a point rather than a harvest.
+     * Whether the clicking player could plausibly reach it is deliberately not checked — popping is
+     * the long-range steal, and it is worth a point rather than a harvest.
      */
     @onClick
     pop(ctx: Ctx): void {
-        const rules = currentRules();
+        const rules = game.getScript(Rules);
         const player = ctx.player;
         if (rules === null || !player || rules.phase !== 'playing' || !this.host.alive) return;
         rules.award(player, popValue());

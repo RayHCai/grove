@@ -37,6 +37,7 @@ import {
     ROUND_SECONDS,
     SCRIPT_CLICKER,
     SCRIPT_HARVESTER,
+    SCRIPT_HUD,
     SCRIPT_LEAF,
     SCRIPT_LOBBY,
     SCRIPT_PROFILE,
@@ -233,6 +234,17 @@ export const PROJECT: ProjectManifest = {
             path: 'src/scripts/templates/leaf/leaf.ts',
             scripts: [
                 { id: scriptId(SCRIPT_LEAF), export: 'Leaf', location: 'server', host: 'entity' },
+            ],
+        },
+        {
+            path: 'src/scripts/screens/hud.ts',
+            scripts: [
+                {
+                    id: scriptId(SCRIPT_HUD),
+                    export: 'HudScreen',
+                    location: 'client',
+                    host: 'screen',
+                },
             ],
         },
         {

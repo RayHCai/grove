@@ -21,8 +21,7 @@ import { loopbackPair } from '@platform/transport';
 import type { LoopbackPair } from '@platform/transport';
 import { createGameInstance } from '../dist/server/host.js';
 import { resetSession } from '../dist/scripts/session.js';
-import { HudBridge, pressWidget } from '../src/hud';
-import { pickLeaf } from '../src/pick';
+import { ClockNode, openHud, pressWidget } from '../src/hud';
 import { PROJECT } from '../src/project';
 import { CLIENT_SCRIPTS } from '../src/client-registry';
 import {
@@ -65,7 +64,9 @@ interface Tab {
     frames: ManualFrameSource;
     device: ScriptedInputDevice;
     renderer: IRenderer;
-    bridge: HudBridge;
+    clock: ClockNode;
+    /** Whether the host has registered this tab's screens yet — a once-per-session job. */
+    opened: boolean;
 }
 
 /**
@@ -131,7 +132,8 @@ class Session {
             frames,
             device,
             renderer,
-            bridge: new HudBridge({ client, renderer }),
+            clock: new ClockNode(renderer),
+            opened: false,
         };
         this.#tabs.push(tab);
         return tab;
@@ -145,7 +147,14 @@ class Session {
             for (const tab of this.#tabs) {
                 tab.frames.frame(this.#now);
                 // The host's own after-frame work, exactly as `use-game.ts` runs it.
-                tab.bridge.sync();
+                tab.clock.sync(tab.client);
+                // Once, on the transition to `live` — which is exactly where `use-game.ts` calls
+                // it. Every frame would re-open and re-close each screen, discarding the instances
+                // the overlay's own switch believes are still up.
+                if (tab.client.state === 'live' && !tab.opened) {
+                    tab.opened = true;
+                    openHud(tab.client);
+                }
             }
             // An identified join awaits a store read before it allocates a Player, so the admission
             // finishes on the microtask queue rather than inside the pump that received it.
@@ -190,7 +199,7 @@ class Session {
 
     dispose(): void {
         for (const tab of this.#tabs) {
-            tab.bridge.dispose();
+            tab.clock.dispose();
             tab.client.destroy({ ownsRenderer: true });
         }
         this.instance.close();
@@ -401,6 +410,27 @@ describe('a session over the real wire', () => {
         })!;
         expect(rt.transforms.posX(avatar)).toBeCloseTo(server.transforms.posX(authoritative), 6);
         expect(tab.client.prediction?.counters.snappedCorrections).toBe(0);
+    });
+
+    it('resolves a click on the avatar to the avatar, through the drawn scene', async () => {
+        session = new Session();
+        const tab = await session.join('one');
+        await session.live(tab);
+        // A frame past the welcome, so the bridge has created the node and pushed a pose into it.
+        await session.step(4);
+
+        const avatar = avatarOf(tab);
+        const rt = runtimeOf(tab);
+        // The avatar is PREDICTED, so what is drawn is what is simulated — the one entity whose
+        // screen position a test can compute without knowing the interpolation delay.
+        const at = tab.renderer.worldToScreen({
+            x: rt.transforms.posX(avatar),
+            y: rt.transforms.posY(avatar),
+        });
+
+        expect(tab.client.entityAt({ x: at.x, y: at.y })).toBe(avatar);
+        // Far off the body, and nothing else is drawn there.
+        expect(tab.client.entityAt({ x: at.x + 400, y: at.y })).toBeUndefined();
     });
 
     it('predicts on both axes, and clamps the avatar onto the stage', async () => {
@@ -620,10 +650,6 @@ describe('a round', () => {
 
         const rt = runtimeOf(tab);
         const target = leafIds(tab)[0]!;
-        const at = { x: rt.transforms.posX(target), y: rt.transforms.posY(target) };
-        // The same hit test the browser runs, against the same mirror it draws from.
-        expect(pickLeaf(rt, at.x, at.y)).toBe(target);
-
         tab.client.pointer('onClick', target);
         await session.stepUntil(() => !rt.entities.isAlive(target), 120);
         expect(scoreWidget(tab)).toBeGreaterThan(0);
