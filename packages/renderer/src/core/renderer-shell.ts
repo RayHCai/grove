@@ -15,6 +15,7 @@ import type {
     CameraState,
     ContextState,
     InspectOptions,
+    PickOptions,
     IRenderer,
     NodeDesc,
     NodePatch,
@@ -215,6 +216,12 @@ export abstract class RendererShell implements IRenderer {
 
     screenBoundsOf(id: NodeId): Bounds | null {
         return this.core?.screenBoundsOf(id) ?? null;
+    }
+
+    nodeAt(screenPoint: Vec3Like, opts?: PickOptions): NodeId {
+        // `NO_NODE` before `init` for the reason every other query answers empty there: there is no
+        // scene yet, and a caller asking what is under a pixel is asking about one that is drawn.
+        return this.core?.nodeAt(screenPoint, opts) ?? NO_NODE;
     }
 
     screenPositionOf(id: NodeId, out?: MutableVec3): MutableVec3 | null {

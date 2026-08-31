@@ -28,6 +28,7 @@ export type {
     NodeSnapshot,
     SceneSnapshot,
     InspectOptions,
+    PickOptions,
 } from './renderer.js';
 
 export type { NodeId } from './node-id.js';
