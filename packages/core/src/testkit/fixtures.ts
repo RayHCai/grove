@@ -3,6 +3,7 @@
 
 import { ClientScript, ServerScript, SyncedScript } from '../script/bases.js';
 import {
+    onClick,
     onCollide,
     onEnd,
     onEnter,
@@ -10,14 +11,18 @@ import {
     onEventHold,
     onEventRelease,
     onExit,
+    onHoverEnter,
+    onHoverExit,
     onPlayerJoin,
-    onPlayerLeave,
     onPress,
+    onPlayerLeave,
     onRequest,
     onStart,
+    onUpdate,
     serverState,
 } from '../script/decorators.js';
 import type { ScriptProps } from '@platform/project';
+import type { Camera } from '../runtime/camera.js';
 import type { Entity } from '../runtime/entity.js';
 import type { HUDScreen } from '../runtime/hud.js';
 import { BaseMovement } from '../runtime/movement.js';
@@ -351,4 +356,93 @@ export class Greeter extends ServerScript {
     join(ctx: Ctx): void {
         ctx.player?.addScript(LateJoiner);
     }
+}
+
+// Pass 9. Synced, so the same class is the one a client would run under prediction — which is why
+// the update pass forcing the server's locations is a claim worth an assertion of its own.
+export class Ticker extends SyncedScript<Entity> {
+    updates = 0;
+    lastDt = 0;
+
+    @onUpdate
+    tick(ctx: Ctx): void {
+        this.updates += 1;
+        this.lastDt = ctx.dt;
+    }
+}
+
+/** The same handler on a ClientScript, which pass 9 must NOT run — `displayUpdate` owns it. */
+export class ClientTicker extends ClientScript<Entity> {
+    updates = 0;
+
+    @onUpdate
+    tick(): void {
+        this.updates += 1;
+    }
+}
+
+/** An `@onUpdate` that throws, for the log record the pass writes about it. */
+export class FaultyTicker extends SyncedScript<Entity> {
+    @onUpdate
+    tick(): void {
+        throw new Error('update always throws');
+    }
+}
+
+// The three pointer edges are three handler kinds rather than one with an argument, so each is
+// matched on kind alone and a fixture declaring all three proves they do not cross.
+export class Pointed extends SyncedScript<Entity> {
+    clicks = 0;
+    entered = 0;
+    exited = 0;
+    lastPlayer: string | null = null;
+    /** Whichever of `other`/`player` the hit carried, so the ctx shape is assertable. */
+    sawOther = false;
+
+    @onClick
+    click(ctx: Ctx): void {
+        this.clicks += 1;
+        this.lastPlayer = (ctx.player as { id: string } | undefined)?.id ?? null;
+        this.sawOther = ctx.other !== undefined;
+    }
+
+    @onHoverEnter
+    hoverIn(): void {
+        this.entered += 1;
+    }
+
+    @onHoverExit
+    hoverOut(): void {
+        this.exited += 1;
+    }
+}
+
+/** A SyncedScript on a camera host: the rejection, since a camera has no authoritative copy. */
+export class Viewfinder extends SyncedScript<Camera> {
+    @onStart
+    begin(): void {
+        /* the location and the host kind are what wire time rejects, never the body */
+    }
+}
+
+/** A roster handler off a ServerScript: the other half of the Game-hosted-only rule. */
+export class SyncedRoster extends SyncedScript<Entity> {
+    @onPlayerJoin
+    join(): void {
+        /* the location, not the body, is what wire time rejects */
+    }
+}
+
+/** A second class claiming `credits`, which `Wallet` already declares — one name, one host. */
+export class RivalWallet extends ServerScript {
+    @serverState credits = 99;
+}
+
+/** Overrides `tick`, which is the one stage of the movement contract a subclass may not replace. */
+export class TickOverridingMovement extends BaseMovement {
+    override tick(): void {
+        /* the override itself is the rejection; the body never runs */
+    }
+
+    protected accelerate(): void {}
 }
