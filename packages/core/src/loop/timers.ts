@@ -100,13 +100,17 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
     }
 
     sleep(seconds: number, hostScopeId: ScopeId): Promise<void> {
+        // Converted before the id is minted and before the executor runs, so a bad duration throws
+        // where `after` and `every` do. Inside the executor it became a rejected promise instead —
+        // and an unawaited `sleep` then raised an unhandled rejection rather than a call-site error.
+        const remaining = this.#toTicks(seconds);
         const id = this.#nextId++;
         return new Promise<void>((resolve) => {
             this.#timers.set(id, {
                 id,
                 kind: 'sleep',
                 hostScopeId,
-                remaining: this.#toTicks(seconds),
+                remaining,
                 interval: 0,
                 fn: null,
                 resolve,
