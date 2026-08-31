@@ -2,49 +2,111 @@
 // must produce identical results from identical inputs, which the built-in transcendentals do not
 // guarantee, so these use polynomial/range-reduction over exact IEEE-754 operations only.
 //
-// Only sin, cos, atan2, exp, log and pow carry their own approximation; everything below them is
-// derived by identity, so a precision fix belongs in one of those six.
+// Only sin, cos, atan, exp and log carry their own approximation; everything below them is
+// derived by identity, so a precision fix belongs in one of those five.
 //
 // Not replaced, because they are already exact IEEE-754 and agree bit-for-bit on every target:
 // abs, sign, min, max, floor, ceil, round, trunc, fround, sqrt.
 
 const PI = 3.141592653589793;
 const HALF_PI = 1.5707963267948966;
-const TWO_PI = 6.283185307179586;
-const INV_TWO_PI = 0.15915494309189535;
+const INV_HALF_PI = 0.6366197723675814;
 
-function reduceAngle(x: number): number {
-    const q = Math.round(x * INV_TWO_PI);
-    let reduced = x - q * TWO_PI;
-    if (reduced > PI) reduced -= TWO_PI;
-    else if (reduced < -PI) reduced += TWO_PI;
-    // sin(π−r) = sin(−π−r) = sin(r): reflecting into [−π/2, π/2] preserves sine, so no sign flip.
-    if (reduced < -HALF_PI) reduced = -PI - reduced;
-    else if (reduced > HALF_PI) reduced = PI - reduced;
-    return reduced;
+// π/2 in three pieces that sum to it, each holding the bits the one before it dropped. `PIO2_1`'s
+// low 33 bits are zero, so `n * PIO2_1` is exact for every quadrant count this reduction sees and
+// the subtraction below loses nothing — which is the whole reason the split exists.
+const PIO2_1 = 1.5707963267341256;
+const PIO2_2 = 6.077100506303966e-11;
+const PIO2_2T = 2.0222662487959506e-21;
+
+/**
+ * `x` as a quadrant count and a remainder in [−π/4, π/4], which is where both kernels are accurate.
+ *
+ * Reducing to [−π/2, π/2] and running one kernel over it instead costs ~5e-8 at the ends of that
+ * range — worst exactly at the quadrant boundaries, which is where `cos(0)` lands when cosine is
+ * spelled `sin(x + π/2)`.
+ */
+function reduceQuadrant(x: number): { q: number; r: number } {
+    const n = Math.round(x * INV_HALF_PI);
+    if (n === 0) return { q: 0, r: x };
+
+    const head = x - n * PIO2_1;
+    // Each correction is subtracted separately rather than folded into one constant: `n * PIO2_2`
+    // rounds away bits that matter once n is large, and `PIO2_2T` is exactly those bits.
+    const mid = head - n * PIO2_2;
+    const tail = n * PIO2_2T - (head - mid - n * PIO2_2);
+    // Arithmetic, never bitwise: `n & 3` wraps at int32, so every angle past 2^31 quadrants — which
+    // is a reachable double — would select the wrong kernel rather than merely lose precision.
+    return { q: ((n % 4) + 4) % 4, r: mid - tail };
 }
 
+// fdlibm's minimax kernels for |x| <= π/4. Both are written so the leading terms cancel exactly:
+// `x + x³·P` rather than `x·(1 + x²·P)`, and cosine's `(1 − w) − hz` recovers the rounding of
+// `1 − x²/2`, which is the term that decides whether `cos(0)` is 1 or merely close to it.
 function sinKernel(x: number): number {
-    const x2 = x * x;
-    const c5 = -0.000000025050747879607072;
-    const c4 = 0.0000027557315514280769 + x2 * c5;
-    const c3 = -0.00019841269836761127 + x2 * c4;
-    const c2 = 0.008333333333332249 + x2 * c3;
-    const c1 = -0.16666666666666632 + x2 * c2;
-    return x * (1 + x2 * c1);
+    const z = x * x;
+    const p =
+        -1.6666666666666632e-1 +
+        z *
+            (8.3333333333224895e-3 +
+                z *
+                    (-1.9841269829857949e-4 +
+                        z *
+                            (2.7557313707070068e-6 +
+                                z * (-2.5050760253406863e-8 + z * 1.5896909952115501e-10))));
+    return x + x * z * p;
+}
+
+function cosKernel(x: number): number {
+    const z = x * x;
+    const p =
+        4.1666666666666602e-2 +
+        z *
+            (-1.3888888888874109e-3 +
+                z *
+                    (2.4801587289476729e-5 +
+                        z *
+                            (-2.7557314351390663e-7 +
+                                z * (2.0875723212981748e-9 - z * 1.1359647557788195e-11))));
+    const hz = 0.5 * z;
+    const w = 1 - hz;
+    return w + (1 - w - hz + z * z * p);
 }
 
 export function sin(x: number): number {
     if (x !== x) return NaN;
     if (!isFinite(x)) return NaN;
+    // -0 in, -0 out: the kernel would return +0 and a caller mirroring a position would lose the sign.
     if (x === 0) return x;
-    return sinKernel(reduceAngle(x));
+
+    const { q, r } = reduceQuadrant(x);
+    switch (q) {
+        case 0:
+            return sinKernel(r);
+        case 1:
+            return cosKernel(r);
+        case 2:
+            return -sinKernel(r);
+        default:
+            return -cosKernel(r);
+    }
 }
 
 export function cos(x: number): number {
     if (x !== x) return NaN;
     if (!isFinite(x)) return NaN;
-    return sin(x + HALF_PI);
+
+    const { q, r } = reduceQuadrant(x);
+    switch (q) {
+        case 0:
+            return cosKernel(r);
+        case 1:
+            return -sinKernel(r);
+        case 2:
+            return -cosKernel(r);
+        default:
+            return sinKernel(r);
+    }
 }
 
 export function tan(x: number): number {
@@ -53,16 +115,34 @@ export function tan(x: number): number {
     return sin(x) / c;
 }
 
+// ±1/(2k+3), highest power first, so the Horner walk below runs smallest term first. Carried to
+// x³³ because the halving in `atan` only brings the argument down to 0.414, where stopping at x²¹
+// leaves 7e-11 of truncation — three orders worse than everything else in this module.
+const ATAN_COEFFICIENTS = [
+    1 / 33,
+    -1 / 31,
+    1 / 29,
+    -1 / 27,
+    1 / 25,
+    -1 / 23,
+    1 / 21,
+    -1 / 19,
+    1 / 17,
+    -1 / 15,
+    1 / 13,
+    -1 / 11,
+    1 / 9,
+    -1 / 7,
+    1 / 5,
+    -1 / 3,
+] as const;
+
+/** arctan on |x| <= tan(π/8), by its own series: −x³/3 + x⁵/5 − x⁷/7 … */
 function atanKernel(x: number): number {
-    const x2 = x * x;
-    const x4 = x2 * x2;
-    const s1 = -0.3333333333331711 + x2 * 0.19999999999874913;
-    const s2 = -0.14285714266771338 + x2 * 0.11111110678749424;
-    const s3 = -0.0909090442773387 + x2 * 0.07692307001993961;
-    const s4 = -0.06666652376498812 + x2 * 0.058823529365552845;
-    const s5 = -0.049999810939498;
-    const poly = s1 + x4 * (s2 + x4 * (s3 + x4 * (s4 + x4 * s5)));
-    return x * (1 + x2 * poly);
+    const z = x * x;
+    let poly = 0;
+    for (const c of ATAN_COEFFICIENTS) poly = c + z * poly;
+    return x + x * z * poly;
 }
 
 export function atan(x: number): number {

@@ -31,9 +31,9 @@ function quarterTurn(degrees: number): number {
 /**
  * `cos` of an angle in degrees, exact at multiples of 90.
  *
- * Math's `cos(90 * DEG2RAD)` is 6.1e-17 and the deterministic one is off by ~1e-7 even at 0, so
- * without these arms the residue would leak into every edge of a quarter-turned AABB — the
- * commonest authored rotation.
+ * `90 * DEG2RAD` is not π/2, so `cos` of it is 6.1e-17 rather than 0 however exact the cosine is.
+ * Without these arms that residue leaks into every edge of a quarter-turned AABB — the commonest
+ * authored rotation.
  */
 function cosDeg(degrees: number): number {
     switch (quarterTurn(degrees)) {
