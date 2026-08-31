@@ -77,6 +77,32 @@ declare module '@platform/engine' {
     function clamp(value: number, min: number, max: number): number; // (B) (M)
     function lerp(a: number, b: number, t: number): number; // (M)
 
+    // Deterministic replacements for the transcendentals ECMA-262 leaves implementation-
+    // approximated. A SyncedScript reaches them through this import because `Math.*` is a
+    // load-time error there, so they are part of the creator surface rather than an internal.
+    function sin(x: number): number; // (M)
+    function cos(x: number): number; // (M)
+    function tan(x: number): number; // (M)
+    function asin(x: number): number; // (M)
+    function acos(x: number): number; // (M)
+    function atan(x: number): number; // (M)
+    function atan2(y: number, x: number): number; // (M)
+    function sinh(x: number): number; // (M)
+    function cosh(x: number): number; // (M)
+    function tanh(x: number): number; // (M)
+    function asinh(x: number): number; // (M)
+    function acosh(x: number): number; // (M)
+    function atanh(x: number): number; // (M)
+    function exp(x: number): number; // (M)
+    function expm1(x: number): number; // (M)
+    function log(x: number): number; // (M)
+    function log1p(x: number): number; // (M)
+    function log2(x: number): number; // (M)
+    function log10(x: number): number; // (M)
+    function pow(base: number, exponent: number): number; // (M)
+    function cbrt(x: number): number; // (M)
+    function hypot(x: number, y: number): number; // (M)
+
     // Seeded stream: client and server draw the same numbers in the same order (§1.2).
     interface Random {
         seed(n: number): void; // (M) daily content, reproducible debugging
