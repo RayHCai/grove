@@ -84,9 +84,25 @@ function describe(value: unknown): string {
 }
 
 /**
- * Validates a leaf against the JSON wire's admissible set; `undefined` means "not a leaf, recurse".
+ * Where a child sits, as `at` wants it — built on demand, since every caller but a throw arm and a
+ * container push discards it, and a healthy encode walks thousands of leaves without throwing once.
  */
-function admitLeaf(value: unknown, path: string): { leaf: JsonLike } | undefined {
+function leafPath(frame: Pending | null, key: string): string {
+    if (frame === null) return '';
+    return Array.isArray(frame.source) ? `${frame.path}[${key}]` : `${frame.path}.${key}`;
+}
+
+/**
+ * Validates a leaf against the JSON wire's admissible set; `undefined` means "not a leaf, recurse".
+ *
+ * Takes the parent frame and key rather than the built path, so the string costs nothing until a
+ * message is actually rejected. A null frame is the message root.
+ */
+function admitLeaf(
+    value: unknown,
+    frame: Pending | null,
+    key: string,
+): { leaf: JsonLike } | undefined {
     switch (typeof value) {
         case 'string':
         case 'boolean':
@@ -96,13 +112,13 @@ function admitLeaf(value: unknown, path: string): { leaf: JsonLike } | undefined
             if (Number.isNaN(value)) {
                 transportError(
                     'encode-rejected',
-                    `${at(path)} is NaN, which JSON silently encodes as null — send a null, a sentinel, or omit the field.`,
+                    `${at(leafPath(frame, key))} is NaN, which JSON silently encodes as null — send a null, a sentinel, or omit the field.`,
                 );
             }
             if (!Number.isFinite(value)) {
                 transportError(
                     'encode-rejected',
-                    `${at(path)} is ${value > 0 ? 'Infinity' : '-Infinity'}, which JSON silently encodes as null.`,
+                    `${at(leafPath(frame, key))} is ${value > 0 ? 'Infinity' : '-Infinity'}, which JSON silently encodes as null.`,
                 );
             }
             // Normalized rather than rejected: -0 falls out of ordinary arithmetic, such as a
@@ -112,7 +128,7 @@ function admitLeaf(value: unknown, path: string): { leaf: JsonLike } | undefined
         case 'undefined':
             transportError(
                 'encode-rejected',
-                `${at(path)} is undefined, which JSON DROPS — the peer would receive a frame with the key missing. Send null if the absence is meaningful.`,
+                `${at(leafPath(frame, key))} is undefined, which JSON DROPS — the peer would receive a frame with the key missing. Send null if the absence is meaningful.`,
             );
 
         case 'function':
@@ -120,7 +136,7 @@ function admitLeaf(value: unknown, path: string): { leaf: JsonLike } | undefined
         case 'bigint':
             transportError(
                 'encode-rejected',
-                `${at(path)} is ${describe(value)}, which cannot cross a wire. Payloads are plain values only; encode entity and player references to their ids before sending.`,
+                `${at(leafPath(frame, key))} is ${describe(value)}, which cannot cross a wire. Payloads are plain values only; encode entity and player references to their ids before sending.`,
             );
 
         case 'object':
@@ -128,7 +144,10 @@ function admitLeaf(value: unknown, path: string): { leaf: JsonLike } | undefined
 
         /* c8 ignore next 2 -- no other typeof exists */
         default:
-            transportError('encode-rejected', `${at(path)} has unsupported type ${typeof value}.`);
+            transportError(
+                'encode-rejected',
+                `${at(leafPath(frame, key))} has unsupported type ${typeof value}.`,
+            );
     }
 
     if (value === null) return { leaf: null };
@@ -139,7 +158,7 @@ function admitLeaf(value: unknown, path: string): { leaf: JsonLike } | undefined
     if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype) {
         transportError(
             'encode-rejected',
-            `${at(path)} is ${describe(value)}; the wire would deliver something other than what was sent. Send a plain object of plain values.`,
+            `${at(leafPath(frame, key))} is ${describe(value)}; the wire would deliver something other than what was sent. Send a plain object of plain values.`,
         );
     }
     return undefined;
@@ -168,7 +187,7 @@ interface Pending {
  * arrives as two independent copies exactly as a socket would deliver it; only a true cycle throws.
  */
 function admit(root: unknown): JsonLike {
-    const rootLeaf = admitLeaf(root, '');
+    const rootLeaf = admitLeaf(root, null, '');
     if (rootLeaf !== undefined) return rootLeaf.leaf;
 
     const rootSource = root as object;
@@ -193,7 +212,6 @@ function admit(root: unknown): JsonLike {
         frame.index++;
 
         const isArray = Array.isArray(frame.source);
-        const path = isArray ? `${frame.path}[${key}]` : `${frame.path}.${key}`;
 
         nodes++;
         if (nodes > MAX_NODES) {
@@ -215,7 +233,7 @@ function admit(root: unknown): JsonLike {
             if (RESERVED_KEYS.has(key)) {
                 transportError(
                     'encode-rejected',
-                    `${at(path)} uses the reserved key "${key}", which a decoder must refuse because it poisons any recursive merge downstream — and an own "__proto__" key would not even survive the copy. Rename the field.`,
+                    `${at(leafPath(frame, key))} uses the reserved key "${key}", which a decoder must refuse because it poisons any recursive merge downstream — and an own "__proto__" key would not even survive the copy. Rename the field.`,
                 );
             }
 
@@ -223,13 +241,13 @@ function admit(root: unknown): JsonLike {
             if (descriptor?.get !== undefined) {
                 transportError(
                     'encode-rejected',
-                    `${at(path)} is a getter; a wire carries data, not computation, and invoking it could throw or mutate mid-encode.`,
+                    `${at(leafPath(frame, key))} is a getter; a wire carries data, not computation, and invoking it could throw or mutate mid-encode.`,
                 );
             }
         }
 
         const value = (frame.source as Record<string, unknown>)[key];
-        const leaf = admitLeaf(value, path);
+        const leaf = admitLeaf(value, frame, key);
         if (leaf !== undefined) {
             setChild(frame, key, leaf.leaf);
             continue;
@@ -239,20 +257,28 @@ function admit(root: unknown): JsonLike {
         if (open.has(child)) {
             transportError(
                 'encode-rejected',
-                `${at(path)} is a circular reference, which JSON cannot encode.`,
+                `${at(leafPath(frame, key))} is a circular reference, which JSON cannot encode.`,
             );
         }
         if (stack.length >= MAX_DEPTH) {
             transportError(
                 'encode-rejected',
-                `${at(path)} nests deeper than ${MAX_DEPTH} levels, past what a wire decoder will walk. Flatten the payload.`,
+                `${at(leafPath(frame, key))} nests deeper than ${MAX_DEPTH} levels, past what a wire decoder will walk. Flatten the payload.`,
             );
         }
 
         const copy: JsonLike[] | Record<string, JsonLike> = Array.isArray(child) ? [] : {};
         setChild(frame, key, copy);
         open.add(child);
-        stack.push({ source: child, copy, keys: keysOf(child), path, index: 0 });
+        // The one path string an encode still builds eagerly: a container's own path is the prefix
+        // every descendant's would be built from, so it cannot wait for a throw that may never come.
+        stack.push({
+            source: child,
+            copy,
+            keys: keysOf(child),
+            path: leafPath(frame, key),
+            index: 0,
+        });
     }
 
     return rootCopy;
