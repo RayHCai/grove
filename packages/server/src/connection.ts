@@ -190,7 +190,7 @@ export class Connection {
     pendingJoin: JoinRequest | null = null;
     /** True while this connection's persisted record is being read, so a second request cannot race it. */
     admitting = false;
-    /** The pump clock reading at `accept`, or null when accepted before the first wake. */
+    /** The driver's elapsed seconds at `accept`, or null when accepted before the first wake — elapsed rather than the raw reading, so a backwards clock step cannot extend the deadline by its own length. */
     acceptedAtSeconds: number | null;
     closed = false;
 

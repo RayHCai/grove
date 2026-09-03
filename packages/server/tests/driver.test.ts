@@ -65,6 +65,18 @@ describe('real time becomes ticks', () => {
         expect(spy.steps).toHaveLength(ran);
     });
 
+    it('measures elapsed time a backwards clock cannot rewind', () => {
+        const spy = spyDriver();
+        spy.driver.pump(0);
+        spy.driver.pump(1);
+        spy.driver.pump(0.5);
+        spy.driver.pump(1.5);
+
+        // Two seconds of real time reached this driver; the step contributed none of it and undid
+        // none of it, so a wall-clock deadline measured against this neither stalls nor jumps.
+        expect(spy.driver.elapsedSeconds).toBeCloseTo(2, 10);
+    });
+
     it('a non-finite clock reading is discarded, not stored', () => {
         const spy = spyDriver();
         spy.driver.pump(0);

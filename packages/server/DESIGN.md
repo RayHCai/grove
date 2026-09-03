@@ -73,7 +73,7 @@ so it is what persisted `@serverState` is keyed by and what every other peer see
 `Connection` carries `transport`, nullable `player`, `identity` (the host's id for this peer, or null),
 `playerId` (that identity or the `connectionId`), `pendingJoin`, `admitting` (true while the persisted read
 is in flight), one `ActionStates` fold (core's, not a second implementation), `AdmissionState`, `disposers`,
-`acceptedAtSeconds` (null until the first wake observes it — the injected clock's epoch is unknown), and
+`acceptedAtSeconds` (the driver's `elapsedSeconds`, null until the first wake observes it), and
 `closed`.
 
 ### 3.2 The client speaks first
@@ -240,9 +240,13 @@ Its narrowing caps `events[]` at `MAX_INTERACTIONS_PER_FRAME` and each widget or
 where a held action buys one every tick until it is released.
 
 Two more bounds, on state a frame is not needed to open: `JOIN_DEADLINE_MS` (swept after each `pump`,
-against the pump's own clock, since `TimerSource` schedules but does not tell time) and
+against the driver's `elapsedSeconds`, since `TimerSource` schedules but does not tell time) and
 `MAX_UNJOINED_CONNECTIONS`, **distinct** from `maxPlayers` so unjoined sockets cannot lock out real players.
-Input before the join is dropped — there is no player to attribute it to.
+That cap is a total, so `accept` adds a per-peer one in the only currency this package has: a second
+unjoined connection under an `identity` an unjoined connection already holds is refused, since otherwise one
+named peer reconnect-looping fills every slot at no cost to itself. Bounding an _anonymous_ flood is the
+composition root's, which is the only layer that knows an address. Input before the join is dropped — there
+is no player to attribute it to.
 
 Every window and cap constant is stated in **milliseconds** and converted per `simRate`: a tick count sized
 for 60 Hz is three times the wall-clock window at 20 Hz.
@@ -388,6 +392,12 @@ counter for the whole session), clamps a backwards clock to zero, then steps whi
 exactly `1 / simRate` accumulates slightly less than `dt`, and a wake owing one tick would step zero times.
 It returns `{ steps, sends, shed }`, so cadence and shedding are observable without reading `rt.tick`, and
 `GameServer.shedCount` reports the cumulative count.
+
+The same clamped delta also accumulates into **`elapsedSeconds`**, monotonic from the driver's own
+construction, and that — not the raw reading, which moves backwards with the clock — is what every
+wall-clock deadline here is measured against. An NTP correction or a restored VM snapshot otherwise buys
+an unjoined connection an extension the length of the step, since `nowSeconds − acceptedAtSeconds` is
+negative for the whole of it.
 
 ### 6.2 The step cap sheds wall-clock, never ticks
 
