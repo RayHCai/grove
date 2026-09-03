@@ -60,6 +60,46 @@ jobs:
             - name: ${{ matrix.task.name }}
               run: ${{ matrix.task.run }}
 
+    # Identical floats across machines is the whole premise, and one runner on one V8 never tests it.
+    # Only the test task repeats here — lint, format, typecheck and build cannot see a divergence.
+    determinism:
+        name: test (${{ matrix.os }}, node ${{ matrix.node }})
+        runs-on: ${{ matrix.os }}
+        timeout-minutes: 30
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    # A second architecture: the macOS runners are arm64.
+                    - os: macos-latest
+                      node: 24.16.0
+                    # A second V8, on the architecture the pinned toolchain already covers.
+                    - os: ubuntu-latest
+                      node: 26
+        steps:
+            - uses: actions/checkout@v6
+
+            - uses: pnpm/action-setup@v4
+
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: ${{ matrix.node }}
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Cache turbo
+              uses: actions/cache@v4
+              with:
+                  path: .turbo
+                  key: turbo-test-${{ runner.os }}-node${{ matrix.node }}-${{ github.sha }}
+                  restore-keys: |
+                      turbo-test-${{ runner.os }}-node${{ matrix.node }}-
+
+            - name: test
+              run: pnpm run test
+
     citations:
         name: no design-doc citations
         runs-on: ubuntu-latest
@@ -84,13 +124,17 @@ jobs:
     ci-ok:
         name: CI passed
         if: always()
-        needs: [ci, citations]
+        needs: [ci, determinism, citations]
         runs-on: ubuntu-latest
         steps:
             - name: Verify all matrix jobs succeeded
               run: |
                   if [ "${{ needs.ci.result }}" != "success" ]; then
                     echo "CI matrix result: ${{ needs.ci.result }}"
+                    exit 1
+                  fi
+                  if [ "${{ needs.determinism.result }}" != "success" ]; then
+                    echo "Cross-platform test result: ${{ needs.determinism.result }}"
                     exit 1
                   fi
                   if [ "${{ needs.citations.result }}" != "success" ]; then
