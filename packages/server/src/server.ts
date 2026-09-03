@@ -309,7 +309,11 @@ export class GameServer {
                 'playerId must be a non-empty string, or omitted',
             );
         }
-        if (!this.#booted || this.#closed || this.#unjoinedCount() >= MAX_UNJOINED_CONNECTIONS) {
+        const refusal = this.#acceptRefusal(playerId);
+        if (refusal !== null) {
+            // No connection id: one is minted for a socket this server keeps, and an id in a log
+            // line for a socket it just closed is an id a reader will go looking for.
+            this.#rt.log.warn(`accept-refused reason=${refusal}`);
             transport.close();
             return null;
         }
@@ -319,7 +323,7 @@ export class GameServer {
             connectionId,
             playerId ?? null,
             transport,
-            this.#driver.hasReading ? this.#driver.nowSeconds : null,
+            this.#driver.hasReading ? this.#driver.elapsedSeconds : null,
         );
 
         conn.disposers.push(transport.onMessage((message) => this.#receive(conn, message)));
@@ -335,7 +339,7 @@ export class GameServer {
         const result = this.#driver.pump(nowSeconds);
         // Swept after the pump, so a join request this wake's delivery was about to flush is already
         // processed and its connection no longer counts as unjoined.
-        this.#sweepJoinDeadline(nowSeconds);
+        this.#sweepJoinDeadline(this.#driver.elapsedSeconds);
         return result;
     }
 
@@ -691,15 +695,25 @@ export class GameServer {
         void save.finally(() => this.#saves.delete(save));
     }
 
-    #unjoinedCount(): number {
-        let n = 0;
-        for (const conn of this.#connections.values()) if (!conn.joined) n += 1;
-        return n;
+    /** Why this socket may not be registered, or null to admit it. */
+    #acceptRefusal(playerId: string | undefined): string | null {
+        if (!this.#booted) return 'not-booted';
+        if (this.#closed) return 'server-closed';
+        let unjoined = 0;
+        let claimed = false;
+        for (const conn of this.#connections.values()) {
+            if (conn.joined) continue;
+            unjoined += 1;
+            if (conn.identity === playerId) claimed = true;
+        }
+        if (unjoined >= MAX_UNJOINED_CONNECTIONS) return 'unjoined-cap';
+        // One pre-join slot per named peer: the cap above is a total, so without this a single peer
+        // reconnect-looping holds every slot and locks out everyone else at no cost to itself.
+        return playerId !== undefined && claimed ? 'identity-pending' : null;
     }
 
     /** Closes a connection that has not joined inside the deadline — the one denial needing no frame at all. */
-    #sweepJoinDeadline(nowSeconds: number): void {
-        if (!Number.isFinite(nowSeconds)) return;
+    #sweepJoinDeadline(elapsedSeconds: number): void {
         const deadline = JOIN_DEADLINE_MS / 1000;
         // Collected, then closed: `close()` never fires its handler synchronously, but a sweep that
         // mutated the registry mid-iteration would be relying on that rather than stating it.
@@ -707,10 +721,10 @@ export class GameServer {
         for (const conn of this.#connections.values()) {
             if (conn.joined || conn.closed) continue;
             if (conn.acceptedAtSeconds === null) {
-                conn.acceptedAtSeconds = nowSeconds;
+                conn.acceptedAtSeconds = elapsedSeconds;
                 continue;
             }
-            if (nowSeconds - conn.acceptedAtSeconds >= deadline) expired.push(conn);
+            if (elapsedSeconds - conn.acceptedAtSeconds >= deadline) expired.push(conn);
         }
         for (const conn of expired) {
             this.#deny('close', conn, 'join-deadline');
