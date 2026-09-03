@@ -7,14 +7,17 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import {
+    BREAKER_THRESHOLD,
     DEFAULT_SEND_RATE,
     DEFAULT_SIM_RATE,
     MAX_BUBBLE_LENGTH,
     MAX_DEDUP_KEYS,
+    MAX_HANDLER_MS,
     MAX_LOG_RECORDS,
     MAX_SEND_DEPTH,
     resolveConfig,
 } from '../src/config.js';
+import type { BreakerTrip } from '../src/errors.js';
 import { CollectingLog, clearRuntime } from '../src/runtime/runtime.js';
 import { loadGame } from '../src/runtime/load-game.js';
 import type { Runtime } from '../src/runtime/runtime.js';
@@ -303,6 +306,61 @@ describe('MAX_BUBBLE_LENGTH', () => {
 
         // The sleep woke and found a different bubble in place, so it left it alone.
         expect(rt.channels.structuralCount).toBe(0);
+    });
+});
+
+/** Holds the thread for `ms`, which is the shape of the fault: no await to interrupt. */
+function hold(ms: number): void {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+        /* deliberately busy */
+    }
+}
+
+describe('MAX_HANDLER_MS', () => {
+    it('charges a handler that holds the tick, instead of counting it a success', async () => {
+        const rt = loadGame();
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
+        const si = probe(rt, e, () => hold(MAX_HANDLER_MS * 2));
+        rt.instances.attach(entityKey(e.entityId as number), si);
+
+        await e.send('go');
+
+        // Through the same record as a throw, so the dedup, the log and the breaker cannot drift.
+        expect(rt.breaker.count(si.id, 'go')).toBe(1);
+        expect(rt.log.records.at(-1)?.stack).toContain(`${MAX_HANDLER_MS}ms budget`);
+        expect(
+            rt.dispatcher.throwCount(
+                'Probe',
+                'go',
+                `held the tick past the ${MAX_HANDLER_MS}ms budget`,
+            ),
+        ).toBe(1);
+    });
+
+    it('trips the breaker, which is the only abort a single realm has', async () => {
+        const rt = loadGame();
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
+        let calls = 0;
+        const si = probe(rt, e, () => {
+            calls += 1;
+            hold(MAX_HANDLER_MS * 2);
+        });
+        rt.instances.attach(entityKey(e.entityId as number), si);
+
+        const trips: BreakerTrip[] = [];
+        rt.dispatcher.onTrip((trip) => trips.push(trip));
+        // Charged, not held for a hundred real seconds: what is under test is that an overrun counts
+        // toward the same threshold a throw does, not how long a hundred of them take.
+        for (let i = 1; i < BREAKER_THRESHOLD; i++) rt.breaker.recordThrow(si.id, 'go');
+
+        await e.send('go');
+        expect(trips).toHaveLength(1);
+        expect(calls).toBe(1);
+
+        // Nothing interrupts the loop that is already running; what the trip buys is the next one.
+        await e.send('go');
+        expect(calls).toBe(1);
     });
 });
 

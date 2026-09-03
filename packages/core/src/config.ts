@@ -22,6 +22,9 @@ export const MAX_LOG_RECORDS = 512;
 /** Speech-bubble text cap; longer strings truncate rather than growing unbounded. */
 export const MAX_BUBBLE_LENGTH = 200;
 
+/** Milliseconds one handler may hold the tick before the boundary charges it like a throw. */
+export const MAX_HANDLER_MS = 50;
+
 /** How far back a historical spatial query may reach, in milliseconds. */
 export const MAX_REWIND_MS = 250;
 

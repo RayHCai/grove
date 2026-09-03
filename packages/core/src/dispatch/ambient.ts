@@ -14,15 +14,18 @@ export function setCurrentInvocation(scope: InvocationScope | null): void {
     current = scope;
 }
 
-/** Wraps an engine awaitable so it restores `scope` as the ambient when it settles. */
-export function resumeWith<T>(scope: InvocationScope | null, promise: Promise<T>): Promise<T> {
+/** Wraps an engine awaitable so whatever resumes behind it runs under the ambient it was made in. */
+export function resumeWith<T>(promise: Promise<T>): Promise<T> {
+    // Saved here rather than named by the caller: assigning a fixed scope left a settled handler's
+    // dead invocation ambient at top level, where the next `every` inherited it.
+    const made = current;
     return promise.then(
         (value) => {
-            current = scope;
+            current = made;
             return value;
         },
         (error) => {
-            current = scope;
+            current = made;
             throw error;
         },
     );

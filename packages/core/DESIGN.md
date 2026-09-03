@@ -64,8 +64,10 @@ path and core only ever receives an already-valid manifest.
   counted and readable through `dispatcher.throwCount` — and 100 **consecutive** throws disable that
   `(instance, method)`; a success resets it, and an async handler counts as a success only once its promise
   settles. The handler is read **inside** the try, since a handler declared as an accessor makes the property
-  read itself creator code. Breaker counts are snapshot state; the dedup map is not, and both it and the
-  default log are capped so a session cannot grow them without bound.
+  read itself creator code. A call that returns without throwing but held the tick past `MAX_HANDLER_MS`
+  takes the same record and the same count, since nothing inside one realm can interrupt a synchronous loop
+  and the only bound left is how many more times it is entered. Breaker counts are snapshot state; the dedup
+  map is not, and both it and the default log are capped so a session cannot grow them without bound.
   Wiring throws are fatal (`LoadError`) because a half-hoisted host record matches no declaration.
 - **The same boundary covers creator code that runs without a dispatch**, through `dispatcher.guard(owner,
 site, fn)` — one implementation, so the dedup, log and breaker cannot diverge between the two entries. Four
@@ -73,8 +75,9 @@ site, fn)` — one implementation, so the dedup, log and breaker cannot diverge 
   target (`tween:<id>`) and a countdown's completion (`countdown:<id>`). Each is keyed on the CALLBACK rather
   than on the method that registered it, which has already returned; the owning `ScriptInstance` comes from
   `InvocationScope.owner`, captured at registration, or from `instances.forInstance` for a movement the pass
-  holds directly. An unowned callback is contained and logged but cannot be disabled — there is no instance to
-  charge.
+  holds directly. `guard` runs the callback under an invocation of that owner's own, so a timer the callback
+  starts is charged to its host rather than to whichever invocation settled last. An unowned callback is
+  contained and logged but cannot be disabled — there is no instance to charge.
 - **A trip is reported to the host** through `dispatcher.onTrip`, carrying the log record plus the
   `instanceId`, since a class name does not say which of a template's copies stopped. The listener's own throw
   is contained, so a reporting bug cannot end a tick.

@@ -12,6 +12,7 @@ import type { ScriptQuery } from './get-script.js';
 import { scriptOnHost } from './get-script.js';
 import { entityKey } from './hosts.js';
 import type { TweenTarget } from '../loop/tweens.js';
+import { resumeWith } from '../dispatch/ambient.js';
 import type { AssetRef } from './assets.js';
 import type { Player } from './player.js';
 import { MAX_BUBBLE_LENGTH } from '../config.js';
@@ -148,10 +149,12 @@ export class Entity {
 
     glideTo(x: number, y: number, seconds: number, easing?: Easing): Promise<void> {
         const t = this.#tweenTarget();
-        return Promise.all([
-            this.#rt.tweens.start(t, 'x', x, seconds, this.#hostScope(), easing),
-            this.#rt.tweens.start(t, 'y', y, seconds, this.#hostScope(), easing),
-        ]).then(() => undefined);
+        return resumeWith(
+            Promise.all([
+                this.#rt.tweens.start(t, 'x', x, seconds, this.#hostScope(), easing),
+                this.#rt.tweens.start(t, 'y', y, seconds, this.#hostScope(), easing),
+            ]).then(() => undefined),
+        );
     }
 
     glideBy(dx: number, dy: number, seconds: number, easing?: Easing): Promise<void> {
