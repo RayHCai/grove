@@ -1,0 +1,28 @@
+{
+    "name": "@grove/player-app",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "The origin a game renders on: a ticket in, a canvas out.",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "typecheck": "tsc -p tsconfig.test.json",
+        "test": "vitest run --passWithNoTests",
+        "clean": "rm -rf dist .turbo"
+    },
+    "dependencies": {
+        "react": "^19.2.8",
+        "react-dom": "^19.2.8",
+        "@grove/player": "workspace:*",
+        "@grove/ui": "workspace:*"
+    },
+    "devDependencies": {
+        "@types/react": "^19.2.18",
+        "@types/react-dom": "^19.2.4",
+        "@vitejs/plugin-react": "^6.0.5",
+        "typescript": "^7.0.2",
+        "vite": "^8.2.0",
+        "vitest": "^4.1.10"
+    }
+}

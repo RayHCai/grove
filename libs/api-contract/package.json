@@ -1,0 +1,32 @@
+{
+    "name": "@grove/api-contract",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "The request and response shapes both services validate against and every caller parses with.",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc -b",
+        "typecheck": "tsc -p tsconfig.test.json",
+        "test": "vitest run --passWithNoTests",
+        "clean": "rm -rf dist .turbo"
+    },
+    "dependencies": {
+        "zod": "^4.5.4"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.5",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    }
+}

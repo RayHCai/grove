@@ -209,6 +209,12 @@
             }
         },
         {
+            "files": ["apps/**/src/main.ts"],
+            "rules": {
+                "no-console": "off"
+            }
+        },
+        {
             "files": ["bench/src/**"],
             "rules": {
                 "no-console": "off",
@@ -216,11 +222,13 @@
             }
         },
         {
-            "files": [
-                "apps/editor/src/index.ts",
-                "apps/platform/src/index.ts",
-                "examples/src/index.ts"
-            ],
+            "files": ["apps/grove/api/src/**", "apps/grove/game-manager/src/**"],
+            "rules": {
+                "oxc/no-async-endpoint-handlers": "off"
+            }
+        },
+        {
+            "files": ["apps/grove/*/src/main.ts", "examples/src/index.ts"],
             "rules": {
                 "unicorn/require-module-specifiers": "off"
             }
