@@ -31,7 +31,7 @@
     },
     "dependencies": {
         "@platform/math": "workspace:*",
-        "pixi.js": "^8.19.0"
+        "pixi.js": "^8.20.1"
     },
     "devDependencies": {
         "typescript": "^7.0.2",
