@@ -63,6 +63,31 @@ another name:
 - **Packages with no `DESIGN.md`** (`engine`, `math`, `project`, `scripting`) keep their contract in
   `README.md` — update that; don't add a `DESIGN.md` uninvited.
 
+## Tests
+
+Every creator-facing API member carries **two** proofs, and neither substitutes for the other:
+
+| Level       | Lives in                | Proves                                                                                                                    |
+| ----------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Unit        | `packages/<pkg>/tests/` | The member does what it says, called against a directly-built runtime                                                     |
+| Integration | `integration/`          | It does it **through a game** — authored in a manifest, run in a handler, and observed on a client that was told about it |
+
+A unit test alone is not coverage. A method that moves an entity on the authority and never marks a
+replication channel passes every unit test and is broken in every real game.
+
+**One world per API component.** `integration/src/worlds/<component>.ts` holds that component's game — its
+scripts and its `defineWorld` call — and `integration/tests/<component>.test.ts` drives it. A new component
+means both files; widening one means widening its suite in the same commit.
+
+- Reach the API the way a creator does: in a handler, on a host, entered through a real frame. A call made
+  from the test body proves only that the method exists.
+- Assert on the **mirror** (`runtimeOf(tab)`), not only on `session.server.runtime`.
+- Import a decorated world from `../dist/worlds/<name>.js`; only `tsc` lowers standard decorators.
+- A member that turns out inert or unreachable is pinned **as that**, with the evidence for the claim.
+  Never assert behaviour the platform does not have.
+
+`docs/api_spec.ts` is the checklist: every member it declares is owed both levels.
+
 ## Build
 
 Requires Node 24 — pinned to 24.16.0 in `.node-version`, enforced by `engines` in `package.json`. If
