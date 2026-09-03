@@ -3,15 +3,19 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "The composition of one game instance: a project in, a running, reachable world out.",
+    "description": "The composition of one game: a project in, a running world and the sessions that reach it out.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
         },
-        "./node": {
-            "types": "./dist/node/index.d.ts",
-            "import": "./dist/node/index.js"
+        "./server": {
+            "types": "./dist/server/index.d.ts",
+            "import": "./dist/server/index.js"
+        },
+        "./client": {
+            "types": "./dist/client/index.d.ts",
+            "import": "./dist/client/index.js"
         }
     },
     "main": "./dist/index.js",
@@ -26,6 +30,7 @@
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
+        "@platform/client": "workspace:*",
         "@platform/core": "workspace:*",
         "@platform/engine": "workspace:*",
         "@platform/project": "workspace:*",
@@ -35,7 +40,6 @@
         "ws": "^8.21.3"
     },
     "devDependencies": {
-        "@platform/client": "workspace:*",
         "@platform/renderer": "workspace:*",
         "@types/node": "^22.10.5",
         "@types/ws": "^8.18.1",

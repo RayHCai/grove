@@ -5,7 +5,7 @@
 // left here is the aim axis: which action carries the click's height, and the bias that keeps it
 // off zero.
 
-import type { EmittingInputDevice } from '@platform/client';
+import type { EmittingInputDevice } from '@platform/glue/client';
 import { createCanvasInputDevice } from '@platform/client/browser';
 import type { IRenderer } from '@platform/renderer';
 import { CODE_AIM_Y, encodeAim } from './scripts/globals';

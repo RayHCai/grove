@@ -7,7 +7,7 @@
 // Everything that used to be here — reading replicated state, diffing it, formatting it, choosing
 // which menu is up — is `scripts/screens/hud.ts`, where the authored model puts it.
 
-import type { GameClient } from '@platform/client';
+import type { GameClient } from '@platform/glue/client';
 import { hud, withRuntime } from '@platform/core';
 import type { IRenderer, NodeId } from '@platform/renderer';
 // The LOWERED copies: every script carries decorators, and Vite's transform would hand them to the
