@@ -264,7 +264,15 @@ facades over a swappable world rather than process singletons — `game` is a `P
 **unbound**, so neither the const nor a method read off it captures a stale instance. Anything a facade needs
 lives on the runtime and is resolved per call (`assets`, the player lookup behind `Scoreboard.top`), never in a
 module slot a second `loadGame` would repoint. Script instances get their runtime stamped at attach time, so
-simulation code inside a tick never has to consult the ambient slot at all.
+simulation code inside a tick never has to consult the ambient slot at all. Every entry point that dispatches
+creator code from OUTSIDE the loop establishes it instead — `startGame`, `endGame`, `joinPlayer`,
+`leavePlayer`, `pressWidget`, `pointerHit`, `deliverRequest`, `displayUpdate` — because each is reached from a
+transport or
+frame callback with nothing on the stack that set it, and `every` / `after` / `sleep` / the module consts
+resolve it per call: without the wrap they would answer with whichever world `loadGame` ran last, and
+register there. `request` is not among them, because it resolves the slot itself: it hands the call to
+`Runtime.requestUplink` when an endpoint installed one, and otherwise to the loopback `requestSink`, which
+runs `deliverRequest` in the world it found.
 
 `loadGame(manifest, opts)` → build world (bounds, regions, assets, template registry, collaborators,
 `passes`) → attach Game scripts (wire + hoist, **no** `@onStart`) → instantiate the placed `entities` →

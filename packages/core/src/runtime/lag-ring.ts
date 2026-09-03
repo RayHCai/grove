@@ -2,17 +2,20 @@
 // against the world the shooter saw. Reads a buffer and marks nothing, so it is invisible to
 // replication and to the determinism test. Slots are reused rather than allocated per tick.
 
+import { grownCapacity } from '@platform/math';
 import { MAX_REWIND_MS } from '../config.js';
 import type { EntityId } from '../ids.js';
 import { entityIndex } from '../ids.js';
 import { Broadphase } from '../world/broadphase.js';
 import type { TransformView } from '../world/broadphase.js';
 import type { EntityTable } from '../world/entity-table.js';
-import type { SimTransformStore, TransformBuffer } from '../world/transform-store.js';
+import type { SimTransformStore } from '../world/transform-store.js';
 
 interface RingSlot {
     tick: number;
-    buffer: TransformBuffer;
+    /** Position only: the two lanes `bufferView` reads, indexed by slot like the live store. */
+    posX: Float64Array;
+    posY: Float64Array;
     /** Who was alive at that tick, generation and all; a transform buffer records neither. */
     ids: EntityId[];
     filled: boolean;
@@ -30,16 +33,24 @@ export class LagRing {
         const depth = Math.max(1, Math.ceil((simRate * MAX_REWIND_MS) / 1000));
         this.#slots = Array.from({ length: depth }, () => ({
             tick: -1,
-            buffer: transforms.createBuffer(),
+            posX: new Float64Array(0),
+            posY: new Float64Array(0),
             ids: [] as EntityId[],
             filled: false,
         }));
     }
 
-    /** Captures the live transforms for `tick` into the next ring slot (end of tick). */
+    /** Captures the live positions for `tick` into the next ring slot (end of tick). */
     capture(tick: number): void {
         const slot = this.#slots[this.#head]!;
-        this.#transforms.capture(slot.buffer, null);
+        const cap = this.#transforms.slotCount;
+        if (slot.posX.length < cap) {
+            // Doubled, not fitted: a slot regrows once per doubling rather than once per entity.
+            const grown = grownCapacity(slot.posX.length, cap);
+            slot.posX = new Float64Array(grown);
+            slot.posY = new Float64Array(grown);
+        }
+        this.#transforms.copyPositions(slot.posX, slot.posY);
         this.#entities.liveIds(slot.ids);
         slot.tick = tick;
         slot.filled = true;
@@ -89,7 +100,8 @@ function bufferView(
     slot: RingSlot,
     halfExtent: (id: EntityId, axis: 'w' | 'h') => number,
 ): TransformView {
-    const buffer = slot.buffer;
+    const posX = slot.posX;
+    const posY = slot.posY;
     const ids = slot.ids;
     return {
         liveIds: (o: EntityId[] = []) => {
@@ -97,8 +109,8 @@ function bufferView(
             for (const id of ids) o.push(id);
             return o;
         },
-        posX: (id) => buffer.posX[entityIndex(id)] ?? 0,
-        posY: (id) => buffer.posY[entityIndex(id)] ?? 0,
+        posX: (id) => posX[entityIndex(id)] ?? 0,
+        posY: (id) => posY[entityIndex(id)] ?? 0,
         halfWidth: (id) => halfExtent(id, 'w'),
         halfHeight: (id) => halfExtent(id, 'h'),
     };
