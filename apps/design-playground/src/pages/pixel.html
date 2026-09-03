@@ -1,0 +1,1595 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Grove · Pixel Grove</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Press+Start+2P&amp;family=VT323&amp;display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            /* ============================================================
+   PIXEL GROVE - a cozy retro handheld, warmed up and modernized
+   Everything steps. Nothing eases. Autumn moss, never neon.
+   ============================================================ */
+
+            :root {
+                /* palette: warm GameBoy-goes-autumn */
+                --parchment: #f4ead2;
+                --cream: #fbf4e1;
+                --sand: #e4d5ae;
+                --moss: #7d9c50;
+                --moss-lite: #93b164;
+                --olive: #4c5b3c;
+                --rust: #c96f43;
+                --rust-lite: #d98457;
+                --char: #2e2a24;
+                --sun: #e8b865;
+
+                /* spacing scale (4px grid, like a tileset) */
+                --sp-1: 4px;
+                --sp-2: 8px;
+                --sp-3: 12px;
+                --sp-4: 16px;
+                --sp-5: 24px;
+                --sp-6: 32px;
+                --sp-7: 48px;
+                --sp-8: 80px;
+
+                --bw: 3px; /* chunky border */
+                --lift: 4px; /* hard shadow offset */
+
+                --font-head: 'Press Start 2P', 'Courier New', monospace;
+                --font-body: 'VT323', 'Courier New', monospace;
+
+                /* two-step pixel corner, dialog-box sized */
+                --notch: polygon(
+                    0 12px,
+                    6px 12px,
+                    6px 6px,
+                    12px 6px,
+                    12px 0,
+                    calc(100% - 12px) 0,
+                    calc(100% - 12px) 6px,
+                    calc(100% - 6px) 6px,
+                    calc(100% - 6px) 12px,
+                    100% 12px,
+                    100% calc(100% - 12px),
+                    calc(100% - 6px) calc(100% - 12px),
+                    calc(100% - 6px) calc(100% - 6px),
+                    calc(100% - 12px) calc(100% - 6px),
+                    calc(100% - 12px) 100%,
+                    12px 100%,
+                    12px calc(100% - 6px),
+                    6px calc(100% - 6px),
+                    6px calc(100% - 12px),
+                    0 calc(100% - 12px)
+                );
+
+                /* one-step pixel corner, button/badge sized */
+                --notch-sm: polygon(
+                    0 6px,
+                    3px 6px,
+                    3px 3px,
+                    6px 3px,
+                    6px 0,
+                    calc(100% - 6px) 0,
+                    calc(100% - 6px) 3px,
+                    calc(100% - 3px) 3px,
+                    calc(100% - 3px) 6px,
+                    100% 6px,
+                    100% calc(100% - 6px),
+                    calc(100% - 3px) calc(100% - 6px),
+                    calc(100% - 3px) calc(100% - 3px),
+                    calc(100% - 6px) calc(100% - 3px),
+                    calc(100% - 6px) 100%,
+                    6px 100%,
+                    6px calc(100% - 3px),
+                    3px calc(100% - 3px),
+                    3px calc(100% - 6px),
+                    0 calc(100% - 6px)
+                );
+
+                /* pixel cursor arrow (a stepped right-pointing triangle) */
+                --arrow: polygon(
+                    0 0,
+                    4px 0,
+                    4px 4px,
+                    8px 4px,
+                    8px 8px,
+                    12px 8px,
+                    12px 12px,
+                    8px 12px,
+                    8px 16px,
+                    4px 16px,
+                    4px 20px,
+                    0 20px
+                );
+            }
+
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            html {
+                background: var(--char);
+            }
+
+            body {
+                background: var(--parchment);
+                color: var(--char);
+                font-family: var(--font-body);
+                font-size: 21px;
+                line-height: 1.45;
+                overflow-x: hidden;
+            }
+
+            /* faint scanline overlay, very low opacity */
+            body::after {
+                content: '';
+                position: fixed;
+                inset: 0;
+                z-index: 90;
+                pointer-events: none;
+                background: repeating-linear-gradient(
+                    0deg,
+                    rgba(46, 42, 36, 0.045) 0 2px,
+                    transparent 2px 5px
+                );
+            }
+
+            ::selection {
+                background: var(--moss);
+                color: var(--cream);
+            }
+
+            img,
+            svg {
+                display: block;
+                max-width: 100%;
+            }
+
+            a {
+                color: inherit;
+            }
+
+            a:focus-visible,
+            button:focus-visible,
+            input:focus-visible,
+            [tabindex]:focus-visible {
+                outline: 3px solid var(--rust);
+                outline-offset: 3px;
+            }
+
+            .wrap {
+                width: 100%;
+                max-width: 1120px;
+                margin-inline: auto;
+                padding-inline: clamp(16px, 4vw, 40px);
+            }
+
+            /* tileset strip across the very top */
+            .tilestrip {
+                height: 8px;
+                background: repeating-linear-gradient(
+                    90deg,
+                    var(--moss) 0 8px,
+                    var(--olive) 8px 16px,
+                    var(--rust) 16px 24px,
+                    var(--sun) 24px 32px
+                );
+                border-bottom: var(--bw) solid var(--char);
+            }
+
+            /* ---------- pixel dialog panel (the core component) ----------
+   Face + edge are painted on ::after, the hard 4px drop shadow
+   on ::before - both share the stepped clip-path so corners
+   stay chunky everywhere.                                     */
+            .pix {
+                position: relative;
+                z-index: 0;
+                --face: var(--cream);
+                --edge: var(--char);
+            }
+            .pix::before,
+            .pix::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                clip-path: var(--notch);
+                pointer-events: none;
+            }
+            .pix::before {
+                background: var(--char);
+                transform: translate(var(--lift), var(--lift));
+                z-index: -2;
+            }
+            .pix::after {
+                z-index: -1;
+                border: var(--bw) solid transparent;
+                background:
+                    linear-gradient(var(--face), var(--face)) padding-box,
+                    var(--edge) border-box;
+            }
+
+            /* ---------- back chip ---------- */
+            .back-chip {
+                position: fixed;
+                left: var(--sp-4);
+                bottom: var(--sp-4);
+                z-index: 95;
+                font-family: var(--font-head);
+                font-size: 10px;
+                letter-spacing: 1px;
+                text-decoration: none;
+                color: var(--char);
+                background: var(--cream);
+                border: var(--bw) solid var(--char);
+                box-shadow: 4px 4px 0 var(--char);
+                padding: 10px 12px;
+            }
+            .back-chip:hover {
+                background: var(--char);
+                color: var(--sun);
+            }
+            .back-chip:active {
+                transform: translate(2px, 2px);
+                box-shadow: 2px 2px 0 var(--char);
+            }
+
+            /* ---------- navigation ---------- */
+            .site-head {
+                padding-top: var(--sp-5);
+            }
+            .nav {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: var(--sp-4) var(--sp-5);
+                padding: var(--sp-4) var(--sp-5);
+            }
+            .wordmark {
+                font-family: var(--font-head);
+                font-size: 16px;
+                letter-spacing: 2px;
+                text-decoration: none;
+                color: var(--char);
+                display: inline-flex;
+                align-items: center;
+                gap: 12px;
+            }
+            .wordmark .leaf {
+                width: 12px;
+                height: 20px;
+                background: var(--moss);
+                clip-path: var(--arrow);
+                transform: rotate(-90deg);
+            }
+            .wordmark:hover {
+                color: var(--olive);
+            }
+            .wordmark:active {
+                transform: translate(2px, 2px);
+            }
+            .nav-links {
+                list-style: none;
+                display: flex;
+                flex-wrap: wrap;
+                gap: var(--sp-2);
+                margin-inline: auto;
+            }
+            .nav-links a {
+                display: inline-block;
+                font-size: 22px;
+                text-decoration: none;
+                padding: 2px 10px;
+                color: var(--char);
+            }
+            .nav-links a:hover {
+                background: var(--char);
+                color: var(--sun);
+            }
+            .nav-links a:active {
+                transform: translate(2px, 2px);
+            }
+
+            /* ---------- buttons: menu options ---------- */
+            .btn {
+                position: relative;
+                z-index: 0;
+                display: inline-flex;
+                align-items: center;
+                --face: var(--cream);
+                font-family: var(--font-head);
+                font-size: 12px;
+                letter-spacing: 1px;
+                line-height: 1;
+                color: var(--char);
+                text-decoration: none;
+                padding: 15px 18px;
+                border: none;
+                background: none;
+                cursor: pointer;
+            }
+            .btn::before,
+            .btn::after {
+                content: '';
+                position: absolute;
+                inset: 0;
+                clip-path: var(--notch-sm);
+                pointer-events: none;
+            }
+            .btn::before {
+                background: var(--char);
+                transform: translate(4px, 4px);
+                z-index: -2;
+            }
+            .btn::after {
+                z-index: -1;
+                border: var(--bw) solid transparent;
+                background:
+                    linear-gradient(var(--face), var(--face)) padding-box,
+                    var(--char) border-box;
+            }
+            .btn .lbl {
+                display: inline-flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .btn .lbl::before {
+                content: '';
+                width: 12px;
+                height: 20px;
+                flex: none;
+                background: currentColor;
+                clip-path: var(--arrow);
+                opacity: 0;
+            }
+            .btn:hover .lbl::before,
+            .btn:focus-visible .lbl::before {
+                opacity: 1;
+            }
+            .btn:active {
+                transform: translate(2px, 2px);
+            }
+            .btn:active::before {
+                transform: translate(2px, 2px);
+            }
+            .btn-primary {
+                --face: var(--moss);
+            }
+            .btn-primary:hover {
+                --face: var(--moss-lite);
+            }
+            .btn-secondary:hover {
+                --face: var(--sand);
+            }
+            .btn[disabled] {
+                --face: var(--sand);
+                color: #6e6858;
+                cursor: not-allowed;
+            }
+            .btn[disabled]::before {
+                transform: translate(0, 0);
+            }
+            .btn[disabled] .lbl::before {
+                opacity: 0;
+            }
+
+            /* ---------- hero ---------- */
+            .hero {
+                display: grid;
+                grid-template-columns: 1.05fr 0.95fr;
+                gap: var(--sp-7);
+                align-items: center;
+                padding-block: var(--sp-8) var(--sp-8);
+            }
+            .eyebrow {
+                display: inline-flex;
+                align-items: center;
+                gap: 10px;
+                font-family: var(--font-head);
+                font-size: 11px;
+                letter-spacing: 2px;
+                color: var(--rust);
+                border: var(--bw) solid var(--rust);
+                padding: 9px 12px;
+                margin-bottom: var(--sp-5);
+            }
+            .eyebrow::before {
+                content: '';
+                width: 8px;
+                height: 8px;
+                background: var(--rust);
+            }
+            .hero h1 {
+                font-family: var(--font-head);
+                font-size: clamp(24px, 4.6vw, 34px);
+                line-height: 1.5;
+                letter-spacing: 2px;
+                text-shadow: 4px 4px 0 var(--sand);
+                margin-bottom: var(--sp-5);
+            }
+            .hero .sub {
+                font-size: 25px;
+                color: var(--olive);
+                max-width: 46ch;
+                margin-bottom: var(--sp-6);
+            }
+            .cta-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: var(--sp-5);
+            }
+
+            /* ---------- hero visual: the GROVE-16 handheld ---------- */
+            .console {
+                padding: var(--sp-5);
+                --face: var(--rust);
+                width: min(440px, 100%);
+                justify-self: center;
+            }
+            .screen-frame {
+                background: var(--olive);
+                border: var(--bw) solid var(--char);
+                padding: 12px;
+            }
+            .screen {
+                width: 100%;
+                height: auto;
+                border: var(--bw) solid var(--char);
+                background: #f6edd3;
+            }
+            .controls {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-top: var(--sp-5);
+                padding-inline: var(--sp-2);
+            }
+            .dpad {
+                position: relative;
+                width: 66px;
+                height: 66px;
+            }
+            .dpad::before,
+            .dpad::after {
+                content: '';
+                position: absolute;
+                background: var(--char);
+            }
+            .dpad::before {
+                left: 22px;
+                top: 0;
+                width: 22px;
+                height: 66px;
+            }
+            .dpad::after {
+                left: 0;
+                top: 22px;
+                width: 66px;
+                height: 22px;
+            }
+            .ab {
+                display: flex;
+                gap: var(--sp-3);
+            }
+            .pbtn {
+                width: 38px;
+                height: 38px;
+                display: grid;
+                place-items: center;
+                background: var(--char);
+                color: var(--sun);
+                font-family: var(--font-head);
+                font-size: 10px;
+                box-shadow: 3px 3px 0 #8f4a28;
+            }
+            .console-foot {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-top: var(--sp-5);
+            }
+            .console-label {
+                font-family: var(--font-head);
+                font-size: 9px;
+                letter-spacing: 2px;
+                color: var(--cream);
+            }
+            .speaker {
+                width: 64px;
+                height: 26px;
+                background: repeating-linear-gradient(90deg, #8f4a28 0 4px, transparent 4px 10px);
+            }
+
+            /* sprout frames: statically show the grown frame; motion block animates */
+            .fr1,
+            .fr2,
+            .fr3 {
+                opacity: 0;
+            }
+            .fr4 {
+                opacity: 1;
+            }
+
+            /* ---------- sections ---------- */
+            section {
+                padding-block: var(--sp-7);
+            }
+            .sec-head {
+                margin-bottom: var(--sp-6);
+            }
+            .sec-title {
+                display: inline-block;
+                font-family: var(--font-head);
+                font-size: 13px;
+                letter-spacing: 1px;
+                line-height: 1.6;
+                background: var(--char);
+                color: var(--sun);
+                padding: 12px 16px;
+                box-shadow: 4px 4px 0 var(--olive);
+            }
+            .sec-sub {
+                margin-top: var(--sp-3);
+                font-size: 23px;
+                color: var(--olive);
+            }
+
+            /* ---------- featured worlds ---------- */
+            .worlds-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: var(--sp-6);
+            }
+            .card {
+                padding: var(--sp-4);
+                display: flex;
+                flex-direction: column;
+                gap: var(--sp-3);
+            }
+            .card:hover {
+                transform: translate(-2px, -2px);
+            }
+            .card:hover::before {
+                transform: translate(6px, 6px);
+            }
+            .card-scene {
+                border: var(--bw) solid var(--char);
+                width: 100%;
+                height: auto;
+            }
+            .card h3 {
+                font-family: var(--font-head);
+                font-size: 13px;
+                line-height: 1.6;
+                letter-spacing: 1px;
+            }
+            .byline {
+                color: var(--olive);
+                font-size: 20px;
+            }
+            .card-meta {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: var(--sp-3);
+            }
+            .live {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 20px;
+            }
+            .live::before {
+                content: '';
+                width: 8px;
+                height: 8px;
+                background: var(--rust);
+                flex: none;
+            }
+            .tag {
+                font-family: var(--font-head);
+                font-size: 9px;
+                letter-spacing: 1px;
+                color: var(--olive);
+                border: var(--bw) solid var(--olive);
+                padding: 6px 8px;
+            }
+            .card-actions {
+                margin-top: auto;
+            }
+            .card .btn {
+                width: 100%;
+                justify-content: center;
+            }
+
+            /* ---------- bits & pieces ---------- */
+            .bits-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+                gap: var(--sp-6);
+                align-items: stretch;
+            }
+            .spec {
+                padding: var(--sp-5);
+                display: flex;
+                flex-direction: column;
+                gap: var(--sp-4);
+            }
+            .spec-title {
+                font-family: var(--font-head);
+                font-size: 10px;
+                letter-spacing: 2px;
+                color: var(--olive);
+                text-transform: uppercase;
+            }
+            .spec-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: var(--sp-4);
+                align-items: center;
+            }
+
+            .field label {
+                display: block;
+                font-family: var(--font-head);
+                font-size: 11px;
+                letter-spacing: 1px;
+                margin-bottom: var(--sp-3);
+            }
+            .field input {
+                font-family: var(--font-body);
+                font-size: 22px;
+                color: var(--char);
+                background: var(--cream);
+                border: var(--bw) solid var(--char);
+                box-shadow: inset 4px 4px 0 var(--sand);
+                padding: 10px 14px;
+                width: 100%;
+                max-width: 340px;
+            }
+            .field input::placeholder {
+                color: #877f6c;
+            }
+            .field input:hover {
+                background: #fdf9ec;
+            }
+
+            /* toggle: a pause-menu ON/OFF option */
+            .toggle {
+                display: inline-flex;
+                align-items: center;
+                gap: var(--sp-4);
+                background: none;
+                border: none;
+                cursor: pointer;
+                font-family: var(--font-body);
+                font-size: 22px;
+                color: var(--char);
+                padding: 4px;
+            }
+            .t-cells {
+                display: inline-flex;
+                border: var(--bw) solid var(--char);
+                box-shadow: 4px 4px 0 var(--char);
+                background: var(--cream);
+            }
+            .cell {
+                font-family: var(--font-head);
+                font-size: 10px;
+                letter-spacing: 1px;
+                padding: 10px 12px;
+                color: #6e6858;
+            }
+            .toggle[aria-pressed='true'] .cell-on {
+                background: var(--char);
+                color: var(--sun);
+            }
+            .toggle[aria-pressed='false'] .cell-off {
+                background: var(--char);
+                color: var(--rust-lite);
+            }
+            .toggle:hover .t-cells {
+                background: var(--sand);
+            }
+            .toggle:active .t-cells {
+                transform: translate(2px, 2px);
+                box-shadow: 2px 2px 0 var(--char);
+            }
+
+            /* badges: item drops with box-shadow pixel sprites */
+            .badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 12px;
+                font-family: var(--font-head);
+                font-size: 10px;
+                letter-spacing: 1px;
+                padding: 10px 14px;
+                border: var(--bw) solid var(--char);
+                box-shadow: 3px 3px 0 var(--char);
+                background: var(--cream);
+            }
+            .drop {
+                position: relative;
+                width: 21px;
+                height: 21px;
+                flex: none;
+            }
+            .drop::before {
+                content: '';
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 3px;
+                height: 3px;
+                background: transparent;
+            }
+            .drop-sprout::before {
+                box-shadow:
+                    3px 3px 0 var(--moss),
+                    6px 6px 0 var(--moss),
+                    15px 3px 0 var(--moss),
+                    12px 6px 0 var(--moss),
+                    9px 6px 0 var(--olive),
+                    9px 9px 0 var(--olive),
+                    9px 12px 0 var(--olive),
+                    9px 15px 0 var(--olive),
+                    3px 18px 0 var(--rust),
+                    6px 18px 0 var(--rust),
+                    9px 18px 0 var(--rust),
+                    12px 18px 0 var(--rust),
+                    15px 18px 0 var(--rust);
+            }
+            .drop-star::before {
+                box-shadow:
+                    6px 0 0 var(--sun),
+                    3px 3px 0 var(--sun),
+                    6px 3px 0 var(--sun),
+                    9px 3px 0 var(--sun),
+                    0 6px 0 var(--sun),
+                    3px 6px 0 var(--sun),
+                    6px 6px 0 var(--rust),
+                    9px 6px 0 var(--sun),
+                    12px 6px 0 var(--sun),
+                    3px 9px 0 var(--sun),
+                    6px 9px 0 var(--sun),
+                    9px 9px 0 var(--sun),
+                    6px 12px 0 var(--sun);
+            }
+            .drop-heart::before {
+                box-shadow:
+                    3px 0 0 var(--rust),
+                    9px 0 0 var(--rust),
+                    0 3px 0 var(--rust),
+                    3px 3px 0 var(--rust),
+                    6px 3px 0 var(--rust),
+                    9px 3px 0 var(--rust),
+                    12px 3px 0 var(--rust),
+                    3px 6px 0 var(--rust),
+                    6px 6px 0 var(--rust),
+                    9px 6px 0 var(--rust),
+                    6px 9px 0 var(--rust);
+            }
+
+            /* segmented XP bar: 16 of 25 cells lit = 64% */
+            .xp-wrap {
+                max-width: 420px;
+            }
+            .xp-label {
+                display: flex;
+                justify-content: space-between;
+                align-items: baseline;
+                font-family: var(--font-head);
+                font-size: 11px;
+                letter-spacing: 1px;
+                margin-bottom: var(--sp-3);
+            }
+            .xp-label .pct {
+                font-family: var(--font-body);
+                font-size: 21px;
+                color: var(--olive);
+            }
+            .xp {
+                border: var(--bw) solid var(--char);
+                background: var(--cream);
+                box-shadow: 4px 4px 0 var(--char);
+                padding: 4px;
+            }
+            .xp-fill {
+                height: 18px;
+                width: 64%;
+                background: repeating-linear-gradient(
+                    90deg,
+                    var(--moss) 0,
+                    var(--moss) calc(6.25% - 3px),
+                    var(--cream) calc(6.25% - 3px),
+                    var(--cream) 6.25%
+                );
+            }
+
+            /* ---------- type & tone ---------- */
+            .type-list {
+                display: flex;
+                flex-direction: column;
+            }
+            .type-row {
+                display: grid;
+                grid-template-columns: 150px 1fr;
+                gap: var(--sp-5);
+                padding-block: var(--sp-5);
+                border-bottom: var(--bw) solid var(--sand);
+            }
+            .type-row:last-child {
+                border-bottom: none;
+            }
+            .type-tag {
+                font-size: 20px;
+                color: var(--olive);
+                text-transform: uppercase;
+                letter-spacing: 2px;
+            }
+            .t-display {
+                font-family: var(--font-head);
+                font-size: clamp(18px, 3vw, 26px);
+                line-height: 1.6;
+                letter-spacing: 2px;
+                text-shadow: 4px 4px 0 var(--sand);
+            }
+            .t-heading {
+                font-family: var(--font-head);
+                font-size: 14px;
+                line-height: 1.8;
+                letter-spacing: 1px;
+            }
+            .t-body {
+                font-size: 23px;
+                max-width: 60ch;
+            }
+            .t-caption {
+                font-size: 19px;
+                color: var(--olive);
+            }
+
+            /* ---------- palette ---------- */
+            .pal-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: var(--sp-6);
+            }
+            .swatch {
+                display: flex;
+                flex-direction: column;
+                gap: var(--sp-3);
+            }
+            .chip {
+                height: 92px;
+                border: var(--bw) solid var(--char);
+                box-shadow: 4px 4px 0 var(--char);
+            }
+            .swatch .name {
+                font-family: var(--font-head);
+                font-size: 10px;
+                letter-spacing: 1px;
+            }
+            .swatch .hex {
+                font-size: 20px;
+                color: var(--olive);
+            }
+
+            /* ---------- footer ---------- */
+            .site-foot {
+                padding-block: var(--sp-7) var(--sp-8);
+            }
+            .foot-panel {
+                --face: var(--olive);
+                color: var(--cream);
+                padding: var(--sp-6);
+                display: flex;
+                flex-direction: column;
+                gap: var(--sp-4);
+                align-items: flex-start;
+            }
+            .foot-line {
+                font-size: 24px;
+            }
+            .foot-links {
+                display: flex;
+                flex-wrap: wrap;
+                gap: var(--sp-2) var(--sp-5);
+                list-style: none;
+            }
+            .foot-links a {
+                text-decoration: none;
+                font-size: 21px;
+                padding: 2px 8px;
+                color: var(--cream);
+            }
+            .foot-links a:hover {
+                background: var(--char);
+                color: var(--sun);
+            }
+            .foot-links a:active {
+                transform: translate(2px, 2px);
+            }
+            .credit {
+                font-size: 20px;
+                color: var(--sand);
+            }
+
+            /* ---------- responsive ---------- */
+            @media (max-width: 920px) {
+                .hero {
+                    grid-template-columns: 1fr;
+                    gap: var(--sp-7);
+                }
+            }
+            @media (max-width: 560px) {
+                .nav {
+                    justify-content: center;
+                    text-align: center;
+                }
+                .nav-links {
+                    margin-inline: 0;
+                    justify-content: center;
+                }
+                .type-row {
+                    grid-template-columns: 1fr;
+                    gap: var(--sp-2);
+                }
+                .hero h1 {
+                    text-shadow: 3px 3px 0 var(--sand);
+                }
+                .back-chip {
+                    left: var(--sp-2);
+                    bottom: var(--sp-2);
+                }
+            }
+
+            /* ============================================================
+   MOTION - every move snaps on steps(); nothing eases.
+   ============================================================ */
+            @media (prefers-reduced-motion: no-preference) {
+                @keyframes rise {
+                    from {
+                        opacity: 0;
+                        transform: translateY(14px);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0);
+                    }
+                }
+                @keyframes blink {
+                    0%,
+                    49% {
+                        opacity: 1;
+                    }
+                    50%,
+                    100% {
+                        opacity: 0;
+                    }
+                }
+                @keyframes xpfill {
+                    from {
+                        clip-path: inset(0 100% 0 0);
+                    }
+                    to {
+                        clip-path: inset(0 0 0 0);
+                    }
+                }
+                @keyframes bob {
+                    0%,
+                    49% {
+                        transform: translateY(0);
+                    }
+                    50%,
+                    99% {
+                        transform: translateY(-3px);
+                    }
+                    100% {
+                        transform: translateY(0);
+                    }
+                }
+                @keyframes frame {
+                    0%,
+                    24.9% {
+                        opacity: 1;
+                    }
+                    25%,
+                    100% {
+                        opacity: 0;
+                    }
+                }
+                @keyframes twk {
+                    0%,
+                    54% {
+                        opacity: 1;
+                    }
+                    55%,
+                    100% {
+                        opacity: 0.15;
+                    }
+                }
+
+                /* staggered entrance choreography */
+                .rise {
+                    animation: rise 0.5s steps(4, end) both;
+                }
+                .d1 {
+                    animation-delay: 0.06s;
+                }
+                .d2 {
+                    animation-delay: 0.14s;
+                }
+                .d3 {
+                    animation-delay: 0.22s;
+                }
+                .d4 {
+                    animation-delay: 0.3s;
+                }
+                .d5 {
+                    animation-delay: 0.38s;
+                }
+                .d6 {
+                    animation-delay: 0.46s;
+                }
+
+                /* blinking menu cursor */
+                .btn:hover .lbl::before,
+                .btn:focus-visible .lbl::before {
+                    animation: blink 0.8s steps(1) infinite;
+                }
+
+                /* live counters pulse like a save icon */
+                .live::before {
+                    animation: blink 1.4s steps(1) infinite;
+                }
+
+                /* XP fills cell by cell */
+                .xp-fill {
+                    animation: xpfill 1.6s steps(16, end) 0.4s both;
+                }
+
+                /* item drops bob on alternating beats */
+                .badge {
+                    animation: bob 2.2s steps(1) infinite;
+                }
+                .badge:nth-child(2) {
+                    animation-delay: 0.55s;
+                }
+                .badge:nth-child(3) {
+                    animation-delay: 1.1s;
+                }
+
+                /* the sprout grows frame by frame, then replants */
+                .fr1,
+                .fr2,
+                .fr3,
+                .fr4 {
+                    opacity: 0;
+                }
+                .fr1 {
+                    animation: frame 4.8s steps(1) 0s infinite;
+                }
+                .fr2 {
+                    animation: frame 4.8s steps(1) 1.2s infinite;
+                }
+                .fr3 {
+                    animation: frame 4.8s steps(1) 2.4s infinite;
+                }
+                .fr4 {
+                    animation: frame 4.8s steps(1) 3.6s infinite;
+                }
+
+                /* stars twinkle in steps */
+                .tw {
+                    animation: twk 2.4s steps(1) infinite;
+                }
+                .tw2 {
+                    animation-duration: 1.8s;
+                    animation-delay: 0.5s;
+                }
+                .tw3 {
+                    animation-duration: 2.8s;
+                    animation-delay: 1.1s;
+                }
+                .tw4 {
+                    animation-duration: 2.1s;
+                    animation-delay: 1.6s;
+                }
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                *,
+                *::before,
+                *::after {
+                    animation: none !important;
+                    transition: none !important;
+                }
+            }
+        </style>
+    </head>
+
+    <body>
+        <div class="tilestrip" aria-hidden="true"></div>
+
+        <a class="back-chip" href="../">&#8592; All designs</a>
+
+        <header class="site-head wrap">
+            <nav class="nav pix" aria-label="Main">
+                <a class="wordmark" href="#"><span class="leaf" aria-hidden="true"></span>Grove</a>
+                <ul class="nav-links">
+                    <li><a href="#">Play</a></li>
+                    <li><a href="#">Create</a></li>
+                    <li><a href="#">Community</a></li>
+                </ul>
+                <a class="btn btn-primary" href="#"><span class="lbl">Join Grove</span></a>
+            </nav>
+        </header>
+
+        <main class="wrap">
+            <!-- ================= HERO ================= -->
+            <section class="hero">
+                <div>
+                    <p class="eyebrow rise">A place to grow</p>
+                    <h1 class="rise d1">Grow your world.</h1>
+                    <p class="sub rise d2">
+                        Build games with friends, explore worlds made by kids like you, and watch
+                        your wildest ideas take root.
+                    </p>
+                    <div class="cta-row rise d3">
+                        <button class="btn btn-primary" type="button">
+                            <span class="lbl">Start playing</span>
+                        </button>
+                        <button class="btn btn-secondary" type="button">
+                            <span class="lbl">Make a game</span>
+                        </button>
+                    </div>
+                </div>
+
+                <figure
+                    class="console pix rise d4"
+                    role="img"
+                    aria-label="A tiny handheld console named GROVE-16. On its screen a pixel sprout grows frame by frame beneath twinkling stars and an autumn tree."
+                >
+                    <div class="screen-frame">
+                        <svg
+                            class="screen"
+                            viewBox="0 0 160 104"
+                            shape-rendering="crispEdges"
+                            aria-hidden="true"
+                        >
+                            <!-- sky -->
+                            <rect x="0" y="0" width="160" height="104" fill="#F6EDD3" />
+                            <!-- sun -->
+                            <rect x="124" y="10" width="16" height="16" fill="#E8B865" />
+                            <rect x="124" y="10" width="4" height="4" fill="#F6EDD3" />
+                            <rect x="136" y="10" width="4" height="4" fill="#F6EDD3" />
+                            <rect x="124" y="22" width="4" height="4" fill="#F6EDD3" />
+                            <rect x="136" y="22" width="4" height="4" fill="#F6EDD3" />
+                            <rect x="118" y="16" width="4" height="4" fill="#E8B865" />
+                            <rect x="142" y="16" width="4" height="4" fill="#E8B865" />
+                            <rect x="130" y="4" width="4" height="4" fill="#E8B865" />
+                            <rect x="130" y="28" width="4" height="4" fill="#E8B865" />
+                            <!-- stars, twinkling in steps -->
+                            <rect class="tw" x="16" y="14" width="4" height="4" fill="#E8B865" />
+                            <rect class="tw tw2" x="64" y="8" width="4" height="4" fill="#C96F43" />
+                            <rect
+                                class="tw tw4"
+                                x="100"
+                                y="18"
+                                width="4"
+                                height="4"
+                                fill="#E8B865"
+                            />
+                            <g class="tw tw3">
+                                <rect x="40" y="20" width="4" height="12" fill="#E8B865" />
+                                <rect x="36" y="24" width="12" height="4" fill="#E8B865" />
+                            </g>
+                            <!-- far moss hill -->
+                            <rect x="0" y="64" width="160" height="16" fill="#7D9C50" />
+                            <rect x="8" y="56" width="36" height="8" fill="#7D9C50" />
+                            <rect x="44" y="60" width="24" height="4" fill="#7D9C50" />
+                            <rect x="112" y="58" width="30" height="6" fill="#7D9C50" />
+                            <!-- autumn tree -->
+                            <rect x="24" y="44" width="8" height="20" fill="#2E2A24" />
+                            <rect x="8" y="36" width="40" height="8" fill="#C96F43" />
+                            <rect x="12" y="28" width="32" height="12" fill="#C96F43" />
+                            <rect x="16" y="20" width="24" height="8" fill="#C96F43" />
+                            <rect
+                                class="tw tw2"
+                                x="52"
+                                y="48"
+                                width="4"
+                                height="4"
+                                fill="#C96F43"
+                            />
+                            <!-- near olive hill -->
+                            <rect x="0" y="80" width="160" height="24" fill="#4C5B3C" />
+                            <rect x="72" y="72" width="40" height="8" fill="#4C5B3C" />
+                            <rect x="80" y="68" width="24" height="4" fill="#4C5B3C" />
+                            <rect x="16" y="86" width="4" height="4" fill="#3E4A31" />
+                            <rect x="120" y="90" width="4" height="4" fill="#3E4A31" />
+                            <rect x="60" y="94" width="4" height="4" fill="#3E4A31" />
+                            <rect x="48" y="76" width="4" height="4" fill="#C96F43" />
+                            <!-- sprout: four growth frames on the mound -->
+                            <g class="fr fr1">
+                                <rect x="88" y="60" width="8" height="8" fill="#C96F43" />
+                                <rect x="96" y="54" width="4" height="4" fill="#E4D5AE" />
+                            </g>
+                            <g class="fr fr2">
+                                <rect x="90" y="52" width="4" height="16" fill="#4C5B3C" />
+                                <rect x="86" y="52" width="4" height="4" fill="#7D9C50" />
+                                <rect x="94" y="48" width="4" height="4" fill="#7D9C50" />
+                                <rect x="90" y="48" width="4" height="4" fill="#7D9C50" />
+                            </g>
+                            <g class="fr fr3">
+                                <rect x="90" y="40" width="4" height="28" fill="#4C5B3C" />
+                                <rect x="82" y="48" width="8" height="4" fill="#7D9C50" />
+                                <rect x="86" y="44" width="4" height="4" fill="#7D9C50" />
+                                <rect x="94" y="44" width="8" height="4" fill="#7D9C50" />
+                                <rect x="98" y="40" width="4" height="4" fill="#7D9C50" />
+                                <rect x="90" y="36" width="4" height="4" fill="#7D9C50" />
+                            </g>
+                            <g class="fr fr4">
+                                <rect x="90" y="36" width="4" height="32" fill="#4C5B3C" />
+                                <rect x="82" y="52" width="8" height="4" fill="#7D9C50" />
+                                <rect x="82" y="48" width="4" height="4" fill="#7D9C50" />
+                                <rect x="94" y="46" width="8" height="4" fill="#7D9C50" />
+                                <rect x="98" y="42" width="4" height="4" fill="#7D9C50" />
+                                <rect x="86" y="24" width="12" height="12" fill="#E8B865" />
+                                <rect x="86" y="24" width="4" height="4" fill="#F6EDD3" />
+                                <rect x="94" y="24" width="4" height="4" fill="#F6EDD3" />
+                                <rect x="86" y="32" width="4" height="4" fill="#F6EDD3" />
+                                <rect x="94" y="32" width="4" height="4" fill="#F6EDD3" />
+                                <rect x="90" y="28" width="4" height="4" fill="#C96F43" />
+                            </g>
+                        </svg>
+                    </div>
+                    <div class="controls" aria-hidden="true">
+                        <div class="dpad"></div>
+                        <div class="ab">
+                            <span class="pbtn">B</span>
+                            <span class="pbtn">A</span>
+                        </div>
+                    </div>
+                    <div class="console-foot" aria-hidden="true">
+                        <span class="console-label">GROVE-16</span>
+                        <span class="speaker"></span>
+                    </div>
+                </figure>
+            </section>
+
+            <!-- ================= FEATURED WORLDS ================= -->
+            <section aria-labelledby="worlds-title">
+                <div class="sec-head rise">
+                    <h2 class="sec-title" id="worlds-title">Featured worlds</h2>
+                    <p class="sec-sub">Fresh from the community garden.</p>
+                </div>
+                <div class="worlds-grid">
+                    <article class="card pix">
+                        <svg
+                            class="card-scene"
+                            viewBox="0 0 128 80"
+                            shape-rendering="crispEdges"
+                            aria-hidden="true"
+                        >
+                            <rect x="0" y="0" width="128" height="80" fill="#F3E9CE" />
+                            <rect x="0" y="60" width="128" height="20" fill="#7D9C50" />
+                            <rect x="12" y="66" width="4" height="4" fill="#5F7C3A" />
+                            <rect x="104" y="70" width="4" height="4" fill="#5F7C3A" />
+                            <rect x="36" y="12" width="52" height="20" fill="#4C5B3C" />
+                            <rect x="36" y="12" width="4" height="4" fill="#F3E9CE" />
+                            <rect x="84" y="12" width="4" height="4" fill="#F3E9CE" />
+                            <rect x="40" y="16" width="12" height="4" fill="#7D9C50" />
+                            <rect x="72" y="20" width="8" height="4" fill="#7D9C50" />
+                            <rect x="52" y="32" width="20" height="28" fill="#2E2A24" />
+                            <rect x="48" y="56" width="4" height="4" fill="#2E2A24" />
+                            <rect x="72" y="56" width="4" height="4" fill="#2E2A24" />
+                            <rect x="58" y="44" width="8" height="12" fill="#E8B865" />
+                            <rect x="56" y="64" width="16" height="4" fill="#C96F43" />
+                            <rect class="tw" x="24" y="24" width="4" height="4" fill="#E8B865" />
+                            <rect
+                                class="tw tw2"
+                                x="92"
+                                y="36"
+                                width="4"
+                                height="4"
+                                fill="#C96F43"
+                            />
+                        </svg>
+                        <h3>Mossy Hollow</h3>
+                        <p class="byline">by Pip</p>
+                        <div class="card-meta">
+                            <span class="live">128 playing</span>
+                            <span class="tag">Adventure</span>
+                        </div>
+                        <div class="card-actions">
+                            <button class="btn btn-secondary" type="button">
+                                <span class="lbl">Play</span>
+                            </button>
+                        </div>
+                    </article>
+
+                    <article class="card pix">
+                        <svg
+                            class="card-scene"
+                            viewBox="0 0 128 80"
+                            shape-rendering="crispEdges"
+                            aria-hidden="true"
+                        >
+                            <rect x="0" y="0" width="128" height="80" fill="#F8ECC9" />
+                            <rect x="108" y="8" width="8" height="8" fill="#E8B865" />
+                            <rect x="16" y="16" width="4" height="4" fill="#2E2A24" />
+                            <rect x="24" y="12" width="4" height="4" fill="#2E2A24" />
+                            <rect x="68" y="14" width="8" height="10" fill="#C96F43" />
+                            <rect class="tw" x="68" y="6" width="4" height="4" fill="#E4D5AE" />
+                            <rect class="tw tw3" x="74" y="2" width="4" height="4" fill="#E4D5AE" />
+                            <rect x="36" y="24" width="48" height="8" fill="#FBF4E1" />
+                            <rect x="24" y="32" width="72" height="16" fill="#FBF4E1" />
+                            <rect x="16" y="40" width="88" height="8" fill="#FBF4E1" />
+                            <rect x="24" y="32" width="4" height="4" fill="#F8ECC9" />
+                            <rect x="92" y="32" width="4" height="4" fill="#F8ECC9" />
+                            <rect x="44" y="36" width="8" height="8" fill="#E8B865" />
+                            <rect x="64" y="36" width="8" height="12" fill="#C96F43" />
+                            <rect
+                                class="tw tw4"
+                                x="100"
+                                y="56"
+                                width="4"
+                                height="4"
+                                fill="#E8B865"
+                            />
+                            <rect x="20" y="60" width="4" height="4" fill="#E4D5AE" />
+                        </svg>
+                        <h3>Cloud Bakery</h3>
+                        <p class="byline">by Luna</p>
+                        <div class="card-meta">
+                            <span class="live">86 playing</span>
+                            <span class="tag">Cozy</span>
+                        </div>
+                        <div class="card-actions">
+                            <button class="btn btn-secondary" type="button">
+                                <span class="lbl">Play</span>
+                            </button>
+                        </div>
+                    </article>
+
+                    <article class="card pix">
+                        <svg
+                            class="card-scene"
+                            viewBox="0 0 128 80"
+                            shape-rendering="crispEdges"
+                            aria-hidden="true"
+                        >
+                            <rect x="0" y="0" width="128" height="80" fill="#F2E8CF" />
+                            <rect x="0" y="56" width="128" height="24" fill="#4C5B3C" />
+                            <rect x="12" y="48" width="4" height="8" fill="#7D9C50" />
+                            <rect x="8" y="44" width="4" height="4" fill="#7D9C50" />
+                            <rect x="28" y="48" width="4" height="8" fill="#7D9C50" />
+                            <rect x="32" y="44" width="4" height="4" fill="#7D9C50" />
+                            <rect x="96" y="48" width="4" height="8" fill="#7D9C50" />
+                            <rect x="92" y="44" width="4" height="4" fill="#7D9C50" />
+                            <rect x="112" y="48" width="4" height="8" fill="#7D9C50" />
+                            <rect x="116" y="44" width="4" height="4" fill="#7D9C50" />
+                            <rect x="62" y="4" width="4" height="8" fill="#2E2A24" />
+                            <rect class="tw" x="62" y="0" width="4" height="4" fill="#E8B865" />
+                            <rect x="52" y="12" width="20" height="14" fill="#C96F43" />
+                            <rect x="56" y="16" width="4" height="4" fill="#E8B865" />
+                            <rect x="64" y="16" width="4" height="4" fill="#E8B865" />
+                            <rect x="48" y="28" width="28" height="20" fill="#C96F43" />
+                            <rect x="56" y="34" width="12" height="10" fill="#2E2A24" />
+                            <rect
+                                class="tw tw2"
+                                x="58"
+                                y="36"
+                                width="4"
+                                height="4"
+                                fill="#E8B865"
+                            />
+                            <rect x="40" y="32" width="8" height="4" fill="#2E2A24" />
+                            <rect x="76" y="32" width="8" height="4" fill="#2E2A24" />
+                            <rect x="48" y="48" width="28" height="8" fill="#2E2A24" />
+                        </svg>
+                        <h3>Robo Garden</h3>
+                        <p class="byline">by Max</p>
+                        <div class="card-meta">
+                            <span class="live">214 playing</span>
+                            <span class="tag">Builder</span>
+                        </div>
+                        <div class="card-actions">
+                            <button class="btn btn-secondary" type="button">
+                                <span class="lbl">Play</span>
+                            </button>
+                        </div>
+                    </article>
+                </div>
+            </section>
+
+            <!-- ================= BITS & PIECES ================= -->
+            <section aria-labelledby="bits-title">
+                <div class="sec-head rise">
+                    <h2 class="sec-title" id="bits-title">Bits &amp; pieces</h2>
+                </div>
+                <div class="bits-grid">
+                    <div class="spec pix">
+                        <h3 class="spec-title">Buttons</h3>
+                        <div class="spec-row">
+                            <button class="btn btn-primary" type="button">
+                                <span class="lbl">Plant it</span>
+                            </button>
+                            <button class="btn btn-secondary" type="button">
+                                <span class="lbl">Maybe later</span>
+                            </button>
+                            <button class="btn" type="button" disabled>
+                                <span class="lbl">Locked</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="spec pix">
+                        <h3 class="spec-title">Text input</h3>
+                        <div class="field">
+                            <label for="nick">Pick a nickname</label>
+                            <input
+                                id="nick"
+                                name="nick"
+                                type="text"
+                                placeholder="mossy_pip"
+                                autocomplete="off"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="spec pix">
+                        <h3 class="spec-title">Toggle</h3>
+                        <button class="toggle" id="soundsToggle" type="button" aria-pressed="true">
+                            <span>Garden sounds</span>
+                            <span class="t-cells" aria-hidden="true">
+                                <span class="cell cell-on">ON</span>
+                                <span class="cell cell-off">OFF</span>
+                            </span>
+                        </button>
+                    </div>
+
+                    <div class="spec pix">
+                        <h3 class="spec-title">Badges</h3>
+                        <div class="spec-row">
+                            <span class="badge"
+                                ><span class="drop drop-sprout" aria-hidden="true"></span>New
+                                sprout</span
+                            >
+                            <span class="badge"
+                                ><span class="drop drop-star" aria-hidden="true"></span>Level
+                                12</span
+                            >
+                            <span class="badge"
+                                ><span class="drop drop-heart" aria-hidden="true"></span>Friends
+                                only</span
+                            >
+                        </div>
+                    </div>
+
+                    <div class="spec pix">
+                        <h3 class="spec-title">Progress</h3>
+                        <div class="xp-wrap">
+                            <div class="xp-label">
+                                <span id="xpLabel">Garden level 7</span>
+                                <span class="pct">64%</span>
+                            </div>
+                            <div
+                                class="xp"
+                                role="progressbar"
+                                aria-labelledby="xpLabel"
+                                aria-valuemin="0"
+                                aria-valuemax="100"
+                                aria-valuenow="64"
+                            >
+                                <div class="xp-fill"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TYPE & TONE ================= -->
+            <section aria-labelledby="type-title">
+                <div class="sec-head rise">
+                    <h2 class="sec-title" id="type-title">Type &amp; tone</h2>
+                </div>
+                <div class="type-list pix" style="padding: var(--sp-5) var(--sp-6)">
+                    <div class="type-row">
+                        <span class="type-tag">Display</span>
+                        <p class="t-display">Big dreams grow here</p>
+                    </div>
+                    <div class="type-row">
+                        <span class="type-tag">Heading</span>
+                        <p class="t-heading">Every garden starts with a seed</p>
+                    </div>
+                    <div class="type-row">
+                        <span class="type-tag">Body</span>
+                        <p class="t-body">
+                            Grove is a cozy corner of the internet where kids build, share, and play
+                            together. Plant an idea, water it with friends, and watch what grows.
+                        </p>
+                    </div>
+                    <div class="type-row">
+                        <span class="type-tag">Caption</span>
+                        <p class="t-caption">Made for ages 8 and up. Grown-ups welcome too.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= PALETTE ================= -->
+            <section aria-labelledby="palette-title">
+                <div class="sec-head rise">
+                    <h2 class="sec-title" id="palette-title">Palette</h2>
+                </div>
+                <div class="pal-grid">
+                    <div class="swatch">
+                        <div class="chip" style="background: var(--parchment)"></div>
+                        <span class="name">Parchment</span>
+                        <span class="hex">#F4EAD2</span>
+                    </div>
+                    <div class="swatch">
+                        <div class="chip" style="background: var(--moss)"></div>
+                        <span class="name">Moss</span>
+                        <span class="hex">#7D9C50</span>
+                    </div>
+                    <div class="swatch">
+                        <div class="chip" style="background: var(--olive)"></div>
+                        <span class="name">Deep olive</span>
+                        <span class="hex">#4C5B3C</span>
+                    </div>
+                    <div class="swatch">
+                        <div class="chip" style="background: var(--rust)"></div>
+                        <span class="name">Rust</span>
+                        <span class="hex">#C96F43</span>
+                    </div>
+                    <div class="swatch">
+                        <div class="chip" style="background: var(--char)"></div>
+                        <span class="name">Char</span>
+                        <span class="hex">#2E2A24</span>
+                    </div>
+                    <div class="swatch">
+                        <div class="chip" style="background: var(--sun)"></div>
+                        <span class="name">Sunbeam</span>
+                        <span class="hex">#E8B865</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- ================= FOOTER ================= -->
+        <footer class="site-foot wrap">
+            <div class="foot-panel pix">
+                <p class="foot-line">Grove &#8212; made with care for curious kids.</p>
+                <ul class="foot-links">
+                    <li><a href="#">Safety</a></li>
+                    <li><a href="#">For grown-ups</a></li>
+                    <li><a href="#">Help</a></li>
+                </ul>
+                <p class="credit">Design direction: Pixel Grove</p>
+            </div>
+        </footer>
+
+        <script>
+            // The one tiny interaction: the pause-menu sound option flips ON/OFF.
+            var soundsToggle = document.getElementById('soundsToggle');
+            soundsToggle.addEventListener('click', function () {
+                var pressed = soundsToggle.getAttribute('aria-pressed') === 'true';
+                soundsToggle.setAttribute('aria-pressed', pressed ? 'false' : 'true');
+            });
+        </script>
+    </body>
+</html>
