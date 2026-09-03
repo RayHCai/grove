@@ -3,11 +3,32 @@
 
 import type { ScriptProps } from '@platform/project';
 import { defined } from '@platform/math';
-import type { HandlerDecl, ScriptLocation } from '../script/index.js';
+import type { HandlerDecl, HandlerKind, ScriptLocation } from '../script/index.js';
 import { getMetadata } from '../script/index.js';
 import type { GuardOwner, ScopeId } from './scope-tree.js';
 
 let nextInstanceId = 1;
+
+const NO_HANDLERS: readonly HandlerDecl[] = [];
+const NO_KINDS: ReadonlySet<HandlerKind> = new Set();
+
+/**
+ * Which handler kinds a class declares, memoised on the metadata array every instance of that
+ * class shares — so a thousand copies of one script build the set once.
+ */
+const KINDS = new WeakMap<readonly HandlerDecl[], ReadonlySet<HandlerKind>>();
+
+function kindsOf(handlers: readonly HandlerDecl[]): ReadonlySet<HandlerKind> {
+    if (handlers.length === 0) return NO_KINDS;
+    let kinds = KINDS.get(handlers);
+    if (kinds === undefined) {
+        const built = new Set<HandlerKind>();
+        for (const decl of handlers) built.add(decl.kind);
+        kinds = built;
+        KINDS.set(handlers, kinds);
+    }
+    return kinds;
+}
 
 export interface ScriptInstance extends GuardOwner {
     readonly instance: object;
@@ -36,13 +57,15 @@ export function makeInstance(
     props?: ScriptProps,
 ): ScriptInstance {
     const meta = getMetadata(klass);
+    // The shared empty rather than a fresh one: `kindsOf` memoises against the array's identity.
+    const handlers = meta?.handlers ?? NO_HANDLERS;
     return {
         id: nextInstanceId++,
         instance,
         klass,
         className: klass.name,
         location: locationOf(klass),
-        handlers: meta?.handlers ?? [],
+        handlers,
         hostScopeId,
         ...defined({ props }),
     };
@@ -156,6 +179,38 @@ export class InstanceRegistry {
         for (const [hostKey, list] of this.#byHost) {
             for (const inst of list) yield [hostKey, inst];
         }
+    }
+
+    /**
+     * The instances declaring `kind`, and their host keys, into two caller-owned parallel arrays.
+     *
+     * What the whole-registry passes walk instead of `Array.from(entries())`. Same order and the
+     * same detachment — `attach` pushes into the lists this reads, so a handler adding a script to
+     * its own host must not extend the pass it is running in — but the copy is two arrays for the
+     * pass rather than a tuple per instance, and it holds only what the kind could reach.
+     */
+    snapshotByKind(kind: HandlerKind, hostsOut: string[], instancesOut: ScriptInstance[]): number {
+        hostsOut.length = 0;
+        instancesOut.length = 0;
+        for (const [hostKey, list] of this.#byHost) {
+            for (let i = 0; i < list.length; i++) {
+                const inst = list[i]!;
+                if (!kindsOf(inst.handlers).has(kind)) continue;
+                hostsOut.push(hostKey);
+                instancesOut.push(inst);
+            }
+        }
+        return instancesOut.length;
+    }
+
+    /**
+     * Whether `inst`'s class declares any handler of `kind`.
+     *
+     * A coarse pre-filter, not a replacement for `matches`: it narrows on kind alone, which is
+     * enough to skip an instance before a context, an array and a promise have been built for it.
+     */
+    declares(inst: ScriptInstance, kind: HandlerKind): boolean {
+        return kindsOf(inst.handlers).has(kind);
     }
 
     clear(): void {
