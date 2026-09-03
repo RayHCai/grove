@@ -17,4 +17,9 @@ export class Runner extends Movable {
     recent(history: readonly number[]): number {
         return history.length;
     }
+
+    // `Function` is a denied global and a parameter name here; the pass must see the binding.
+    applied(Function: (n: number) => number): number {
+        return Function(this.x);
+    }
 }

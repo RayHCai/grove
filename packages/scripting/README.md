@@ -111,10 +111,17 @@ surprise on the tick a prediction diverges:
 | `fetch`                              | `request`, declared on a `ServerScript`      |
 | `window`, `document`, `navigator`, … | a `ClientScript`                             |
 | `globalThis`, `process`              | the binding itself; `@platform/engine`       |
+| `eval`, `Function`, `.constructor`   | the code written out                         |
+| `import(expr)`                       | a static import at the top of the module     |
+| `Reflect`, `Proxy`                   | the property read written out                |
+| `WeakRef`, `FinalizationRegistry`    | an ordinary reference                        |
 
 The rest of `Math` stays legal: `floor`, `abs`, `min`, `max`, `round`, `sqrt` and their kin are
-exactly specified, so they already agree everywhere. `globalThis` is refused because it is how every
-other row would be reached without naming it, and `process` because the browser half has none.
+exactly specified, so they already agree everywhere. `globalThis`, `Reflect`, `Proxy` and a
+`.constructor` read are refused because they are how every other row would be reached without naming
+it; `eval`, `Function` and `import()` because what they run is source no static pass ever read;
+`WeakRef` and `FinalizationRegistry` because the collector's timing is nobody's contract; and
+`process` because the browser half has none.
 
 **This is why it cannot be an oxlint rule.** The identical `Date.now()` is a refusal in a
 `SyncedScript` and correct in a `ClientScript`, and no lint config can express "only inside a

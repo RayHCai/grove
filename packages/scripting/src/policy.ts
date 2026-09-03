@@ -38,6 +38,9 @@ const PRNG =
     "core's PRNGStore is the one draw sequence snapshot and rewind restore; an unseeded one cannot be replayed";
 const NO_DOM =
     'the DOM exists on one end only, and a synced script must reach the same numbers on both';
+const COMPILED = 'a string compiled at run time is source this lexical pass never read';
+const UNNAMED = 'reaching a global without naming it is how this list is evaded';
+const COLLECTOR = "collection timing is the engine's own, and no two runs agree on it";
 
 /**
  * `Math` members denied inside a `SyncedScript`, keyed by member name.
@@ -62,8 +65,9 @@ export const DENIED_MATH: ReadonlyMap<string, Redirect> = new Map([
 /**
  * Globals denied inside a `SyncedScript`, keyed by binding name.
  *
- * `globalThis` and `process` are here although neither is a clock: `globalThis` is how every other
- * entry is reached without naming it, and `process` is absent in the browser half outright.
+ * Not every entry is a clock. `globalThis`, `Reflect` and `Proxy` are how the rest would be reached
+ * without naming one; `eval` and `Function` run source this pass never read; `WeakRef` and
+ * `FinalizationRegistry` expose the collector; and `process` is absent in the browser half outright.
  */
 export const DENIED_GLOBALS: ReadonlyMap<string, Redirect> = new Map<string, Redirect>([
     [
@@ -103,6 +107,26 @@ export const DENIED_GLOBALS: ReadonlyMap<string, Redirect> = new Map<string, Red
             because: 'a synced script runs in the browser too, where process does not exist',
         },
     ],
+    ['eval', { use: 'the code written out', because: COMPILED }],
+    [
+        'Function',
+        {
+            use: 'a function literal',
+            because: `the Function constructor compiles its last argument — ${COMPILED}`,
+        },
+    ],
+    ['Reflect', { use: 'the property read written out', because: UNNAMED }],
+    [
+        'Proxy',
+        {
+            use: 'the object itself',
+            because: `a trap turns a plain read into code, and ${UNNAMED}`,
+        },
+    ],
+    ...(['WeakRef', 'FinalizationRegistry'] as const).map((name): [string, Redirect] => [
+        name,
+        { use: 'an ordinary reference, dropped when the script is detached', because: COLLECTOR },
+    ]),
     ...(
         [
             'window',
@@ -134,4 +158,16 @@ export const ALIASED_MATH: Redirect = {
 export const COMPUTED_MATH: Redirect = {
     use: 'the member name written as a literal',
     because: 'a computed member cannot be checked before it runs',
+};
+
+/** Denied for a `.constructor` read, the one route to `Function` that names nothing on any list. */
+export const CONSTRUCTOR_READ: Redirect = {
+    use: 'the class named directly',
+    because: `every constructor chain ends at Function, and ${COMPILED}`,
+};
+
+/** Denied for `import(expr)`, which reaches a module after the chunk both ends agreed on was built. */
+export const DYNAMIC_IMPORT: Redirect = {
+    use: 'a static import at the top of the module',
+    because: 'a module pulled in at run time is outside the bytes the handshake compared',
 };
