@@ -4,7 +4,14 @@
 import type { Diagnostic } from '../errors.js';
 import { DeterminismError, formatDiagnostic } from '../errors.js';
 import type { Redirect } from '../policy.js';
-import { ALIASED_MATH, COMPUTED_MATH, DENIED_GLOBALS, DENIED_MATH } from '../policy.js';
+import {
+    ALIASED_MATH,
+    COMPUTED_MATH,
+    CONSTRUCTOR_READ,
+    DENIED_GLOBALS,
+    DENIED_MATH,
+    DYNAMIC_IMPORT,
+} from '../policy.js';
 import { asNodes, forEachChild, isNode, nodeName, patternNames, positionAt } from './ast.js';
 import type { Node } from './ast.js';
 import type { SyncedClass } from './analyze.js';
@@ -49,6 +56,7 @@ class Walk {
     #visit(node: Node): void {
         if (node.type === 'Identifier') return this.#identifier(node);
         if (node.type === 'MemberExpression') return this.#member(node);
+        if (node.type === 'ImportExpression') this.#report(node, 'import(…)', DYNAMIC_IMPORT);
 
         const scope = scopeNames(node);
         if (scope) this.#scopes.push(scope);
@@ -66,8 +74,13 @@ class Walk {
 
     #member(node: Node): void {
         const objectName = nodeName(node.object);
-        const member = node.computed === true ? undefined : nodeName(node.property);
+        const read = propertyRead(node);
+        const member = node.computed === true ? undefined : read;
 
+        // Not gated on shadowing: any object's constructor chain ends at Function all the same.
+        if (read === 'constructor') {
+            return this.#report(node, `${objectName ?? ''}.constructor`, CONSTRUCTOR_READ);
+        }
         if (objectName && !this.#shadowed(objectName)) {
             if (objectName === 'Math') {
                 if (member === undefined) {
@@ -103,6 +116,15 @@ class Walk {
             because: redirect.because,
         });
     }
+}
+
+// A literal key counts, because `f['constructor']` reaches Function exactly as `f.constructor` does.
+function propertyRead(node: Node): string | undefined {
+    if (node.computed !== true) return nodeName(node.property);
+    const property = node.property;
+    return isNode(property) && property.type === 'Literal' && typeof property.value === 'string'
+        ? property.value
+        : undefined;
 }
 
 /** The names a scope-creating node declares, or undefined for a node that creates no scope. */
