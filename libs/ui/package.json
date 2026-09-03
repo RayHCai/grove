@@ -1,0 +1,33 @@
+{
+    "name": "@grove/ui",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "The design tokens every Grove surface renders against.",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc -b",
+        "typecheck": "tsc -p tsconfig.test.json",
+        "test": "vitest run --passWithNoTests",
+        "clean": "rm -rf dist .turbo"
+    },
+    "peerDependencies": {
+        "react": ">=19"
+    },
+    "devDependencies": {
+        "@types/react": "^19.2.18",
+        "react": "^19.2.8",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    }
+}

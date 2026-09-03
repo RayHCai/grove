@@ -1,8 +1,8 @@
 {
-    // Solution file for `tsc -b`. `apps/playground` is deliberately ABSENT: it is a Vite app that
-    // emits no declarations and is imported by nothing, and a composite project may not disable
-    // declaration emit (TS6304). Its types are checked by its own `typecheck` script, which turbo
-    // runs alongside every package's.
+    // Solution file for `tsc -b`. Every app is deliberately ABSENT: an app emits no declarations
+    // and is imported by nothing, and a composite project may not disable declaration emit
+    // (TS6304). Their types are checked by their own `typecheck` scripts, which turbo runs
+    // alongside every package's.
     "files": [],
     "references": [
         {
@@ -39,10 +39,13 @@
             "path": "./packages/glue"
         },
         {
-            "path": "./apps/platform"
+            "path": "./libs/ui"
         },
         {
-            "path": "./apps/editor"
+            "path": "./libs/api-contract"
+        },
+        {
+            "path": "./libs/player"
         },
         {
             "path": "./examples"

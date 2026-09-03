@@ -1,6 +1,8 @@
 packages:
     - packages/*
     - apps/*
+    - apps/grove/*
+    - libs/*
     - bench
     - examples
     - integration
