@@ -132,11 +132,16 @@ export function loadGame(manifest: GameManifest = {}, opts: LoadOptions = {}): R
  * a join can land before a Game `@onStart` resumes.
  */
 export function startGame(rt: Runtime): Promise<void> {
-    return drainStarts(rt, {
-        activeLocations: roleLocations(rt),
-        replay: false,
-        tick: rt.tick,
-    });
+    // Ambient runtime established for the same reason `joinPlayer` establishes it: a second
+    // `loadGame` between building this world and starting it repoints the slot every `@onStart`
+    // resolves, and the starts pass gets the wrap from the loop rather than from here.
+    return withRuntime(rt, () =>
+        drainStarts(rt, {
+            activeLocations: roleLocations(rt),
+            replay: false,
+            tick: rt.tick,
+        }),
+    );
 }
 
 /** Dispatches `@onStart` at everything attached since the last drain, in attachment order. */
@@ -152,13 +157,20 @@ function drainStarts(rt: Runtime, dispatch: DispatchOptions): Promise<void> {
 
 /** The world stopped existing, so every attached script's @onEnd runs — the mirror of startGame. */
 export function endGame(rt: Runtime): Promise<void> {
-    return dispatchEach(rt, 'onEnd', '@end');
+    // Ambient runtime established for the same reason `joinPlayer` establishes it; a teardown is as
+    // far from a tick as an entry point gets.
+    return withRuntime(rt, () => dispatchEach(rt, 'onEnd', '@end'));
 }
 
 /** Creates the player record, then lets @onPlayerJoin decide spawn or spectate. */
 export function joinPlayer(rt: Runtime, id: string, name: string): Player {
     const player = rt.wired.playerManager.create(id, name);
-    void dispatchAt(rt, GAME_KEY, 'onPlayerJoin', '@playerJoin', { extra: { player } });
+    // Under `rt`, for the reason `pressWidget` establishes it: a join arrives from a transport
+    // callback rather than a tick, so `every`, `after` and `sleep` inside the handler would resolve
+    // whichever world `loadGame` ran last — and register a timer in it, silently.
+    withRuntime(rt, () => {
+        void dispatchAt(rt, GAME_KEY, 'onPlayerJoin', '@playerJoin', { extra: { player } });
+    });
     return player;
 }
 
@@ -173,9 +185,13 @@ export function leavePlayer(rt: Runtime, id: string): void {
     const player = players.byId(id);
     if (!player) return;
     const ended = { player, alive: false };
-    void dispatchAt(rt, playerKey(id), 'onEnd', '@end', { extra: ended });
-    void dispatchAt(rt, cameraKey(id), 'onEnd', '@end', { extra: ended });
-    void dispatchAt(rt, GAME_KEY, 'onPlayerLeave', '@playerLeave', { extra: { player } });
+    // Ambient runtime established for the same reason `joinPlayer` establishes it; all three are
+    // creator handlers reached from a transport callback rather than from a tick.
+    withRuntime(rt, () => {
+        void dispatchAt(rt, playerKey(id), 'onEnd', '@end', { extra: ended });
+        void dispatchAt(rt, cameraKey(id), 'onEnd', '@end', { extra: ended });
+        void dispatchAt(rt, GAME_KEY, 'onPlayerLeave', '@playerLeave', { extra: { player } });
+    });
     players.remove(id);
 }
 

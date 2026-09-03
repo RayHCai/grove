@@ -1,7 +1,7 @@
 // Every timer is owned by a scope, so it auto-cancels when its host dies. Time is counted in
 // ticks internally and in seconds at the API, so a timer cannot drift with frame rate.
 
-import { currentInvocation } from '../dispatch/ambient.js';
+import { currentInvocation, resumeWith } from '../dispatch/ambient.js';
 import type { GuardOwner, ScopeId } from '../dispatch/scope-tree.js';
 import { NO_SCOPE } from '../dispatch/scope-tree.js';
 import { entityIndex } from '../ids.js';
@@ -105,19 +105,23 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
         // and an unawaited `sleep` then raised an unhandled rejection rather than a call-site error.
         const remaining = this.#toTicks(seconds);
         const id = this.#nextId++;
-        return new Promise<void>((resolve) => {
-            this.#timers.set(id, {
-                id,
-                kind: 'sleep',
-                hostScopeId,
-                remaining,
-                interval: 0,
-                fn: null,
-                resolve,
-                owner: null,
-                cancelled: false,
-            });
-        });
+        // Wrapped, because the code past the await is the handler's: unwrapped, `every` after a
+        // `sleep` registered on no host at all and outlived the host that asked for it.
+        return resumeWith(
+            new Promise<void>((resolve) => {
+                this.#timers.set(id, {
+                    id,
+                    kind: 'sleep',
+                    hostScopeId,
+                    remaining,
+                    interval: 0,
+                    fn: null,
+                    resolve,
+                    owner: null,
+                    cancelled: false,
+                });
+            }),
+        );
     }
 
     cancel(id: number): void {
