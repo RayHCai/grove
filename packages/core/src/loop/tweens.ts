@@ -117,12 +117,20 @@ export class TweenEngine {
         for (const id of doomed) this.cancel(id);
     }
 
-    /** Advances every tween a tick, in ascending id order because determinism needs one. */
+    /**
+     * Advances every tween a tick, in ascending id order because determinism needs one.
+     *
+     * Insertion order is already that order — ids come from a monotonic counter and nothing
+     * re-inserts an old one — so the map is walked directly. `horizon` stands in for the key
+     * snapshot the walk used to take: a guarded `set` reaches a creator setter that may call
+     * `tween()`, and a live iterator would otherwise advance that tween on the tick it started.
+     */
     advance(): void {
-        const ids = [...this.#tweens.keys()].toSorted((a, b) => a - b);
-        for (const id of ids) {
-            const tween = this.#tweens.get(id);
-            if (!tween || tween.cancelled) continue;
+        if (this.#tweens.size === 0) return;
+        const horizon = this.#nextId;
+        for (const tween of this.#tweens.values()) {
+            if (tween.cancelled || tween.id >= horizon) continue;
+            const id = tween.id;
 
             tween.elapsed += 1;
             const t = Math.min(1, tween.elapsed / tween.durationTicks);
