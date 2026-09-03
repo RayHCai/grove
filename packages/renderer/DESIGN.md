@@ -202,9 +202,10 @@ kill a level load; unknown unload names are reported, not thrown.
 - `nodeAt(screenPoint, opts?)` is **screen space in, `NodeId` out** — the same CSS pixels
   `screenToWorld` takes, so one conversion serves both. It walks the live index once against each
   node's `screenBoundsOf`, keeping the topmost by the draw order the surfaces above define, then
-  `layer`, then index — the same three keys the renderer sorts by, so the answer is the node a person
-  sees on top. Groups are skipped (no art, so nothing was drawn to hit) as are invisible nodes, whose
-  hidden state includes an ancestor's; `{ surface }` narrows the walk to one. `NO_NODE` on a miss,
+  `layer`, then `NodeRecord.ordinal` — creation order, never slot index, which the LIFO freelist
+  runs backwards after a destroy — so the answer is the node a person sees on top. Groups are
+  skipped (no art, so nothing was drawn to hit) as are invisible nodes, whose hidden state includes
+  an ancestor's; `{ surface }` narrows the walk to one. `NO_NODE` on a miss,
   before `init`, and after `destroy` — never `null`, matching `inspect`. It belongs here rather than
   in a caller because the renderer holds the pose it **drew**: a caller with its own poses is off by
   whatever it interpolates or buffers away between the simulation and the frame.
