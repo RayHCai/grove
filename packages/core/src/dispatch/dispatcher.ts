@@ -1,7 +1,7 @@
 // Synchronous to the first await: every matching handler runs to its first `await` before
 // `dispatch` returns, and the promise it returns settles once they all finish.
 
-import { BREAKER_THRESHOLD, MAX_DEDUP_KEYS, MAX_SEND_DEPTH } from '../config.js';
+import { BREAKER_THRESHOLD, MAX_DEDUP_KEYS, MAX_HANDLER_MS, MAX_SEND_DEPTH } from '../config.js';
 import type { EventPhase, HandlerDecl, HandlerKind, ScriptLocation } from '../script/index.js';
 import { defaultConcurrency } from '../script/index.js';
 import type { BreakerTrip, HandlerErrorRecord } from '../errors.js';
@@ -26,6 +26,14 @@ export interface DispatchCtx {
 export interface DispatchLog {
     error(record: HandlerErrorRecord & { phase?: string; disabled?: boolean }): void;
 }
+
+// `performance` is a host global on both ends but sits in neither this package's `lib` nor its
+// types, and core stays free of DOM and Node typings; `Date.now` is the fallback because a budget
+// that silently stopped being enforced is worse than one a clock step can misread once.
+const elapsedMs: () => number = (() => {
+    const host = (globalThis as { performance?: { now(): number } }).performance;
+    return host === undefined ? () => Date.now() : () => host.now();
+})();
 
 function matches(
     decl: HandlerDecl,
@@ -102,8 +110,8 @@ export class Dispatcher {
      * timer or tween callback, a countdown's completion — under the boundary a handler already gets.
      *
      * The same dedup, log and breaker as `#invoke`, because a second implementation of any of the
-     * three would diverge from it the first time one is tuned. Returns false when the breaker has
-     * already disabled this `(owner, method)` and `fn` was therefore not called.
+     * three would diverge from it the first time one is tuned. Returns false when the breaker had
+     * already disabled this `(owner, method)`, and when the call threw or overran its budget.
      */
     guard(owner: GuardOwner | null, site: GuardSite, fn: () => void): boolean {
         // An unowned callback cannot be disabled — there is no instance to charge — but it is still
@@ -111,12 +119,30 @@ export class Dispatcher {
         if (owner !== null && this.#breaker.count(owner.id, site.method) >= BREAKER_THRESHOLD) {
             return false;
         }
+        // An invocation of its own, because what `fn` registers is charged to the ambient one: a
+        // timer started from a timer callback would otherwise land on whichever host settled last.
+        const scope =
+            owner === null
+                ? null
+                : this.#scopes.createInvocation(
+                      owner.hostScopeId,
+                      site.tick,
+                      `guard:${site.method}`,
+                      owner,
+                  );
+        const outer = currentInvocation();
+        setCurrentInvocation(scope);
+        const startedAt = elapsedMs();
         try {
             fn();
         } catch (err) {
             this.#recordThrow(owner, site, err);
             return false;
+        } finally {
+            setCurrentInvocation(outer);
+            if (scope !== null) this.#scopes.completeInvocation(scope);
         }
+        if (this.#chargeOverrun(owner, site, startedAt)) return false;
         if (owner !== null) this.#breaker.recordSuccess(owner.id, site.method);
         return true;
     }
@@ -197,6 +223,7 @@ export class Dispatcher {
         setActingPlayer(ctx.player ?? null);
         let result: unknown;
         let called = false;
+        const startedAt = elapsedMs();
         try {
             // Inside the try because the read itself can run creator code: a handler declared as a
             // getter rather than a method invokes it here, and a throw would escape the boundary.
@@ -221,16 +248,23 @@ export class Dispatcher {
         }
 
         if (!(result instanceof Promise)) {
-            this.#breaker.recordSuccess(si.id, method);
+            if (!this.#chargeOverrun(si, site, startedAt))
+                this.#breaker.recordSuccess(si.id, method);
             this.#scopes.completeInvocation(scope);
             return null;
         }
 
+        // The synchronous span alone, never the wall time to the settle: `await sleep(30)` is a
+        // parked handler rather than a busy one, and charging it would disable every handler that waits.
+        const overran = this.#chargeOverrun(si, site, startedAt);
+
         // Only once the promise settles: recording success when the call returns — at the first
         // await — resets the count before the rejection arrives, so the breaker never trips.
-        return resumeWith(scope, result as Promise<unknown>).then(
+        // Wrapped after the ambient has gone back to `outer`, so a handler that settles between
+        // ticks leaves the slot where it found it rather than holding a finished invocation open.
+        return resumeWith(result as Promise<unknown>).then(
             () => {
-                this.#breaker.recordSuccess(si.id, method);
+                if (!overran) this.#breaker.recordSuccess(si.id, method);
                 if (!scope.dead) this.#scopes.completeInvocation(scope);
             },
             (err: unknown) => {
@@ -240,6 +274,24 @@ export class Dispatcher {
                 }
             },
         );
+    }
+
+    /**
+     * Charges a call that held the tick past `MAX_HANDLER_MS`, as a throw rather than a success.
+     *
+     * A budget checked on the way out, because nothing inside one realm can interrupt a synchronous
+     * loop: what this bounds is how many more times such a call is entered, since the count it
+     * charges reaches `BREAKER_THRESHOLD` and disables it like any other failure. The message carries
+     * no measurement, so a slow handler is one dedup key rather than one per millisecond.
+     */
+    #chargeOverrun(owner: GuardOwner | null, site: GuardSite, startedAt: number): boolean {
+        if (elapsedMs() - startedAt <= MAX_HANDLER_MS) return false;
+        this.#recordThrow(
+            owner,
+            site,
+            new RangeError(`held the tick past the ${MAX_HANDLER_MS}ms budget`),
+        );
+        return true;
     }
 
     #recordThrow(owner: GuardOwner | null, site: GuardSite, err: unknown): void {

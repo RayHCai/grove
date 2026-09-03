@@ -1,10 +1,11 @@
 // Load order, lifecycle, request path, and wire-time rejections.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { Roll, Rules, SyncedWithRequest } from '../dist/testkit/fixtures.js';
+import { Roll, RosterProbe, Rules, SyncedWithRequest } from '../dist/testkit/fixtures.js';
 import { loadGame, startGame, joinPlayer, leavePlayer } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import { request } from '../src/runtime/request.js';
+import { every } from '../src/runtime/time.js';
 import { Loop } from '../src/loop/loop.js';
 import { game } from '../src/runtime/game.js';
 
@@ -53,6 +54,41 @@ describe('wire-time rejections', () => {
 function tick(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+function probeOn(rt: ReturnType<typeof loadGame>): RosterProbe {
+    return [...rt.instances.forHost('game')][0]!.instance as RosterProbe;
+}
+
+// A roster edge arrives from a transport callback rather than from a tick, so nothing else on the
+// stack has established the ambient runtime the module consts and `every`/`after`/`sleep` resolve.
+describe('roster dispatch under its own runtime', () => {
+    it('registers a join handler timer in the dispatching world, not the last one loaded', async () => {
+        const rtA = loadGame({ gameScripts: [RosterProbe as never] });
+        probeOn(rtA).onJoin = (): void => {
+            every(1, () => {});
+        };
+        const rtB = loadGame(); // a client mirror in the same process, as a soak or a browser tab has
+        joinPlayer(rtA, 'p1', 'Ada');
+        await tick();
+
+        expect(rtA.timers.pendingCount).toBe(1);
+        expect(rtB.timers.pendingCount).toBe(0);
+    });
+
+    it('does the same for a leave', async () => {
+        const rtA = loadGame({ gameScripts: [RosterProbe as never] });
+        joinPlayer(rtA, 'p1', 'Ada');
+        probeOn(rtA).onLeave = (): void => {
+            every(1, () => {});
+        };
+        const rtB = loadGame();
+        leavePlayer(rtA, 'p1');
+        await tick();
+
+        expect(rtA.timers.pendingCount).toBe(1);
+        expect(rtB.timers.pendingCount).toBe(0);
+    });
+});
 
 describe('leavePlayer', () => {
     it('dispatches @onPlayerLeave BEFORE the roster removal, then removes', async () => {

@@ -24,6 +24,7 @@ import {
 import type { ScriptProps } from '@platform/project';
 import type { Camera } from '../runtime/camera.js';
 import type { Entity } from '../runtime/entity.js';
+import type { Game } from '../runtime/game.js';
 import type { HUDScreen } from '../runtime/hud.js';
 import { BaseMovement } from '../runtime/movement.js';
 import type { Player } from '../runtime/player.js';
@@ -219,6 +220,22 @@ export class Roll extends ServerScript {
     leave(ctx: Ctx): void {
         this.left.push((ctx.player as { id: string }).id);
         this.probe?.();
+    }
+}
+
+/** Roster handlers that call back into the test, which holds the globals a dist fixture cannot see. */
+export class RosterProbe extends ServerScript<Game> {
+    onJoin: (() => void) | null = null;
+    onLeave: (() => void) | null = null;
+
+    @onPlayerJoin
+    join(): void {
+        this.onJoin?.();
+    }
+
+    @onPlayerLeave
+    leave(): void {
+        this.onLeave?.();
     }
 }
 

@@ -9,7 +9,7 @@ import type { Vec3 } from '@platform/math';
 import { currentRuntime } from './runtime.js';
 import type { Runtime } from './runtime.js';
 import { NO_SCOPE } from '../dispatch/scope-tree.js';
-import { currentInvocation } from '../dispatch/ambient.js';
+import { currentInvocation, resumeWith } from '../dispatch/ambient.js';
 import type { TweenTarget } from '../loop/tweens.js';
 
 // The animated entity owns the timer, not the caller: `oscillate(other)` from a Game handler used
@@ -57,11 +57,15 @@ export function tween(
         'entityId' in target
             ? entityScope(rt, target as Entity)
             : (currentInvocation()?.hostId ?? NO_SCOPE);
-    return Promise.all(
-        Object.entries(props).map(([prop, to]) =>
-            rt.tweens.start(t, prop, to, seconds, scope, easing),
-        ),
-    ).then(() => undefined);
+    // Wrapped here too, not only inside `start`: an empty `props` awaits a `Promise.all([])` that
+    // no tween resolves, so nothing else would put the invocation back for the code past the await.
+    return resumeWith(
+        Promise.all(
+            Object.entries(props).map(([prop, to]) =>
+                rt.tweens.start(t, prop, to, seconds, scope, easing),
+            ),
+        ).then(() => undefined),
+    );
 }
 
 function asTweenTarget(target: object): TweenTarget {

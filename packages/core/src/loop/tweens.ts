@@ -4,7 +4,7 @@
 
 import type { Easing } from '@platform/math';
 import { ease, lerp } from '@platform/math';
-import { currentInvocation } from '../dispatch/ambient.js';
+import { currentInvocation, resumeWith } from '../dispatch/ambient.js';
 import type { GuardOwner, ScopeId } from '../dispatch/scope-tree.js';
 import { NO_SCOPE } from '../dispatch/scope-tree.js';
 import type { GuardedCall } from './timers.js';
@@ -73,24 +73,28 @@ export class TweenEngine {
         }
         const id = this.#nextId++;
         const durationTicks = Math.max(1, Math.round(seconds * this.#simRate));
-        return new Promise<void>((resolve) => {
-            const tween: Tween = {
-                id,
-                hostScopeId,
-                target,
-                prop,
-                from: target.get(prop),
-                to,
-                elapsed: 0,
-                durationTicks,
-                easing,
-                resolve,
-                owner: currentInvocation()?.owner ?? null,
-                cancelled: false,
-            };
-            this.#tweens.set(id, tween);
-            this.#byProp.set(propKey, id);
-        });
+        // Wrapped for the same reason `sleep` is: an `await glideTo(...)` is an await like any other,
+        // and what the handler registers after it belongs to the host that started the tween.
+        return resumeWith(
+            new Promise<void>((resolve) => {
+                const tween: Tween = {
+                    id,
+                    hostScopeId,
+                    target,
+                    prop,
+                    from: target.get(prop),
+                    to,
+                    elapsed: 0,
+                    durationTicks,
+                    easing,
+                    resolve,
+                    owner: currentInvocation()?.owner ?? null,
+                    cancelled: false,
+                };
+                this.#tweens.set(id, tween);
+                this.#byProp.set(propKey, id);
+            }),
+        );
     }
 
     cancel(id: number): void {
