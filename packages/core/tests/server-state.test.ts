@@ -8,6 +8,7 @@ import {
     STATE_TARGET,
     authoredValue,
     hasNoDataProperty,
+    hoistReplicated,
     redirectState,
 } from '../src/state/backing.js';
 
@@ -66,5 +67,58 @@ describe('@serverState accessor pair', () => {
         w.credits = 501;
         expect(record.get('credits')).toBe(501);
         expect(marked).toEqual(['credits']);
+    });
+});
+
+// Field names reach this from the wire, so what it refuses is a peer's reach into the facade.
+describe('hoistReplicated', () => {
+    it('defines a read-only accessor over the record for a free name', () => {
+        const host = {};
+        const values = new Map<string, unknown>([['phase', 'running']]);
+
+        expect(hoistReplicated(host, 'phase', values)).toBe(true);
+        expect((host as { phase: string }).phase).toBe('running');
+        values.set('phase', 'idle');
+        expect((host as { phase: string }).phase).toBe('idle');
+    });
+
+    it('is idempotent for a name it defined, without reporting a refusal', () => {
+        const host = {};
+        const values = new Map<string, unknown>([['phase', 'running']]);
+
+        expect(hoistReplicated(host, 'phase', values)).toBe(true);
+        expect(hoistReplicated(host, 'phase', values)).toBe(true);
+    });
+
+    it('refuses a name the host inherits, leaving the member callable', () => {
+        class Facade {
+            get players(): string[] {
+                return ['ada'];
+            }
+            spawn(): string {
+                return 'spawned';
+            }
+        }
+        const host = new Facade();
+
+        expect(hoistReplicated(host, 'players', new Map([['players', 0]]))).toBe(false);
+        expect(hoistReplicated(host, 'spawn', new Map([['spawn', 0]]))).toBe(false);
+        expect(host.players).toEqual(['ada']);
+        expect(host.spawn()).toBe('spawned');
+    });
+
+    it('refuses a name the host owns as a field, which it would otherwise leave diverged', () => {
+        const host = { id: 'p1' };
+        expect(hoistReplicated(host, 'id', new Map([['id', 'other']]))).toBe(false);
+        expect(host.id).toBe('p1');
+    });
+
+    it('tracks its own names per host, so one facade does not exempt another', () => {
+        const values = new Map<string, unknown>([['phase', 'running']]);
+        const first = {};
+        const second = Object.create({ phase: 'inherited' }) as object;
+
+        expect(hoistReplicated(first, 'phase', values)).toBe(true);
+        expect(hoistReplicated(second, 'phase', values)).toBe(false);
     });
 });
