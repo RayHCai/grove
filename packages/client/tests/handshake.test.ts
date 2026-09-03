@@ -14,6 +14,7 @@ import { GameClient } from '../src/client.js';
 import {
     ACK_STALL_TICKS,
     BUNDLE_DEADLINE_SECONDS,
+    JOIN_DEADLINE_SECONDS,
     MAX_WIRE_ITEMS,
     RING_TICKS,
 } from '../src/constants.js';
@@ -256,6 +257,18 @@ describe('the join sequence', () => {
         expect(h.client.stats().nodeCount).toBe(2);
     });
 
+    it('fails a join the server never answers, rather than waiting for the life of the tab', async () => {
+        // The server closes an unjoined connection on its own deadline; with no symmetric one here a
+        // peer that accepts the socket and says nothing leaves a spinner up forever.
+        const h = await harness({ ignoreJoin: true });
+        h.runSilent(3);
+        expect(h.client.state).toBe('connecting');
+
+        h.runSilent(Math.ceil(JOIN_DEADLINE_SECONDS / TICK) + 2);
+        expect(h.client.state).toBe('failed');
+        expect(h.client.lifecycle.failure?.kind).toBe('peer');
+    });
+
     it('measures a NON-ZERO lead in loopback, so the lead loop executes in local mode', async () => {
         // Loopback delivers server→client one tick late by construction, so a local run has real
         // latency, a real lead, and every line of the lead loop executes in a single-player playtest.
@@ -296,6 +309,26 @@ describe('a snapshot too big for one frame', () => {
         expect(h.client.state).toBe('failed');
         expect(h.client.lifecycle.failure?.kind).toBe('peer');
         expect(h.client.mirror).toBeUndefined();
+    });
+
+    it('refuses a set past the byte budget, which the count cap alone does not bound', async () => {
+        // A chunk may be megabytes, so a cap on how MANY are held bounds no memory at all: the set
+        // below is well inside the count and a gigabyte-scale peer would be too.
+        const blob = 'x'.repeat(1024 * 1024);
+        const h = await harness({
+            snapshotTick: 10,
+            entities: Array.from({ length: 20 }, (_, i) =>
+                entity(i + 1, 'wall', { tags: [blob] as never }),
+            ),
+            snapshotChunks: 20,
+        });
+        h.run(3);
+
+        expect(h.client.stats().snapshotChunksDropped).toBeGreaterThan(0);
+        // And what is left no longer adds up to the count the `Welcome` names, so the join is refused
+        // rather than opening a session on the half of the world that fitted.
+        expect(h.client.state).toBe('failed');
+        expect(h.client.lifecycle.failure?.kind).toBe('peer');
     });
 
     it('leaves an unchunked welcome exactly as it was', async () => {
@@ -416,6 +449,43 @@ describe('the script bundle is verified before it is run', () => {
         expect(h.server.received[0]).toMatchObject({ bundleHash: named.hash });
     });
 
+    it('does not open a session on a socket that closed while the bundle was in flight', async () => {
+        // The load resolves into a session that no longer exists: opening it would go `live` on a
+        // frozen frame source, with no failure text and nothing to correct the world it shows.
+        const bundle = new ScriptedBundle(named.hash);
+        const h = await harness({ bundle: named }, { bundle: bundle.source() });
+        h.run(2);
+        expect(h.client.state).toBe('loading');
+
+        h.server.close();
+        h.run(2);
+        expect(h.client.state).toBe('disconnected');
+
+        bundle.release();
+        await settle();
+
+        expect(h.client.state).toBe('disconnected');
+        expect(h.client.mirror).toBeUndefined();
+    });
+
+    it('fails as `peer` when the welcome’s world throws after the load, not wedging in `loading`', async () => {
+        // The same malformed snapshot fails cleanly through the drain's catch; arriving down the load
+        // path it escapes into a promise, and the session sits in `loading` with nothing left to end it.
+        const bundle = new ScriptedBundle(named.hash);
+        const h = await harness(
+            { bundle: named, entities: [{ netId: 9, template: 'x' } as never] },
+            { bundle: bundle.source() },
+        );
+        h.run(2);
+        expect(h.client.state).toBe('loading');
+
+        bundle.release();
+        await settle();
+
+        expect(h.client.state).toBe('failed');
+        expect(h.client.lifecycle.failure?.kind).toBe('peer');
+    });
+
     it('fails a fetch that never answers, rather than holding envelopes for the tab’s lifetime', async () => {
         const bundle = new ScriptedBundle(named.hash);
         const h = await harness({ bundle: named }, { bundle: bundle.source() });
@@ -496,6 +566,26 @@ describe('a refusal is distinguishable from a drop', () => {
         h.run(3);
         expect(h.client.state).toBe('failed');
         expect(h.client.lifecycle.failure?.kind).toBe('undecodable');
+    });
+
+    it('closes the transport on failure, so the peer cannot keep filling an inbox nothing drains', async () => {
+        // A failed session stops its frame source, and nothing drains the inbox after that: left
+        // connected, every later envelope the peer sends is memory held for the life of the tab.
+        const h = await harness();
+        untilLive(h);
+        h.server.sendRaw({
+            kind: 'state',
+            tick: h.server.tick,
+            ackSeq: 0,
+            structural: [{ kind: 'spawn', snapshot: { netId: 9, template: 'x' } }],
+            state: [],
+        });
+        h.run(2);
+        expect(h.client.state).toBe('failed');
+
+        // The frame source is stopped, so the close crosses on a bare deliver rather than on a frame.
+        h.flush();
+        expect(h.server.closed).toBe(true);
     });
 
     it('reaches `disconnected` on a bare close and stops the frame source', async () => {

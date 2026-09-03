@@ -67,8 +67,9 @@ browser passes rAF and a headless host drives it by hand.
    the newest of them. A frame that advanced none sends nothing.
 4. `#predict()` — carry the predicted world to `localTick`. After the flush, so the tick just stamped is
    replayed on the frame it was sent; only while `live`.
-5. `#checkBundleDeadline()` → `bundle` failure; `#checkNotBehind()` → resync; `#checkLiveness()` → `stalled`
-   in **both** directions; `#maybeSync()`.
+5. `#checkJoinDeadline()` → `peer` failure on a join nothing answered; `#checkBundleDeadline()` → `bundle`
+   failure; `#checkNotBehind()` → resync; `#checkLiveness()` → `stalled` in **both** directions;
+   `#maybeSync()`.
 6. `#displayUpdate(now)` — core's `displayUpdate` over the mirror's runtime: every `client`-located
    instance's `@onUpdate`, once, with the wall dt between frames clamped to `MAX_FRAME_DT`. Here and not
    in step 3, because this is a render pass and not a tick — a frame that advanced three ticks still runs it
@@ -108,8 +109,9 @@ in it. `TimeSync` refreshes every
 
 **A snapshot arriving in pieces is reassembled here, not in the mirror.** `snapshot-chunk` envelopes precede
 their `Welcome`, which names how many there were; `SnapshotChunks` holds them — bounded at
-`MAX_SNAPSHOT_CHUNKS`, because they are memory kept before anything has been validated — and folds them onto
-`snapshot.entities` / `snapshot.state` **ahead** of the welcome's own remainder, since `entities` is
+`MAX_SNAPSHOT_CHUNKS` frames and `MAX_SNAPSHOT_BYTES` of payload, because a count bounds frames and not the
+memory kept before anything has been validated — and folds them onto `snapshot.entities` /
+`snapshot.state` **ahead** of the welcome's own remainder, since `entities` is
 parents-before-children across the whole set. The fold runs before `isUsableWelcome`, so every path below it
 sees one whole world and chunking is invisible past that line. A set that does not match the count fails the
 session as `peer`: a world missing entities the server believes it sent reads later as a mirror bug rather
@@ -133,7 +135,9 @@ the session at once (`bundleUrl === ''`, or this process already holds that hash
 A missing `GameClientOptions.bundle` against a server that names one is a `bundle` failure, never a silent
 skip. `BUNDLE_DEADLINE_SECONDS` bounds the wait and, with it, the held inbox. The verified hash **survives a
 resync** — the code is in this process — while any in-flight load does not, since its welcome will never be
-answered.
+answered. A load whose session has since closed, resynced or been torn down opens nothing: the state is
+re-checked after the await, and the open itself carries the drain's own catch, so a snapshot that throws on
+the way up fails as `peer` down this path exactly as it does down the other.
 
 ## The mirror ([src/mirror.ts](src/mirror.ts))
 
@@ -295,7 +299,9 @@ rather than accumulates and a measurement blind to the ease still in flight woul
 drawn position by the residual once per envelope. It is handed to `RenderBridge` as a decaying offset, in
 world units, applied where a drawn position is computed and nowhere else. Past
 `CORRECTION_SNAP_DISTANCE_SQUARED` it is shown at once, since easing a teleport draws a slide the simulation
-never made. The scope is handed to `RenderBridge` live, because it is also the exclusion list for the
+never made, and counted onto `ClientStats.snappedCorrections` — a rising count is a client whose authority
+keeps disagreeing with it by more than an ease can hide. The scope is handed to `RenderBridge` live, because
+it is also the exclusion list for the
 interpolation buffer: an entity is either predicted or interpolated, never both. `GameClient` resolves the
 follow camera through the bridge's drawn pose, or the avatar slides across the screen on every correction.
 
@@ -415,19 +421,25 @@ map keys on the **local `EntityId`**, so the render layer never learns there is 
 
 ## Lifecycle ([src/lifecycle.ts](src/lifecycle.ts))
 
-| State          | Entered when                                                      | Input |
-| -------------- | ----------------------------------------------------------------- | ----- |
-| `connecting`   | `JoinRequest` sent, no `Welcome` yet                              | no    |
-| `loading`      | `Welcome` accepted, its bundle still fetching                     | no    |
-| `live`         | `Welcome` applied, clock seeded                                   | yes   |
-| `stalled`      | no envelope for `STALL_SECONDS`, **or** `ackSeq` frozen           | no    |
-| `resyncing`    | `localTick < depictedTick`, or a `RateChange`                     | no    |
-| `disconnected` | `onClose` fired                                                   | no    |
-| `failed`       | `Reject`, unusable `Welcome`, a bad bundle, or a `TransportError` | no    |
+| State          | Entered when                                                                          | Input |
+| -------------- | ------------------------------------------------------------------------------------- | ----- |
+| `connecting`   | `JoinRequest` sent, no `Welcome` yet                                                  | no    |
+| `loading`      | `Welcome` accepted, its bundle still fetching                                         | no    |
+| `live`         | `Welcome` applied, clock seeded                                                       | yes   |
+| `stalled`      | no envelope for `STALL_SECONDS`, **or** `ackSeq` frozen                               | no    |
+| `resyncing`    | `localTick < depictedTick`, or a `RateChange`                                         | no    |
+| `disconnected` | `onClose` fired                                                                       | no    |
+| `failed`       | `Reject`, unusable `Welcome`, a bad bundle, an unanswered join, or a `TransportError` | no    |
 
-`failed` is terminal and absorbs later transitions. `FailureReason` distinguishes `rejected` (with phrased
+`failed` and `disconnected` are terminal and absorb later transitions, `failed` outranking a close that
+arrived first because it is the only state that says why — a `Reject` and the close it causes land in one
+delivery. Every failure also **closes the transport** and drops the handlers with it: a session whose frame
+source has stopped drains nothing, so an open socket would go on decoding the peer's envelopes into an inbox
+for the life of the tab. `FailureReason` distinguishes `rejected` (with phrased
 reason + `serverProtocolVersion`), `undecodable`, `internal` (`encode-rejected` — our bug), `peer`
-(a malformed or hostile frame, including an envelope that threw while applying) and `bundle` (code that would
+(a malformed or hostile frame, an envelope that threw while applying, or a join unanswered past
+`JOIN_DEADLINE_SECONDS` — the client's half of the server's own join deadline, which is otherwise a spinner
+for the life of the tab) and `bundle` (code that would
 not load, or was not the code the server said it would be). `loading` refuses input for the reason `stalled`
 does not cover: there is no session yet, so there is nothing for a tick to be stamped against. Both stall triggers are
 evidence about the _connection_; ring occupancy deliberately is not, or an energetic player could disable
@@ -445,8 +457,9 @@ Each constant states its unit in its own doc line, because mixing them is the fa
 | `HEADROOM_TARGET` 2 · `LEAD_MIN_TICKS` 1 | `LEAD_MAX_SECONDS` = core's `MAX_REWIND_MS` / 1000 · `SYNC_INTERVAL_SECONDS` 2 · `MAX_FRAME_DT` .1 · `STALL_SECONDS` 1 · `CORRECTION_SMOOTH_SECONDS` .1 · `MAX_INTERPOLATION_DELAY_SECONDS` .1 | `GAIN` .25 · `NUDGE_MAX` .02 · `AXIS_QUANTUM` 1/64 |
 
 Plus, in the session's own ticks: `ACK_STALL_TICKS` 60, `RING_TICKS` 48, `MAX_REPLAY_TICKS` 48. In world
-units squared, `CORRECTION_SNAP_DISTANCE_SQUARED` 64². In seconds, `BUNDLE_DEADLINE_SECONDS` 30; in bytes,
-`MAX_BUNDLE_BYTES` 8 MiB. In frames, `MAX_SNAPSHOT_CHUNKS` 256. And `DEFAULT_VIEWPORT`, the extent the
+units squared, `CORRECTION_SNAP_DISTANCE_SQUARED` 64². In seconds, `BUNDLE_DEADLINE_SECONDS` 30 and
+`JOIN_DEADLINE_SECONDS` 10; in bytes, `MAX_BUNDLE_BYTES` 8 MiB and `MAX_SNAPSHOT_BYTES` 16 MiB. In frames,
+`MAX_SNAPSHOT_CHUNKS` 256. And `DEFAULT_VIEWPORT`, the extent the
 cursor quantum falls back to before the first `Welcome`.
 
 ## Traps
@@ -471,3 +484,5 @@ Each of these is load-bearing and reads as removable.
 | `#resumeInput`               | re-assert a press unconditionally: after a stall the server still holds it and the handler fires twice                               |
 | `BindingTable.#down`         | clear it on resync: the release edge for every key held across it is then never sent                                                 |
 | `destroy()`'s `clearRuntime` | call it unconditionally: core keeps one module-global and a second client loses its own runtime                                      |
+| `Lifecycle.fail`             | route it through `to()`: the close a `Reject` causes is delivered with it, and the session would end terminal with no reason         |
+| `onClose`                    | drop the inbox with the rest: a `Reject` rides in ahead of the close it caused, and this frame's drain is what turns it into text    |
