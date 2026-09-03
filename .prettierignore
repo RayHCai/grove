@@ -4,6 +4,9 @@ dist
 pnpm-lock.yaml
 *.log
 
+# Benchmark results, written by a tool and never edited by hand.
+bench/runs
+
 # Local agent/editor tooling config, not project source.
 .claude
 
