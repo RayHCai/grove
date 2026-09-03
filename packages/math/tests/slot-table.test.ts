@@ -1,12 +1,19 @@
 // Contract tests for the slot table.
 //
-// Three properties carry the whole design and each fails silently when broken: a released handle
+// Four properties carry the whole design and each fails silently when broken: a released handle
 // must never equal the handle that reuses its slot, a stale handle must read as absent instead of
-// landing on its replacement, and reuse must stay dense from slot 0 because parallel
-// structure-of-arrays stores are scanned flat over the same slot indices.
+// landing on its replacement, reuse must stay dense from slot 0 because parallel
+// structure-of-arrays stores are scanned flat over the same slot indices, and a slot out of
+// generations must be retired rather than re-mint a handle it already gave out.
 
 import { describe, it, expect } from 'vitest';
-import { FIRST_GENERATION, MAX_INDEX, handleGeneration, handleIndex } from '../src/handle.js';
+import {
+    FIRST_GENERATION,
+    MAX_GENERATION,
+    MAX_INDEX,
+    handleGeneration,
+    handleIndex,
+} from '../src/handle.js';
 import type { SlotTableSnapshot } from '../src/slot-table.js';
 import { SlotTable } from '../src/slot-table.js';
 import * as math from '../src/index.js';
@@ -269,6 +276,67 @@ describe('clear', () => {
         const ids = [t.create(rec('d')), t.create(rec('e')), t.create(rec('f'))];
         expect(ids.map((id) => handleIndex(id))).toEqual([0, 1, 2]);
         expect(ids.map((id) => handleGeneration(id))).toEqual([2, 2, 2]);
+    });
+});
+
+describe('the generation wrap', () => {
+    // Reaching `MAX_GENERATION` through `release` alone is 2^29 cycles of one slot, so the slot is
+    // fast-forwarded through a snapshot and the last few generations are then spent for real.
+    const atGeneration = (t: SlotTable<TestId, Rec>, generation: number, name: string): void => {
+        t.apply(
+            { records: [rec(name)], generations: [generation], freeList: [], live: 1 },
+            cloneRec,
+        );
+    };
+
+    it('retires the slot rather than re-mint a handle it already gave out', () => {
+        const t = table();
+        const first = t.create(rec('a'));
+        expect(handleGeneration(first)).toBe(FIRST_GENERATION);
+
+        atGeneration(t, MAX_GENERATION - 2, 'a');
+        for (let cycle = 0; cycle < 2; cycle++) {
+            t.releaseAt(0);
+            expect(t.indexOf(t.create(rec('cycle')))).toBe(0);
+        }
+        // The slot is live at MAX_GENERATION; one more release is the wrap.
+        t.releaseAt(0);
+
+        // Without retirement the freelist hands slot 0 back at FIRST_GENERATION, `next` equals
+        // `first`, and a handle some other entity is still holding reads and writes this record.
+        const next = t.create(rec('after-wrap'));
+        expect(next).not.toBe(first);
+        expect(t.indexOf(next)).toBe(1);
+        expect(t.slotCount).toBe(2);
+
+        expect(t.exists(first)).toBe(false);
+        expect(t.record(first)).toBeNull();
+        expect(t.idAt(0)).toBe(0);
+    });
+
+    it('leaves a retired slot out of the freelist that `clear` rebuilds', () => {
+        const t = table();
+        atGeneration(t, MAX_GENERATION, 'a');
+        t.releaseAt(0);
+        t.create(rec('b'));
+        t.clear();
+
+        expect(t.indexOf(t.create(rec('c')))).toBe(1);
+        expect(t.indexOf(t.create(rec('d')))).toBe(2);
+    });
+
+    it('carries the retirement through a capture and back', () => {
+        const t = table();
+        atGeneration(t, MAX_GENERATION, 'a');
+        const outstanding = t.idAt(0);
+        t.releaseAt(0);
+
+        const snapshot = t.capture(cloneRec);
+        expect(snapshot.freeList).toEqual([]);
+
+        t.apply(snapshot, cloneRec);
+        expect(t.indexOf(t.create(rec('b')))).toBe(1);
+        expect(t.exists(outstanding)).toBe(false);
     });
 });
 
