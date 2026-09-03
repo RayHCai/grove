@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Grove · Design playground</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;900&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+                font-family: 'Nunito', 'Segoe UI', system-ui, sans-serif;
+                background: #faf6ef;
+                color: #43382c;
+                min-height: 100vh;
+            }
+            .wrap {
+                max-width: 620px;
+                margin: 0 auto;
+                padding: 96px 24px;
+            }
+            header {
+                text-align: center;
+                margin-bottom: 40px;
+            }
+            .mark {
+                display: inline-block;
+                font-size: 15px;
+                font-weight: 900;
+                letter-spacing: 0.14em;
+                text-transform: uppercase;
+                color: #6d9e4f;
+                margin-bottom: 16px;
+            }
+            h1 {
+                font-size: clamp(32px, 5vw, 48px);
+                font-weight: 900;
+                line-height: 1.1;
+                margin-bottom: 14px;
+            }
+            .sub {
+                font-size: 17px;
+                line-height: 1.5;
+                color: #7d6f5d;
+            }
+            .card {
+                display: block;
+                text-decoration: none;
+                color: inherit;
+                background: #fffdf8;
+                border: 1px solid #ece3d4;
+                border-radius: 20px;
+                padding: 26px 26px 24px;
+                transition:
+                    transform 180ms ease,
+                    box-shadow 180ms ease;
+            }
+            .card:hover,
+            .card:focus-visible {
+                transform: translateY(-4px);
+                box-shadow: 0 14px 30px rgba(107, 84, 51, 0.14);
+            }
+            .card:active {
+                transform: translateY(-1px);
+                box-shadow: 0 6px 14px rgba(107, 84, 51, 0.12);
+            }
+            .dots {
+                display: flex;
+                gap: 6px;
+                margin-bottom: 16px;
+            }
+            .dots span {
+                width: 14px;
+                height: 14px;
+                border-radius: 50%;
+                border: 1px solid rgba(67, 56, 44, 0.12);
+            }
+            .card h2 {
+                font-size: 21px;
+                font-weight: 900;
+                margin-bottom: 6px;
+            }
+            .card p {
+                font-size: 15px;
+                line-height: 1.5;
+                color: #7d6f5d;
+            }
+            footer {
+                margin-top: 56px;
+                text-align: center;
+                font-size: 14px;
+                color: #b8a992;
+            }
+            @media (prefers-reduced-motion: no-preference) {
+                .card {
+                    animation: rise 500ms ease backwards;
+                }
+                @keyframes rise {
+                    from {
+                        opacity: 0;
+                        transform: translateY(14px);
+                    }
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="wrap">
+            <header>
+                <span class="mark">Grove</span>
+                <h1>The design direction</h1>
+                <p class="sub">
+                    Pixel Grove is the one that stayed. Every other exploration has been retired.
+                </p>
+            </header>
+            <main>
+                <a class="card" href="./pages/pixel.html">
+                    <span class="dots"
+                        ><span style="background: #f4ead2"></span
+                        ><span style="background: #7d9c50"></span
+                        ><span style="background: #4c5b3c"></span
+                        ><span style="background: #c96f43"></span
+                        ><span style="background: #2e2a24"></span>
+                    </span>
+                    <h2>Pixel Grove</h2>
+                    <p>
+                        A cozy retro handheld: pixel type, chunky borders, and stepped sprite
+                        motion.
+                    </p>
+                </a>
+            </main>
+            <footer>Grove — made with care for curious kids.</footer>
+        </div>
+    </body>
+</html>
