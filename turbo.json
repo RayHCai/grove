@@ -18,6 +18,11 @@
             "inputs": ["src/**", "tests/**", "tsconfig*.json", "vitest.config.ts"],
             "outputs": []
         },
+        "bench": {
+            "dependsOn": ["^build"],
+            // Never cached: a benchmark's whole output is a fresh reading of this machine.
+            "cache": false
+        },
         "clean": {
             "cache": false
         },

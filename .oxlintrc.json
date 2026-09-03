@@ -209,6 +209,13 @@
             }
         },
         {
+            "files": ["bench/src/**"],
+            "rules": {
+                "no-console": "off",
+                "no-await-in-loop": "off"
+            }
+        },
+        {
             "files": [
                 "apps/editor/src/index.ts",
                 "apps/platform/src/index.ts",

@@ -1,0 +1,29 @@
+{
+    "name": "@platform/bench",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Tick cost, bytes per tick and GC pressure, measured against the built packages.",
+    "scripts": {
+        "build": "tsc -b",
+        "typecheck": "tsc -b && tsc -p tsconfig.test.json",
+        "bench": "tsc -b && node --expose-gc --min-semi-space-size=64 --max-semi-space-size=64 dist/run.js --mode=alloc",
+        "bench:gc": "tsc -b && node --expose-gc dist/run.js --mode=gc",
+        "test": "tsc -b && vitest run",
+        "clean": "rm -rf dist .turbo runs"
+    },
+    "dependencies": {
+        "@platform/client": "workspace:*",
+        "@platform/core": "workspace:*",
+        "@platform/engine": "workspace:*",
+        "@platform/integration": "workspace:*",
+        "@platform/math": "workspace:*",
+        "@platform/renderer": "workspace:*",
+        "@platform/transport": "workspace:*"
+    },
+    "devDependencies": {
+        "@types/node": "^26.1.2",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    }
+}

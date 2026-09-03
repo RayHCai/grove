@@ -4,6 +4,9 @@ dist/
 *.tsbuildinfo
 coverage/
 
+# One JSON per benchmark run, stamped with the commit it measured. Local history, not shared state.
+bench/runs/
+
 *.log
 .DS_Store
 .env
