@@ -36,6 +36,7 @@ import {
     ACK_STALL_TICKS,
     BUNDLE_DEADLINE_SECONDS,
     DEFAULT_VIEWPORT,
+    JOIN_DEADLINE_SECONDS,
     MAX_FRAME_DT,
     MAX_REQUESTS_PER_FRAME,
     STALL_SECONDS,
@@ -61,8 +62,8 @@ import type { BundleSource } from './bundle.js';
 import { BundleLoadError, loadBundle } from './bundle.js';
 import type { FrameSource, InputDevice, RawInputEvent } from './input.js';
 import { ClientHUDSink } from './hud-sink.js';
-import { Lifecycle } from './lifecycle.js';
-import type { SessionState } from './lifecycle.js';
+import { Lifecycle, isTerminal } from './lifecycle.js';
+import type { FailureReason, SessionState } from './lifecycle.js';
 import { Mirror, wireBounds } from './mirror.js';
 import type { MirrorDelta, ScriptIndex } from './mirror.js';
 import { Prediction } from './prediction.js';
@@ -141,6 +142,8 @@ export interface ClientStats {
     cappedReplays: number;
     /** Snapshot chunks refused: over the cap, or arriving for a join already answered. */
     snapshotChunksDropped: number;
+    /** Corrections too far to ease, shown at once. The nearest thing here to a desync alarm. */
+    snappedCorrections: number;
 }
 
 export class GameClient {
@@ -181,8 +184,10 @@ export class GameClient {
     /** Our own send stamps, in the injected clock's ms — never the value the server echoed back. */
     #joinSentMs = 0;
     #lastSyncSentMs: number | undefined;
-    /** All four of these are in the FRAME source's seconds, which is the only base `#now` ever holds. */
+    /** All of these are in the FRAME source's seconds, which is the only base `#now` ever holds. */
     #now = 0;
+    /** Stamped on the first frame after a join, since `start()` runs before the source has a time. */
+    #joinSentAt: number | undefined;
     /** The previous frame's stamp, for the display delta. Undefined before the first frame. */
     #lastFrameAt: number | undefined;
     #lastEnvelopeAt: number | undefined;
@@ -356,6 +361,7 @@ export class GameClient {
             resimulations: predicted?.counters.resimulations ?? 0,
             cappedReplays: predicted?.counters.cappedReplays ?? 0,
             snapshotChunksDropped: this.#chunks.dropped,
+            snappedCorrections: predicted?.counters.snappedCorrections ?? 0,
         };
     }
 
@@ -367,6 +373,9 @@ export class GameClient {
         this.#disposers.push(
             transport.onClose(() => {
                 this.#lifecycle.to('disconnected');
+                // A fetch still in flight belongs to a session that no longer exists, and the bundle
+                // behind it would otherwise open one on a socket that is gone.
+                this.#loadingSince = undefined;
                 frames.stop();
             }),
         );
@@ -391,6 +400,9 @@ export class GameClient {
      */
     #joinFrame(): ReturnType<typeof joinRequest> {
         this.#joinSentMs = this.#nowMs();
+        // Cleared rather than stamped, because the deadline runs in the frame source's seconds and
+        // `start()` is called before that source has produced one.
+        this.#joinSentAt = undefined;
         const declared = this.#opts.project ?? unidentifiedProject();
         return joinRequest(
             this.#opts.name,
@@ -422,6 +434,7 @@ export class GameClient {
         // After the flush, so the tick just stamped can be replayed on the frame it was sent.
         this.#predict();
 
+        this.#checkJoinDeadline();
         this.#checkBundleDeadline();
         this.#checkNotBehind();
         this.#checkLiveness();
@@ -475,6 +488,9 @@ export class GameClient {
     }
 
     #receive(message: Message): void {
+        // A terminal session drains nothing ever again, so an envelope kept here is memory held for the
+        // life of the tab rather than work postponed.
+        if (isTerminal(this.#lifecycle.state)) return;
         const envelope = asServerEnvelope(message);
         // A frame that is not an envelope, or one missing a field the client dereferences, is a mismatched
         // or hostile peer: dropped rather than crashing the session.
@@ -507,11 +523,7 @@ export class GameClient {
                 // An envelope that passed the boundary narrowing and still threw is malformed deeper than
                 // depth-one checks reach. Failing here names the peer; letting it unwind would escape
                 // `frame()` through the frame source and end the session with nothing to show a person.
-                this.#lifecycle.fail({
-                    kind: 'peer',
-                    message: error instanceof Error ? error.message : String(error),
-                });
-                this.#opts.frames.stop();
+                this.#failPeer(error);
                 return;
             }
             // A `Welcome` that opened a bundle fetch suspends the batch here rather than racing it:
@@ -532,12 +544,11 @@ export class GameClient {
                 this.#chunks.offer(envelope, this.#welcome !== undefined);
                 return;
             case 'reject':
-                this.#lifecycle.fail({
+                this.#fail({
                     kind: 'rejected',
                     reason: rejectMessage(envelope),
                     serverProtocolVersion: envelope.serverProtocolVersion,
                 });
-                this.#opts.frames.stop();
                 return;
             case 'state':
                 this.#onState(envelope);
@@ -581,18 +592,16 @@ export class GameClient {
         // Folded in before anything reads the snapshot, so every path below sees one whole world and
         // chunking stays invisible past this line.
         if (!this.#chunks.foldInto(welcome)) {
-            this.#lifecycle.fail({
+            this.#fail({
                 kind: 'peer',
                 message: 'the snapshot chunks did not add up to the set the Welcome named',
             });
-            this.#opts.frames.stop();
             return;
         }
         if (!isUsableWelcome(welcome)) {
             // A `Welcome` the client cannot use means the server does not speak this client's JSON —
             // terminal, and distinct from a `Reject`, which carries a reason.
-            this.#lifecycle.fail({ kind: 'undecodable' });
-            this.#opts.frames.stop();
+            this.#fail({ kind: 'undecodable' });
             return;
         }
 
@@ -611,11 +620,10 @@ export class GameClient {
         if (source === undefined) {
             // Never silently skipped: a client with no loader cannot run what the server is running,
             // and going live anyway is the divergence the hash exists to catch.
-            this.#lifecycle.fail({
+            this.#fail({
                 kind: 'bundle',
                 message: 'the server sent game code this client has no way to load',
             });
-            this.#opts.frames.stop();
             return;
         }
 
@@ -634,24 +642,40 @@ export class GameClient {
         try {
             await loadBundle(source, welcome.bundleUrl, welcome.bundleHash);
         } catch (error) {
-            if (this.#torn) return;
+            if (!this.#stillLoading()) return;
             this.#loadingSince = undefined;
-            this.#lifecycle.fail({
+            this.#fail({
                 kind: 'bundle',
                 message:
                     error instanceof BundleLoadError || error instanceof Error
                         ? error.message
                         : String(error),
             });
-            this.#opts.frames.stop();
             return;
         }
-        // The session may have been torn down or resynced while the fetch was in flight; either way
-        // this welcome is no longer the one being answered.
-        if (this.#torn || this.#loadingSince === undefined) return;
+        if (!this.#stillLoading()) return;
         this.#bundleHash = welcome.bundleHash;
         this.#loadingSince = undefined;
-        this.#openSession(welcome);
+        try {
+            this.#openSession(welcome);
+        } catch (error) {
+            // The same backstop the drain gives the synchronous path: a snapshot that throws while it
+            // is applied names the peer either way, and here it would otherwise leave `loading` set
+            // with no fetch outstanding and nothing left to end it.
+            this.#failPeer(error);
+        }
+    }
+
+    /**
+     * Whether the welcome a fetch was started for is still the one being answered.
+     *
+     * A teardown, a close or a resync during the fetch each end that welcome, and its bundle must not
+     * open a session over the one that replaced it.
+     */
+    #stillLoading(): boolean {
+        return (
+            !this.#torn && this.#loadingSince !== undefined && this.#lifecycle.state === 'loading'
+        );
     }
 
     /** Builds the mirror, bridge and clock, applies the snapshot, and goes `live`. */
@@ -932,11 +956,32 @@ export class GameClient {
         const since = this.#loadingSince;
         if (since === undefined || this.#now - since < BUNDLE_DEADLINE_SECONDS) return;
         this.#loadingSince = undefined;
-        this.#lifecycle.fail({
+        this.#fail({
             kind: 'bundle',
             message: `the game code did not arrive within ${BUNDLE_DEADLINE_SECONDS} seconds`,
         });
-        this.#opts.frames.stop();
+    }
+
+    /**
+     * Fails a join the server never answers, in either state that waits for a `Welcome`.
+     *
+     * The server closes an unjoined connection on a deadline of its own; without this one a peer that
+     * accepts the socket and then says nothing holds the session on a spinner for the life of the tab,
+     * and a resync that goes unanswered wedges the same way with its whole world already discarded.
+     */
+    #checkJoinDeadline(): void {
+        const state = this.#lifecycle.state;
+        if (state !== 'connecting' && state !== 'resyncing') return;
+        const since = this.#joinSentAt;
+        if (since === undefined) {
+            this.#joinSentAt = this.#now;
+            return;
+        }
+        if (this.#now - since < JOIN_DEADLINE_SECONDS) return;
+        this.#fail({
+            kind: 'peer',
+            message: `the server did not answer the join within ${JOIN_DEADLINE_SECONDS} seconds`,
+        });
     }
 
     /**
@@ -1066,10 +1111,8 @@ export class GameClient {
 
         const runtime = this.#mirror?.runtime;
 
-        this.#opts.frames.stop();
+        this.#shutdown();
         this.#opts.device.dispose();
-        for (const dispose of this.#disposers.splice(0)) dispose();
-        this.#opts.transport.close();
         this.#bridge?.clear();
         if (opts.ownsRenderer === true) this.#opts.renderer.destroy();
         this.#mirror = undefined;
@@ -1087,13 +1130,40 @@ export class GameClient {
             fn();
         } catch (error) {
             if (!(error instanceof TransportError)) throw error;
-            this.#lifecycle.fail(
+            this.#fail(
                 error.code === 'encode-rejected'
                     ? { kind: 'internal', message: error.message }
                     : { kind: 'peer', message: error.message },
             );
-            this.#opts.frames.stop();
         }
+    }
+
+    /** The one way a session ends terminally: the reason is recorded, then everything is shut down. */
+    #fail(reason: FailureReason): void {
+        this.#lifecycle.fail(reason);
+        this.#shutdown();
+    }
+
+    /** A frame malformed deeper than the boundary narrowing reaches names the peer, never us. */
+    #failPeer(error: unknown): void {
+        this.#fail({
+            kind: 'peer',
+            message: error instanceof Error ? error.message : String(error),
+        });
+    }
+
+    /**
+     * Stops the loop and drops the connection with it.
+     *
+     * The transport is closed rather than merely ignored: a failed session decodes every later
+     * envelope into an inbox no frame will ever drain, which is the peer choosing how much memory
+     * this tab holds. The handlers go first, so our own `close()` does not read back as a peer close.
+     */
+    #shutdown(): void {
+        this.#opts.frames.stop();
+        this.#inbox.length = 0;
+        for (const dispose of this.#disposers.splice(0)) dispose();
+        this.#opts.transport.close();
     }
 }
 

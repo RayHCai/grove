@@ -8,7 +8,7 @@ export type FailureReason =
     | { kind: 'undecodable' }
     /** `encode-rejected` — our bug, and it must surface loudly. */
     | { kind: 'internal'; message: string }
-    /** A malformed or hostile peer: bad frames, or an envelope that threw while applying. */
+    /** A peer that did not hold up its end: bad frames, an applying throw, or a join never answered. */
     | { kind: 'peer'; message: string }
     /** The script bundle would not load, or was not the bundle the server said it would be. */
     | { kind: 'bundle'; message: string };
@@ -78,10 +78,26 @@ export class Lifecycle {
         };
     }
 
-    /** Moves to `state`, unless already terminal — a `failed` client does not become `disconnected`. */
+    /** Moves to `state`, unless already terminal — a closed session does not become `live` again. */
     to(state: SessionState): void {
+        if (isTerminal(this.#state)) return;
+        this.#move(state);
+    }
+
+    /**
+     * Ends the session with a reason, from any state including a close that arrived first.
+     *
+     * The one move a terminal state does not absorb: a `Reject` and the close behind it land in the
+     * same delivery, and `failed` is the only state that says why.
+     */
+    fail(reason: FailureReason): void {
+        // Recorded even on a repeat call: the first reason is the interesting one, and `#move` refuses.
+        this.#failure ??= reason;
+        this.#move('failed');
+    }
+
+    #move(state: SessionState): void {
         if (this.#state === state) return;
-        if (this.#state === 'failed') return;
         this.#state = state;
 
         this.#dispatching.length = 0;
@@ -95,11 +111,5 @@ export class Lifecycle {
             }
         }
         this.#dispatching.length = 0;
-    }
-
-    fail(reason: FailureReason): void {
-        // Recorded even on a repeat call: the first reason is the interesting one, and `to` refuses.
-        this.#failure ??= reason;
-        this.to('failed');
     }
 }

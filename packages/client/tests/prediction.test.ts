@@ -597,6 +597,20 @@ describe('a whole session predicts', () => {
         expect(rt.transforms.posX(h.avatar())).toBe(frozen);
     });
 
+    it('reports a snapped correction on the stats, the one alarm a desync raises', async () => {
+        // Computed per correction and read by nobody: a client whose authority keeps moving it further
+        // than an ease can hide is diverging, and the count is the only place that says so.
+        const h = await session();
+        h.run(6);
+        expect(h.client.stats().snappedCorrections).toBe(0);
+
+        // Far past `CORRECTION_SNAP_DISTANCE_SQUARED`, so it is shown at once rather than eased.
+        h.server.sendTransforms([transformDiff(1, { posX: 5000 })], h.client.stats().depictedTick);
+        h.run(1);
+
+        expect(h.client.stats().snappedCorrections).toBe(1);
+    });
+
     it('resumes from the authority on recovery, not from a pose measured before the stall', async () => {
         const h = await session();
         h.run(10);
