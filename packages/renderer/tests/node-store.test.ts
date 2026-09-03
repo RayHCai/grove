@@ -258,7 +258,7 @@ describe('generations', () => {
         expect(new Set(history).size).toBe(history.length); // no handle ever repeated
     });
 
-    it('wraps to generation 1 instead of leaving the safe-integer range', () => {
+    it('spends every generation of a slot without leaving the safe-integer range', () => {
         const store = new NodeStore();
         const first = store.create(record());
         expect(nodeGeneration(first)).toBe(1);
@@ -270,24 +270,24 @@ describe('generations', () => {
         expect(Number.isSafeInteger(nearMax)).toBe(true);
         expect(nearMax).toBeLessThanOrEqual(Number.MAX_SAFE_INTEGER);
 
+        // Past MAX_GENERATION the packing would leave the safe range, so the slot is retired
+        // rather than re-minted at generation 1 — which would hand `first` back to a caller that
+        // is still holding it and turn a dead node id into a live one belonging to someone else.
         store.release(0);
-        const wrapped = store.create(record());
-        expect(nodeGeneration(wrapped)).toBe(1);
-        expect(Number.isSafeInteger(wrapped)).toBe(true);
-        // The documented cost of wrapping: after 2^29 reuses of ONE slot, a generation-1
-        // handle validates again. Unreachable in practice, and strictly better than
-        // arithmetic that has stopped being exact.
-        expect(wrapped).toBe(first);
-        expect(store.isAlive(wrapped)).toBe(true);
+        const next = store.create(record());
+        expect(next).not.toBe(first);
+        expect(store.indexOf(next)).toBe(1);
+        expect(store.isAlive(first)).toBe(false);
     });
 
-    it('wraps from MAX_GENERATION on the very next release', () => {
+    it('retires the slot on the very next release from MAX_GENERATION', () => {
         const store = new NodeStore();
         store.create(record());
         pokeGeneration(store, 0, MAX_GENERATION);
 
         store.release(0);
-        expect(nodeGeneration(store.create(record()))).toBe(1);
+        expect(store.indexOf(store.create(record()))).toBe(1);
+        expect(store.slotCount).toBe(2);
     });
 });
 

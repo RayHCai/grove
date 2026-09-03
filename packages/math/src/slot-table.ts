@@ -8,12 +8,17 @@
 
 import {
     FIRST_GENERATION,
+    MAX_GENERATION,
     MAX_INDEX,
     handleGeneration,
     handleIndex,
     nextGeneration,
     packHandle,
 } from './handle.js';
+
+// Marks a slot out of generations: 0 is never minted, and reusing the slot past the generation
+// wrap would reissue a handle it has already handed out.
+const RETIRED_GENERATION = 0;
 
 /** A detached copy of a table's slots. Records are cloned, so it tracks no later mutation. */
 export interface SlotTableSnapshot<R> {
@@ -122,16 +127,15 @@ export class SlotTable<Id extends number, R> {
         this.releaseAt(this.indexOf(id));
     }
 
-    /** Bumps the generation and returns the slot to the freelist. */
+    /** Bumps the generation and returns the slot to the freelist, unless it has run out of them. */
     releaseAt(index: number): void {
         // Out of range or already free are both no-ops, so a double release cannot put a
         // duplicate index on the freelist.
         if (this.#records[index] == null) return;
 
         this.#records[index] = null;
-        this.#generations[index] = nextGeneration(this.#generationAt(index));
-        this.#freeList.push(index);
         this.#live--;
+        if (this.#recycle(index)) this.#freeList.push(index);
     }
 
     /** Live handles in ascending slot order — creation order. Fills and returns `out` when given. */
@@ -160,7 +164,7 @@ export class SlotTable<Id extends number, R> {
             if (this.#records[index] == null) continue;
 
             this.#records[index] = null;
-            this.#generations[index] = nextGeneration(this.#generationAt(index));
+            this.#recycle(index);
             this.#live--;
         }
 
@@ -168,6 +172,7 @@ export class SlotTable<Id extends number, R> {
         // keeps this table's flat scan — and that of every store indexed by the same slot — short.
         this.#freeList.length = 0;
         for (let index = this.#records.length - 1; index >= 0; index--) {
+            if (this.#generations[index] === RETIRED_GENERATION) continue;
             this.#freeList.push(index);
         }
 
@@ -211,6 +216,18 @@ export class SlotTable<Id extends number, R> {
 
     #mint(index: number, generation: number): Id {
         return packHandle(index, generation) as unknown as Id;
+    }
+
+    /** Advances a freed slot's generation, or retires it when the next would wrap; false once retired. */
+    #recycle(index: number): boolean {
+        const generation = this.#generationAt(index);
+        if (generation >= MAX_GENERATION) {
+            this.#generations[index] = RETIRED_GENERATION;
+            return false;
+        }
+
+        this.#generations[index] = nextGeneration(generation);
+        return true;
     }
 
     /** `#generations` is invariantly as long as `#records`; the fallback only satisfies the index check. */
