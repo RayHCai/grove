@@ -64,6 +64,11 @@ export class Roster {
         this.#checkpoints.set(player.id, { x, y });
     }
 
+    /** @internal — a departed player's checkpoint, which nothing but a rejoin under that id reads. */
+    forgetCheckpoint(playerId: string): void {
+        this.#checkpoints.delete(playerId);
+    }
+
     #tryAvatar(player: Player): Entity | null {
         return player.hasAvatar ? player.avatar : null;
     }

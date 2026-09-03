@@ -66,8 +66,9 @@ path and core only ever receives an already-valid manifest.
   settles. The handler is read **inside** the try, since a handler declared as an accessor makes the property
   read itself creator code. A call that returns without throwing but held the tick past `MAX_HANDLER_MS`
   takes the same record and the same count, since nothing inside one realm can interrupt a synchronous loop
-  and the only bound left is how many more times it is entered. Breaker counts are snapshot state; the dedup
-  map is not, and both it and the default log are capped so a session cannot grow them without bound.
+  and the only bound left is how many more times it is entered. Breaker counts are snapshot state and are
+  dropped with the instances a host removal takes; the dedup map is not, and both it and the default log are
+  capped so a session cannot grow them without bound.
   Wiring throws are fatal (`LoadError`) because a half-hoisted host record matches no declaration.
 - **The same boundary covers creator code that runs without a dispatch**, through `dispatcher.guard(owner,
 site, fn)` — one implementation, so the dedup, log and breaker cannot diverge between the two entries. Four
@@ -203,8 +204,10 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   identity, and `Inventory`'s player is resolved through the roster, staying raw when that player is unknown.
 - **Persistence is a synchronous cache written through to an async store.** `PersistedState` is what
   `rt.persisted` holds and what wiring's seeding reads, because the hoist is synchronous and cannot await;
-  `save(record)` captures the record's fields into the cache **now** and returns the store's promise. The
-  asymmetry is deliberate: the boundary that triggers a save is a connection that has already closed, so
+  `save(record)` captures the record's fields into the cache **now**, returns the store's promise, and
+  releases the cached copy once that write lands, so the cache is sized by the players present rather than by
+  every one the session has seen. The asymmetry is deliberate: the boundary that triggers a save is a
+  connection that has already closed, so
   nothing is there to await it, and the capture has to be synchronous because the record is torn down
   immediately after. A host is one KV entry under the `serverState` scope, so a rejoin costs one round trip
   rather than one per field.
@@ -274,8 +277,8 @@ without passing through it; `validate` stays the server's to call. `LoadOptions.
 thing a manifest cannot hold, because it names code: the registry that stamps a class with its `ScriptId`
 imports core, so the edge arrives as a function. `leavePlayer` goes innermost host outward and removes last — `@onEnd` at
 the player host then its camera host, then `@onPlayerLeave` at the Game, then `PlayerManager.remove`, which
-drops both hosts — so every handler can still read the player; `PlayerManager.adopt` keeps a wire-supplied
-`index` where `create` mints one.
+drops both hosts and the roster's checkpoint for that id — so every handler can still read the player;
+`PlayerManager.adopt` keeps a wire-supplied `index` where `create` mints one.
 
 `hud` is a facade over the current runtime's `HUDState` — the authored screens, the open stack bottom to
 top, and one record per widget a verb has written — so it is per-world like `game` rather than a process
