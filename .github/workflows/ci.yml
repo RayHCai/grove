@@ -24,7 +24,8 @@ jobs:
             matrix:
                 task:
                     - name: lint
-                      run: pnpm run lint
+                      # Warn-tier rules only ratchet if they exit non-zero somewhere.
+                      run: pnpm run lint --deny-warnings
                     - name: format
                       run: pnpm run format:check
                     - name: typecheck

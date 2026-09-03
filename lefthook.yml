@@ -11,7 +11,7 @@ pre-commit:
           # oxlint exits non-zero when every path it is handed is one it ignores.
           exclude:
               - 'docs/*'
-          run: pnpm exec oxlint {staged_files}
+          run: pnpm exec oxlint --deny-warnings {staged_files}
 
         - name: typecheck
           glob: '*.{ts,tsx}'
