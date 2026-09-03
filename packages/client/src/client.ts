@@ -18,11 +18,13 @@ import { defined } from '@platform/math';
 import type { CameraState, IRenderer, PickOptions } from '@platform/renderer';
 import { NO_NODE } from '@platform/renderer';
 import type {
+    GameRequest,
     InputAction,
     InputFrame,
     Interaction,
     InteractionFrame,
     RateChange,
+    RequestFrame,
     ServerToClient,
     StateEnvelope,
     TimeSyncReply,
@@ -35,6 +37,7 @@ import {
     BUNDLE_DEADLINE_SECONDS,
     DEFAULT_VIEWPORT,
     MAX_FRAME_DT,
+    MAX_REQUESTS_PER_FRAME,
     STALL_SECONDS,
     SYNC_INTERVAL_SECONDS,
 } from './constants.js';
@@ -63,6 +66,7 @@ import type { SessionState } from './lifecycle.js';
 import { Mirror, wireBounds } from './mirror.js';
 import type { MirrorDelta, ScriptIndex } from './mirror.js';
 import { Prediction } from './prediction.js';
+import { requestFields } from './request.js';
 import { InputRing } from './ring.js';
 
 const CAMERA_ORIGIN = { x: 0, y: 0, z: 0 } as const;
@@ -170,6 +174,8 @@ export class GameClient {
     readonly #pending: ResolvedEdge[] = [];
     /** HUD presses and pointer hits owed to the authority, flushed with this frame's input. */
     readonly #interactions: Interaction[] = [];
+    /** `request()` calls owed to the authority, flushed with this frame's input. */
+    readonly #requests: GameRequest[] = [];
 
     #rtt = 0;
     /** Our own send stamps, in the injected clock's ms — never the value the server echoed back. */
@@ -410,6 +416,7 @@ export class GameClient {
         if (this.#lifecycle.state !== 'failed' && this.#clock !== undefined) {
             this.#flushInput(this.#clock.advance(nowSeconds, this.#ticks).at(-1));
             this.#flushInteractions();
+            this.#flushRequests();
         }
 
         // After the flush, so the tick just stamped can be replayed on the frame it was sent.
@@ -679,6 +686,12 @@ export class GameClient {
         // Before the snapshot: a script attached during it may write a widget on its way up, and a
         // runtime still holding core's null sink would drop that write silently.
         this.#mirror.runtime.hudSink = this.#hud;
+        // The authority is the far end of this socket, so a `request()` must cross it. Without this
+        // core falls back to its loopback sink and validates an untrusted ask on the machine that
+        // made it — against a mirror that holds no server-located script to validate it with.
+        this.#mirror.runtime.requestUplink = (name, payload) => {
+            this.#queueRequest(name, payload);
+        };
 
         this.#apply(this.#mirror.applySnapshot(welcome));
         this.#mirror.runtime.localPlayer = this.localPlayer;
@@ -837,6 +850,44 @@ export class GameClient {
     }
 
     /**
+     * Queues a creator's `request()` for the uplink, encoding the payload here rather than at `send`.
+     *
+     * Gated like input, because a client that cannot reach the authority cannot be asking it for
+     * anything; the encode drops what the wire cannot carry, since a throw at `send` would end the
+     * session over a field a creator named.
+     */
+    #queueRequest(name: string, payload?: Record<string, unknown>): void {
+        if (!this.#lifecycle.acceptsInput) return;
+        const call: GameRequest = { name };
+        if (payload !== undefined) call.data = requestFields(payload);
+        this.#requests.push(call);
+    }
+
+    /**
+     * Sends this frame's requests, stamped with the tick they were made on.
+     *
+     * Its own frame rather than a field on the interaction one: the two are different asks with
+     * different costs, and folding them would put one admission decision over both.
+     */
+    #flushRequests(): void {
+        const clock = this.#clock;
+        if (clock === undefined || this.#requests.length === 0) return;
+        if (!this.#lifecycle.acceptsInput) {
+            this.#requests.length = 0;
+            return;
+        }
+        // Chunked rather than sent whole: the receiver refuses an over-cap frame ENTIRE, so a burst
+        // of seventeen would lose all seventeen. Carrying the excess costs it a frame, which a
+        // request — unacked and unreplayed — has no ordering claim against.
+        const frame: RequestFrame = {
+            kind: 'request',
+            tick: clock.localTick,
+            requests: this.#requests.splice(0, MAX_REQUESTS_PER_FRAME),
+        };
+        this.#guard(() => send(this.#opts.transport, frame));
+    }
+
+    /**
      * Input resumed, so what the wire believes is stale: nothing was sent while it was refused.
      *
      * An axis re-asserts unconditionally, because a `hold` is idempotent. A press re-asserts only after a
@@ -956,6 +1007,8 @@ export class GameClient {
         // session will not hold.
         this.#hud.clear();
         this.#interactions.length = 0;
+        // Stamped against a tick the next session will not be seeded from, so it would arrive stale.
+        this.#requests.length = 0;
         this.#ackSeq = -1;
         this.#ackSeqStillAt = this.#now;
         this.#lastEnvelopeAt = this.#now;

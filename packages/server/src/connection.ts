@@ -1,7 +1,7 @@
 import type { Player } from '@platform/core';
 import { createActionStates } from '@platform/core';
 import type { ActionStates } from '@platform/core';
-import type { Interaction, JoinRequest } from '@platform/protocol';
+import type { GameRequest, Interaction, JoinRequest } from '@platform/protocol';
 import type { Transport } from '@platform/transport';
 import {
     CONTROL_BUCKET_FRAMES,
@@ -183,6 +183,8 @@ export class Connection {
     readonly actions: ActionStates = createActionStates();
     /** HUD presses and pointer hits awaiting the next tick pass. */
     readonly interactions: Interaction[] = [];
+    /** `request()` calls awaiting the next tick pass, for the reason the interactions do. */
+    readonly requests: GameRequest[] = [];
 
     /** Null until the first valid `JoinRequest` allocates it. */
     player: Player | null = null;

@@ -14,7 +14,7 @@ drift. Types only: no bytes move here, no frame is validated here. It sits above
 | File               | Holds                                                    |
 | ------------------ | -------------------------------------------------------- |
 | `src/ids.ts`       | `NetId`, `PlayerId`, `ProjectId`                         |
-| `src/version.ts`   | `PROTOCOL_VERSION = 2`                                   |
+| `src/version.ts`   | `PROTOCOL_VERSION = 3`                                   |
 | `src/envelopes.ts` | every message, both direction unions, every payload type |
 | `src/index.ts`     | the barrel, grouped by concern                           |
 
@@ -42,6 +42,7 @@ A message not in one of the two unions is not on the wire, and this table is tha
 | `rate-change`     | `ServerToClient` | `tick`, `simRate`; the client resyncs rather than retunes                 |
 | `input`           | `ClientToServer` | one frame per tick, `seq` + batched `actions[]`                           |
 | `interaction`     | `ClientToServer` | one frame per tick, `tick` + batched `events[]`; no `seq`, so no ack      |
+| `request`         | `ClientToServer` | one frame per tick, `tick` + batched `requests[]`; no `seq`, so no ack    |
 
 `Envelope` is both unions; `EnvelopeKind` is every `kind`. The unions are **disjoint**, so neither end can
 accept a frame it minted.
@@ -55,7 +56,7 @@ union `WireStructuralOp` and `WireStructuralOpKind`; `WireScriptAttachment`, `En
 `Leaderboard`, `Inventory`, `Team`); `RenderManifest`, `WireAssetRef`, `WireAssetKind`, `TemplateVisual`
 (`SpriteTemplateVisual` | `GroupTemplateVisual`), `TemplateChild` (`SpriteTemplateChild` |
 `GroupTemplateChild`); `InputAction`, `InputPhase`; `Interaction` (four arms: `press`, `click`,
-`hover-enter`, `hover-exit`) and `InteractionKind`.
+`hover-enter`, `hover-exit`) and `InteractionKind`; `GameRequest`.
 
 ## 3. Three type-level rules
 
@@ -68,8 +69,8 @@ Every envelope must be assignable to transport's `Message` (`JsonValue`). All th
    `jsonCodec.encode` throws at runtime for the value a socket actually produces. The carriers:
    `JoinRequest.token`, `Welcome.reconnectToken`, `StateEnvelope.earliestHeadroom`, `WireAssetRef.meta` (and
    its three members), `SpriteTemplateVisual`'s `anchorX` / `anchorY` / `tint` / `neverCull`,
-   `InputAction.value`, the `press` arm's `screen`, `GroupTemplateVisual.children`, and every
-   `TemplateChild` field but `kind` and a sprite child's `texture`.
+   `InputAction.value`, the `press` arm's `screen`, `GameRequest.data`, `GroupTemplateVisual.children`,
+   and every `TemplateChild` field but `kind` and a sprite child's `texture`.
 
 Branded numbers, unions of `type` aliases, and intersections all pass — which is what makes `NetId` and the
 flattened `TransformDiff` free.
@@ -129,7 +130,8 @@ flattened `TransformDiff` free.
   hold one each: transport refuses a frame over `MAX_FRAME_BYTES` before parsing it, since parsing is what
   allocates; the server bounds the unauthenticated client → server surface (`MAX_ACTIONS_PER_FRAME`,
   `MAX_ACTION_NAME_LENGTH`, `MAX_ACTION_NAMES`, `MAX_INTERACTIONS_PER_FRAME`, `MAX_WIDGET_NAME_LENGTH`,
-  `MAX_NAME_LENGTH`, `maxSeqGap`); the client bounds every array
+  `MAX_NAME_LENGTH`, `MAX_REQUESTS_PER_FRAME`, `MAX_REQUEST_NAME_LENGTH`, `MAX_REQUEST_PAYLOAD_NODES`,
+  `maxSeqGap`); the client bounds every array
   it walks at `MAX_WIRE_ITEMS` — a spawn's attachment list at the smaller `MAX_ENTITY_SCRIPTS`, since each
   entry mints a script instance that outlives the frame — and refuses a `netId` that could not name a
   server handle. A `kind` check that
@@ -152,6 +154,13 @@ flattened `TransformDiff` free.
   is neither acked nor replayed: an interaction is one discrete event, not an edge of a sustained input, and
   a lost one is lost rather than re-derivable from the next sample. That is why it is its own frame — in
   `actions[]` every one of those rules would become conditional on a name.
+- **A `request` is the one client → server path with authority behind it, so it crosses the wire and
+  runs only on the authority.** Server-to-client is implicit `@serverState` replication and
+  client-to-server is always an explicit, checked `request()` — an arm that dispatched at the sender
+  would put that check on the untrusted machine. It carries no `seq` for the reason an `interaction`
+  does not: one discrete ask, neither acked nor replayed. `GameRequest.name` becomes the event name of
+  a dispatch and `data` is the only untrusted payload on this wire, so the receiver caps the name's
+  length and bounds the payload before a handler sees it.
 - **`Welcome.visuals` is a baseline, not a session's whole manifest.** A template first used after a client
   joined reaches it on a `manifest` arm, which carries ADDITIONS the receiver merges — never a replacement,
   which would drop what the join established. It is sent _before_ the `state` envelope whose journal first

@@ -20,6 +20,7 @@ import {
     onPlayerJoin,
     onPlayerLeave,
     onPress,
+    onRequest,
     onStart,
     onUpdate,
     serverState,
@@ -34,6 +35,22 @@ export class Storekeeper extends ServerScript {
     buy(ctx: Ctx): void {
         this.presses.push((ctx.player as Player | undefined)?.id ?? '(none)');
         this.credits += 1;
+    }
+}
+
+/** The authoritative half of a `request()`: the client asks over the wire, the server decides. */
+export class Vault extends ServerScript {
+    @serverState coins = 0;
+    /** Every ask that reached the authority, as `player:item`. */
+    asks: string[] = [];
+
+    @onRequest('buy')
+    buy(ctx: Ctx): void {
+        // The only untrusted ctx.data in the API, so the handler validates before keying with it.
+        const item = ctx.data['item'];
+        if (typeof item !== 'string') return;
+        this.asks.push(`${(ctx.player as Player | undefined)?.id ?? '(none)'}:${item}`);
+        this.coins += 1;
     }
 }
 

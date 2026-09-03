@@ -103,6 +103,23 @@ export const MAX_BUNDLE_BYTES = 8 * 1024 * 1024;
 export const BUNDLE_DEADLINE_SECONDS = 30;
 
 /**
+ * Nesting past which a `request()` payload value is dropped rather than sent.
+ *
+ * Held far below the codec's own 128-level cap, which the envelope's own nesting eats into, because a
+ * value the encoder passes and the codec then refuses throws out of the send and fails the session.
+ */
+export const MAX_REQUEST_DEPTH = 64;
+
+/**
+ * Requests one frame may carry, the rest held for the next.
+ *
+ * The receiver's own cap, restated: it refuses an over-cap frame WHOLE, so a sender that minted one
+ * would lose every call in it rather than the excess. Creator code makes these in a loop, where a
+ * human cannot make sixteen clicks in a frame, so the sender is the end that must chunk.
+ */
+export const MAX_REQUESTS_PER_FRAME = 16;
+
+/**
  * Cardinality cap on any single array a server sends, applied before the client walks it.
  *
  * A sanity bound rather than a game rule: the client trusts a server for correctness but must not
