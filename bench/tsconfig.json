@@ -1,0 +1,22 @@
+{
+    "extends": "../tsconfig.base.json",
+    "compilerOptions": {
+        "rootDir": "src",
+        "outDir": "dist",
+        "tsBuildInfoFile": "dist/.tsbuildinfo",
+        "types": ["node"],
+        // `tsc` is the only tool here that lowers TC39 standard decorators, and `src/scripts.ts`
+        // carries them; the runner's transform emits them verbatim, so everything imports `dist`.
+        "lib": ["ES2023", "ESNext.Decorators"]
+    },
+    "include": ["src/**/*.ts"],
+    "references": [
+        { "path": "../packages/core" },
+        { "path": "../packages/math" },
+        { "path": "../packages/client" },
+        { "path": "../packages/engine" },
+        { "path": "../packages/renderer" },
+        { "path": "../packages/transport" },
+        { "path": "../integration" }
+    ]
+}
