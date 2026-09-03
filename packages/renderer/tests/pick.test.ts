@@ -83,20 +83,32 @@ describe('nodeAt', () => {
 
     it('prefers the most recent where layer ties, as the draw does', async () => {
         const renderer = await ready();
-        renderer.createNode({
+        const first = renderer.createNode({
             kind: 'sprite',
             texture: 'block',
             surface: 'world',
             position: { x: 0, y: 0 },
         });
-        const later = renderer.createNode({
+        const second = renderer.createNode({
+            kind: 'sprite',
+            texture: 'block',
+            surface: 'world',
+            position: { x: 0, y: 0 },
+        });
+        expect(renderer.nodeAt(CENTRE)).toBe(second);
+
+        // Destroying the oldest returns its slot to the freelist, so the next node is created into
+        // a LOWER slot index than the one already on screen — the case a slot-index rank inverts.
+        renderer.destroyNode(first);
+        const third = renderer.createNode({
             kind: 'sprite',
             texture: 'block',
             surface: 'world',
             position: { x: 0, y: 0 },
         });
 
-        expect(renderer.nodeAt(CENTRE)).toBe(later);
+        expect(renderer.drawOrderOf('world').at(-1)).toBe(third);
+        expect(renderer.nodeAt(CENTRE)).toBe(third);
         renderer.destroy();
     });
 
