@@ -3,6 +3,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
+import { LoadError } from '../src/errors.js';
 import { bounds } from '@platform/math';
 
 afterEach(() => clearRuntime());
@@ -69,5 +70,34 @@ describe('getTouching', () => {
 
         expect(a.getTouching('enemy').map((e) => e.id)).toEqual([b.id]);
         expect(a.getTouching('nonexistent')).toHaveLength(0);
+    });
+});
+
+describe('attachTo', () => {
+    it('refuses a parent already inside the child’s own subtree', () => {
+        // Two lines from any script build a chain with no root, and everything that walks a parent
+        // chain after it — the destroy cascade first — never terminates.
+        const rt = loadGame();
+        const a = rt.wired.gameInstance.spawn('crate', 0, 0);
+        const b = rt.wired.gameInstance.spawn('crate', 1, 0);
+        a.attachTo(b);
+
+        expect(() => b.attachTo(a)).toThrow(LoadError);
+        expect(() => a.attachTo(a)).toThrow(LoadError);
+        // Refused before anything moved: `b` is still the root it was.
+        expect(b.parent).toBeNull();
+        expect(b.children.map((c) => c.id)).toStrictEqual([a.id]);
+    });
+
+    it('leaves a legal deep chain alone, and reparenting sideways still works', () => {
+        const rt = loadGame();
+        const root = rt.wired.gameInstance.spawn('crate', 0, 0);
+        const mid = rt.wired.gameInstance.spawn('crate', 1, 0).attachTo(root);
+        const leaf = rt.wired.gameInstance.spawn('crate', 2, 0).attachTo(mid);
+        expect(leaf.parent?.id).toBe(mid.id);
+
+        leaf.attachTo(root);
+        expect(leaf.parent?.id).toBe(root.id);
+        expect(mid.children).toStrictEqual([]);
     });
 });

@@ -13,6 +13,7 @@ import { scriptOnHost } from './get-script.js';
 import { entityKey } from './hosts.js';
 import type { TweenTarget } from '../loop/tweens.js';
 import { resumeWith } from '../dispatch/ambient.js';
+import { LoadError } from '../errors.js';
 import type { AssetRef } from './assets.js';
 import type { Player } from './player.js';
 import { MAX_BUBBLE_LENGTH } from '../config.js';
@@ -219,6 +220,15 @@ export class Entity {
         const prec = this.#rt.entities.record(parent.#id);
         // A destroy-pending parent already cascaded; a child linked under it dies with it.
         if (!rec || !prec || !prec.alive) return this;
+        // Refused where the authored path refuses a template that contains itself: a chain with no
+        // root is a walk that never ends, for the destroy cascade and for anything that follows it.
+        let at: EntityId = parent.#id;
+        while (at !== NO_ENTITY) {
+            if (at === this.#id) {
+                throw new LoadError(`entity ${this.id} cannot be attached beneath its own subtree`);
+            }
+            at = this.#rt.entities.record(at)?.parent ?? NO_ENTITY;
+        }
         // #unlink rather than detach(), whose mark would put two ops on the wire for one move.
         this.#unlink();
         rec.parent = parent.#id;

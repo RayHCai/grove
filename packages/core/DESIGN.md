@@ -174,7 +174,8 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   instantiation) and the `(record, field)` state set;
   the **transform** channel is `SimTransformStore`'s own dirty index, which is what lets the server's sink and
   the client's `SceneSink` drain it independently. None of the three is captured by snapshot — they are output
-  bookkeeping. `detach()` journals `reparent → NO_ENTITY`; `attachTo` unlinks silently and journals one op.
+  bookkeeping. `detach()` journals `reparent → NO_ENTITY`; `attachTo` refuses a parent already inside its
+  own subtree with a `LoadError`, then unlinks silently and journals one op.
   A bubble is a `say:<text>` tag op, and `say` clears the one it replaces while `clearSay` — which the timed
   form calls on its own tag alone — journals the removal, so an entity carries one bubble at a time.
   `attach` carries the `ScriptId` the running bundle stamped, resolved through `rt.scriptIdOf`, and is
