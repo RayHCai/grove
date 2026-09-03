@@ -1,0 +1,40 @@
+name: Audit
+
+# Deliberately outside the `CI passed` gate: an advisory is published against the tree, not against
+# the change under review, so one landing overnight must not block every merge until it is fixed.
+on:
+    push:
+        branches: [main]
+    pull_request:
+    schedule:
+        - cron: '17 6 * * *'
+    workflow_dispatch:
+
+concurrency:
+    group: audit-${{ github.ref }}
+    cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+    DO_NOT_TRACK: 1
+
+jobs:
+    advisories:
+        name: Dependency advisories
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@v6
+
+            - uses: pnpm/action-setup@v4
+
+            - uses: actions/setup-node@v6
+              with:
+                  node-version-file: .node-version
+                  cache: pnpm
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            # The whole tree, not --prod: the bundler that processes creator scripts is a dev dependency.
+            - name: pnpm audit
+              run: pnpm audit --audit-level=high
