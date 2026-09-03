@@ -35,10 +35,17 @@ export interface StateMark {
 export class ReplicationChannels {
     /** Append-only; order is meaning. */
     readonly #structural: StructuralOp[] = [];
-    /** Keyed so a field written twice before a drain replicates once. */
-    readonly #state = new Map<string, StateMark>();
-    #stateKeySeq = new WeakMap<object, number>();
-    #nextRecordId = 1;
+    /**
+     * Keyed so a field written twice before a drain replicates once.
+     *
+     * Record-major, by object identity, rather than one flat map under a `record field` string:
+     * `markState` runs on every assignment to a decorated field, and building the key and the mark
+     * before the deduplicating write meant both were garbage for every write after the first.
+     * The marks are shaped at drain instead, once per send tick.
+     */
+    readonly #state = new Map<object, Set<string>>();
+    /** Distinct (record, field) pairs held, since the map above counts records, not marks. */
+    #markCount = 0;
     /** The open group's ops, or null outside one. */
     #group: SingleStructuralOp[] | null = null;
     /** Open groups, so a template minting a template still produces one flat boundary. */
@@ -76,12 +83,14 @@ export class ReplicationChannels {
     }
 
     markState(record: object, field: string): void {
-        let recordId = this.#stateKeySeq.get(record);
-        if (recordId === undefined) {
-            recordId = this.#nextRecordId++;
-            this.#stateKeySeq.set(record, recordId);
+        let fields = this.#state.get(record);
+        if (fields === undefined) {
+            fields = new Set();
+            this.#state.set(record, fields);
         }
-        this.#state.set(`${recordId} ${field}`, { record, field });
+        const before = fields.size;
+        fields.add(field);
+        if (fields.size !== before) this.#markCount += 1;
     }
 
     drainStructural(): StructuralOp[] {
@@ -91,8 +100,12 @@ export class ReplicationChannels {
     }
 
     drainState(): StateMark[] {
-        const out = [...this.#state.values()];
+        const out: StateMark[] = [];
+        for (const [record, fields] of this.#state) {
+            for (const field of fields) out.push({ record, field });
+        }
         this.#state.clear();
+        this.#markCount = 0;
         return out;
     }
 
@@ -100,12 +113,13 @@ export class ReplicationChannels {
         return this.#structural.length;
     }
     get stateCount(): number {
-        return this.#state.size;
+        return this.#markCount;
     }
 
     clear(): void {
         this.#structural.length = 0;
         this.#state.clear();
+        this.#markCount = 0;
         this.#group = null;
         this.#groupDepth = 0;
     }

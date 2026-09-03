@@ -30,6 +30,15 @@ export interface DispatchLog {
 // `performance` is a host global on both ends but sits in neither this package's `lib` nor its
 // types, and core stays free of DOM and Node typings; `Date.now` is the fallback because a budget
 // that silently stopped being enforced is worse than one a clock step can misread once.
+/**
+ * The "nothing to await" answer, shared.
+ *
+ * A settled promise is immutable, so every caller that awaits or chains off this one sees the same
+ * thing a fresh `Promise.resolve()` would have given it — and a dispatch that matched no handler is
+ * the common case on a pass that runs across the whole registry every tick.
+ */
+const RESOLVED: Promise<void> = Promise.resolve();
+
 const elapsedMs: () => number = (() => {
     const host = (globalThis as { performance?: { now(): number } }).performance;
     return host === undefined ? () => Date.now() : () => host.now();
@@ -168,7 +177,10 @@ export class Dispatcher {
             return Promise.resolve();
         }
 
-        const pending: Promise<void>[] = [];
+        // Built only once something is actually parked. The passes call this once per instance
+        // across the whole registry, and most instances park nothing at all.
+        let pending: Promise<void>[] | null = null;
+        let first: Promise<void> | null = null;
         this.#depth++;
         try {
             for (const si of instances) {
@@ -178,16 +190,20 @@ export class Dispatcher {
                 for (const decl of si.handlers) {
                     if (!matches(decl, kind, event, opts.phase)) continue;
                     const p = this.#invoke(si, decl, ctx, hostId, opts.tick);
-                    if (p) pending.push(p);
+                    if (!p) continue;
+                    if (first === null) first = p;
+                    else (pending ??= [first]).push(p);
                 }
             }
         } finally {
             this.#depth--;
         }
 
-        return pending.length === 0
-            ? Promise.resolve()
-            : Promise.all(pending).then(() => undefined);
+        if (first === null) return RESOLVED;
+        // One handler is the overwhelming case, and its own promise already settles when it does —
+        // joining a single promise buys nothing and costs the array, the join and its reaction job.
+        if (pending === null) return first;
+        return Promise.all(pending).then(() => undefined);
     }
 
     #invoke(
