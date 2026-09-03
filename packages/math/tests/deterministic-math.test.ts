@@ -1,11 +1,11 @@
-// Contract tests for the deterministic transcendentals.
+// Accuracy tests for the deterministic transcendentals.
 //
-// Two separate promises live here and only one of them is about accuracy. The load-bearing one is
-// that a result is a pure function of its input — two machines running the same simulation must
-// draw the same number — and the built-ins are exempted from that by ECMA-262, which is why this
-// module exists at all. The second is that the replacement is close enough to the built-in to be
-// usable, and every bound below is asserted rather than described, because a mistyped coefficient
-// produces plausible values everywhere and is invisible without a number to fail against.
+// Only one of this module's two promises is asserted here: that the replacement is close enough to
+// the built-in to be usable. Every bound below is a number rather than a description, because a
+// mistyped coefficient produces plausible values everywhere and is invisible without one to fail
+// against. The load-bearing promise — that a result is the same float64 on every machine — cannot
+// be measured against `Math.*` at all, since ECMA-262 lets each engine approximate those its own
+// way; the golden bit vectors are what pin it.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -362,44 +362,26 @@ describe('the derived functions', () => {
     });
 });
 
-describe('determinism', () => {
-    // The actual contract. Accuracy is negotiable between releases; this is not, because two peers
-    // disagreeing by one bit diverge and never reconcile.
-    const every = [
-        sin,
-        cos,
-        tan,
-        atan,
-        asin,
-        acos,
-        exp,
-        log,
-        log2,
-        log10,
-        sinh,
-        cosh,
-        tanh,
-        asinh,
-        acosh,
-        atanh,
-        cbrt,
-        expm1,
-        log1p,
-    ];
+describe('the scratch buffer exp, log and pow share', () => {
+    it('carries nothing from one call into the next', () => {
+        // `exp`, `log` and the `pow2`/`scalbn` pair behind them all write one module-level
+        // Float64Array, and `pow` runs a `log` and an `exp` through it back to back — so a result
+        // could come to depend on which call ran before it, which no accuracy bound would show.
+        const xs = sweep(0.1, 40, 500);
+        const alone = {
+            exp: xs.map((x) => exp(x)),
+            log: xs.map((x) => log(x)),
+            pow: xs.map((x) => pow(x, 1.5)),
+        };
 
-    it('returns bit-identical results for a repeated argument', () => {
-        for (const f of every) {
-            for (const x of [0.5, 1, 2, 7.25, 100.125, -3.5, 1e-7, 12345.6789]) {
-                expect(f(x)).toBe(f(x));
-            }
+        const interleaved = { exp: [] as number[], log: [] as number[], pow: [] as number[] };
+        for (const x of xs) {
+            interleaved.log.push(log(x));
+            interleaved.pow.push(pow(x, 1.5));
+            interleaved.exp.push(exp(x));
         }
-    });
 
-    it('does not depend on the order arguments arrive in', () => {
-        const xs = sweep(-20, 20, 500);
-        const forwards = xs.map(sin);
-        const backwards = xs.toReversed().map(sin).toReversed();
-        expect(forwards).toStrictEqual(backwards);
+        expect(interleaved).toStrictEqual(alone);
     });
 });
 
