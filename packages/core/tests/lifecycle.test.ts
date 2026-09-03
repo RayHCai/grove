@@ -41,6 +41,24 @@ describe('@onRequest loopback', () => {
         await tick();
         expect((game as unknown as { credits: number }).credits).toBe(25);
     });
+
+    it('is the FALLBACK: an installed uplink takes the call and nothing dispatches here', async () => {
+        // What a networked client holds. Dispatching here as well would run the authority's check on
+        // the machine that made the ask — and a mirror is not where the answer is authoritative.
+        const rt = loadGame({ gameScripts: [Rules as never] });
+        await startGame(rt);
+        joinPlayer(rt, 'p1', 'Ada');
+        const sent: Array<[string, Record<string, unknown> | undefined]> = [];
+        rt.requestUplink = (name, payload): void => {
+            sent.push([name, payload]);
+        };
+
+        request('grant', { amount: 25 });
+        await tick();
+
+        expect(sent).toStrictEqual([['grant', { amount: 25 }]]);
+        expect((game as unknown as { credits: number }).credits).toBe(0);
+    });
 });
 
 describe('wire-time rejections', () => {

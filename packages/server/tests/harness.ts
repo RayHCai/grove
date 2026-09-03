@@ -6,12 +6,14 @@
 // a test that had to order the two would be reproducing the bug that owning the sequence removes.
 
 import type {
+    GameRequest,
     InputAction,
     InputFrame,
     Interaction,
     InteractionFrame,
     JoinRequest,
     Reject,
+    RequestFrame,
     ServerToClient,
     StateEnvelope,
     TimeSyncReply,
@@ -93,6 +95,11 @@ export class Peer {
     /** One tick's HUD presses and pointer hits. It carries no seq, so it disturbs no ack. */
     interaction(tick: number, events: Interaction[]): void {
         this.#send({ kind: 'interaction', tick, events } satisfies InteractionFrame);
+    }
+
+    /** One tick's `request()` calls. It carries no seq either, so it disturbs no ack. */
+    request(tick: number, requests: GameRequest[]): void {
+        this.#send({ kind: 'request', tick, requests } satisfies RequestFrame);
     }
 
     timeSync(clientSentMs: number): void {

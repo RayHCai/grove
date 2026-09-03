@@ -140,8 +140,9 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   `dt` in wall seconds rather than `1/simRate`, no tick advance, no snapshot, no replay. That is the whole
   reason it can be safe at display rate — nothing it does is replicated or reconciled, so there is no second
   machine that has to agree about how many times it ran.
-- **The lag ring** (`lag-ring.ts`) holds `ceil(simRate * 250ms / 1000)` reused transform buffers, each with
-  the live id list of its tick; a historical query builds a throwaway `Broadphase` over one and marks nothing.
+- **The lag ring** (`lag-ring.ts`) holds `ceil(simRate * 250ms / 1000)` reused slots, each a pair of position
+  lanes — the only two a ring view reads, since its half-extents come from the live facade — and the live id
+  list of its tick; a historical query builds a throwaway `Broadphase` over one and marks nothing.
   The ids are real `EntityId`s, generation included, because every caller feeds the results straight back into
   stores that would otherwise resolve a slot index to the wrong entity.
 

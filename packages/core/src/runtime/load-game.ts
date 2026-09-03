@@ -118,7 +118,11 @@ export function loadGame(manifest: GameManifest = {}, opts: LoadOptions = {}): R
         send: (id, event, payload) => dispatchTo(rt, id, event, payload),
         makeCamera: (player: Player) => new Camera(rt, player),
         makeStorage: (player: Player) => new Storage(rt.kv, `player:${player.id}`),
-        requestSink: (name, payload) => deliverRequest(rt, name, payload),
+        requestSink: (name, payload) => {
+            // ctx.player is engine-supplied and unforgeable; in loopback that is the local player.
+            const player = rt.localPlayer ?? rt.wired.playerManager.players[0] ?? undefined;
+            void deliverRequest(rt, { name, ...defined({ payload, player }) });
+        },
         random: new RuntimeRandom(rt),
         assets,
         gameInstance,
@@ -400,19 +404,35 @@ function dispatchEach(
     return Promise.all(pending).then(() => undefined);
 }
 
-/** Loopback delivery for request(): every server-located @onRequest handler, in place. */
-function deliverRequest(
-    rt: Runtime,
-    name: string,
-    payload: Record<string, unknown> | undefined,
-): void {
-    // ctx.player is engine-supplied and unforgeable; in loopback that is the local player.
-    const player = rt.localPlayer ?? rt.wired.playerManager.players[0] ?? undefined;
-    void dispatchEach(rt, 'onRequest', name, {
-        only: 'server',
-        extra: { data: payload ?? {}, player, from: null, viewTick: rt.tick },
-        dispatch: { activeLocations: activeLocationsFor('server'), tick: rt.tick },
-    });
+/** One `request()`, as either endpoint hands one to core. */
+export interface PlayerRequest {
+    name: string;
+    /** The only untrusted `ctx.data` in the API: it crossed the wire, and a handler must validate it. */
+    payload?: Record<string, unknown>;
+    /** Who asked — engine-supplied from the connection, never from the frame. */
+    player?: Player;
+}
+
+/**
+ * Dispatches `@onRequest` at every SERVER-located handler, which is the trust boundary itself.
+ *
+ * A client mirror holds no server-located instance, so a request that reached this there would
+ * dispatch to nothing rather than validate an untrusted ask on the untrusted machine.
+ */
+export function deliverRequest(rt: Runtime, request: PlayerRequest): Promise<void> {
+    // Ambient runtime established for the same reason `pressWidget` establishes it.
+    return withRuntime(rt, () =>
+        dispatchEach(rt, 'onRequest', request.name, {
+            only: 'server',
+            extra: {
+                data: request.payload ?? {},
+                ...defined({ player: request.player }),
+                from: null,
+                viewTick: rt.tick,
+            },
+            dispatch: { activeLocations: activeLocationsFor('server'), tick: rt.tick },
+        }),
+    );
 }
 
 function dispatchTo(

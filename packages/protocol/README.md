@@ -4,7 +4,8 @@ The shared wire vocabulary. **The one thing `@platform/server` and `@platform/cl
 bytes one writes are the bytes the other reads.
 
 It holds the **envelope types** — the handshake, the refusal, the reliable state diff, the droppable transform
-diff, the input frame, the clock-sync pair — and the **`PROTOCOL_VERSION`** the handshake stamps and compares.
+diff, the input frame, the checked request, the clock-sync pair — and the **`PROTOCOL_VERSION`** the handshake
+stamps and compares.
 It does not hold `jsonCodec`, which stays in `@platform/transport` as the injected default, and it does not
 move bytes: transport does that.
 

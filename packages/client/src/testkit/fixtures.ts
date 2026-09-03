@@ -8,9 +8,11 @@
 import type { Entity, HUDScreen } from '@platform/core';
 import {
     ClientScript,
+    ServerScript,
     SyncedScript,
     hud,
     onEventHold,
+    onRequest,
     onUpdate,
     serverState,
 } from '@platform/core';
@@ -57,5 +59,20 @@ export class Drift extends SyncedScript<Entity> {
     @onUpdate
     step(): void {
         Drift.frames += 1;
+    }
+}
+
+/**
+ * A server-located `@onRequest` handler, standing where one must never run.
+ *
+ * Attached to a MIRROR's Game, its counter staying at zero is what proves a `request()` left this
+ * process instead of being checked on the machine that made it.
+ */
+export class LocalVault extends ServerScript {
+    static asks = 0;
+
+    @onRequest('buy')
+    buy(): void {
+        LocalVault.asks += 1;
     }
 }

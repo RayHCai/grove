@@ -20,11 +20,13 @@ import type {
     Interaction,
     InteractionFrame,
     JoinRequest,
+    GameRequest,
     ManifestUpdate,
     NetId,
     RateChange,
     Reject,
     RejectReason,
+    RequestFrame,
     ServerToClient,
     SnapshotChunk,
     StateEnvelope,
@@ -214,6 +216,12 @@ const inputFrame: InputFrame = {
 
 const timeSync: TimeSync = { kind: 'time-sync', clientSentMs: 9 };
 
+const requestFrame: RequestFrame = {
+    kind: 'request',
+    tick: 4821,
+    requests: [{ name: 'buy', data: { item: 'shield', quantity: 2 } }, { name: 'ready' }],
+};
+
 const interactionFrame: InteractionFrame = {
     kind: 'interaction',
     tick: 4821,
@@ -238,6 +246,7 @@ type _ManifestUpdateIsMessage = Assignable<ManifestUpdate, Message>;
 type _RateChangeIsMessage = Assignable<RateChange, Message>;
 type _InputFrameIsMessage = Assignable<InputFrame, Message>;
 type _InteractionFrameIsMessage = Assignable<InteractionFrame, Message>;
+type _RequestFrameIsMessage = Assignable<RequestFrame, Message>;
 type _ServerToClientIsMessage = Assignable<ServerToClient, Message>;
 type _ClientToServerIsMessage = Assignable<ClientToServer, Message>;
 
@@ -276,7 +285,13 @@ const serverFrames: ServerToClient[] = [
     timeSyncReply,
     rateChange,
 ];
-const clientFrames: ClientToServer[] = [joinRequest, inputFrame, interactionFrame, timeSync];
+const clientFrames: ClientToServer[] = [
+    joinRequest,
+    inputFrame,
+    interactionFrame,
+    requestFrame,
+    timeSync,
+];
 
 describe('every envelope is assignable to transport Message', () => {
     it('encodes through jsonCodec, which is the runtime half of the same rule', () => {
@@ -286,7 +301,7 @@ describe('every envelope is assignable to transport Message', () => {
         for (const frame of frames) {
             expect(() => jsonCodec.encode(frame)).not.toThrow();
         }
-        expect(frames).toHaveLength(12);
+        expect(frames).toHaveLength(13);
     });
 
     it('round-trips an envelope to a structurally equal value', () => {
@@ -331,6 +346,8 @@ function narrowClientToServer(frame: ClientToServer): string {
             return `input@${frame.tick}/${frame.seq}`;
         case 'interaction':
             return `interaction@${frame.tick}x${frame.events.length}`;
+        case 'request':
+            return `request@${frame.tick}x${frame.requests.length}`;
         case 'time-sync':
             return `sync@${frame.clientSentMs}`;
         default: {
@@ -359,6 +376,7 @@ describe('the discriminant narrows both unions exhaustively', () => {
             'join:Ray',
             'input@4821/337',
             'interaction@4821x2',
+            'request@4821x2',
             'sync@9',
         ]);
     });
@@ -371,7 +389,7 @@ describe('the discriminant narrows both unions exhaustively', () => {
         const serverKinds = serverFrames.map((f) => f.kind);
         const clientKinds: string[] = clientFrames.map((f) => f.kind);
         expect(serverKinds.filter((k) => clientKinds.includes(k))).toStrictEqual([]);
-        expect(new Set([...serverKinds, ...clientKinds]).size).toBe(12);
+        expect(new Set([...serverKinds, ...clientKinds]).size).toBe(13);
     });
 });
 
@@ -398,6 +416,49 @@ describe('the interaction arm carries what the authority cannot recompute', () =
             true;
         expect(exactFields).toBe(true);
         expect('seq' in interactionFrame).toBe(false);
+    });
+});
+
+describe('a request crosses the wire, because the authority is the only place it may run', () => {
+    it('is a client-to-server arm, so a handler runs on the machine that owns the state', () => {
+        // The security model in one assertion: server-to-client is implicit replication and
+        // client-to-server is always an explicit, checked `request()`. An arm missing here is a
+        // request that never leaves the caller, and a check running on the untrusted machine.
+        type _RequestIsClientToServer = Assignable<RequestFrame, ClientToServer>;
+        // @ts-expect-error — and never the other direction: a server does not ask a client for
+        // anything, so an arm that narrowed both ways would let a client accept a frame it minted.
+        type _RequestIsNotServerToClient = Assignable<RequestFrame, ServerToClient>;
+        expect(clientFrames.map((f) => f.kind)).toContain('request');
+    });
+
+    it('round-trips a call and its payload to a structurally equal value', () => {
+        expect(jsonCodec.decode(jsonCodec.encode(requestFrame))).toStrictEqual(requestFrame);
+    });
+
+    it('omits `data` for a call carrying no payload, rather than sending undefined', () => {
+        const bare: GameRequest = { name: 'ready' };
+        expect('data' in bare).toBe(false);
+        expect(jsonCodec.encode(bare)).toBe('{"name":"ready"}');
+
+        const dynamic = { name: 'ready', data: undefined } as unknown as Message;
+        expect(() => jsonCodec.encode(dynamic)).toThrow();
+    });
+
+    it('carries no seq, so it is neither acked nor replayed', () => {
+        // One discrete ask, like an interaction and unlike an input edge — there is nothing to
+        // re-derive it from and nothing a replay could safely repeat.
+        const exactFields: Assert<IsMutual<keyof RequestFrame, 'kind' | 'tick' | 'requests'>> =
+            true;
+        expect(exactFields).toBe(true);
+        expect('seq' in requestFrame).toBe(false);
+    });
+
+    it('puts a payload field name in KEY position, where the reserved-key check sees it', () => {
+        // The same rule a `StateDiff` holds, and the reason `data` is a map rather than pairs: a
+        // sender must drop `__proto__` rather than emit it, and a receiver never sees one.
+        const hostile =
+            '{"kind":"request","tick":1,"requests":[{"name":"buy","data":{"__proto__":{"polluted":true}}}]}';
+        expect(() => jsonCodec.decode(hostile)).toThrow();
     });
 });
 

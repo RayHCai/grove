@@ -41,6 +41,15 @@ export const MAX_INTERACTIONS_PER_FRAME = 16;
 /** Longest accepted widget or screen name — each becomes the event name of a dispatch. */
 export const MAX_WIDGET_NAME_LENGTH = 64;
 
+/** Requests one frame may carry, so a single frame cannot buy an unbounded dispatch walk. */
+export const MAX_REQUESTS_PER_FRAME = 16;
+
+/** Longest accepted request name — it becomes the event name of that dispatch. */
+export const MAX_REQUEST_NAME_LENGTH = 64;
+
+/** Values one request payload may hold, counted over the whole graph: it bounds nesting and cardinality together, since depth can never exceed the node count. */
+export const MAX_REQUEST_PAYLOAD_NODES = 256;
+
 /** Longest accepted display name. */
 export const MAX_NAME_LENGTH = 24;
 

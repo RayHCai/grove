@@ -25,6 +25,7 @@ import {
 import type { ScriptId } from '@platform/project';
 import type {
     ClientToServer,
+    GameRequest,
     InputAction,
     InputFrame,
     Interaction,
@@ -34,6 +35,7 @@ import type {
     Reject,
     RejectReason,
     RenderManifest,
+    RequestFrame,
     TimeSync,
     Welcome,
     WireBounds,
@@ -57,6 +59,9 @@ import {
     MAX_ACTION_NAME_LENGTH,
     MAX_IDENTITY_LENGTH,
     MAX_NAME_LENGTH,
+    MAX_REQUESTS_PER_FRAME,
+    MAX_REQUEST_NAME_LENGTH,
+    MAX_REQUEST_PAYLOAD_NODES,
     MAX_UNJOINED_CONNECTIONS,
     assertRate,
     pastGraceTicks,
@@ -488,7 +493,10 @@ export class GameServer {
         if (conn.closed) return;
         const envelope = asClientEnvelope(message);
         if (envelope === undefined) return;
-        const onInputBucket = envelope.kind === 'input' || envelope.kind === 'interaction';
+        const onInputBucket =
+            envelope.kind === 'input' ||
+            envelope.kind === 'interaction' ||
+            envelope.kind === 'request';
         if (!onInputBucket && !conn.admission.takeControlToken()) return;
         if (conn.joined) conn.admission.noteTraffic(this.#rt.tick);
         switch (envelope.kind) {
@@ -500,6 +508,9 @@ export class GameServer {
                 return;
             case 'interaction':
                 this.#interaction(conn, envelope);
+                return;
+            case 'request':
+                this.#request(conn, envelope);
                 return;
             case 'time-sync':
                 this.#timeSync(conn, envelope);
@@ -638,12 +649,24 @@ export class GameServer {
 
     /** Queues a frame's interactions for the tick pass, which is where they are dispatched. */
     #interaction(conn: Connection, frame: InteractionFrame): void {
-        if (!conn.joined) return;
-        if (!conn.admission.takeToken()) {
-            if (conn.admission.overRateBreachLimit) conn.transport.close();
-            return;
-        }
+        if (!conn.joined || !this.#takeInputToken(conn)) return;
         for (const event of frame.events) conn.interactions.push(event);
+    }
+
+    /** Queues a frame's requests for the tick pass, which is where the authority answers them. */
+    #request(conn: Connection, frame: RequestFrame): void {
+        if (!conn.joined || !this.#takeInputToken(conn)) return;
+        for (const call of frame.requests) conn.requests.push(call);
+    }
+
+    /** Spends an input token for a frame the bucket meters, closing a connection that has sustained a breach. */
+    #takeInputToken(conn: Connection): boolean {
+        if (conn.admission.takeToken()) return true;
+        if (conn.admission.overRateBreachLimit) {
+            this.#deny('close', conn, 'rate-breach');
+            conn.transport.close();
+        }
+        return false;
     }
 
     #timeSync(conn: Connection, sync: TimeSync): void {
@@ -744,6 +767,8 @@ function asClientEnvelope(message: unknown): ClientToServer | undefined {
             return isInputFrame(message) ? message : undefined;
         case 'interaction':
             return isInteractionFrame(message) ? message : undefined;
+        case 'request':
+            return isRequestFrame(message) ? message : undefined;
         case 'time-sync':
             return isTimeSync(message) ? message : undefined;
         default:
@@ -797,6 +822,53 @@ function isInteraction(value: unknown): value is Interaction {
 
 function isWidgetName(value: unknown): value is string {
     return typeof value === 'string' && value !== '' && value.length <= MAX_WIDGET_NAME_LENGTH;
+}
+
+function isRequestFrame(message: object): message is RequestFrame {
+    const m = message as Record<string, unknown>;
+    if (!Number.isSafeInteger(m['tick'])) return false;
+    const requests = m['requests'];
+    if (!Array.isArray(requests) || requests.length > MAX_REQUESTS_PER_FRAME) return false;
+    return requests.every(isGameRequest);
+}
+
+function isGameRequest(value: unknown): value is GameRequest {
+    if (typeof value !== 'object' || value === null) return false;
+    const r = value as Record<string, unknown>;
+    const name = r['name'];
+    if (typeof name !== 'string' || name === '' || name.length > MAX_REQUEST_NAME_LENGTH) {
+        return false;
+    }
+    // Checked with `in` rather than by value, because an explicit `undefined` is a frame no codec
+    // could have produced and the wire rule is absent-not-undefined.
+    if (!('data' in r)) return true;
+    return isPlainObject(r['data']) && isBoundedPayload(r['data']);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Whether a payload's whole graph fits inside `MAX_REQUEST_PAYLOAD_NODES`.
+ *
+ * Iterative rather than recursive, for the reason the codec's own walk is: a frame nesting a few
+ * thousand deep is well-formed and small, and would overflow the stack before any cap read it. The
+ * node count is what bounds this walk, and depth can never exceed it — a peer-chosen graph the
+ * handler is handed whole is the one place a cardinality cap alone would not.
+ */
+function isBoundedPayload(payload: Record<string, unknown>): boolean {
+    const stack: unknown[] = [payload];
+    let nodes = 0;
+    while (stack.length > 0) {
+        const node = stack.pop();
+        if (node === null || typeof node !== 'object') continue;
+        for (const child of Object.values(node)) {
+            if (++nodes > MAX_REQUEST_PAYLOAD_NODES) return false;
+            stack.push(child);
+        }
+    }
+    return true;
 }
 
 function isTimeSync(message: object): message is TimeSync {

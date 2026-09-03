@@ -33,6 +33,7 @@ Deps: `core`, `math`, `protocol`, `renderer`, `transport`. Never `server`. No Re
 | [src/lifecycle.ts](src/lifecycle.ts)   | `Lifecycle` — `SessionState`, `FailureReason`, input gating                                       |
 | [src/bridge.ts](src/bridge.ts)         | `RenderBridge` — `EntityId ↔ NodeId`, manifest, dirty-set push, interpolation, camera             |
 | [src/hud-sink.ts](src/hud-sink.ts)     | `ClientHUDSink` — core's HUD seam: widget records and the open screen stack                       |
+| [src/request.ts](src/request.ts)       | A `request()` payload as wire fields, with what the wire cannot carry dropped                     |
 | [src/constants.ts](src/constants.ts)   | Engine constants, each stating its unit                                                           |
 | [src/browser/](src/browser/)           | DOM adapters behind the `./browser` subpath                                                       |
 
@@ -275,6 +276,18 @@ input is accepted, since a press the server would refuse as stale is worse than 
 flushes once per frame as one `InteractionFrame` stamped with `localTick`; it never enters `InputRing`,
 because an interaction carries no `seq`, is not acked and is not replayed. `pointer` takes the **local**
 `EntityId` and maps it to a `netId` here, so the layer that hit-tests never learns there is a network.
+
+`GameClient` installs `Runtime.requestUplink` on the mirror when the session opens, which is what makes a
+creator's `request()` cross the wire instead of falling back to core's loopback sink — the mirror holds no
+server-located script, so a loopback here would check an untrusted ask on the machine that made it and
+against no authoritative state. The call is gated like input, queued, and flushed once per frame as one
+`RequestFrame` stamped with `localTick`, carrying at most `MAX_REQUESTS_PER_FRAME` and holding the excess
+for the next frame, since the receiver refuses an over-cap frame whole and a burst would otherwise lose
+every call in it; a resync drops the queue with the world it belonged to. The
+payload is encoded by `src/request.ts` at queue time rather than at `send`, dropping a reserved key, a
+cycle, anything past `MAX_REQUEST_DEPTH` levels, and any value the wire would deliver as something other
+than itself — because `encode` throws on each and that throw would end the session over a field a creator
+named.
 
 **A correction is eased on screen and exact in the simulation.** What the authority disagreed with is
 measured across the rewind — from the **drawn** pose, not the simulated one, because the offset replaces
