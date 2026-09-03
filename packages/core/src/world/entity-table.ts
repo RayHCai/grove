@@ -85,6 +85,11 @@ export class EntityTable implements SnapshotStore<EntityTableBuffer> {
         this.#slots.release(id);
     }
 
+    /** How many slots are occupied — what the spawn cap is read against, without building a list. */
+    get liveCount(): number {
+        return this.#slots.liveCount;
+    }
+
     /** Live entity ids in ascending slot order — creation order. */
     liveIds(out: EntityId[] = []): EntityId[] {
         return this.#slots.liveIds(out);

@@ -22,6 +22,9 @@ export const MAX_LOG_RECORDS = 512;
 /** Speech-bubble text cap; longer strings truncate rather than growing unbounded. */
 export const MAX_BUBBLE_LENGTH = 200;
 
+/** Live entities one world may hold; a spawn past it is refused, so a storm cannot exhaust memory. */
+export const MAX_ENTITIES = 10_000;
+
 /** Milliseconds one handler may hold the tick before the boundary charges it like a throw. */
 export const MAX_HANDLER_MS = 50;
 

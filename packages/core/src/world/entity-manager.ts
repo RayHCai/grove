@@ -2,6 +2,8 @@
 // Teardown is deferred to the tick's destroy drain so a mid-dispatch destroy cannot mutate
 // the live list underneath the pass that is walking it.
 
+import { MAX_ENTITIES } from '../config.js';
+import { LoadError } from '../errors.js';
 import type { EntityId } from '../ids.js';
 import type { Runtime } from '../runtime/runtime.js';
 import type { Entity } from '../runtime/entity.js';
@@ -27,6 +29,11 @@ export class EntityManager {
 
     /** Spawns an entity from a template, at (x, y). */
     spawn(template: string, x = 0, y = 0, ownerId = ''): Entity {
+        // Refused where a template's node budget is refused, and for the same reason: past the cap
+        // the only thing left to stop a spawn loop is memory.
+        if (this.#rt.entities.liveCount >= MAX_ENTITIES) {
+            throw new LoadError(`the world already holds ${MAX_ENTITIES} entities`);
+        }
         const id = this.#rt.entities.create(template, ownerId);
         this.#rt.transforms.initSlot(id);
         this.#rt.transforms.setPosition(id, x, y, 0);
