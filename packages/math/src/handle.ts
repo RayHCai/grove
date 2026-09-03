@@ -34,9 +34,8 @@ export function handleGeneration(handle: number): number {
  * The generation a slot moves to when it is freed.
  *
  * Wraps rather than growing without bound: past `MAX_GENERATION` a packed handle leaves the
- * safe-integer range, where distinct handles start comparing equal. A handle held across 2^29
- * reuses of one slot could then alias a live one — unreachable in practice, and better than
- * arithmetic that has silently stopped being exact.
+ * safe-integer range, where distinct handles start comparing equal. `SlotTable` retires a slot
+ * rather than mint across the wrap, so the reissued handle is never handed out.
  */
 export function nextGeneration(generation: number): number {
     return generation >= MAX_GENERATION ? FIRST_GENERATION : generation + 1;

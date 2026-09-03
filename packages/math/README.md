@@ -43,7 +43,9 @@ one is a cross-package change.
 Handles are packed arithmetically as `generation * 2^24 + index`, because `<<` coerces to int32
 and would start minting negative, colliding handles at generation 128. Releasing a slot bumps its
 generation and pushes the slot onto a freelist, so a handle that outlived its record reads as
-absent rather than as whatever record reused the slot.
+absent rather than as whatever record reused the slot; a slot that reaches `MAX_GENERATION` is
+retired instead of pushed, because reuse past the generation wrap would reissue a handle it has
+already given out.
 
 ## Conventions worth knowing
 
