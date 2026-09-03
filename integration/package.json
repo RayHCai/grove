@@ -1,0 +1,37 @@
+{
+    "name": "@platform/integration",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Every package composed as an application composes them, driven by a seeded pseudo-random session.",
+    "exports": {
+        "./*": {
+            "types": "./dist/*.d.ts",
+            "import": "./dist/*.js"
+        }
+    },
+    "scripts": {
+        "build": "tsc -b",
+        "typecheck": "tsc -b && tsc -p tsconfig.test.json",
+        "test": "tsc -b && vitest run",
+        "clean": "rm -rf dist .turbo"
+    },
+    "dependencies": {
+        "@platform/client": "workspace:*",
+        "@platform/core": "workspace:*",
+        "@platform/engine": "workspace:*",
+        "@platform/glue": "workspace:*",
+        "@platform/math": "workspace:*",
+        "@platform/project": "workspace:*",
+        "@platform/protocol": "workspace:*",
+        "@platform/renderer": "workspace:*",
+        "@platform/scripting": "workspace:*",
+        "@platform/server": "workspace:*",
+        "@platform/transport": "workspace:*"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.5",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    }
+}
