@@ -132,6 +132,9 @@ export class RendererCore {
     /** Set when something scene-wide changed and the next flush must reconsider every node. */
     #cullAll = true;
 
+    /** Stamped onto every `NodeRecord`; never rewound, so a recycled slot still sorts newest. */
+    #nextOrdinal = 0;
+
     /** Slots already re-culled this flush: a moved node lands in both dirty sets. */
     readonly #culledThisFlush = new Set<number>();
 
@@ -255,6 +258,7 @@ export class RendererCore {
             style: desc.kind === 'text' ? desc.style : undefined,
             uiAnchor: desc.uiAnchor,
             layer: desc.layer ?? 0,
+            ordinal: this.#nextOrdinal++,
         };
 
         const id = this.nodes.create(record);
@@ -647,8 +651,8 @@ export class RendererCore {
      * already computes for both kinds.
      *
      * "Topmost" is draw order read backwards: greatest surface first, then greatest `layer`, then
-     * the most recently created — the same three keys the draw walk uses, so what a pointer picks
-     * is what a person sees on top.
+     * the most recently created. Creation order, never slot index — the freelist is LIFO, so a
+     * node born into a recycled slot would otherwise lose to the node it was drawn over.
      *
      * Groups are never hit: a group has no art, so it has no extent to cover a pixel with. An
      * invisible node is never hit either, whether it was hidden itself or inherited it.
@@ -658,6 +662,7 @@ export class RendererCore {
         let best = NO_NODE;
         let bestSurface = -1;
         let bestLayer = -Infinity;
+        let bestOrdinal = -1;
         let bestIndex = -1;
 
         for (const index of this.nodes.liveIndices(this.#pickScratch)) {
@@ -672,7 +677,10 @@ export class RendererCore {
             // Cheaper than the bounds below, and it decides the winner on its own.
             if (order < bestSurface) continue;
             if (order === bestSurface && record.layer < bestLayer) continue;
-            if (order === bestSurface && record.layer === bestLayer && index < bestIndex) continue;
+            if (order === bestSurface && record.layer === bestLayer) {
+                if (record.ordinal < bestOrdinal) continue;
+                if (record.ordinal === bestOrdinal && index < bestIndex) continue;
+            }
 
             const box = this.screenBoundsOf(this.nodes.idAt(index));
             if (box === null) continue;
@@ -683,6 +691,7 @@ export class RendererCore {
             best = this.nodes.idAt(index);
             bestSurface = order;
             bestLayer = record.layer;
+            bestOrdinal = record.ordinal;
             bestIndex = index;
         }
         return best;

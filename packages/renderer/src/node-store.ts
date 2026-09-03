@@ -23,6 +23,11 @@ export interface NodeRecord {
     uiAnchor: UiAnchor | undefined;
     /** Draw order within the surface; sibling order once parented. */
     layer: number;
+    /**
+     * Creation sequence number: the freelist is LIFO, so a slot index would sort a node created
+     * into a recycled slot underneath the node it was drawn on top of.
+     */
+    ordinal: number;
 }
 
 /**

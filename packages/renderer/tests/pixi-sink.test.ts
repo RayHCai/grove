@@ -24,6 +24,7 @@ function record(over: Partial<NodeRecord> = {}): NodeRecord {
         style: undefined,
         uiAnchor: undefined,
         layer: 0,
+        ordinal: 0,
         ...over,
     };
 }
