@@ -200,7 +200,12 @@ function runUpdatePass(
 }
 
 function dispatchUpdate(rt: Runtime, hostKey: string, dt: number, opts: DispatchOptions): void {
-    for (const instance of rt.instances.forHost(hostKey)) {
+    const instances = rt.instances.forHost(hostKey);
+    for (let i = 0; i < instances.length; i++) {
+        const instance = instances[i]!;
+        // Ahead of the array and the context, both of which are per-instance: this runs for every
+        // scoped entity on every replayed tick, and a replay spans up to MAX_REPLAY_TICKS of them.
+        if (!rt.instances.declares(instance, 'onUpdate')) continue;
         void rt.dispatcher.dispatch(
             [instance],
             'onUpdate',
