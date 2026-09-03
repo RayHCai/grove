@@ -562,6 +562,40 @@ describe('@serverState lands in the host record', () => {
         expect(m.runtime.channels.stateCount).toBe(0);
     });
 
+    // Field names are the sender's to choose, so this is the one place a peer could reach an engine
+    // member. The value still lands in the record; only the hoist onto the facade is refused.
+    it('counts a field the game facade already answers to, and leaves the member intact', () => {
+        const m = mirror();
+        m.applyState(
+            stateEnvelope([], {
+                state: [{ host: { kind: 'game' }, fields: { players: 0, spawn: 0 } }],
+            }),
+        );
+        expect(m.counters.reservedField).toBe(2);
+        expect(Array.isArray(m.runtime.gameInstance?.players)).toBe(true);
+        expect(typeof m.runtime.gameInstance?.spawn).toBe('function');
+        expect(m.runtime.hosts.ensure('game').record.values.get('players')).toBe(0);
+    });
+
+    it('counts a player member the same way, without disturbing the roster', () => {
+        const m = mirror();
+        m.applyState(
+            stateEnvelope([{ kind: 'player-join', player: { id: 'p1', index: 0, name: 'Ada' } }], {
+                state: [{ host: { kind: 'player', id: 'p1' }, fields: { name: 'spoofed' } }],
+            }),
+        );
+        expect(m.counters.reservedField).toBe(1);
+        expect(m.runtime.playerManager?.byId('p1')?.name).toBe('Ada');
+    });
+
+    it('leaves the counter alone when the same free field arrives twice', () => {
+        const m = mirror();
+        const diff = { host: { kind: 'game' } as const, fields: { phase: 'running' } };
+        m.applyState(stateEnvelope([], { state: [diff] }));
+        m.applyState(stateEnvelope([], { state: [diff] }));
+        expect(m.counters.reservedField).toBe(0);
+    });
+
     it('rebuilds a wrapper from its payload, methods and all', () => {
         const m = mirror();
         m.applyState(

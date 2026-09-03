@@ -129,7 +129,7 @@ export class Wiring {
             // record, so a prop written after it would be overwritten by the initializer it is
             // there to override. Written here it lands in the backing map the hoist then reads.
             applyProps(instance, props);
-            this.#hoistState(instance, host, entry.record);
+            this.#hoistState(instance, host, entry.record, kind);
             this.#bindWrappers(instance, entry.record);
         } catch (err) {
             // Fatal, not logged: a half-hoisted host record matches no declaration.
@@ -145,7 +145,7 @@ export class Wiring {
     }
 
     // Hoisting onto the host too is what makes `this.credits` and `player.credits` one value.
-    #hoistState(instance: object, host: object, record: HostRecord): void {
+    #hoistState(instance: object, host: object, record: HostRecord, kind: HostKind): void {
         const backing = (instance as Record<symbol, Map<string, unknown> | undefined>)[
             STATE_BACKING
         ];
@@ -154,6 +154,16 @@ export class Wiring {
         for (const field of backing.keys()) {
             if (record.values.has(field) && !record.wrappers.has(field)) {
                 throw new Error(`duplicate @serverState name "${field}" on host`);
+            }
+            // Nothing but the engine can have put this name on the host: a sibling's hoist is the
+            // duplicate above. Left alone, a prototype member is REPLACED by the accessor and a
+            // method is replaced by a value, so the first `game.players.filter(...)` throws a
+            // TypeError nowhere near the declaration — and an own field like `player.name` is not
+            // replaced at all, which splits one name across two values instead.
+            if (field in host) {
+                throw new LoadError(
+                    `@serverState "${field}" is already a member of the ${kind} it is hosted on; rename the field`,
+                );
             }
             const authored = authoredValue(instance, field);
             const declaredTag = tagOf(authored);
@@ -176,7 +186,8 @@ export class Wiring {
         record: HostRecord,
         mark: (field: string) => void,
     ): void {
-        if (Object.prototype.hasOwnProperty.call(host, field)) return;
+        // Unconditional: `#hoistState` has already refused every name the host answered to, so a
+        // guard here would only hide a collision it was supposed to have caught.
         Object.defineProperty(host, field, {
             configurable: true,
             enumerable: true,

@@ -16,6 +16,13 @@ interface StateHolder {
 }
 
 /**
+ * Which names this function has defined on which facade, so a re-hoist is told apart from a name
+ * the host already owned. Weak because a facade outlives nothing here — an entity's is evicted the
+ * tick it dies.
+ */
+const replicated = new WeakMap<object, Set<string>>();
+
+/**
  * Puts a replicated field on a host FACADE, read-only, reading through the record.
  *
  * The authoritative side gets this for free: wiring hoists each `@serverState` field onto the host
@@ -26,10 +33,21 @@ interface StateHolder {
  *
  * Read-only by construction. Client code reads the world and asks; it never tells, and a setter here
  * would be a write to authoritative state that no channel carries and no server would ever see.
- * Idempotent per field, so the per-envelope call costs a `hasOwnProperty` after the first.
+ *
+ * Returns false for a field the host already answers to, having defined nothing. Field names arrive
+ * from the wire, so a peer naming `players` or `avatar` would otherwise replace the engine member
+ * with a read-only accessor for the life of the facade — and every later call would throw somewhere
+ * far from the envelope that did it. The caller counts the refusal; it cannot throw, because one
+ * hostile field must not abort the rest of an envelope.
  */
-export function hoistReplicated(host: object, field: string, values: Map<string, unknown>): void {
-    if (Object.prototype.hasOwnProperty.call(host, field)) return;
+export function hoistReplicated(
+    host: object,
+    field: string,
+    values: Map<string, unknown>,
+): boolean {
+    const mine = replicated.get(host);
+    if (mine?.has(field)) return true;
+    if (field in host) return false;
     Object.defineProperty(host, field, {
         configurable: true,
         enumerable: true,
@@ -37,6 +55,9 @@ export function hoistReplicated(host: object, field: string, values: Map<string,
             return values.get(field);
         },
     });
+    if (mine) mine.add(field);
+    else replicated.set(host, new Set([field]));
+    return true;
 }
 
 /** Installs `field`'s accessor pair, moving the authored value into a local backing map. */

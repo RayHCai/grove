@@ -42,7 +42,7 @@ path and core only ever receives an already-valid manifest.
 - **Wire-time rejections** live in `Wiring.#reject` + the hoist walk, all `LoadError`: `SyncedScript` on a
   camera/screen host, `ServerScript` on a screen host, `@onRequest` off a `ServerScript`,
   `@onPlayerJoin`/`@onPlayerLeave` off a Game-hosted `ServerScript`, two `@serverState` fields claiming one
-  name on a host.
+  name on a host, and a `@serverState` field naming something the host itself already answers to.
 
 ## 2. Dispatch
 
@@ -151,13 +151,20 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   own property and installs an accessor pair that reads a redirectable target symbol at call time. Wiring
   points that target at the host record's `values` map, installs the mark closure, and defines the same
   accessor on the host object — so `this.credits` and `player.credits` are one value and one mark per write.
+  A name the host already answers to is a `LoadError` rather than a hoist, since the accessor would replace
+  the member for a prototype one (`game.players`) and be skipped for an own one (`player.name`), splitting
+  that name across two values; the only other thing that could hold the name is a sibling script, which the
+  duplicate check above has already refused.
 - **`hoistReplicated(host, field, values)` is the same accessor without a script**, and it is why a receiver
   running no scripts can still read a replicated field by name. Wiring installs the pair above because it has
   an instance to hoist from; a mirror has none — the value arrives in the host record and stops there, so
   `game.phase` on the machine that draws it would be `undefined` while being present on the wire. This
   defines a **read-only** accessor reading through the same `values` map, so the two ends spell one value one
   way. Read-only because there is no authority behind it: a write here would be a local lie the next envelope
-  silently overwrites.
+  silently overwrites. Field names reach it from the wire, so it answers `false` and defines nothing for a
+  name the host already answers to — a peer naming `players` would otherwise replace the member for the life
+  of that facade — and the caller counts the refusal rather than throwing, since one field must not abort an
+  envelope. Names it defined itself are tracked per host, so re-hoisting one is idempotent and uncounted.
 - **Ctor props land between construction and the hoist**, and that ordering is the whole correctness
   argument: the hoist moves each field's authored value into the host record, so a prop written after it
   would be overwritten by the initializer it exists to override. Written there it goes through the accessor

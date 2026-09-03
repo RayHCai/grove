@@ -79,6 +79,14 @@ export interface MirrorCounters {
     invalidNetId: number;
     /** An array from the wire past the cap for its kind, refused whole before the element walk. */
     oversizedList: number;
+    /**
+     * A `StateDiff` field whose name the host facade already answers to.
+     *
+     * Applied to the record but hoisted onto nothing, since defining it would replace an engine
+     * member — `game.players`, `player.avatar` — for the life of that facade. A well-formed peer
+     * sends none: the authority refuses the same name at wire time.
+     */
+    reservedField: number;
 }
 
 /**
@@ -163,6 +171,7 @@ export class Mirror {
         invalidNetId: 0,
         supersededTransforms: 0,
         oversizedList: 0,
+        reservedField: 0,
     };
 
     constructor(opts: MirrorOptions) {
@@ -541,7 +550,8 @@ export class Mirror {
             // attaches. Nothing attaches a Game or Player script here, so without this the values
             // just applied would be reachable from no creator-facing name at all — and reading them
             // is the entire job of the client code that draws them.
-            if (host !== undefined) hoistReplicated(host, field, record.values);
+            if (host === undefined) continue;
+            if (!hoistReplicated(host, field, record.values)) this.counters.reservedField++;
         }
     }
 
