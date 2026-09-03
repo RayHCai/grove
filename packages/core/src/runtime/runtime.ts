@@ -106,9 +106,25 @@ export interface EngineLog extends DispatchLog {
     readonly records: ReadonlyArray<HandlerErrorRecord & { phase?: string; disabled?: boolean }>;
 }
 
+/**
+ * Where the engine's diagnostics leave core, installed through `LoadOptions.log`.
+ *
+ * Core writes to a console nowhere and holds no transport, so a warning has nowhere to go without
+ * one of these: everything the host is meant to see about a misbehaving world arrives here.
+ */
+export interface LogSink extends DispatchLog {
+    warn(message: string): void;
+}
+
 /** Default log: retains the most recent MAX_LOG_RECORDS error records in memory. */
 export class CollectingLog implements EngineLog {
     readonly #records: Array<HandlerErrorRecord & { phase?: string; disabled?: boolean }> = [];
+    #sink: LogSink | null = null;
+
+    /** Installs the host's sink beneath the ring, which keeps recording either way. */
+    setSink(sink: LogSink | null): void {
+        this.#sink = sink;
+    }
 
     error(record: HandlerErrorRecord & { phase?: string; disabled?: boolean }): void {
         // Capped: a session runs for hours and an unbounded array is a slow leak that only shows
@@ -117,10 +133,12 @@ export class CollectingLog implements EngineLog {
             this.#records.shift();
         }
         this.#records.push(record);
+        this.#sink?.error(record);
     }
 
-    warn(_message: string): void {
-        // Warnings belong in the host's dev console, not in the error records.
+    warn(message: string): void {
+        // Not a record: a warning is not a handler throw, and the ring is what `records` promises.
+        this.#sink?.warn(message);
     }
 
     get records(): ReadonlyArray<HandlerErrorRecord & { phase?: string; disabled?: boolean }> {
@@ -145,7 +163,8 @@ export class Runtime {
     readonly hosts = new HostTable(this.scopes);
     readonly channels = new ReplicationChannels();
     readonly instances = new InstanceRegistry();
-    readonly log: EngineLog = new CollectingLog();
+    readonly #collecting = new CollectingLog();
+    readonly log: EngineLog = this.#collecting;
     readonly dispatcher = new Dispatcher(this.scopes, this.breaker, this.log);
     readonly entityManager = new EntityManager(this);
 
@@ -244,6 +263,11 @@ export class Runtime {
         this.tweens.setGuard((owner, method, fn) =>
             this.guardCallback(owner, method, '@tween', fn),
         );
+    }
+
+    /** Routes this runtime's diagnostics to the host; the default log keeps its ring regardless. */
+    setLogSink(sink: LogSink | null): void {
+        this.#collecting.setSink(sink);
     }
 
     /** Runs a creator callback that reaches the engine outside a handler under that same boundary. */
