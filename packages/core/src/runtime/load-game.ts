@@ -24,6 +24,7 @@ import { Wiring, activeLocationsFor } from './wiring.js';
 import { createRuntime, withRuntime } from './runtime.js';
 import type { Runtime, TickPasses } from './runtime.js';
 import type { DispatchCtx, DispatchOptions } from '../dispatch/dispatcher.js';
+import type { ScriptInstance } from '../dispatch/instances.js';
 import {
     GAME_KEY,
     SCREEN_KEY_PREFIX,
@@ -219,11 +220,17 @@ export function pressWidget(rt: Runtime, press: WidgetPress): Promise<void> {
     return withRuntime(rt, () => {
         const onScreen = press.screen === undefined ? undefined : screenKey(press.screen);
         const pending: Promise<void>[] = [];
-        for (const [hostKey, si] of rt.instances.entries()) {
+        // Over a copy: `attach` pushes into the very lists this walks, so a handler that adds a
+        // script to its own host would extend this loop for as long as it kept pressing.
+        const hosts: string[] = [];
+        const instances: ScriptInstance[] = [];
+        const found = rt.instances.snapshotByKind('onPress', hosts, instances);
+        for (let i = 0; i < found; i++) {
+            const hostKey = hosts[i]!;
             if (hostKey.startsWith(SCREEN_KEY_PREFIX) && hostKey !== onScreen) continue;
             pending.push(
                 rt.dispatcher.dispatch(
-                    [si],
+                    [instances[i]!],
                     'onPress',
                     press.widget,
                     hostKey,
@@ -249,13 +256,19 @@ export function pressWidget(rt: Runtime, press: WidgetPress): Promise<void> {
  */
 export function displayUpdate(rt: Runtime, dtSeconds: number): void {
     withRuntime(rt, () => {
-        for (const [hostKey, si] of rt.instances.entries()) {
+        // Over a copy: a handler attaching a script mid-pass would otherwise reach it on this same
+        // frame, before the starts pass has run its `@onStart`.
+        const hosts: string[] = [];
+        const instances: ScriptInstance[] = [];
+        const found = rt.instances.snapshotByKind('onUpdate', hosts, instances);
+        for (let i = 0; i < found; i++) {
+            const si = instances[i]!;
             if (si.location !== 'client') continue;
             void rt.dispatcher.dispatch(
                 [si],
                 'onUpdate',
                 '@update',
-                hostKey,
+                hosts[i]!,
                 { data: {}, dt: dtSeconds, alive: true },
                 { activeLocations: CLIENT_ONLY, tick: rt.tick },
             );
@@ -348,13 +361,23 @@ function dispatchEach(
     opts: DispatchOverrides & { only?: ScriptLocation } = {},
 ): Promise<void> {
     const dispatch = opts.dispatch ?? tickDispatch(rt);
+    // Over a copy: a handler attaching a script mid-pass would otherwise take this same dispatch —
+    // an `@onUpdate` before its own `@onStart` — and one attaching to its own host would not end.
+    // Narrowed by kind first, so an instance that declares no handler of this kind costs nothing
+    // past the set probe: the context, the promise and the reaction job below are all per-instance.
+    const hosts: string[] = [];
+    const instances: ScriptInstance[] = [];
+    const found = rt.instances.snapshotByKind(kind, hosts, instances);
+
     const pending: Promise<void>[] = [];
-    for (const [hostKey, si] of rt.instances.entries()) {
+    for (let i = 0; i < found; i++) {
+        const si = instances[i]!;
         if (opts.only !== undefined && si.location !== opts.only) continue;
         pending.push(
-            rt.dispatcher.dispatch([si], kind, event, hostKey, tickCtx(rt, opts.extra), dispatch),
+            rt.dispatcher.dispatch([si], kind, event, hosts[i]!, tickCtx(rt, opts.extra), dispatch),
         );
     }
+    if (pending.length === 0) return Promise.resolve();
     return Promise.all(pending).then(() => undefined);
 }
 
