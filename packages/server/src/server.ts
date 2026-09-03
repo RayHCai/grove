@@ -6,6 +6,7 @@ import type {
     GameManifest,
     HostRecord,
     KVStore,
+    LogSink,
     Player,
     Runtime,
 } from '@platform/core';
@@ -43,7 +44,7 @@ import { PROTOCOL_VERSION } from '@platform/protocol';
 import type { Codec, Message, TimerSource, Transport } from '@platform/transport';
 import { jsonCodec } from '@platform/transport';
 import { Connection } from './connection.js';
-import type { RosterOps } from './broadcast.js';
+import type { RosterOps, SendSet } from './broadcast.js';
 import { broadcastTo, drainOnce, readPlayerSnapshot, send } from './broadcast.js';
 import { splitSnapshot } from './chunk.js';
 import {
@@ -120,6 +121,8 @@ export interface GameServerOptions {
     timer?: TimerSource;
     /** The clock a self-driven server reads; `TimerSource` schedules but does not tell time. */
     now?: () => number;
+    /** Where this server's own denials and core's diagnostics go; without one an operator has no record of why a session died. */
+    log?: LogSink;
     /** Called when the breaker disables a script's handler or callback — the dev channel, deliberately not an envelope. */
     onBreakerTrip?: (trip: BreakerTrip) => void;
 }
@@ -146,10 +149,16 @@ export class GameServer {
     readonly #started: Promise<void>;
     /** `@serverState` that outlives a session — read synchronously, written through at a leave. */
     readonly #persisted: PersistedState;
+    /** Store writes still in flight, so a shutdown can wait for the ones it just started. */
+    readonly #saves = new Set<Promise<unknown>>();
 
+    /** What `close()` hands back, so a second caller waits on the first call's drain rather than on nothing. */
+    #drain: Promise<void> = Promise.resolve();
     #nextConnectionId = 1;
     /** Marks and ops dropped as unrepresentable, cumulative. */
     #dropped = 0;
+    /** Marks whose host died before the send that would have carried them, cumulative. */
+    #stale = 0;
     #closed = false;
     /** False until the world exists; `accept` refuses while it is. */
     #booted = false;
@@ -200,9 +209,15 @@ export class GameServer {
                     gameScripts: config.gameScripts,
                 }),
             },
-            config.scripts === undefined
-                ? {}
-                : { scriptIdOf: (klass) => config.scripts?.idOf(klass) },
+            {
+                ...defined({ log: opts.log }),
+                ...(config.scripts === undefined
+                    ? {}
+                    : {
+                          scriptIdOf: (klass: abstract new (...args: never[]) => object) =>
+                              config.scripts?.idOf(klass),
+                      }),
+            },
         );
         this.#loop = new Loop(this.#rt);
 
@@ -261,9 +276,24 @@ export class GameServer {
         return this.#dropped;
     }
 
+    /**
+     * Marks whose host died between the write and the send that would have carried them.
+     *
+     * Expected in any world that destroys anything, so it reads as churn rather than as a defect —
+     * a rate worth watching, never a count worth alerting on.
+     */
+    get staleMarks(): number {
+        return this.#stale;
+    }
+
     /** Live connections in accept order. */
     get connections(): Connection[] {
         return [...this.#connections.values()];
+    }
+
+    /** How many wakes hit the step cap with backlog left and shed it — the sim falling behind, and the only number that measures it. */
+    get shedCount(): number {
+        return this.#driver.shedCount;
     }
 
     /** Whether the world is built, and so whether `accept` will admit anything. */
@@ -322,9 +352,9 @@ export class GameServer {
         this.#driver.stop();
     }
 
-    /** Shuts the server down: stops the driver, closes every connection, and refuses later `accept`s. Idempotent. */
-    close(): void {
-        if (this.#closed) return;
+    /** Shuts the server down: stops the driver, closes every connection, and settles once every departing player's save has landed. Idempotent. */
+    close(): Promise<void> {
+        if (this.#closed) return this.#drain;
         this.#closed = true;
         this.#driver.stop();
         // Deleting the entry the iterator has already yielded is well-defined, which is what lets the
@@ -333,6 +363,10 @@ export class GameServer {
             conn.transport.close();
             this.#onTransportClosed(conn);
         }
+        // `allSettled`, so a store that rejects releases the drain rather than holding the shutdown
+        // open forever on the one write that will never land.
+        this.#drain = Promise.allSettled(this.#saves).then(() => undefined);
+        return this.#drain;
     }
 
     /** Declares visuals for templates that have come into use since boot. Idempotent per name. */
@@ -388,6 +422,7 @@ export class GameServer {
         this.#roster.joins.length = 0;
         this.#roster.leaves.length = 0;
         this.#dropped += set.dropped;
+        this.#stale += set.staleMarks;
 
         // Ahead of the fan-out, never after: this send's journal may spawn the first entity of a
         // template these peers have not been told about, and a node created against a table that
@@ -395,20 +430,34 @@ export class GameServer {
         const additions = this.#visuals.drain();
 
         for (const conn of this.#connections.values()) {
-            if (conn.wantsBroadcast) {
-                if (additions !== null) {
-                    send(conn.transport, { kind: 'manifest', visuals: additions });
-                }
-                broadcastTo(conn, set, this.#codec);
-                continue;
+            try {
+                this.#sendTo(conn, set, additions);
+            } catch (error) {
+                // Per connection: without it one peer whose encode throws takes the broadcast down
+                // for every peer behind it in the registry.
+                this.#deny('close', conn, 'send-failed', errorMessage(error));
+                conn.transport.close();
             }
-            const pending = conn.pendingJoin;
-            const player = conn.livePlayer;
-            if (pending === null || player === null) continue;
-            conn.pendingJoin = null;
-            conn.structuralSkip = this.#spill.length;
-            this.#sendWelcome(conn, this.#welcome(player, pending));
         }
+    }
+
+    /** One connection's share of a send: the broadcast, or the `Welcome` it is still owed. */
+    #sendTo(conn: Connection, set: SendSet, additions: RenderManifest | null): void {
+        if (conn.wantsBroadcast) {
+            if (additions !== null) {
+                send(conn.transport, { kind: 'manifest', visuals: additions });
+            }
+            broadcastTo(conn, set, this.#codec);
+            return;
+        }
+        const pending = conn.pendingJoin;
+        const player = conn.livePlayer;
+        if (pending === null || player === null) return;
+        conn.structuralSkip = this.#spill.length;
+        this.#sendWelcome(conn, this.#welcome(player, pending));
+        // Cleared only once the `Welcome` is on the wire: cleared first, a throw above would leave
+        // this connection reading as broadcast-ready with no baseline behind it.
+        conn.pendingJoin = null;
     }
 
     /** Sends a `Welcome`, split across `snapshot-chunk` frames when the world is too big for one. */
@@ -557,9 +606,16 @@ export class GameServer {
     }
 
     #reject(conn: Connection, reason: RejectReason): void {
+        this.#deny('reject', conn, reason);
         const reject: Reject = { kind: 'reject', reason, serverProtocolVersion: PROTOCOL_VERSION };
         send(conn.transport, reject);
         conn.transport.close();
+    }
+
+    /** One line per denial, in `key=value` tokens an operator greps for; any prose comes last. */
+    #deny(event: string, conn: Connection, reason: string, detail?: string): void {
+        const tail = detail === undefined ? '' : `: ${detail}`;
+        this.#rt.log.warn(`${event} conn=${conn.connectionId} reason=${reason}${tail}`);
     }
 
     #input(conn: Connection, frame: InputFrame): void {
@@ -571,6 +627,7 @@ export class GameServer {
             result.reason === 'rate' &&
             conn.admission.overRateBreachLimit
         ) {
+            this.#deny('close', conn, 'rate-breach');
             conn.transport.close();
         }
     }
@@ -616,20 +673,22 @@ export class GameServer {
         // `PlayerManager.remove` then drops the record from the host table.
         const record = this.#rt.hosts.get(playerKey(player.id))?.record;
         leavePlayer(this.#rt, player.id);
-        if (
-            record !== undefined &&
-            (conn.identity === null || this.#persisted.has(record.hostId))
-        ) {
+        // Only a host-named peer, since only a host-named peer can ever read it back: a connection
+        // id is minted fresh per socket, so writing one durably leaks an entry per join/leave cycle.
+        if (record !== undefined && conn.identity !== null && this.#persisted.has(record.hostId)) {
             this.#persist(record);
         }
         this.#roster.leaves.push(player.id);
     }
 
-    /** Writes a departing player's `@serverState` through to the store, fire-and-forget: the trigger is a socket that has already closed. */
+    /** Writes a departing player's `@serverState` through to the store; the caller is a socket that has already closed, so only `close()` ever waits on one. */
     #persist(record: HostRecord): void {
-        this.#persisted.save(record).catch((error: unknown) => {
+        const save = this.#persisted.save(record).catch((error: unknown) => {
             this.#rt.log.warn(`persisting ${record.hostId} failed: ${errorMessage(error)}`);
         });
+        this.#saves.add(save);
+        // Dropped once it settles, so a long session is not sized by every player it ever saw.
+        void save.finally(() => this.#saves.delete(save));
     }
 
     #unjoinedCount(): number {
@@ -653,7 +712,10 @@ export class GameServer {
             }
             if (nowSeconds - conn.acceptedAtSeconds >= deadline) expired.push(conn);
         }
-        for (const conn of expired) conn.transport.close();
+        for (const conn of expired) {
+            this.#deny('close', conn, 'join-deadline');
+            conn.transport.close();
+        }
     }
 }
 

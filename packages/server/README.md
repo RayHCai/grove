@@ -57,8 +57,9 @@ requestAnimationFrame(function frame(ms) {
     requestAnimationFrame(frame);
 });
 
-// Shutdown: stops the driver and closes every connection. `stop()` only parks the driver.
-server.close();
+// Shutdown: stops the driver, closes every connection, and settles once every departing player's
+// save has landed. `stop()` only parks the driver.
+await server.close();
 ```
 
 Networked, `deliver` is omitted — the socket's own event loop has already dispatched inbound frames — and
