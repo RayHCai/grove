@@ -168,14 +168,25 @@ describe('capture / restore', () => {
         expect(state).toStrictEqual(copy);
     });
 
-    it('holds four 32-bit words', () => {
-        const state = new SeededRandom(43).capture();
-        expect(state).toHaveLength(4);
-        for (const word of state) {
+    it('holds four 32-bit words, unsigned only until the first draw', () => {
+        const fresh = new SeededRandom(43);
+        for (const word of fresh.capture()) {
             expect(Number.isInteger(word)).toBe(true);
             expect(word).toBeGreaterThanOrEqual(0);
             expect(word).toBeLessThanOrEqual(0xffffffff);
         }
+
+        // The xors in `next` leave a signed int32 behind, so three of the four words go negative
+        // once the stream has advanced — a consumer that stores the state must keep it as-is.
+        drawn(fresh, 16);
+        const advanced = fresh.capture();
+        expect(advanced).toHaveLength(4);
+        for (const word of advanced) {
+            expect(Number.isInteger(word)).toBe(true);
+            expect(word).toBeGreaterThanOrEqual(-0x8000_0000);
+            expect(word).toBeLessThanOrEqual(0xffffffff);
+        }
+        expect(advanced.some((word) => word < 0)).toBe(true);
     });
 });
 
