@@ -12,11 +12,13 @@ import {
     DEFAULT_SIM_RATE,
     MAX_BUBBLE_LENGTH,
     MAX_DEDUP_KEYS,
+    MAX_ENTITIES,
     MAX_HANDLER_MS,
     MAX_LOG_RECORDS,
     MAX_SEND_DEPTH,
     resolveConfig,
 } from '../src/config.js';
+import { LoadError } from '../src/errors.js';
 import type { BreakerTrip } from '../src/errors.js';
 import { CollectingLog, clearRuntime } from '../src/runtime/runtime.js';
 import { loadGame } from '../src/runtime/load-game.js';
@@ -306,6 +308,26 @@ describe('MAX_BUBBLE_LENGTH', () => {
 
         // The sleep woke and found a different bubble in place, so it left it alone.
         expect(rt.channels.structuralCount).toBe(0);
+    });
+});
+
+describe('MAX_ENTITIES', () => {
+    it('refuses the spawn past the cap, and gives the room back when one dies', () => {
+        // The only bound on a spawn loop: `BREAKER_THRESHOLD` counts throws and `MAX_SEND_DEPTH`
+        // counts re-entry, and a handler that only ever spawns does neither.
+        const rt = loadGame();
+        for (let i = 0; i < MAX_ENTITIES; i++) rt.entityManager.spawn('crate');
+        expect(rt.entities.liveCount).toBe(MAX_ENTITIES);
+
+        // Through the creator path, which is the one an untrusted script reaches.
+        expect(() => rt.wired.gameInstance.spawn('crate')).toThrow(LoadError);
+        expect(rt.entities.liveCount).toBe(MAX_ENTITIES);
+
+        rt.entityManager.facade(rt.entities.idAt(0)).destroy();
+        rt.entityManager.drainDestroyed();
+        // A ceiling on the live world, not a lifetime quota: a game that recycles bodies must not
+        // run out of them.
+        expect(() => rt.wired.gameInstance.spawn('crate')).not.toThrow();
     });
 });
 
