@@ -180,7 +180,9 @@ exists to keep at zero.
 walked with `Object.entries` — keyed with core's own `GAME_KEY` /
 `playerKey` / `entityKey` helpers — the record being exactly the one a hoist would land on. Each field is
 then passed to core's `hoistReplicated` against the facade that host names — `rt.gameInstance`,
-`playerManager.byId`, `entityManager.facade` — which defines the read-only accessor a script would have
+`playerManager.byId`, `entityManager.facade` — which refuses a name that facade already answers to
+(`reservedField`, since the sender chooses field names and `game.players` is not the sender's to replace)
+and otherwise defines the read-only accessor a script would have
 installed had one been attached. Without it a mirror runs no `Rules`, so nothing ever defines `phase`, and
 the `ClientScript` drawing the HUD reads `undefined` off a value that is sitting in the record beside it.
 It is resolved once per diff rather than per field, and a host with no facade here is skipped — structural

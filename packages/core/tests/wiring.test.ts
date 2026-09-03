@@ -9,6 +9,10 @@ import {
     LateJoiner,
     RivalWallet,
     Roll,
+    ShadowsGameGetter,
+    ShadowsGameMethod,
+    ShadowsPlayerField,
+    ShadowsPlayerGetter,
     SyncedRoster,
     TickOverridingMovement,
     Viewfinder,
@@ -225,6 +229,40 @@ describe('wire-time rejections', () => {
         e.addScript(Wallet as never);
         expect(() => e.addScript(RivalWallet as never)).toThrow(LoadError);
         expect(() => e.addScript(RivalWallet as never)).toThrow(/credits/);
+    });
+
+    it('refuses a @serverState name the Game already answers to as a getter', () => {
+        // Hoisted, it would REPLACE the roster getter with a number, and the first
+        // `game.players.filter(...)` would throw a TypeError nowhere near the declaration.
+        const rt = loadGame();
+        expect(() => rt.wired.gameInstance.addScript(ShadowsGameGetter as never)).toThrow(
+            LoadError,
+        );
+        expect(() => rt.wired.gameInstance.addScript(ShadowsGameGetter as never)).toThrow(
+            /players/,
+        );
+        expect(Array.isArray(rt.wired.gameInstance.players)).toBe(true);
+    });
+
+    it('refuses one the Game answers to as a method', () => {
+        const rt = loadGame();
+        expect(() => rt.wired.gameInstance.addScript(ShadowsGameMethod as never)).toThrow(/spawn/);
+        expect(typeof rt.wired.gameInstance.spawn).toBe('function');
+    });
+
+    it('refuses a Player getter name, which would shadow it', () => {
+        const rt = loadGame();
+        const player = joinPlayer(rt, 'p1', 'Ada');
+        expect(() => player.addScript(ShadowsPlayerGetter as never)).toThrow(/avatar/);
+    });
+
+    it('refuses a Player OWN field name, which would silently split one name across two values', () => {
+        // The failure this catches is not a shadow: the hoist skips an own property, so `this.name`
+        // would read the host record while `player.name` kept the engine's.
+        const rt = loadGame();
+        const player = joinPlayer(rt, 'p1', 'Ada');
+        expect(() => player.addScript(ShadowsPlayerField as never)).toThrow(/name/);
+        expect(player.name).toBe('Ada');
     });
 
     it('lets one class declare a name a DIFFERENT host already uses', () => {

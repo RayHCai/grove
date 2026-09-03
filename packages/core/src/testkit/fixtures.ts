@@ -239,6 +239,26 @@ export class RosterProbe extends ServerScript<Game> {
     }
 }
 
+/** `players` is a getter on Game, so hoisting this would replace the roster with a number. */
+export class ShadowsGameGetter extends ServerScript<Game> {
+    @serverState players = 0;
+}
+
+/** `spawn` is a method on Game — a value hoisted over one is not callable. */
+export class ShadowsGameMethod extends ServerScript<Game> {
+    @serverState spawn = 0;
+}
+
+/** `name` is an own field on Player, which a hoist skips rather than shadows. */
+export class ShadowsPlayerField extends ServerScript<Player> {
+    @serverState name = 'shadow';
+}
+
+/** `avatar` is a getter on Player, so this one would shadow rather than skip. */
+export class ShadowsPlayerGetter extends ServerScript<Player> {
+    @serverState avatar = 0;
+}
+
 // The tick order's edges on one host: a region crossing, a contact's enter edge, and the host's end.
 export class Edges extends SyncedScript<Entity> {
     entered: string[] = [];
