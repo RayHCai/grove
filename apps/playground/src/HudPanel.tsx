@@ -11,7 +11,7 @@
 // client→server command channel there is.
 
 import { useCallback, useRef, useSyncExternalStore } from 'react';
-import type { ClientHUDSink, HUDWidgetView } from '@platform/client';
+import type { ClientHUDSink, HUDWidgetView } from '@platform/glue/client';
 import {
     BOARD_SIZE,
     SCREEN_LOBBY,

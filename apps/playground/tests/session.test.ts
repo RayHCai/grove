@@ -8,14 +8,13 @@
 // The game's classes come from `dist/`, because they carry decorators and only `tsc` lowers them.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import type { GameClient } from '@platform/client';
-import { ManualFrameSource, ScriptedInputDevice } from '@platform/client';
 import type { EntityId, Runtime } from '@platform/core';
 import { GAME_KEY, MemoryKVStore, entityKey, playerKey } from '@platform/core';
-import { createClient } from '@platform/engine/host';
+import { ClientInstance, ManualFrameSource, ScriptedInputDevice } from '@platform/glue/client';
+import type { GameClient } from '@platform/glue/client';
 import { createReadyNullRenderer } from '@platform/renderer/null';
 import type { IRenderer } from '@platform/renderer';
-import type { GameInstance } from '@platform/glue';
+import type { GameInstance } from '@platform/glue/server';
 import type { GameServer } from '@platform/server';
 import { loopbackPair } from '@platform/transport';
 import type { LoopbackPair } from '@platform/transport';
@@ -60,6 +59,8 @@ import { dropBand } from '../dist/scripts/templates/leaf/leaf.js';
 const TICK = 1 / 60;
 
 interface Tab {
+    /** What `use-game.ts` holds: the composed session, closed as one thing. */
+    session: ClientInstance;
     client: GameClient;
     frames: ManualFrameSource;
     device: ScriptedInputDevice;
@@ -111,9 +112,11 @@ class Session {
 
         const frames = new ManualFrameSource();
         const device = new ScriptedInputDevice();
-        // The composition root the browser uses, from the same manifest the server booted from:
-        // the identity check is derived once and compared, rather than restated on both ends.
-        const client = createClient({
+        // The composition the browser uses, from the same manifest the server booted from: the
+        // identity check is derived once and compared, rather than restated on both ends. Built
+        // rather than dialled, which is the whole reason the socket layer is a function beside the
+        // session instead of inside it.
+        const session = new ClientInstance({
             transport: pair.client,
             renderer,
             frames,
@@ -124,11 +127,14 @@ class Session {
             predict: true,
             scripts: CLIENT_SCRIPTS,
             project: PROJECT,
+            // This suite built the null renderer per tab, and nothing else holds it.
+            ownsRenderer: true,
         });
-        client.start();
+        session.start();
 
         const tab: Tab = {
-            client,
+            session,
+            client: session.client,
             frames,
             device,
             renderer,
@@ -200,7 +206,7 @@ class Session {
     dispose(): void {
         for (const tab of this.#tabs) {
             tab.clock.dispose();
-            tab.client.destroy({ ownsRenderer: true });
+            tab.session.close();
         }
         this.instance.close();
         // The Game captured at start is module state; a second server in this process must not
@@ -540,7 +546,7 @@ describe('the lobby', () => {
 
         // Leaves are spawned unowned precisely so this does not destroy them: the server sweeps
         // every entity whose ownerId matches a departing player.
-        a.client.destroy({ ownsRenderer: true });
+        a.session.close();
         await session.step(30);
 
         expect(leavesIn(b)).toBe(1);
@@ -672,7 +678,7 @@ describe('the results screen and the lobby after it', () => {
         await session.startRound(a, b);
         expect(phaseOf(a)).toBe('playing');
 
-        b.client.destroy({ ownsRenderer: true });
+        b.session.close();
         // The roster still holds the leaver when `@onPlayerLeave` runs — the removal is last — so
         // the recount is told who to leave out rather than counting them one last time.
         await session.stepUntil(() => gameField<number>(a, STATE_PLAYER_COUNT) === 1, 200);
@@ -691,7 +697,7 @@ describe('the results screen and the lobby after it', () => {
 
         // Without the recount's own start check this leaves the lobby reading "1/1 ready" with
         // nothing running until somebody pressed ready twice.
-        b.client.destroy({ ownsRenderer: true });
+        b.session.close();
         await session.stepUntil(() => phaseOf(a) === 'playing', 200);
     });
 
@@ -708,7 +714,7 @@ describe('the results screen and the lobby after it', () => {
 
         const second = await session.join('two');
         await session.live(second);
-        second.client.destroy({ ownsRenderer: true });
+        second.session.close();
 
         // The clock runs the round out. 45 seconds at 60 Hz, plus the wire.
         await session.stepUntil(() => phaseOf(tab) === 'results', 3200);
@@ -896,7 +902,7 @@ describe('what outlives a session', () => {
             const churn = await session.join(`churn-${n}`, `churn-${n}`);
             await session.live(churn);
             expect(slotOf(churn)).toBe(1);
-            churn.client.destroy({ ownsRenderer: true });
+            churn.session.close();
             await session.step(4);
         }
 

@@ -6,7 +6,7 @@
 
 import type { BreakerTrip, KVStore } from '@platform/core';
 import { defined } from '@platform/math';
-import { GameInstance } from '@platform/glue';
+import { GameInstance } from '@platform/glue/server';
 import { PROJECT } from '../project.js';
 import { onCrownNeeded, resetSession } from '../scripts/session.js';
 import { SERVER_SCRIPTS } from './registry.js';

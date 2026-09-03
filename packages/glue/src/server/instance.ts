@@ -11,8 +11,6 @@ import type { ScriptRegistry } from '@platform/scripting';
 import type { GameServer } from '@platform/server';
 import type { Transport } from '@platform/transport';
 
-export type { BundleRef };
-
 /** What a host supplies that an authored project cannot describe. */
 export interface InstanceOptions {
     /** The authored game. `createServer` validates it before anything is built. */

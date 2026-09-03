@@ -1,4 +1,9 @@
-// The React <-> GameClient seam: dial, session, frame loop, teardown.
+// The React <-> session seam: what is left of it once `@platform/glue/client` owns the composition.
+//
+// Dialling, wiring the state listener before the join, abandoning a dial this component no longer
+// wants, and tearing down in an order that leaves nothing behind are all `connectTo`'s. What is
+// genuinely React's stays here: an `AbortController` per effect, the frame loop this app measures
+// its own fps on, and the three values the chrome renders from.
 //
 // The client owns the frame — `GameClient.frame()` drains the socket, advances the tick clock,
 // flushes input, pushes transforms and calls `render()` — so this hook supplies the loop that
@@ -6,17 +11,17 @@
 // because the client publishes no events for it; the HUD is not, because `ClientHUDSink` does.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPerformanceClock } from '@platform/client/browser';
+import { connectTo } from '@platform/glue/client';
 import type {
     ClientHUDSink,
+    ClientInstance,
     ClientStats,
+    FailureReason,
     FrameSource,
-    GameClient,
     SessionState,
-} from '@platform/client';
-import { createPerformanceClock } from '@platform/client/browser';
-import { createClient } from '@platform/engine/host';
+} from '@platform/glue/client';
 import type { CameraState, IRenderer } from '@platform/renderer';
-import { connectWebSocket } from '@platform/transport/websocket';
 import { ClockNode, openHud, pressWidget } from './hud';
 import { PROJECT } from './project';
 import { CLIENT_SCRIPTS } from './client-registry';
@@ -44,7 +49,7 @@ export interface GameStats extends ClientStats {
 }
 
 export interface UseGameOptions {
-    /** `null` until the renderer is initialized; the client must never see an uninitialized one. */
+    /** `null` until the renderer is initialized; the session must never see an uninitialized one. */
     renderer: IRenderer | null;
     container: React.RefObject<HTMLDivElement | null>;
     url: string;
@@ -53,7 +58,7 @@ export interface UseGameOptions {
 }
 
 export interface UseGameResult {
-    state: SessionState | 'connecting';
+    state: SessionState;
     failure: string | null;
     /** The live HUD, or `null` before the session exists. React subscribes to its `onChange`. */
     hud: ClientHUDSink | null;
@@ -66,16 +71,16 @@ export interface UseGameResult {
 }
 
 export function useGame(opts: UseGameOptions): UseGameResult {
-    const clientRef = useRef<GameClient | null>(null);
+    const sessionRef = useRef<ClientInstance | null>(null);
     const emitRef = useRef<((code: string, down: boolean) => void) | null>(null);
     const fpsRef = useRef(0);
 
-    const [state, setState] = useState<SessionState | 'connecting'>('connecting');
+    const [state, setState] = useState<SessionState>('connecting');
     const [failure, setFailure] = useState<string | null>(null);
     const [hud, setHud] = useState<ClientHUDSink | null>(null);
 
-    // The camera resolver is captured once by `GameClient`, so it is read through a ref — a fresh
-    // closure per render would be ignored, and re-creating the client would resync the world.
+    // The camera resolver is captured once by the session, so it is read through a ref — a fresh
+    // closure per render would be ignored, and re-creating the session would resync the world.
     const cameraRef = useRef(opts.camera);
     cameraRef.current = opts.camera;
 
@@ -86,12 +91,12 @@ export function useGame(opts: UseGameOptions): UseGameResult {
         const container = containerRef.current;
         if (renderer === null || container === null) return;
 
-        // StrictMode dials twice; without this the orphan socket becomes a second player that
-        // never goes away.
-        let cancelled = false;
-        let client: GameClient | null = null;
+        // StrictMode mounts twice, and a dial resolves on its own schedule. The signal is what
+        // `connectTo` abandons an unwanted dial by — and what closes a session that was built
+        // between this effect being torn down and its own continuation running.
+        const abort = new AbortController();
+        let session: ClientInstance | null = null;
         let clock: ClockNode | null = null;
-        let unsubscribe: (() => void) | null = null;
 
         const device = createStageInputDevice({
             container,
@@ -100,31 +105,23 @@ export function useGame(opts: UseGameOptions): UseGameResult {
             // authority can recompute — but the client resolves it, because only the client holds
             // both the node map and the interpolation delay the drawn pose carries.
             onScreenPress: (x, y) => {
-                const hit = client?.entityAt({ x, y });
-                if (hit !== undefined) client?.pointer('onClick', hit);
+                const hit = session?.client.entityAt({ x, y });
+                if (hit !== undefined) session?.client.pointer('onClick', hit);
             },
         });
         // The clock node runs BEHIND the client's own frame: it reads state the drain just applied,
         // so running it first would show a value one frame stale.
         const frames = createCountingFrameSource(fpsRef, () => {
-            if (client !== null) clock?.sync(client);
+            if (session !== null) clock?.sync(session.client);
         });
 
         emitRef.current = (code: string, down: boolean) => device.emit({ kind: 'key', code, down });
 
         void (async () => {
             try {
-                const transport = await connectWebSocket(withPlayer(url, tabIdentity()));
-                if (cancelled) {
-                    transport.close();
-                    return;
-                }
-
-                // The composition root, not `new GameClient`: the identity this tab claims is
-                // derived from the SAME manifest the authority booted from, so a stale tab across a
-                // `dev` restart is refused at the handshake rather than drawn wrongly.
-                client = createClient({
-                    transport,
+                session = await connectTo({
+                    url: withPlayer(url, tabIdentity()),
+                    signal: abort.signal,
                     renderer,
                     frames,
                     device,
@@ -135,62 +132,55 @@ export function useGame(opts: UseGameOptions): UseGameResult {
                     predict: true,
                     scripts: CLIENT_SCRIPTS,
                     project: PROJECT,
+                    // Taken as an option rather than subscribed afterwards: `connectTo` joins
+                    // before it returns, so a listener attached to what it hands back would have
+                    // already missed a session that settled on its first frame.
+                    onState: (next, reason) => {
+                        setState(next);
+                        setFailure(describeFailure(reason));
+                        // The mirror exists from the welcome onward, and the screens are registered
+                        // against it — a resync builds a new one, so this runs again for that too.
+                        if (next === 'live' && session !== null) openHud(session.client);
+                    },
                 });
 
-                clientRef.current = client;
+                sessionRef.current = session;
                 clock = new ClockNode(renderer);
-                setHud(client.hud);
-
-                unsubscribe = client.lifecycle.onChange((next: SessionState) => {
-                    setState(next);
-                    setFailure(describeFailure(client));
-                    // The mirror exists from the welcome onward, and the screens are registered
-                    // against it — a resync builds a new one, so this runs again for that too.
-                    if (next === 'live' && client !== null) openHud(client);
-                });
-                client.start();
-                setState(client.state);
-
-                // Unmounted while the socket was still connecting: cleanup already ran and held
-                // neither of these, so the teardown it could not do happens here.
-                if (cancelled) {
-                    unsubscribe();
-                    clock.dispose();
-                    clock = null;
-                    client.destroy();
-                }
+                setHud(session.hud);
+                setState(session.state);
             } catch (cause) {
-                if (cancelled) return;
+                // An abandoned dial is this component going away, not a failure to show anyone.
+                if (abort.signal.aborted) return;
                 setState('failed');
                 setFailure(cause instanceof Error ? cause.message : String(cause));
             }
         })();
 
         return () => {
-            cancelled = true;
-            // `destroy()` does not clear the lifecycle's listeners, so this is the only handle on it.
-            unsubscribe?.();
-            unsubscribe = null;
+            // Abandons a dial still in flight, and closes a session that resolved into this
+            // teardown. What is left below is only what this app owns.
+            abort.abort();
             emitRef.current = null;
-            clientRef.current = null;
+            sessionRef.current = null;
             setHud(null);
-            // Before the client's own teardown, because both reach the renderer and only this one
+            // Before the session's own teardown, because both reach the renderer and only this one
             // knows which node is the clock's.
             clock?.dispose();
             clock = null;
-            // `ownsRenderer` is left false: `useRenderer` built the renderer and destroys it.
-            if (client !== null) client.destroy();
+            // `close()` is idempotent, so the abort above having already run it is no different.
+            // With no session there is no one to dispose the device this effect built.
+            if (session !== null) session.close();
             else device.dispose();
         };
     }, [renderer, url, containerRef]);
 
     const readStats = useCallback((): GameStats | null => {
-        const live = clientRef.current;
+        const live = sessionRef.current;
         if (live === null) return null;
-        const mirror = live.mirror?.counters;
-        const predicted = live.prediction?.counters;
+        const mirror = live.client.mirror?.counters;
+        const predicted = live.client.prediction?.counters;
         return {
-            ...live.stats(),
+            ...live.client.stats(),
             fps: fpsRef.current,
             droppedAttach: mirror?.droppedAttach ?? 0,
             oversizedList: mirror?.oversizedList ?? 0,
@@ -214,8 +204,8 @@ export function useGame(opts: UseGameOptions): UseGameResult {
      * before anything has granted it.
      */
     const pressReady = useCallback(() => {
-        const live = clientRef.current;
-        if (live !== null) pressWidget(live, WIDGET_READY, SCREEN_LOBBY);
+        const live = sessionRef.current;
+        if (live !== null) pressWidget(live.client, WIDGET_READY, SCREEN_LOBBY);
     }, []);
 
     return { state, failure, hud, readStats, requestClear, pressReady };
@@ -259,8 +249,7 @@ function createCountingFrameSource(fps: React.RefObject<number>, after: () => vo
     };
 }
 
-function describeFailure(client: GameClient | null): string | null {
-    const reason = client?.lifecycle.failure;
+function describeFailure(reason: FailureReason | undefined): string | null {
     if (reason === undefined) return null;
     switch (reason.kind) {
         case 'rejected':
