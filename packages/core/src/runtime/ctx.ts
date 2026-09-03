@@ -9,6 +9,6 @@ export interface Ctx {
     alive: boolean;
     data: Readonly<Record<string, unknown>>;
     from?: Entity | null;
-    /** Server tick the acting client's input referenced — what `asSeen` keys against. */
+    /** Server tick the acting client's input named; `asSeen` reads the latest capture, not this. */
     viewTick?: number;
 }

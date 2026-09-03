@@ -281,6 +281,9 @@ export class Entity {
         return [...this.#rt.tags.tagsOf(this.#id)];
     }
 
+    // Specified as template-configured; nothing in the template pipeline writes either, so a
+    // collider exists only where a script assigned one and `getTouching` answers nothing until
+    // it does.
     collider?: Collider;
     animation?: Animation;
 
