@@ -40,6 +40,8 @@ export interface ActionState {
     axis(action: string): number;
 }
 
+// Neither is wired to anything: pointer state reaches creator code through `@onClick` and the
+// client's own binding table, so these answer empty and record writes nobody reads.
 class NullCursor implements Cursor {
     get position(): Vec3 {
         return vec3();

@@ -144,6 +144,8 @@ export class PlatformerMovement extends BaseMovement {
     acceleration = 2600;
     friction = 3000;
 
+    // Always false until a physics sink stops the body, so gravity never stops pulling and
+    // `jump` never pushes — a platformer is not buildable on the null sink.
     get grounded(): boolean {
         return this.blocked.down;
     }

@@ -34,7 +34,7 @@ Client code has no authority at all. It reads replicated state and, when it need
 
 **Rendering** goes through an interface with PixiJS behind it. A future 3D backend is the reason that interface exists, not a promise about next quarter.
 
-**Physics** is Rapier, exposed as capabilities attached to entities rather than as a system creators address directly.
+**Physics** sits behind a seam, exposed as capabilities attached to entities rather than as a system creators address directly. Rapier is what fills that seam; the integrator shipped today advances position and stops a body against nothing, so a platformer runs and falls but does not land.
 
 ## Taxonomy
 
@@ -44,7 +44,7 @@ Two nearby distinctions are load-bearing. A **template** is a panel-authored blu
 
 **Capabilities** — a collider, an animation, a renderable — attach _to_ an entity as leaf data. They aren't peer objects with independent lifecycles, and they aren't code. **Scripts** are how code attaches, to any of the five hosts, and a script corresponds to something the panel can point at, which is what keeps the visual editor and the code view describing the same thing.
 
-Static geometry is inferred rather than declared. An entity with no scripts gets baked into merged render and collision batches, replicated once, and excluded from per-tick diffing. A wall, a painted platform, and a decorative tree all receive identical treatment. There is no tilemap, no grid, and no cell addressing anywhere in the API — the panel's authoring tools _produce_ entities, and code only ever sees entities.
+Static geometry is inferred rather than declared: an entity with no scripts is static by that test alone, and gets baked into merged render and collision batches, replicated once, and excluded from per-tick diffing. A wall, a painted platform, and a decorative tree all receive identical treatment. Neither the inference nor the batching is built yet, so such an entity currently replicates like any other. There is no tilemap, no grid, and no cell addressing anywhere in the API — the panel's authoring tools _produce_ entities, and code only ever sees entities.
 
 ## The panel
 
@@ -54,7 +54,7 @@ This split is the reason the code surface can stay block-safe. Layout is nested 
 
 ## Conventions
 
-The origin sits at world center with y pointing up, distances are in pixels, and durations are in seconds. State scope is determined by what a script is attached to rather than by a separate decorator — global, per-player, and per-entity state are distinguished by the host in the class header, and the value is hoisted onto that host, so `@serverState coins` on a player script reads as `player.coins` everywhere. That one decorator also covers durability: a server-owned property is persisted against its host automatically, so there is no separate `@persist` to remember. Motion is expressed through named verbs like _glide to_ and _fade to_ rather than a general-purpose tweening call; the tween machinery exists internally but isn't part of the public surface, because "glide to" reads as a block and "tween with easing curve" does not.
+The origin sits at world center with y pointing up, distances are in pixels, and durations are in seconds. State scope is determined by what a script is attached to rather than by a separate decorator — global, per-player, and per-entity state are distinguished by the host in the class header, and the value is hoisted onto that host, so `@serverState coins` on a player script is a real property at `player.coins` everywhere — untyped through a plain `Player` reference, though, so typed code reaches it as `player.getScript(Wallet)?.coins` until the panel emits per-host types. That one decorator also covers durability: a server-owned property is persisted against its host automatically, so there is no separate `@persist` to remember. Motion is expressed through named verbs like _glide to_ and _fade to_ rather than a general-purpose tweening call; the tween machinery exists internally but isn't part of the public surface, because "glide to" reads as a block and "tween with easing curve" does not.
 
 ## Design principles
 
