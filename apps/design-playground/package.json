@@ -1,0 +1,16 @@
+{
+    "name": "@grove/design-playground",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Ten design directions for Grove, rendered as one shared page.",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview",
+        "clean": "rm -rf dist .turbo"
+    },
+    "devDependencies": {
+        "vite": "^8.2.0"
+    }
+}
