@@ -2,6 +2,7 @@ packages:
     - packages/*
     - apps/*
     - examples
+    - integration
 
 # lefthook's postinstall fetches its platform binary and installs the git hooks.
 allowBuilds:
