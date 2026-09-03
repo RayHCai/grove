@@ -388,6 +388,33 @@ describe('the unjoined connection is bounded', () => {
         h.pumpTicks(6);
         expect(overflow.welcome).toBeUndefined();
     });
+
+    it('holds one pre-join slot per named peer, so one cannot take the whole cap', () => {
+        const h = harness({ config: { gameScripts: [Rules] } });
+        h.connect('alice');
+        expect(h.lastAcceptId).not.toBeNull();
+
+        // The global cap is a total, so without a per-peer bound one client reconnect-looping fills
+        // every slot and locks out every real joiner at no cost to itself.
+        for (let i = 0; i < MAX_UNJOINED_CONNECTIONS; i++) h.connect('alice');
+        expect(h.lastAcceptId).toBeNull();
+        expect(h.server.connections).toHaveLength(1);
+
+        expect(h.joined('bob').welcome).toBeDefined();
+    });
+
+    it('closes an unjoined connection on schedule across a backwards clock step', () => {
+        const h = harness();
+        h.connect();
+        h.pumpTicks(2);
+
+        // The clock is injected, so an NTP correction or a restored VM snapshot arrives as a
+        // reading behind the last one — which must not buy the deadline an extension its own length.
+        h.pump(-100);
+        h.pump(JOIN_DEADLINE_MS / 1000);
+        h.pumpTicks(2);
+        expect(h.server.connections).toHaveLength(0);
+    });
 });
 
 describe('disconnection', () => {
