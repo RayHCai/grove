@@ -162,11 +162,32 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
         return createTransformBuffer(this.#count || INITIAL_CAPACITY);
     }
 
+    /** Slots this store addresses — the high-water index, which never falls, not the live count. */
+    get slotCount(): number {
+        return this.#count;
+    }
+
+    /**
+     * Copies the two position lanes into caller-owned arrays and returns the count written.
+     *
+     * The lag ring's view reads position and nothing else — its half-extents come from the live
+     * facade — so a full capture would copy five lanes per tick that no reader ever looks at.
+     * The caller sizes the arrays; a short one would silently drop the tail.
+     */
+    copyPositions(intoX: Float64Array, intoY: Float64Array): number {
+        const cap = this.#count;
+        intoX.set(this.#posX.subarray(0, cap));
+        intoY.set(this.#posY.subarray(0, cap));
+        return cap;
+    }
+
     capture(into: TransformBuffer, scope: Scope): void {
         const cap = this.#count;
         // A TypedArray drops an out-of-range write silently, so an undersized buffer would
         // report a count it does not hold and restore stale values for the missing slots.
-        if (into.posX.length < cap) growBuffer(into, cap);
+        // Grown the same way the store grows itself: an exact fit reallocates all seven arrays
+        // every time the high-water slot rises by one, which is quadratic over a filling world.
+        if (into.posX.length < cap) growBuffer(into, grownCapacity(into.posX.length, cap));
         into.count = cap;
 
         if (scope === null) {

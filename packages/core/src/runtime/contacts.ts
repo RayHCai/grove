@@ -1,6 +1,8 @@
 // isTrigger decides whether a body was stopped, not whether it touches, so both kinds count here.
 
+import { grownCapacity } from '@platform/math';
 import type { EntityId } from '../ids.js';
+import { NO_ENTITY } from '../ids.js';
 import { Broadphase } from '../world/broadphase.js';
 import type { TransformView } from '../world/broadphase.js';
 import type { Runtime } from './runtime.js';
@@ -23,6 +25,12 @@ export class ContactSource {
      */
     #previous = new Set<string>();
     #current = new Set<string>();
+    /** Per-body lanes for the pair walk, indexed by position in `#ids`, not by slot. */
+    #posX = new Float64Array(0);
+    #posY = new Float64Array(0);
+    #halfW = new Float64Array(0);
+    #halfH = new Float64Array(0);
+    #parent = new Float64Array(0);
     readonly #halfExtent = (id: EntityId, axis: 'w' | 'h'): number =>
         halfExtent(this.#rt, id, axis);
 
@@ -52,19 +60,59 @@ export class ContactSource {
     /** Overlapping pairs for this tick's @onCollide dispatch. */
     pairs(out: Array<[EntityId, EntityId]> = []): Array<[EntityId, EntityId]> {
         out.length = 0;
-        // Both arrays are reused: this is O(n²) per tick, so allocating inside the loops put a
-        // view object and five closures per candidate pair on the GC.
         const ids = this.#rt.entities.liveIds(this.#ids);
-        for (let i = 0; i < ids.length; i++) {
+        const n = ids.length;
+        if (n < 2) return out;
+        // Read each body's transform, extents and parent once into flat arrays, then compare
+        // out of those: every read here is a closure hop into a facade lookup and a bounds
+        // division, and the walk below would otherwise pay four of them per candidate pair.
+        this.#loadScratch(ids, n);
+
+        const posX = this.#posX;
+        const posY = this.#posY;
+        const halfW = this.#halfW;
+        const halfH = this.#halfH;
+        const parent = this.#parent;
+
+        for (let i = 0; i < n; i++) {
             const a = ids[i]!;
-            const parent = this.#rt.entities.record(a)?.parent;
-            for (let j = i + 1; j < ids.length; j++) {
+            const ax = posX[i]!;
+            const ay = posY[i]!;
+            const aw = halfW[i]!;
+            const ah = halfH[i]!;
+            const aParent = parent[i]!;
+            for (let j = i + 1; j < n; j++) {
                 const b = ids[j]!;
-                if (this.#isSelfOrKin(a, b, parent)) continue;
-                if (this.#overlaps(a, b)) out.push([a, b]);
+                const bParent = parent[j]!;
+                if (aParent === b || bParent === a) continue;
+                if (!(Math.abs(ax - posX[j]!) <= aw + halfW[j]!)) continue;
+                if (!(Math.abs(ay - posY[j]!) <= ah + halfH[j]!)) continue;
+                out.push([a, b]);
             }
         }
         return out;
+    }
+
+    /** Fills the per-body scratch lanes for `ids`, growing them if this world outgrew the last. */
+    #loadScratch(ids: readonly EntityId[], n: number): void {
+        if (this.#posX.length < n) {
+            const cap = grownCapacity(this.#posX.length, n);
+            this.#posX = new Float64Array(cap);
+            this.#posY = new Float64Array(cap);
+            this.#halfW = new Float64Array(cap);
+            this.#halfH = new Float64Array(cap);
+            this.#parent = new Float64Array(cap);
+        }
+        const view = this.#view;
+        const entities = this.#rt.entities;
+        for (let i = 0; i < n; i++) {
+            const id = ids[i]!;
+            this.#posX[i] = view.posX(id);
+            this.#posY[i] = view.posY(id);
+            this.#halfW[i] = view.halfWidth(id);
+            this.#halfH[i] = view.halfHeight(id);
+            this.#parent[i] = entities.record(id)?.parent ?? NO_ENTITY;
+        }
     }
 
     /** The pairs that began overlapping this tick, and the fold that makes the next call an edge again. */
@@ -90,14 +138,6 @@ export class ContactSource {
         if (parent !== undefined && parent === other) return true;
         const otherRec = this.#rt.entities.record(other);
         return otherRec?.parent === id;
-    }
-
-    #overlaps(a: EntityId, b: EntityId): boolean {
-        const view = this.#view;
-        return (
-            Math.abs(view.posX(a) - view.posX(b)) <= view.halfWidth(a) + view.halfWidth(b) &&
-            Math.abs(view.posY(a) - view.posY(b)) <= view.halfHeight(a) + view.halfHeight(b)
-        );
     }
 
     /** Reads a past capture and marks nothing, so an `asSeen` query is invisible to replication. */
