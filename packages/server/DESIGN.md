@@ -101,7 +101,7 @@ may have loaded a bundle since it joined.
 A refusal is `Reject { reason, serverProtocolVersion }` **then** `close()` — a bare close is
 indistinguishable from a drop, and `version` and `identity` must never be retried while `full` is not a
 network error at all. `maxPlayers` is deliberately absent from `Welcome`. Inbound frames are narrowed
-structurally in `server.ts`, not cast (`join-request`, `input`, `interaction`, `time-sync` only), against
+structurally in `server.ts`, not cast (`join-request`, `input`, `interaction`, `request`, `time-sync` only), against
 **every** field the type declares rather than a `Partial` of it — so a frame missing the identity fields is
 malformed like any other,
 ignored, and closed by the join deadline; the `version` reject can only refuse a peer whose frames still
@@ -202,6 +202,11 @@ core's `applyEdge` and dispatched, then per connection the stale-hold backstop, 
   hit are the same on both endpoints. The entity a hit names is the peer's claim — it was resolved against a
   camera the server does not hold — so it is checked for liveness and nothing more, and a handler that grants
   something must check reach itself.
+- **Requests drain here too**, after the interactions and through core's `deliverRequest`, which
+  dispatches `@onRequest` at server-located handlers alone. This is the authority half of the security
+  model: a client's `request()` crosses the wire precisely so the check runs here, `ctx.player` comes
+  from the connection rather than the frame, and `ctx.data` is the one untrusted payload a handler is
+  handed. Queued at receive and dispatched in the pass, for the reason an interaction is.
 - **Stale-hold backstop:** after `holdStaleTicks(simRate)` with no traffic, every held action is released and every
   axis returned to neutral — the crash / killed tab / yanked cable a client blur handler cannot cover. **Any**
   well-formed frame counts as traffic, because edges-only input means a player holding one button sends
@@ -237,7 +242,12 @@ instead — it is the same shape of cost as an input frame, one per tick with bo
 bucket is what keeps a peer's _total_ per-tick work bounded rather than letting a second channel double it.
 Its narrowing caps `events[]` at `MAX_INTERACTIONS_PER_FRAME` and each widget or screen name at
 `MAX_WIDGET_NAME_LENGTH`; there is no distinct-name cap, because a press buys one dispatch and is gone,
-where a held action buys one every tick until it is released.
+where a held action buys one every tick until it is released. `request` draws on the input bucket for the
+same reason, and its narrowing caps `requests[]` at `MAX_REQUESTS_PER_FRAME`, each name at
+`MAX_REQUEST_NAME_LENGTH`, and the payload at `MAX_REQUEST_PAYLOAD_NODES` values over the whole graph,
+which bounds nesting and cardinality together because depth can never exceed the node count. The walk is
+iterative, like the codec's, since a well-formed payload a few thousand deep is small enough to pass every
+byte cap and would overflow a recursive one before any cap read it.
 
 Two more bounds, on state a frame is not needed to open: `JOIN_DEADLINE_MS` (swept after each `pump`,
 against the driver's `elapsedSeconds`, since `TimerSource` schedules but does not tell time) and
@@ -504,6 +514,9 @@ live in `constants.ts`, grouped by unit, never on the creator surface:
 | `MAX_ACTION_NAMES`            | 64                    | distinct action names one connection may open          |
 | `MAX_INTERACTIONS_PER_FRAME`  | 16                    | interactions one frame may carry                       |
 | `MAX_WIDGET_NAME_LENGTH`      | 64                    | longest accepted widget or screen name                 |
+| `MAX_REQUESTS_PER_FRAME`      | 16                    | requests one frame may carry                           |
+| `MAX_REQUEST_NAME_LENGTH`     | 64                    | longest accepted request name                          |
+| `MAX_REQUEST_PAYLOAD_NODES`   | 256                   | values one request payload may hold, whole graph       |
 | `MAX_NAME_LENGTH`             | 24                    | longest accepted display name, in code points          |
 | `MAX_IDENTITY_LENGTH`         | 128                   | longest accepted `projectId` / hash on a join request  |
 | `MAX_STATE_DEPTH`             | 64                    | `@serverState` nesting past which a value is dropped   |

@@ -71,12 +71,14 @@ export {
     leavePlayer,
     pressWidget,
     pointerHit,
+    deliverRequest,
     displayUpdate,
 } from './load-game.js';
 export type {
     GameManifest,
     GameScriptSpec,
     LoadOptions,
+    PlayerRequest,
     PointerEdge,
     WidgetPress,
 } from './load-game.js';

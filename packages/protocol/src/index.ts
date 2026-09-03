@@ -47,3 +47,5 @@ export type { RateChange, TimeSync, TimeSyncReply } from './envelopes.js';
 export type { InputAction, InputFrame, InputPhase } from './envelopes.js';
 
 export type { Interaction, InteractionFrame, InteractionKind } from './envelopes.js';
+
+export type { GameRequest, RequestFrame } from './envelopes.js';

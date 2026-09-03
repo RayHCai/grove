@@ -18,7 +18,7 @@ export type ServerToClient =
     | RateChange;
 
 /** Everything a client may send — the authoritative list for this direction. */
-export type ClientToServer = JoinRequest | InputFrame | InteractionFrame | TimeSync;
+export type ClientToServer = JoinRequest | InputFrame | InteractionFrame | RequestFrame | TimeSync;
 
 /** Either direction, for code that handles a frame before it knows which way it came. */
 export type Envelope = ServerToClient | ClientToServer;
@@ -450,3 +450,20 @@ export type Interaction =
 
 /** The `kind` of an interaction, for exhaustiveness checks over the arm. */
 export type InteractionKind = Interaction['kind'];
+
+/** Client → server, at most one per tick. The asks a client cannot perform itself. */
+export type RequestFrame = {
+    kind: 'request';
+    /** The client tick it was made on, the same index an `InputFrame` carries. */
+    tick: number;
+    requests: GameRequest[];
+};
+
+/**
+ * One `request()` call: the handler name, and the payload that handler must validate.
+ *
+ * `data` carries its fields as KEYS, which is what puts a creator-chosen field name under the codec's
+ * reserved-key check — so a sender drops a field named `__proto__` / `constructor` / `prototype`
+ * rather than emit it, and a receiver never sees one. ABSENT for a call carrying no payload.
+ */
+export type GameRequest = { name: string; data?: { [field: string]: JsonValue } };

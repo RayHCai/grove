@@ -82,7 +82,7 @@ export interface Wired {
     /** Injected so the player facade need not import Camera and Storage. */
     readonly makeCamera: (player: Player) => Camera;
     readonly makeStorage: (player: Player) => Storage;
-    /** Client→server request delivery; loadGame installs the loopback sink. */
+    /** The single-process FALLBACK for `request()`: it dispatches here when no uplink is installed. */
     readonly requestSink: (name: string, payload?: Record<string, unknown>) => void;
     readonly random: Random;
     /** The manifest's asset table; the `assets` const resolves through here. */
@@ -189,6 +189,14 @@ export class Runtime {
     localPlayer?: Player | null;
     /** Persisted @serverState from a previous session, keyed by (hostId, field). */
     persisted?: PersistedSource;
+    /**
+     * Where `request()` goes when the authority is another process.
+     *
+     * Installed by an endpoint that holds a socket. Without one the loopback sink runs the handlers
+     * here, which is only right when this world IS the authority — a client that dispatched locally
+     * would be validating an untrusted ask on the untrusted machine.
+     */
+    requestUplink?: (name: string, payload?: Record<string, unknown>) => void;
     /**
      * The id the bundle stamped on a class, for the `attach` op that names it on the wire.
      *

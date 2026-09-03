@@ -1,5 +1,5 @@
 import type { DispatchOptions, EntityId, PointerEdge, Player, Runtime } from '@platform/core';
-import { entityKey, playerKey, pointerHit, pressWidget } from '@platform/core';
+import { deliverRequest, entityKey, playerKey, pointerHit, pressWidget } from '@platform/core';
 import { defined } from '@platform/math';
 import type { InputFrame, InputPhase } from '@platform/protocol';
 import type { Connection, RefusalReason } from './connection.js';
@@ -160,6 +160,15 @@ export function runInputPass(ctx: InputPassContext, dispatch: DispatchOptions): 
         );
 
         drainInteractions(rt, conn, player);
+        drainRequests(rt, conn, player);
+    }
+}
+
+/** Dispatches this connection's queued requests, on the authority, with the player the connection names. */
+function drainRequests(rt: Runtime, conn: Connection, player: Player): void {
+    if (conn.requests.length === 0) return;
+    for (const call of conn.requests.splice(0)) {
+        void deliverRequest(rt, { name: call.name, ...defined({ payload: call.data }), player });
     }
 }
 
