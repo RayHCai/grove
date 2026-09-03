@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import type { TransportError } from '@platform/transport';
 import { webSocketTransport } from '@platform/transport/websocket';
-import type { GameInstance } from '../instance.js';
+import type { GameInstance } from './instance.js';
 
 /** Where to bind, and how to decide who a socket is. */
 export interface ListenOptions {

@@ -1,6 +1,7 @@
 # @platform/glue
 
-The composition of one game instance: an authored project in, a running world out.
+The composition of one game: an authored project in, a running world and the sessions that reach it
+out.
 
 Every step it takes belongs to another package. What belongs here is that they happen in the one
 sequence that is correct — including the choices that fail **silently** when made wrongly.
@@ -11,25 +12,43 @@ It owns the standing-up of a game and nothing else. It owns no simulation, no wi
 rendering, no art, and no game rules; it declares no envelope and adds no field to one. If something
 here starts deciding what a game _does_ rather than how it is _started_, it is in the wrong package.
 
-## The two entry points
+## Two halves, and the one type they share
 
 ```ts
-import { GameInstance } from '@platform/glue';
-import { fileKVStore, listenOn } from '@platform/glue/node';
+import { GameInstance, fileKVStore, listenOn } from '@platform/glue/server';
+import { ClientInstance, connectTo } from '@platform/glue/client';
+import type { BundleRef } from '@platform/glue';
 ```
 
-| Export                     | Is                                                         |
-| -------------------------- | ---------------------------------------------------------- |
-| `GameInstance`             | One booted world, and the two verbs a host drives it with  |
-| `listenOn(instance, opts)` | Bind in front of a world the caller already holds          |
-| `fileKVStore(path)`        | `@serverState` that outlives the process, in one JSON file |
+| Export                     | Path      | Is                                                            |
+| -------------------------- | --------- | ------------------------------------------------------------- |
+| `GameInstance`             | `/server` | One booted world, and the two verbs a host drives it with     |
+| `listenOn(instance, opts)` | `/server` | Bind in front of a world the caller already holds             |
+| `fileKVStore(path)`        | `/server` | `@serverState` that outlives the process, in one JSON file    |
+| `ClientInstance`           | `/client` | One composed session, and the two verbs a host drives it with |
+| `connectTo(opts)`          | `/client` | Dial, compose over the socket, and join                       |
+| `BundleRef`                | `.`       | The code every peer must run, and where a joiner fetches it   |
 
-A host builds the two halves itself — `new GameInstance(...)`, then `listenOn(...)` — because the
-seam between them is where it grants the instance a capability the project file cannot describe.
+The two halves never meet. One reaches `ws` and `node:fs`, the other reaches a renderer and a
+socket, so each is behind its own subpath for the reason `@platform/client/browser` and
+`@platform/engine/host` are: a browser takes the session model without taking a Node runtime's
+dependencies with it. The bare `.` path carries the one type both halves name and no values at all —
+the server declares a bundle, the client verifies what it fetched against it.
 
-`@platform/glue` opens no socket and reads no file. The Node host is behind `./node`, for the reason
-`@platform/client/browser` and `@platform/engine/host` are subpaths: a consumer takes the instance
-model without taking `ws` and `node:fs` with it.
+## The socket layer is beside each instance, never inside it
+
+Both instances are transport-agnostic: `GameInstance.accept(transport, playerId)` and
+`new ClientInstance({ transport })` each take a pipe someone else made. The socket is a separate
+function on top — `listenOn` for the authority, `connectTo` for a session — and both of those
+**start** what they are put in front of, because a caller that reached for the socket layer wants the
+thing running.
+
+That split is what keeps a whole game drivable over `loopbackPair()` with no socket, no port and no
+GPU, which is how this package's own suite runs both ends on one hand-turned clock.
+
+A host builds an instance and its socket separately — `new GameInstance(...)`, then `listenOn(...)` —
+because the seam between them is where it grants the instance a capability the project file cannot
+describe.
 
 ## What construction does, and in what order
 
@@ -50,6 +69,26 @@ Two further choices are encoded rather than left to a caller:
   next tick, so a frame arriving before the transport's own listener exists is simply gone.
   Retention covers a late handler, not a late transport.
 
+## What a session's construction does, and in what order
+
+`new ClientInstance({ ... })` composes and registers, but joins nothing — `start()` is what sends
+the request. Three orderings are encoded here rather than left to a caller, each of which fails
+quietly:
+
+- **The state listener is an option, not a later registration.** `start()` can reach `failed`
+  synchronously, and a listener attached after it would never hear the only transition there was. So
+  `onState` is taken at construction and wired before anything is sent.
+- **A dial is abandoned through an `AbortSignal`.** A dial resolves on its own schedule, so a host
+  that gave up while one was in flight holds no session to close and its socket becomes a player that
+  never leaves. `connectTo` closes the transport and constructs nothing when the signal is already
+  aborted.
+- **`close()` unsubscribes before it destroys.** `GameClient.destroy` does not clear the lifecycle's
+  own subscribers, so a host that only destroyed would keep being told about a session it dropped,
+  and its handler would run against state it has already torn down.
+
+A host disposing anything of its own that touches the renderer does it **before** `close()`: the
+session's teardown reaches the same renderer, and only the host knows which nodes are its.
+
 ## Identity is the host's
 
 `accept(transport, playerId)` takes the id from whatever the host resolved, never from a frame —
@@ -61,9 +100,8 @@ account key. Returning `undefined` admits the connection anonymously and persist
 
 `GameInstance` is scoped to one world, and the current runtime is not safe to multiply. Core keeps a
 single module-global runtime — `loadGame` calls `createRuntime()` — so a second instance in one
-process repoints it, and the entry points that do not wrap `withRuntime` would write into the wrong
-world. Creator module state has the same shape: a `let` at module scope in a script is per-process,
-not per-instance.
+process repoints it. Core's own entry points wrap `withRuntime` and so survive that, but creator
+module state does not: a `let` at module scope in a script is per-process, not per-instance.
 
 Scale by processes. `GameInstance` is deliberately shaped so that hosting several later is a change
 inside this package rather than to its callers.

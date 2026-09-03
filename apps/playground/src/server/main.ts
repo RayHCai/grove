@@ -2,12 +2,12 @@
 //
 // Everything this file used to do — parse a port, stand up a listener, build a transport per socket
 // in the right order, accept it under a resolved identity, drive `pump` rather than `start`, close
-// the world before the socket — belongs to `@platform/glue/node`. What is left is the three things
+// the world before the socket — belongs to `@platform/glue/server`. What is left is the three things
 // that are genuinely this deployment's: where it listens, where it saves, and who it believes a
 // socket is.
 
 import type { IncomingMessage } from 'node:http';
-import { fileKVStore, listenOn } from '@platform/glue/node';
+import { fileKVStore, listenOn } from '@platform/glue/server';
 import { DEFAULT_GAME_PORT } from '../hosting.js';
 import { PROJECT } from '../project.js';
 import { createGameInstance } from './host.js';

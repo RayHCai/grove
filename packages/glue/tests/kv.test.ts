@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileKVStore } from '../src/node/index.js';
+import { fileKVStore } from '../src/server/index.js';
 
 const made: string[] = [];
 

@@ -8,14 +8,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ManualFrameSource, ScriptedInputDevice } from '@platform/client';
 import type { GameClient } from '@platform/client';
 import { ServerScript } from '@platform/core';
-import { createClient } from '@platform/engine/host';
 import { PROJECT_FORMAT_VERSION, assetId, scriptId, templateId } from '@platform/project';
 import type { ProjectManifest } from '@platform/project';
 import { createReadyNullRenderer } from '@platform/renderer/null';
 import { ScriptRegistry } from '@platform/scripting';
 import type { ScriptEntry } from '@platform/scripting';
 import { loopbackPair } from '@platform/transport';
-import { GameInstance } from '../src/index.js';
+import { ClientInstance } from '../src/client/index.js';
+import { GameInstance } from '../src/server/index.js';
 
 const TICK = 1 / 60;
 const RULES = scriptId('rules');
@@ -73,6 +73,7 @@ function project(): ProjectManifest {
 
 interface Harness {
     instance: GameInstance;
+    session: ClientInstance;
     client: GameClient;
     frames: ManualFrameSource;
     step(ticks: number): Promise<void>;
@@ -105,7 +106,7 @@ async function harness(): Promise<Harness> {
     const renderer = await createReadyNullRenderer({ design: { width: 200, height: 200 } });
 
     const frames = new ManualFrameSource();
-    const client = createClient({
+    const session = new ClientInstance({
         transport: pair.client,
         renderer,
         frames,
@@ -113,12 +114,15 @@ async function harness(): Promise<Harness> {
         clock: { nowSeconds: () => now },
         name: 'tester',
         project: project(),
+        // The null renderer is this harness's, and nothing else holds it.
+        ownsRenderer: true,
     });
-    client.start();
+    session.start();
 
     return {
         instance,
-        client,
+        session,
+        client: session.client,
         frames,
         async step(ticks: number): Promise<void> {
             for (let i = 0; i < ticks; i++) {
@@ -131,7 +135,9 @@ async function harness(): Promise<Harness> {
             }
         },
         dispose(): void {
-            client.destroy({ ownsRenderer: true });
+            // The session first, for the reason a host disposes its own renderer nodes first: both
+            // reach the same renderer, and this one owns it.
+            session.close();
             instance.close();
         },
     };
@@ -159,11 +165,11 @@ describe('a game instance', () => {
 
     it('carries a client all the way to live', async () => {
         live = await harness();
-        expect(live.client.state).toBe('connecting');
+        expect(live.session.state).toBe('connecting');
 
-        for (let i = 0; i < 200 && live.client.state !== 'live'; i++) await live.step(1);
+        for (let i = 0; i < 200 && live.session.state !== 'live'; i++) await live.step(1);
 
-        expect(live.client.state).toBe('live');
+        expect(live.session.state).toBe('live');
         expect(live.client.localPlayer).not.toBeNull();
         // The placed entity reached the mirror, so the manifest the server built from and the one
         // the client claimed are the same file.
