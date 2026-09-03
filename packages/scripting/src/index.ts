@@ -10,6 +10,8 @@ export {
     DENIED_GLOBALS,
     ALIASED_MATH,
     COMPUTED_MATH,
+    CONSTRUCTOR_READ,
+    DYNAMIC_IMPORT,
 } from './policy.js';
 
 export type { ShimOptions, Shim } from './shim.js';
