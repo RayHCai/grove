@@ -229,6 +229,10 @@ export class Runtime {
         this.registry.register(this.breaker);
         this.registry.register(this.timers);
 
+        // Counters are keyed by instance id and nothing else names one, so a removed host's would
+        // sit in the map for the life of the process.
+        this.instances.setOnRemoved((instanceId) => this.breaker.forgetInstance(instanceId));
+
         this.timers.setSimRate(this.simRate);
         this.tweens.setSimRate(this.simRate);
         this.timers.setScopeOwnerLookup((scopeId) => this.#entityForScope(scopeId));

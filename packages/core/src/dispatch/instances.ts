@@ -69,6 +69,8 @@ export class InstanceRegistry {
      */
     readonly #pendingStart: PendingStart[] = [];
 
+    #onRemoved: ((instanceId: number) => void) | null = null;
+
     attach(hostKey: string, inst: ScriptInstance): void {
         let list = this.#byHost.get(hostKey);
         if (!list) {
@@ -103,7 +105,21 @@ export class InstanceRegistry {
         return this.#byInstance.get(instance);
     }
 
+    /**
+     * Told of every instance a host removal drops, so state keyed by instance id goes with it.
+     *
+     * A seam rather than a `BreakerCounters` reference, for the reason the timer heap takes one: the
+     * registry is not the breaker's owner, and a bare registry still detaches.
+     */
+    setOnRemoved(fn: (instanceId: number) => void): void {
+        this.#onRemoved = fn;
+    }
+
     removeHost(hostKey: string): void {
+        const removed = this.#byHost.get(hostKey);
+        if (removed && this.#onRemoved !== null) {
+            for (const inst of removed) this.#onRemoved(inst.id);
+        }
         this.#byHost.delete(hostKey);
         // A script on a torn-down host never starts: the destroy drain has already run `@onEnd`
         // for that host, and starting after ending is the one order a handler cannot be written
