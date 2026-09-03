@@ -225,6 +225,9 @@ export class PlayerManager {
         // its scripts dispatching against a player the roster no longer holds.
         this.#rt.instances.removeHost(cameraKey(id));
         this.#rt.hosts.remove(cameraKey(id));
+        // The checkpoint too: it is keyed by player id and read only by a spawn, so one left behind
+        // is a row per player the session ever had, and a rejoin lands where a stranger died.
+        this.#rt.wired.roster.forgetCheckpoint(id);
     }
 
     get players(): Player[] {
