@@ -61,7 +61,7 @@ export {
     clearRuntime,
     CollectingLog,
 } from './runtime.js';
-export type { EngineLog, TickPasses, Wired } from './runtime.js';
+export type { EngineLog, LogSink, TickPasses, Wired } from './runtime.js';
 
 export {
     loadGame,

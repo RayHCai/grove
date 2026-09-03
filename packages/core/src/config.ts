@@ -28,6 +28,9 @@ export const MAX_ENTITIES = 10_000;
 /** Milliseconds one handler may hold the tick before the boundary charges it like a throw. */
 export const MAX_HANDLER_MS = 50;
 
+/** The stream a world draws from when the host names no seed; every session would replay this one. */
+export const DEFAULT_PRNG_SEED = 1;
+
 /** How far back a historical spatial query may reach, in milliseconds. */
 export const MAX_REWIND_MS = 250;
 

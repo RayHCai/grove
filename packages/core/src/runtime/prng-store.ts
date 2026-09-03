@@ -2,6 +2,7 @@
 // stream, so no subsequence belongs to a scope.
 
 import { SeededRandom } from '@platform/math';
+import { DEFAULT_PRNG_SEED } from '../config.js';
 import type { Scope, ScopeMode, SnapshotStore } from '../loop/store-registry.js';
 
 export type PRNGBuffer = [number, number, number, number];
@@ -10,7 +11,12 @@ export class PRNGStore implements SnapshotStore<PRNGBuffer> {
     readonly storeName = 'prng';
     readonly scopeMode: ScopeMode = 'whole';
 
-    readonly stream = new SeededRandom(1);
+    readonly stream = new SeededRandom(DEFAULT_PRNG_SEED);
+
+    /** Restarts the stream, which is what two peers must agree on to draw the same numbers. */
+    seed(seed: number): void {
+        this.stream.seed(seed);
+    }
 
     createBuffer(): PRNGBuffer {
         return [0, 0, 0, 0];

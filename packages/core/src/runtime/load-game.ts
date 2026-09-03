@@ -22,7 +22,7 @@ import { Asset, AssetRegistry } from './assets.js';
 import { tickMovement } from './movement-pass.js';
 import { Wiring, activeLocationsFor } from './wiring.js';
 import { createRuntime, withRuntime } from './runtime.js';
-import type { Runtime, TickPasses } from './runtime.js';
+import type { LogSink, Runtime, TickPasses } from './runtime.js';
 import type { DispatchCtx, DispatchOptions } from '../dispatch/dispatcher.js';
 import type { ScriptInstance } from '../dispatch/instances.js';
 import {
@@ -66,11 +66,30 @@ export interface LoadOptions {
      * nowhere.
      */
     scriptIdOf?: (klass: abstract new (...args: never[]) => object) => ScriptId | undefined;
+    /**
+     * Where this world's diagnostics go.
+     *
+     * Core writes to no console and holds no transport, so without one every `warn` the engine makes
+     * ends inside the process that made it.
+     */
+    log?: LogSink;
+    /**
+     * What the world's PRNG starts from, defaulting to `DEFAULT_PRNG_SEED`.
+     *
+     * A world that takes the default replays one stream every session, and a mirror seeded
+     * differently from its server draws a different one — so a seed both ends can be told is the
+     * only way the two agree.
+     */
+    seed?: number;
 }
 
 /** Builds and wires a runtime for `manifest`, returning it live. */
 export function loadGame(manifest: GameManifest = {}, opts: LoadOptions = {}): Runtime {
     const rt = createRuntime();
+    // First, so anything the rest of the load warns about already has somewhere to go.
+    if (opts.log !== undefined) rt.setLogSink(opts.log);
+    // Before the placed world, whose `@onStart`s may already be drawing from it.
+    if (opts.seed !== undefined) rt.prng.seed(opts.seed);
     const role = manifest.role ?? 'server';
     rt.isServer = role === 'server';
     if (manifest.simRate) rt.setSimRate(manifest.simRate);

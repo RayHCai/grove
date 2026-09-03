@@ -127,6 +127,7 @@ export type {
     HUDWidgetState,
     InputBindings,
     KVStore,
+    LogSink,
     Movement,
     PointerEdge,
     Random,

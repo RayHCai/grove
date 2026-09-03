@@ -266,3 +266,36 @@ describe('@onPress', () => {
         expect(shopper.pressed).toStrictEqual(['back', 'back']);
     });
 });
+
+describe('the engine log', () => {
+    it('reaches the sink the host installed, and keeps its own ring either way', () => {
+        // Without a seam every `warn` in the repo is output-less: core writes to no console and
+        // holds no transport, so the only reader it can have is the one the host hands it.
+        const warnings: string[] = [];
+        const stacks: string[] = [];
+        const rt = loadGame(
+            {},
+            {
+                log: {
+                    warn: (message) => warnings.push(message),
+                    error: (record) => stacks.push(record.stack),
+                },
+            },
+        );
+
+        rt.log.warn('a second connection claimed a player id');
+        rt.log.error({
+            scriptClass: 'C',
+            method: 'm',
+            hostId: 'game',
+            tick: 1,
+            event: '@e',
+            stack: 'boom',
+        });
+
+        expect(warnings).toStrictEqual(['a second connection claimed a player id']);
+        expect(stacks).toStrictEqual(['boom']);
+        // The bounded ring is unchanged by installing one, and a warning still stays out of it.
+        expect(rt.log.records.map((r) => r.stack)).toStrictEqual(['boom']);
+    });
+});
