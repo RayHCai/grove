@@ -158,6 +158,14 @@ reported. Not an envelope — a disabled handler is something whoever runs the s
 player's client can neither act on it nor be trusted with a stack, and a wire arm would put it under
 protocol's receiver-bounds rules for no benefit.
 
+`GameServerOptions.log` is the operator channel, handed straight to `loadGame` as core's `LoadOptions.log`
+rather than reimplemented, so this package's own decisions and core's diagnostics leave through one sink.
+Every denial writes one line — the three `Reject` reasons, the rate-breach close, the join-deadline sweep,
+a `send-failed` close, and `accept-refused` with the reason it was refused — as `event conn=<id>
+reason=<token>` with any prose after a colon, because these are read by grep and a stable token is the
+whole point. `accept-refused` carries no id: one is minted for a socket this server keeps, and an id in a
+line for a socket it just closed is an id a reader would go looking for.
+
 ---
 
 ## 4. Input and admission
@@ -341,7 +349,8 @@ would go out with an empty `template`.
   on `NaN`, which would abort the send for every peer). A read, never a write.
 - **State:** marks are addressed through a table built **forward** from `GAME_KEY`, the roster and
   `liveIds()` using core's own `playerKey`/`entityKey` — a core rename becomes a compile error, and a mark
-  naming a dead host misses the table and is dropped. A field is read by one function, `encodeHostField`,
+  naming a dead host misses the table and is counted as `server.staleMarks`, apart from `droppedMarks`
+  because a write whose host dies inside the same send interval is churn rather than a defect. A field is read by one function, `encodeHostField`,
   which `buildSnapshot` calls too, so neither path can keep a field the other discards. Values inside it go
   through `encodeStateValue` (`Entity` → netId,
   `Player` → id, plain objects/arrays recursed, cycle- and depth-guarded); game/entity marks are shared,
@@ -360,9 +369,12 @@ would go out with an empty `template`.
 A loop over the registry, reliable envelope first (the client holds a transform envelope until the state
 envelope for that tick is applied). The transform frame is encoded lazily and memoised on the `SendSet`, so
 N connections still cost one `codec.encode`. Most of a state envelope is per-connection (`ackSeq`,
-`earliestHeadroom`, scoped state), so the transform frame is the whole of the shared subset. No try/catch per
-send: `send`/`sendEncoded` after a peer's `close()` are silent no-ops, so
-one dead peer cannot abort the fan-out.
+`earliestHeadroom`, scoped state), so the transform frame is the whole of the shared subset. `send` and
+`sendEncoded` after a peer's `close()` are silent no-ops, and each connection's turn additionally sits in
+its own `try`/`catch` that logs `send-failed`, closes that peer and continues — an encode or a socket
+write is not this package's code, and one throw would otherwise end the broadcast for every peer behind
+it in the registry. Inside that turn `pendingJoin` is cleared **after** the `Welcome` reaches the wire:
+cleared first, a peer whose reply threw would read as broadcast-ready with no baseline behind it.
 
 ---
 
@@ -374,7 +386,8 @@ one dead peer cannot abort the fan-out.
 counter for the whole session), clamps a backwards clock to zero, then steps while
 `accumulator >= dt − STEP_EPSILON` and under the cap. The epsilon (1 ns) exists because a host advancing by
 exactly `1 / simRate` accumulates slightly less than `dt`, and a wake owing one tick would step zero times.
-It returns `{ steps, sends, shed }`, so cadence and shedding are observable without reading `rt.tick`.
+It returns `{ steps, sends, shed }`, so cadence and shedding are observable without reading `rt.tick`, and
+`GameServer.shedCount` reports the cumulative count.
 
 ### 6.2 The step cap sheds wall-clock, never ticks
 
@@ -433,18 +446,25 @@ hoist and `@onPlayerJoin` attaches the player's own scripts inside that call, so
 would seed nothing until the session after, and a host the cache already holds is never re-read since `save`
 captured it synchronously. The record reference is taken **before** `leavePlayer` and read **after** it — the leave
 handler may write a last value, and `PlayerManager.remove` then drops the record from the host table, so
-neither order alone works. The write is fire-and-forget with the failure routed to `rt.log.warn`: the trigger
-is a socket that has already closed, and making the close path async to carry a promise would push one up
-through `transport.onClose` and `GameServer.close()`, neither of which has anywhere to put it. `PersistedState`
-captures synchronously into its cache for exactly that reason, so a rejoin under the same host id reads the
-value back whether or not the store write has landed. A record the cache does not hold under a host-supplied
-identity is not written, so a read that failed cannot be overwritten with this session's initializers.
+neither order alone works. Only a **host-named** connection is written back, and only when the cache holds
+its record: a `connectionId` is minted fresh per socket, so a record saved under one is unreadable by
+anything and a join/leave loop would leak a durable entry per cycle, while a record the cache does not hold
+under a host-supplied identity means the read failed and this session's initializers must not overwrite it.
+The write is fire-and-forget with the failure routed to `rt.log.warn` — the trigger is a socket that has
+already closed, and `transport.onClose` has nowhere to put a promise — but the promise is retained until it
+settles, because `GameServer.close()` does have somewhere: it returns one. `PersistedState` captures
+synchronously into its cache for the same reason, so a rejoin under the same host id reads the value back
+whether or not the store write has landed.
 
 `GameServer.close()` is the whole-server form: stop the driver, then run that path **inline** for every
 connection rather than waiting on each transport's `onClose`, which arrives on the next delivery — and after
-a close there is no next delivery, so waiting would leak every `Player` and every registered handler.
-Afterwards `pump` is inert, `accept` returns `null`, and `start()` throws. `stop()` remains the narrower
-verb: it parks the driver and leaves every connection open.
+a close there is no next delivery, so waiting would leak every `Player` and every registered handler. It
+returns a **`Promise<void>`** that settles once every save still in flight has, so a host that exits on it
+does not drop the state of every player who was online; `allSettled` over them rather than `all`, since a
+store that rejects must release the drain rather than hold the shutdown open on the one write that will
+never land. Idempotent: a second call returns the first one's drain. Afterwards `pump` is inert, `accept`
+returns `null`, and `start()` throws. `stop()` remains the narrower verb: it parks the driver and leaves
+every connection open.
 
 ---
 

@@ -29,7 +29,7 @@ import type {
 } from '@platform/transport';
 import { defined } from '@platform/math';
 import { jsonCodec, loopbackPair } from '@platform/transport';
-import type { BreakerTrip } from '@platform/core';
+import type { BreakerTrip, LogSink } from '@platform/core';
 import { GameServer } from '../src/server.js';
 import type { ServerConfig } from '../src/server.js';
 import type { PumpResult } from '../src/driver.js';
@@ -169,6 +169,8 @@ export interface HarnessOptions {
     latency?: number;
     /** The dev channel, so a test can watch what the host would be told. */
     onBreakerTrip?: (trip: BreakerTrip) => void;
+    /** Where the server's decisions go, so a test reads exactly what an operator would grep. */
+    log?: LogSink;
 }
 
 export class Harness {
@@ -187,6 +189,7 @@ export class Harness {
                 config: opts.config,
                 codec: opts.codec,
                 onBreakerTrip: opts.onBreakerTrip,
+                log: opts.log,
             }),
             // Handed to the driver, never called by a test around `pump`.
             deliver: () => {

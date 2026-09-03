@@ -402,14 +402,16 @@ describe('wrapper state crosses as its wire form, not as a class', () => {
 
     it('persists a departing player’s wrapper state at the leave, through the KV store', async () => {
         const h = harness({ config: { gameScripts: [Rules] } });
-        const peer = h.joined('a');
+        // Host-named, because only a named peer's record is written through: a connection id is
+        // minted fresh per socket, so a record saved under one is a durable entry nothing reads.
+        const peer = await h.joinedAs('alice');
         const rt = h.server.runtime;
         // `addScript` returns the player for chaining, so the instance comes off the registry.
-        rt.playerManager!.byId('c1')!.addScript(Squad as never);
-        const squad = [...rt.instances.forHost('player:c1')]
+        rt.playerManager!.byId('alice')!.addScript(Squad as never);
+        const squad = [...rt.instances.forHost('player:alice')]
             .map((si) => si.instance)
             .find((i): i is Squad => i instanceof Squad)!;
-        squad.team.add(rt.playerManager!.byId('c1')!);
+        squad.team.add(rt.playerManager!.byId('alice')!);
         h.pumpTicks(4);
 
         peer.close();
@@ -417,9 +419,9 @@ describe('wrapper state crosses as its wire form, not as a class', () => {
 
         // The record is gone from the host table by now — `PlayerManager.remove` drops it — so this
         // is the store answering, not the world.
-        const stored = await rt.kv.get('serverState', 'player:c1');
-        expect(stored).toStrictEqual({ team: { kind: 'Team', name: 'red', members: ['c1'] } });
-        expect(rt.hosts.get('player:c1')).toBeUndefined();
+        const stored = await rt.kv.get('serverState', 'player:alice');
+        expect(stored).toStrictEqual({ team: { kind: 'Team', name: 'red', members: ['alice'] } });
+        expect(rt.hosts.get('player:alice')).toBeUndefined();
     });
 
     it('drops a reserved key nested inside a value, rather than shipping a short object', () => {
@@ -438,6 +440,30 @@ describe('wrapper state crosses as its wire form, not as a class', () => {
 
         expect(peer.states.flatMap((s) => s.state).some((d) => 'round' in d.fields)).toBe(false);
         expect(h.server.droppedMarks).toBeGreaterThan(0);
+        // The value was unsendable, which is the defect this counter names — not churn.
+        expect(h.server.staleMarks).toBe(0);
+    });
+
+    it('counts a mark whose host died first as churn, and not as a bug report', () => {
+        // The write and the destroy land in one send interval, so the address table the drain builds
+        // no longer holds the host. Ordinary in any world that destroys anything — folding it into
+        // `droppedMarks` is what made that counter unusable as a health signal.
+        const h = harness({ config: { gameScripts: [Rules] } });
+        const peer = h.joined('a');
+        const crate = h.server.runtime.entityManager.spawn('crate', 0, 0);
+        crate.addScript(Health as never);
+        h.pumpTicks(6);
+        peer.clear();
+
+        const host = entityKey(crate.entityId as unknown as number);
+        const health = [...h.server.runtime.instances.forHost(host)][0]?.instance as Health;
+        health.health = 1;
+        crate.destroy();
+        h.pumpTicks(6);
+
+        expect(h.server.staleMarks).toBe(1);
+        expect(h.server.droppedMarks).toBe(0);
+        expect(peer.states.flatMap((s) => s.state).some((d) => 'health' in d.fields)).toBe(false);
     });
 });
 

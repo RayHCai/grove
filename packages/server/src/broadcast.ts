@@ -3,7 +3,6 @@ import type {
     HostRecord,
     Runtime,
     SingleStructuralOp,
-    StateMark,
     StructuralOp,
 } from '@platform/core';
 import {
@@ -114,6 +113,15 @@ export interface SendSet {
     transform: TransformDiff[];
     /** Marks and ops dropped as unrepresentable, so a silent loss is visible. */
     dropped: number;
+    /**
+     * Marks whose host was gone by the time the send drained them.
+     *
+     * Counted apart from `dropped` because it is ordinary churn, not a defect: a script writes a
+     * field and the entity or player it lives on dies inside the same send interval. Folding the two
+     * together left `dropped` nonzero for every world that destroys anything, which is what a health
+     * signal cannot be.
+     */
+    staleMarks: number;
     /** The shared frame's one encode, memoised across the fan-out. Null until first sent. */
     encodedTransform: EncodedFrame | null;
 }
@@ -141,6 +149,7 @@ export function drainOnce(
         playerState: new Map(),
         transform: [],
         dropped: 0,
+        staleMarks: 0,
         encodedTransform: null,
     };
 
@@ -185,12 +194,21 @@ export function drainOnce(
     const perPlayer = new Map<PlayerId, StateDiff>();
     for (const mark of rt.channels.drainState()) {
         hosts ??= hostAddresses(rt);
-        const write = toStateWrite(mark, hosts);
-        if (write === undefined) {
+        const record = mark.record as HostRecord;
+        const host = hosts.get(record.hostId);
+        // The table is built from the live world, so a miss is a host that died between the write
+        // and this drain — the entity's own destroy op already tells every peer.
+        if (host === undefined) {
+            set.staleMarks += 1;
+            continue;
+        }
+        const value = encodeHostField(record, mark.field);
+        if (value === undefined) {
             set.dropped += 1;
             continue;
         }
-        const { host, hostKey, field, value } = write;
+        const hostKey = record.hostId;
+        const field = mark.field;
         const bucket =
             host.kind === 'player'
                 ? (perPlayer.get(host.id) ?? put(perPlayer, host.id, { host, fields: {} }))
@@ -310,18 +328,6 @@ function put<K, V>(into: Map<K, V>, key: K, value: V): V {
 export function encodeHostField(record: HostRecord, field: string): JsonValue | undefined {
     if (RESERVED_KEYS.has(field)) return undefined;
     return encodeStateValue(serializeHostField(record, field));
-}
-
-function toStateWrite(
-    mark: StateMark,
-    hosts: Map<string, StateHostAddr>,
-): { host: StateHostAddr; hostKey: string; field: string; value: JsonValue } | undefined {
-    const record = mark.record as HostRecord;
-    const host = hosts.get(record.hostId);
-    if (host === undefined) return undefined;
-    const value = encodeHostField(record, mark.field);
-    if (value === undefined) return undefined;
-    return { host, hostKey: record.hostId, field: mark.field, value };
 }
 
 /** A `@serverState` value as JSON, or `undefined` for "not representable"; a ref travels as what identifies it across the wire. */
