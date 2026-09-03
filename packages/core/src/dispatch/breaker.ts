@@ -26,11 +26,15 @@ export class BreakerCounters implements SnapshotStore<BreakerBuffer> {
         return next;
     }
 
+    // Both paths run per invocation and the map is empty until something throws, so the size
+    // check spends a load to skip minting a key that could only miss.
     recordSuccess(instanceId: number, method: string): void {
+        if (this.#counts.size === 0) return;
         this.#counts.delete(this.#key(instanceId, method));
     }
 
     count(instanceId: number, method: string): number {
+        if (this.#counts.size === 0) return 0;
         return this.#counts.get(this.#key(instanceId, method)) ?? 0;
     }
 
