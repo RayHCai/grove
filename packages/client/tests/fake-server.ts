@@ -32,6 +32,8 @@ export interface FakeServerOptions {
     sendRate?: number;
     /** Answer the join with a `Reject` instead of a `Welcome`. */
     reject?: RejectReason;
+    /** Accept the connection and answer nothing at all — the peer that never gets round to it. */
+    ignoreJoin?: boolean;
     /** Send a structurally broken `Welcome` — the undecodable case. */
     malformedWelcome?: boolean;
     /** The tick the snapshot describes. */
@@ -77,6 +79,8 @@ export class FakeServer {
 
     /** This peer's own tick, which a test advances. Inputs are measured against it. */
     tick = 0;
+    /** True once the other end closed the connection, which is how a test sees a client give up. */
+    closed = false;
     #ackSeq = -1;
     #welcomed = false;
     #welcome: Welcome | undefined;
@@ -91,6 +95,9 @@ export class FakeServer {
         // on the next frame, so the resync path would be under test everywhere by accident.
         if (opts.snapshotTick !== undefined) this.tick = opts.snapshotTick;
         transport.onMessage((message) => this.#receive(message));
+        transport.onClose(() => {
+            this.closed = true;
+        });
     }
 
     get simRate(): number {
@@ -147,6 +154,7 @@ export class FakeServer {
     }
 
     #answerJoin(clientSentMs: number): void {
+        if (this.#opts.ignoreJoin === true) return;
         if (this.#opts.reject !== undefined) {
             const reject: Reject = {
                 kind: 'reject',

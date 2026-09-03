@@ -103,6 +103,16 @@ export const MAX_BUNDLE_BYTES = 8 * 1024 * 1024;
 export const BUNDLE_DEADLINE_SECONDS = 30;
 
 /**
+ * Seconds the session may sit in `connecting` — or in `resyncing` — before the join is failed.
+ *
+ * The server closes an unjoined connection on a deadline of its own, and without a symmetric one
+ * here a peer that accepts the socket and then answers nothing leaves a spinner up for the life of
+ * the tab. Longer than the server's, so a peer that means to refuse still gets its `Reject` — which
+ * carries a reason — in ahead of this.
+ */
+export const JOIN_DEADLINE_SECONDS = 10;
+
+/**
  * Nesting past which a `request()` payload value is dropped rather than sent.
  *
  * Held far below the codec's own 128-level cap, which the envelope's own nesting eats into, because a
@@ -148,6 +158,15 @@ export const MAX_ENTITY_SCRIPTS = 64;
  * above any world that could also fit in a browser.
  */
 export const MAX_SNAPSHOT_CHUNKS = 256;
+
+/**
+ * Bytes of held `snapshot-chunk` payload, summed across the set the `Welcome` will count.
+ *
+ * The count caps frames and says nothing about how big one is: at the transport's own frame ceiling
+ * a full set is a gigabyte of memory held before anything has been validated, so the two bounds are
+ * needed together. Far above any world that also fits in a browser.
+ */
+export const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
 
 /**
  * Levels of `children` below a template's root the client will build, and nodes in one such subtree.

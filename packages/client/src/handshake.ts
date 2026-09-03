@@ -5,6 +5,7 @@
 // reconnect token have nowhere else to live. The cost is one round trip.
 
 import type { Message, Transport } from '@platform/transport';
+import { jsonCodec } from '@platform/transport';
 import type {
     ClientToServer,
     JoinRequest,
@@ -17,7 +18,7 @@ import type {
 } from '@platform/protocol';
 import { PROTOCOL_VERSION } from '@platform/protocol';
 import { isFiniteNumber } from '@platform/math';
-import { MAX_SNAPSHOT_CHUNKS, MAX_WIRE_ITEMS } from './constants.js';
+import { MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_CHUNKS, MAX_WIRE_ITEMS } from './constants.js';
 
 /** A monotonic wall-clock in seconds. Injected, never `Date.now()` at a call site. */
 export interface ClockSource {
@@ -228,9 +229,10 @@ function isChunkCount(value: unknown): boolean {
  */
 export class SnapshotChunks {
     readonly #held: SnapshotChunk[] = [];
+    #bytes = 0;
     #dropped = 0;
 
-    /** Chunks refused as unusable — over the cap, or arriving for a join already answered. */
+    /** Chunks refused as unusable — over either cap, or arriving for a join already answered. */
     get dropped(): number {
         return this.#dropped;
     }
@@ -247,12 +249,21 @@ export class SnapshotChunks {
             this.#dropped++;
             return;
         }
+        // A count bounds frames and says nothing about how big one is, so the memory is bounded here
+        // too — through the codec, since only it knows how its bytes relate to a value.
+        const bytes = jsonCodec.byteLength(JSON.stringify(chunk));
+        if (this.#bytes + bytes > MAX_SNAPSHOT_BYTES) {
+            this.#dropped++;
+            return;
+        }
+        this.#bytes += bytes;
         this.#held.push(chunk);
     }
 
     /** The next join answers with its own set, at its own tick, so a resync discards what is held. */
     clear(): void {
         this.#held.length = 0;
+        this.#bytes = 0;
     }
 
     /**
@@ -266,6 +277,7 @@ export class SnapshotChunks {
         const expected = welcome.snapshotChunks ?? 0;
         if (this.#held.length !== expected) return false;
         const held = this.#held.splice(0);
+        this.#bytes = 0;
         if (expected === 0) return true;
 
         // The wire is FIFO, so arrival order is already emission order; sorting states the invariant
