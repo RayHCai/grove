@@ -57,9 +57,9 @@ not a `pixi/` file: it is backend-independent, and a per-backend copy drifts fro
    `pixi.rotation = -deg * DEG2RAD`) and **only for camera-transformed surfaces** — UI is authored
    y-down, so a screen-space node takes the anchor origin and `fitScale` instead. The camera root
    keeps a **positive** uniform scale — `root.scale.y = -1` would mirror every sprite and glyph.
-6. **The renderer never clamps the camera** to `camera.bounds`, which is engine-enforced; honoring
-   it here double-applies. It does reject a non-finite position or zoom, which would otherwise blank
-   every camera-transformed surface.
+6. **The renderer never clamps the camera.** It draws the position and zoom it is handed, so a
+   constraint applied here would compose with whatever the sender already applied. It does reject a
+   non-finite position or zoom, which would otherwise blank every camera-transformed surface.
 7. **Culling toggles `renderable` on `art` only**, never on `xform` — otherwise a culled parent hides
    its children. Groups, UI nodes and `neverCull` nodes are never culled.
 8. **Restore merges the retained manifest with the queue _before_ applying**, so a queued unload

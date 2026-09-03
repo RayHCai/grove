@@ -21,7 +21,10 @@
 //
 // DETERMINISM for synced code: seeded random only, no storage/leaderboard reads, no
 // wall-clock, no client-local values (camera.viewport), engine-guaranteed iteration
-// order. ClientScript is exempt but may not write authoritative state. Load-time errors.
+// order. The denied forms are refused when the bundle is BUILT, before tsc, so the
+// diagnostic points at the creator's own line. ClientScript is exempt but may not write
+// authoritative state — that half is specified and NOT IMPLEMENTED, so a client-side write
+// to authoritative state lands locally and desyncs until the authority overwrites it.
 //
 // Server -> client is implicit @serverState replication; client -> server is always an
 // explicit request() answered by @onRequest. That asymmetry is the security model
@@ -42,9 +45,10 @@ declare module '@platform/engine' {
     }
 
     // (M) camera.viewport arithmetic is why math owns geometry, not just scalars.
-    // WORLD-SPACE, y-up (top > bottom), recomputed per tick — matching the renderer's
-    // worldBoundsOf (renderer DESIGN §18, core DESIGN §12.12). Collider.bounds is the
-    // rotated world-space AABB of that entity this tick.
+    // WORLD-SPACE, y-up (top > bottom), recomputed per tick — one rect convention, so the
+    // renderer's cull test and a creator's query cannot disagree about what a bounds means.
+    // Collider.bounds is read as a LOCAL extent box centered on the entity's position; the
+    // rotated world-space AABB it is specified as is not computed yet.
     interface Bounds {
         left: number;
         right: number;
@@ -125,6 +129,8 @@ declare module '@platform/engine' {
     // ─── input ─────────────────────────────────────────────────────
 
     // Bindings are panel-authored and per-player. Actions double as the network protocol.
+    // NOT IMPLEMENTED: this object stores what you write and nothing reads it — the client
+    // resolves its own binding table, so a rebind here changes no input.
     interface InputBindings {
         rebind(action: string, bindings: string[]): void;
         addBinding(action: string, binding: string): void;
@@ -173,19 +179,23 @@ declare module '@platform/engine' {
 
     // ─── attachments ───────────────────────────────────────────────
 
-    // Leaf capabilities, not objects. Present on an Entity only if its template configures
-    // them. Contrast a script, which is code the creator wrote.
+    // Leaf capabilities, not objects. Specified as template-configured; NOT IMPLEMENTED that
+    // way — nothing in the template pipeline writes either one, so an entity carries a collider
+    // only where a script assigned it, and carries no animation at all. Contrast a script,
+    // which is code the creator wrote.
 
-    // Geometry and flags only; contact identity comes from Entity.getTouching.
+    // Geometry and flags only; contact identity comes from Entity.getTouching. Without one,
+    // @onCollide and getTouching answer nothing for that entity.
     interface Collider {
-        enabled: boolean;
-        isTrigger: boolean; // fires enter/exit instead of blocking
+        enabled: boolean; // read by nobody yet; a collider that exists always counts
+        isTrigger: boolean; // fires enter/exit instead of blocking — nothing blocks yet either way
         readonly bounds: Bounds; // see Bounds TODO
     }
 
     // The per-entity animator, not one clip. Clips are panel-authored assets referenced by
     // key. Mapping is panel-authored and one-way: it reads velocity, blocked and
     // @serverState, never the reverse.
+    // NOT IMPLEMENTED: there is no animator, so nothing ever holds one of these.
     // TODO: per animation, or only the currently playing one?
     interface Animation {
         speed: number;
@@ -253,10 +263,10 @@ declare module '@platform/engine' {
         // Blocking and trigger colliders both count; isTrigger decides whether you were
         // stopped, not whether you are touching. Excludes self and own parent/children,
         // engine-stable order, empty array / false without a collider, never null. Static
-        // entities are reported individually despite merged geometry.
+        // entities are reported individually — there is no merged geometry to hide them in.
         //
         // opts.asSeen resolves against the world as the acting client saw it — same rules
-        // and same load-time rejections as FindQuery.asSeen above.
+        // and the same not-yet-keyed caveat as FindQuery.asSeen above.
         getTouching(tag?: string, opts?: { asSeen?: boolean }): Entity[]; // real array
         isTouching(tag?: string, opts?: { asSeen?: boolean }): boolean; // (B) block-tier spelling
 
@@ -264,6 +274,8 @@ declare module '@platform/engine' {
         show(): this; // (B)
         hide(): this; // (B)
 
+        // NOT IMPLEMENTED: all three reach the effect sink, which no endpoint fills, so the
+        // call is recorded nowhere and nothing is drawn or played.
         // TODO: check how Scratch/Unity store, load, play and interrupt animations
         play(clip: AssetRef, opts?: { loop?: boolean }): Promise<void>; // (B) frame animation; `opts` is accepted and ignored
         stopAnimation(): this; // (B) accepted and ignored — nothing interrupts a clip yet
@@ -344,6 +356,7 @@ declare module '@platform/engine' {
 
         // Constraint, not observation: where the camera MAY travel. Creator-written,
         // null = unconstrained.
+        // NOT IMPLEMENTED: the value is stored and read back, and nothing clamps to it.
         bounds: Bounds | string | null; // region name or explicit bounds
 
         // Observation, not constraint: the world-space rect seen right now, computed from
@@ -353,12 +366,17 @@ declare module '@platform/engine' {
         // Depends on client-reported window size, so NOT readable from a SyncedScript — two
         // aspect ratios would diverge. Readable from a ServerScript, free from a
         // ClientScript.
+        //
+        // NOT IMPLEMENTED: no window size reaches it, so it returns a fixed 800x600 rect
+        // around the camera on both ends.
         readonly viewport: Bounds;
 
         follow(target: Player | Entity | null): this; // (B) defaults to the owner's avatar
         moveTo(x: number, y: number): this; // (B)
-        shake(strength: number, seconds: number): this; // (B)
+        shake(strength: number, seconds: number): this; // (B) NOT IMPLEMENTED — effect sink, so inert
 
+        // NOT IMPLEMENTED as timed: both cut to the destination and resolve at once, so
+        // `seconds` and `easing` are accepted and ignored.
         // TODO: what happens if it is already following something?
         glideTo(x: number, y: number, seconds: number, easing?: Easing): Promise<void>; // (B)
         zoomTo(zoom: number, seconds: number, easing?: Easing): Promise<void>; // (B)
@@ -376,6 +394,8 @@ declare module '@platform/engine' {
 
     // Position is state; clicks are ordinary actions (mouse:left is a binding). Per-player
     // and private — one player's cursor is invisible to others.
+    // NOT IMPLEMENTED: every read answers zero/null/false and every write is a no-op. Pointer
+    // input reaches creator code through @onClick and cursor-bound axis actions instead.
     interface Cursor {
         readonly position: Vec3; // (B) world space, via this player's camera
         readonly screenPosition: Vec3; // screen space, for HUD hit-testing
@@ -522,21 +542,22 @@ declare module '@platform/engine' {
     interface FindQuery {
         tag?: string;
         in?: string; // panel-authored region name
-        // Euclidean distance over x/y, ignoring z while z is reserved (core DESIGN §12.13).
+        // Euclidean distance over x/y, ignoring z while z is reserved for the 3D backend.
         near?: { of: Entity | Vec3; within: number };
 
         // Resolve against the world as the acting client saw it, not the live present. Only
-        // legal in a server-side, input-originated handler (@onRequest, and later @onEvent on
-        // a ServerScript that carries a view tick); the engine pulls the view tick from the
-        // dispatch context, clamps to maxRewindMs (~250ms), and validates against its own
-        // latency estimate for that connection — no tick arithmetic reaches creator code.
+        // meaningful in a server-side, input-originated handler (@onRequest, and later @onEvent
+        // on a ServerScript that carries a view tick); no tick arithmetic reaches creator code.
         //
-        // Load-time errors: asSeen on any query in a SyncedScript (the ring is server-only,
-        // and reading it would desync); asSeen from a handler with no view tick (no key for
-        // the read). Present-tense is the default and covers every non-shot case.
+        // NOT IMPLEMENTED as specified: it resolves against the rewind ring's most recent
+        // capture rather than the asker's view tick, so there is no clamp to maxRewindMs and
+        // no check against that connection's latency estimate. The two load-time errors it is
+        // specified to raise — asSeen in a SyncedScript, which would desync on a server-only
+        // ring, and asSeen from a handler carrying no view tick — are not raised either.
+        // Present-tense is the default and covers every non-shot case.
         //
         // Placeholder name — likely rendered as a panel toggle on the hat rather than a
-        // visible flag in the block tier (core DESIGN §8.1).
+        // visible flag in the block tier.
         asSeen?: boolean;
     }
 
@@ -555,7 +576,8 @@ declare module '@platform/engine' {
 
         // The world's extent, FIXED AT BUILD TIME from the panel-authored world — not a
         // runtime value and not writable, which removes "which world am I in" from the API.
-        // camera.bounds leashes to it; find({ in }) resolves regions inside it.
+        // find({ in }) resolves regions inside it; camera.bounds is specified to leash to it
+        // and does not yet.
         readonly bounds: Bounds;
 
         // Eager and always safe: the world is built before @onStart and assets are preloaded
@@ -650,6 +672,10 @@ declare module '@platform/engine' {
     // @serverState here is a load-time error pointing at request(), as is writing
     // authoritative state — entity transforms, mutating wrapper calls, spawn/destroy. Reads
     // are unrestricted, as are Math.random, wall-clock time and camera.viewport.
+    //
+    // NOT IMPLEMENTED: neither refusal is raised. Wiring rejects the host/location pairings
+    // and @onRequest's base, and the build pass refuses a SyncedScript's non-determinism;
+    // nothing yet refuses an authoritative write from here.
     //
     //   class Store extends ClientScript<HUDScreen> {
     //       selected = 'lantern';                  // client field, instant
@@ -751,6 +777,9 @@ declare module '@platform/engine' {
         //
         // Directional and about resolution, unlike Entity.getTouching, which is
         // identity-bearing and about overlap. A trigger collider never sets blocked.
+        //
+        // NOT IMPLEMENTED: the shipped physics sink integrates position and stops the body
+        // against nothing, so every side is permanently false.
         readonly blocked: { up: boolean; down: boolean; left: boolean; right: boolean };
 
         // ── the tick ────────────────────────────────────────────────
@@ -819,7 +848,8 @@ declare module '@platform/engine' {
         // Engine-owned, not overridable: sweeps along velocity, slides on contacts, writes
         // position, corrects velocity, sets blocked. No collision hook — a subclass reacts to
         // blocked next tick rather than intercepting resolution, which keeps client and server
-        // in step.
+        // in step. NOT IMPLEMENTED past the write: it integrates position and neither sweeps
+        // nor slides.
         private move(dt: number): void;
     }
 
@@ -845,6 +875,9 @@ declare module '@platform/engine' {
         acceleration: number;
         friction: number;
 
+        // NOT IMPLEMENTED in effect: `grounded` reads blocked.down, which nothing sets, so it
+        // is always false and jump() always returns without a push — a platformer is not
+        // buildable until the physics sink lands.
         readonly grounded: boolean; // getter over blocked.down — derived, not tracked
 
         protected accelerate(intent: Vec3, dt: number): void;
@@ -1028,7 +1061,7 @@ declare module '@platform/engine' {
     class Countdown {
         // onZero fires once when `remaining` reaches 0. A Countdown is not a host, so it
         // cannot own an @onEnd (that decorator means "my host stopped existing"); the
-        // callback is how a creator reacts to it (core DESIGN §12.11).
+        // callback is how a creator reacts to it.
         constructor(seconds: number, onZero?: () => void);
         readonly remaining: number;
         start(): void; // (B)
@@ -1047,7 +1080,7 @@ declare module '@platform/engine' {
     // WITHOUT a @serverState decorator — the wrapper's own methods mark the replication
     // channel — so "is this field replicated state" is an `instanceof StatefulWrapper`
     // rather than a class-name list to keep in sync, and a creator subclass inherits the
-    // marking (core DESIGN §5.2, §12.10).
+    // marking.
     //
     // The three engine members answer the four questions a wrapper cannot when it is
     // constructed as a field initializer, before any host, host record or field name
@@ -1061,8 +1094,8 @@ declare module '@platform/engine' {
         bind(record: object, fieldName: string): void;
 
         // The wrapper's own wire form and its restoration. Persistence and type-tagging go
-        // through this one interface, so §5.3's checkpoint walk handles a wrapper without
-        // knowing what a Team is, and the type tag becomes class identity.
+        // through this one interface, so the persistence checkpoint walk handles a wrapper
+        // without knowing what a Team is, and the type tag becomes class identity.
         serialize(): unknown;
         restore(data: unknown): void;
     }
@@ -1123,6 +1156,8 @@ declare module '@platform/engine' {
 
     // ─── audio ─────────────────────────────────────────────────────
 
+    // NOT IMPLEMENTED: every call below reaches the effect sink, which no endpoint fills, so
+    // nothing is audible and the returned handle is a shared inert one.
     interface SoundHandle {
         stop(): void;
         volume: number;
@@ -1166,8 +1201,10 @@ declare module '@platform/engine' {
     // whatever its host.
     //
     // No return value — the answer arrives as replicated @serverState, same as send(), and
-    // payload restrictions match it. Engine rate-limits per (player, name); excess is
-    // dropped, never queued.
+    // payload restrictions match it. More than 16 calls in one frame ride the frames after it,
+    // since a request carries no seq and so has no ordering claim. The rate limit is the whole
+    // input channel per connection rather than per (player, name), and a frame arriving over
+    // it is dropped, never queued.
     function request(name: string, payload?: Record<string, unknown>): void;
 
     // Server-side entry point for the above, and the ONLY one — a separate decorator from
@@ -1191,7 +1228,7 @@ declare module '@platform/engine' {
     //       }
     //   }
     //
-    // Unhandled names are dropped and logged to the dev console. Concurrency defaults to
+    // Unhandled names are dropped; the dev-console log for one is not written yet. Concurrency defaults to
     // 'ignore' per instance — note a Game-hosted script has ONE instance, so that serializes
     // across all players (§5.9).
     function onRequest(name: string, opts?: HandlerOptions): HandlerDecorator;

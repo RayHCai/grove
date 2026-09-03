@@ -14,6 +14,7 @@ export class Camera {
     readonly player: Player;
 
     zoom = 1;
+    /** Where the camera may travel; stored and read back, and nothing clamps to it yet. */
     bounds: Bounds | string | null = null;
     #x = 0;
     #y = 0;
@@ -50,6 +51,8 @@ export class Camera {
         return this;
     }
 
+    // Both cut to the destination: the camera is not on the tween engine, so the duration and
+    // easing are accepted and ignored until it is.
     glideTo(x: number, y: number, _seconds: number, _easing?: Easing): Promise<void> {
         this.#x = x;
         this.#y = y;
