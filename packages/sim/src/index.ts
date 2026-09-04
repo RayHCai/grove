@@ -53,7 +53,7 @@ export {
     isolateEntry,
     simFromConfig,
 } from './isolate-entry.js';
-export type { IsolateEntry } from './isolate-entry.js';
+export type { EncodedBatch, EncodedSend, IsolateEntry } from './isolate-entry.js';
 
 export {
     CONTROL_BUCKET_FRAMES,

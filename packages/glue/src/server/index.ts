@@ -9,7 +9,7 @@
 export { GameInstance } from './instance.js';
 export type { InstanceOptions } from './instance.js';
 
-export { Driver, HostError, maxStepsPerWake, ticksPerSend } from './driver.js';
+export { Driver, HostError, MAX_CATCHUP_MS, maxStepsPerWake, ticksPerSend } from './driver.js';
 export type { DriverHooks, DriverOptions, HostErrorCode, PumpResult } from './driver.js';
 
 export { listenOn } from './serve.js';

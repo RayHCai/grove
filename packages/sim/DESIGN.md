@@ -10,22 +10,24 @@ which tick an input applies to, whether it is admissible, what each session is o
 never reads a clock, never touches a store for `@serverState`, and never re-implements the tick order.
 
 Two hosts drive it: `@grove/host` in Rust, which runs this bundle in a V8 isolate, and `@platform/glue`'s
-`GameInstance` in process. The same advance runs in a browser for prediction, which is what the batch shape
-buys: there is nothing in it a browser cannot supply.
+`GameInstance` in process. The batch holds nothing a browser cannot supply and this package imports no
+`node:` anything, which is what a third host would need; `@platform/client` is not one — it re-produces
+the input fold in `passes.ts` rather than importing this package.
 
-| File           | Holds                                                                                                  |
-| -------------- | ------------------------------------------------------------------------------------------------------ |
-| `batch.ts`     | `InputBatch` and `OutputBatch` — the whole seam, and the only thing that crosses it                    |
-| `sim.ts`       | `Sim`: the registry, `tick`, `close`, the join/reject/resync path, `setSimRate`; the inbound narrowing |
-| `session.ts`   | `Session` record; `AdmissionState` (resolution frontier, headroom, token bucket)                       |
-| `input.ts`     | `InputBuffer` (tick-keyed, `drainThrough`), the admission checks, `runInputPass`                       |
-| `replicate.ts` | the three drains → `SendSet`, wire retyping, `encodeHostField` / `encodeStateValue`, the two envelopes |
-| `snapshot.ts`  | `buildSnapshot` — the join-time world walk; `ancestorsFirst`                                           |
-| `chunk.ts`     | `splitSnapshot` — dividing a join snapshot one frame cannot carry                                      |
-| `manifest.ts`  | `ManifestStore` — the live render manifest, its join payload and its pending additions                 |
-| `persisted.ts` | `SessionRecords` — the `@serverState` cache the batch fills and the leave captures back                |
-| `constants.ts` | engine constants, in ms with per-`simRate` tick conversions                                            |
-| `errors.ts`    | `SimError` and its `SimErrorCode` union — every condition this package throws on                       |
+| File               | Holds                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------ |
+| `batch.ts`         | `InputBatch` and `OutputBatch` — the whole seam, and the only thing that crosses it                    |
+| `sim.ts`           | `Sim`: the registry, `tick`, `close`, the join/reject/resync path, `setSimRate`; the inbound narrowing |
+| `session.ts`       | `Session` record; `AdmissionState` (resolution frontier, headroom, token bucket)                       |
+| `input.ts`         | `InputBuffer` (tick-keyed, `drainThrough`), the admission checks, `runInputPass`                       |
+| `replicate.ts`     | the three drains → `SendSet`, wire retyping, `encodeHostField` / `encodeStateValue`, the two envelopes |
+| `snapshot.ts`      | `buildSnapshot` — the join-time world walk; `ancestorsFirst`                                           |
+| `chunk.ts`         | `splitSnapshot` — dividing a join snapshot one frame cannot carry                                      |
+| `manifest.ts`      | `ManifestStore` — the live render manifest, its join payload and its pending additions                 |
+| `persisted.ts`     | `SessionRecords` — the `@serverState` cache the batch fills and the leave captures back                |
+| `constants.ts`     | engine constants, in ms with per-`simRate` tick conversions                                            |
+| `errors.ts`        | `SimError` and its `SimErrorCode` union — every condition this package throws on                       |
+| `isolate-entry.ts` | `installIsolateEntry` — the three functions a host with no module loader reaches a bundle through      |
 
 ---
 
@@ -75,6 +77,13 @@ be read must not be overwritten with this build's initializers.
 
 The one `Codec` the sim holds encodes nothing for the wire: it measures whether a `Welcome` fits one frame, so
 it must be the codec the host encodes with.
+
+**A host in another process reaches all of this through one global.** `installIsolateEntry(build)` publishes
+`globalThis.__grove` with `boot(config)`, `tick(batch)` and `close()`, each taking and answering JSON: an
+isolate has no module loader, so a global is the whole of what a host can reach, and a string is the only
+shape neither side can hold a reference into. The world is built at `boot` rather than at evaluation, because
+a bundle that booted when it loaded would run every Game `@onStart` before the host had a clock to advance
+them with.
 
 ---
 
@@ -182,8 +191,10 @@ core), `gameScripts` and `kv`. Defaults: `simRate` 60, `sendRate` 20, `maxPlayer
 below one admits nobody. A missing `rt.passes` throws for a related reason: silently keeping core's stub leaves
 every input unapplied, which reads as a dead game rather than a wiring fault.
 
-`booted` is false until every step above has run, and a connection offered while it is is refused: a joiner's
-snapshot is its entire baseline, and no later delta repairs one taken of a world still being assembled.
+`booted` is false until every step above has run, and the constructor is the only thing that can observe it:
+`tick` is unreachable until it returns, so there is no window a host could offer a connection in. That is the
+guarantee rather than a check — a joiner's snapshot is its entire baseline, and no later delta repairs one
+taken of a world still being assembled.
 
 `SimOptions.onBreakerTrip` is the dev channel: core hands it every handler or callback the breaker disabled,
 and it is registered before `startGame` so a Game `@onStart` that trips on its first tick is still reported.
@@ -276,8 +287,9 @@ depth can never exceed the node count. The walk is iterative, like the codec's, 
 few thousand deep is small enough to pass every byte cap and would overflow a recursive one before any cap read
 it.
 
-Two more bounds, on state a frame is not needed to open: `joinDeadlineTicks` (swept every tick, against
-`rt.tick − session.openedAtTick`) and `MAX_UNJOINED_CONNECTIONS`, **distinct** from `maxPlayers` so unjoined
+Two more bounds, on state a frame is not needed to open: `joinDeadlineTicks` — swept every tick against
+`rt.tick − session.openedAtTick`, so it bounds a session's AGE before it joins rather than its silence — and
+`MAX_UNJOINED_CONNECTIONS`, **distinct** from `maxPlayers` so unjoined
 sockets cannot lock out real players. That cap is a total, so opening adds a per-peer one in the only currency
 this package has: a second unjoined session under an `identity` an unjoined session already holds is refused,
 since otherwise one named peer reconnect-looping fills every slot at no cost to itself. Bounding an _anonymous_

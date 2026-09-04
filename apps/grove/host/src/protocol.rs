@@ -1,10 +1,11 @@
 //! The seam, in Rust. Every type here mirrors one in `packages/sim/src/batch.ts` field for field,
 //! and the field names are the wire — a rename on either side is a silent mismatch, not an error.
 //!
-//! Envelopes and frames cross as `RawValue`, never `Value`: the host routes by `to` and `class` and
-//! reads nothing inside, so parsing one into a tree would allocate it, re-serialize it, and hand V8
-//! bytes that are no longer the peer's. A Rust restatement of `@platform/protocol` would be a second
-//! copy of a shape that package owns.
+//! Nothing here parses a payload. An inbound frame crosses as `RawValue` and an outbound envelope as
+//! the codec's own `String`: the host routes by `to` and `class` and reads nothing inside either, so
+//! a tree would only allocate, re-serialize, and hand the far side bytes that are no longer the ones
+//! it was given. A Rust restatement of `@platform/protocol` would be a second copy of a shape that
+//! package owns.
 
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -80,9 +81,12 @@ pub struct Send {
     /// One entry per recipient. More than one means the frame is byte-identical for all of them,
     /// which is the only thing worth encoding once.
     pub to: Vec<ConnectionId>,
-    /// Written to the socket verbatim. The host does not look inside one and must not re-serialize
-    /// it: the sim measured a `Welcome` against these exact bytes when it decided whether to chunk.
-    pub envelope: Box<RawValue>,
+    /// Already encoded by the sim's own codec, and written to the socket verbatim.
+    ///
+    /// The codec, not `JSON.stringify`: it refuses `NaN`, `Infinity` and `undefined`, which JSON
+    /// turns into `null` or drops — and it is the codec the sim measured a `Welcome` against when it
+    /// decided whether to chunk one. Re-encoding here would break both.
+    pub envelope: String,
     pub class: SendClass,
 }
 

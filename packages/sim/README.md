@@ -57,9 +57,11 @@ prediction and interpolation (the client).
 ## Why the batch, and not a socket
 
 A shape this narrow is what lets the host be a different language — the Rust host runs this bundle in
-a V8 isolate and speaks to it through exactly the two types above — and it is what lets the same
-advance run **in a browser** for prediction, where there is no socket, no store and no clock to give
-it.
+a V8 isolate and speaks to it through exactly the two types above. It is also what would let this
+advance run **in a browser**, where there is no socket, no store and no clock to give it: nothing
+here imports `node:` anything and nothing reads ambient state. `@platform/client` does not do that
+today — it re-produces the input fold itself in `passes.ts` — so that is a property of the shape
+rather than a wire in place.
 
 It is also what makes a tick replayable. Everything that reaches the world reaches it at the top of a
 tick, in the order the batch names, so a session is a sequence of batches and nothing else.

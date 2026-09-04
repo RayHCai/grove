@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 
 use crate::clock::Clock;
 use crate::isolate::{Death, Isolate, IsolateOptions};
-use crate::net::Outgoing;
+use crate::net::{HangUp, Outgoing};
 use crate::protocol::{
     ConnectionId, InboundFrame, InputBatch, LoadedRecord, OpenedConnection, OutputBatch, SendClass,
 };
@@ -29,6 +29,9 @@ pub enum HostEvent {
         /// From the verified ticket. Never a frame's claim.
         identity: String,
         writes: mpsc::Sender<Outgoing>,
+        /// Dropping this ends the peer's task, which is how a socket is actually closed: the writer
+        /// alone going away leaves the reader parked on a socket nobody is answering.
+        hangup: HangUp,
     },
     Frame {
         connection_id: ConnectionId,
@@ -82,7 +85,7 @@ pub fn run(
     let watchdog = Watchdog::arm(isolate.terminator(), opts.tick_budget, &io);
 
     let mut clock = Clock::new(opts.sim_rate, opts.send_rate);
-    let mut writers: HashMap<ConnectionId, mpsc::Sender<Outgoing>> = HashMap::new();
+    let mut peers: HashMap<ConnectionId, Peer> = HashMap::new();
     let mut pending = Pending::default();
     let mut drains: Vec<bool> = Vec::new();
     let mut draining = false;
@@ -95,8 +98,8 @@ pub fn run(
         // a message would run the game at the rate its players happened to type.
         while let Ok(event) = events.try_recv() {
             match event {
-                HostEvent::Opened { connection_id, identity, writes } => {
-                    writers.insert(connection_id.clone(), writes);
+                HostEvent::Opened { connection_id, identity, writes, hangup } => {
+                    peers.insert(connection_id.clone(), Peer { writes, hangup });
                     pending
                         .opened
                         .push(OpenedConnection { connection_id, identity: Some(identity) });
@@ -105,7 +108,7 @@ pub fn run(
                     pending.frames.push(InboundFrame { connection_id, message });
                 }
                 HostEvent::Closed { connection_id } => {
-                    writers.remove(&connection_id);
+                    peers.remove(&connection_id);
                     pending.closed.push(connection_id);
                 }
                 HostEvent::Loaded { connection_id, fields } => {
@@ -130,23 +133,25 @@ pub fn run(
             watchdog.leave();
 
             match out {
-                Ok(out) => apply(out, &mut writers, &opts.store, &io, &answers),
+                Ok(out) => apply(out, &mut peers, &opts.store, &io, &answers),
                 // A tick that threw is a world that cannot be trusted to be advanced again — it
                 // mutates in place and there is no transaction, so half a step is a world no later
                 // delta repairs. Every peer is told why, and the process ends.
                 Err(error) => {
                     let reason = isolate.death().map_or("sim-threw", Death::token);
                     tracing::error!(%error, reason, "the tick failed; ending the session");
-                    for connection_id in writers.keys() {
+                    for connection_id in peers.keys() {
                         tracing::info!(conn = %connection_id, reason, "close conn");
                     }
-                    writers.clear();
+                    // Dropped, which hangs up every socket: a peer left open against a dead world
+                    // would sit waiting for a tick that is never coming.
+                    peers.clear();
                     return Err(error);
                 }
             }
         }
 
-        if draining && writers.is_empty() {
+        if draining && peers.is_empty() {
             break;
         }
         std::thread::sleep(interval);
@@ -154,8 +159,19 @@ pub fn run(
 
     // The last batch, and the only one that carries every online player's save.
     let out = isolate.close()?;
-    apply(out, &mut writers, &opts.store, &io, &answers);
+    apply(out, &mut peers, &opts.store, &io, &answers);
+    // Every socket goes with the world: the sim released each session inline, and a peer still
+    // holding an open connection would wait on a tick that will never run.
+    peers.clear();
     Ok(())
+}
+
+/// One peer's two ends: the frames it is owed, and the handle that hangs it up.
+struct Peer {
+    writes: mpsc::Sender<Outgoing>,
+    /// Held only to be dropped — dropping it is what closes the socket.
+    #[allow(dead_code)]
+    hangup: HangUp,
 }
 
 /// What has arrived since the last tick. Emptied into the batch, never copied out of it.
@@ -181,7 +197,7 @@ impl Pending {
 /// Everything one output batch orders, in the order it must happen: write, then close, then store.
 fn apply(
     out: OutputBatch,
-    writers: &mut HashMap<ConnectionId, mpsc::Sender<Outgoing>>,
+    peers: &mut HashMap<ConnectionId, Peer>,
     store: &Store,
     io: &tokio::runtime::Handle,
     events: &mpsc::UnboundedSender<HostEvent>,
@@ -196,12 +212,12 @@ fn apply(
 
     for send in out.sends {
         // The sim's own bytes, written verbatim and shared across the whole list — which is the only
-        // reason `to` is a list. Re-serializing here would hand a peer bytes the sim never measured.
-        let text = Arc::new(send.envelope.get().to_owned());
+        // reason `to` is a list. Re-encoding here would hand a peer bytes the sim never measured.
+        let text = Arc::new(send.envelope);
         for connection_id in &send.to {
-            let Some(writer) = writers.get(connection_id) else { continue };
+            let Some(peer) = peers.get(connection_id) else { continue };
             let outgoing = Outgoing { text: text.clone(), class: send.class };
-            match writer.try_send(outgoing) {
+            match peer.writes.try_send(outgoing) {
                 Ok(()) => {}
                 // A full queue is a peer that cannot keep up. A droppable frame is superseded by the
                 // next of its kind, so discarding it is the backpressure policy; a reliable one is
@@ -209,20 +225,22 @@ fn apply(
                 Err(mpsc::error::TrySendError::Full(dropped)) => {
                     if dropped.class == SendClass::Reliable {
                         tracing::warn!(conn = %connection_id, "close conn reason=write-backpressure");
-                        writers.remove(connection_id);
+                        peers.remove(connection_id);
                     }
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => {
-                    writers.remove(connection_id);
+                    peers.remove(connection_id);
                 }
             }
         }
     }
 
-    // After the sends, so a `Reject` reaches the wire before the close that follows it.
+    // After the sends, so a `Reject` reaches the wire before the close that follows it. Removing
+    // the peer drops its `HangUp`, which is what actually closes the socket — dropping only the
+    // writer would leave the reader parked on a connection nothing will ever answer.
     for order in out.closes {
         tracing::info!(conn = %order.connection_id, reason = %order.reason, "close conn");
-        writers.remove(&order.connection_id);
+        peers.remove(&order.connection_id);
     }
 
     for load in out.loads {

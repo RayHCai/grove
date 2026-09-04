@@ -58,8 +58,8 @@ process. The isolate is discarded either way, so the headroom is never actually 
 
 The world. Everything from a decoded inbound frame to an outbound envelope is `@platform/sim`'s —
 the narrowing, admission, the input buffer, the join, the snapshot, the drain of the replication
-channels. This half never learns what an entity is, which is what lets the same sim run in a browser
-for prediction with no host at all.
+channels. This half never learns what an entity is, which is what keeps the sim portable enough to
+host anywhere — including, eventually, a browser doing its own prediction.
 
 Its in-process twin is `@platform/glue`'s `GameInstance`: the same clock, sockets and store around
 the same sim, in TypeScript, which is what the tests, the integration suite and `apps/playground`
@@ -104,11 +104,16 @@ so working on the TypeScript half does not require installing Rust.
 `GROVE_BUNDLE` is evaluated once and must leave `globalThis.__grove` holding three functions, which is
 what `@platform/sim`'s `installIsolateEntry` puts there:
 
-| Call           | Answers                                                       |
-| -------------- | ------------------------------------------------------------- |
-| `boot(config)` | nothing; builds the world from `GROVE_SIM_CONFIG`             |
-| `tick(batch)`  | one `OutputBatch`, as JSON                                    |
-| `close()`      | the last `OutputBatch`, whose `saves` this process must drain |
+| Call           | Answers                                                        |
+| -------------- | -------------------------------------------------------------- |
+| `boot(config)` | nothing; builds the world from `GROVE_SIM_CONFIG`              |
+| `tick(batch)`  | one `EncodedBatch`, as JSON                                    |
+| `close()`      | the last `EncodedBatch`, whose `saves` this process must drain |
+
+Every `envelope` in it is already a string the sim's own codec produced, and this process writes it
+verbatim. That matters twice: the codec refuses `NaN`, `Infinity` and `undefined` where JSON turns
+them into `null` or drops them, and it is the codec the sim measured a `Welcome` against when it
+decided whether to chunk one. A host that re-encoded would break both.
 
 JSON in and JSON out because a string is the only shape that crosses an isolate boundary without
 either side holding a reference into the other's heap.
