@@ -14,17 +14,45 @@ isolate. They meet at a single channel of `HostEvent`, and that is what gives a 
 everything that happened to it — a `deno_core` `JsRuntime` is not `Send`, and a tick that could be
 moved mid-step would not be a fixed step at all.
 
-| File          | Holds                                                                           |
-| ------------- | ------------------------------------------------------------------------------- |
-| `main.rs`     | the composition root: config, listener, the drain signal, the session thread    |
-| `config.rs`   | the environment `@grove/server-manager` spawns this process with                |
-| `ticket.rs`   | join-ticket verification, byte for byte with `libs/api-contract`'s minting      |
-| `net.rs`      | the WebSocket listener, one task per peer, and the frame-size cap               |
-| `session.rs`  | the tick loop, the write-out, and the watchdog that kills a runaway tick        |
-| `isolate.rs`  | the V8 isolate, the two ops a batch crosses in, and the heap limit              |
-| `clock.rs`    | the accumulator, the step cap and shed, and the send cadence                    |
-| `protocol.rs` | the batch types, mirroring `packages/sim/src/batch.ts` field for field          |
-| `store.rs`    | `@serverState` over `@grove/game-manager`, which is the only thing it can reach |
+| File          | Holds                                                                            |
+| ------------- | -------------------------------------------------------------------------------- |
+| `main.rs`     | the composition root: config, listener, the drain signal, the session thread     |
+| `config.rs`   | the environment `@grove/server-manager` spawns this process with                 |
+| `ticket.rs`   | join-ticket verification, byte for byte with `libs/api-contract`'s minting       |
+| `net.rs`      | the WebSocket listener, one task per peer, and the frame-size cap                |
+| `session.rs`  | the tick loop, the write-out, and the watchdog that kills a runaway tick         |
+| `isolate.rs`  | the V8 isolate, the two ops a batch crosses in, the heap limit and the kill path |
+| `clock.rs`    | the accumulator, the step cap and shed, and the send cadence                     |
+| `protocol.rs` | the batch types, mirroring `packages/sim/src/batch.ts` field for field           |
+| `store.rs`    | `@serverState` over `@grove/game-manager`, which is the only thing it can reach  |
+
+## What it grants the isolate
+
+Two ops, and nothing else: one takes a message in, one puts a message out. There is no clock op,
+because core's only wall-clock probe falls back to `Date.now` and its handler budget is 50 ms, where
+a millisecond of resolution is a rounding error. There is no ambient Node or DOM global either —
+nothing in the engine reaches one, which is what lets the isolate stay this bare.
+
+A tick is a bounded function, not an event loop: the microtask queue is drained explicitly after each
+call, which is what lets `startGame` — deliberately not awaited — and every awaiting handler make
+progress inside a 16 ms budget.
+
+`@serverState` is checkpointed through `store.rs` and the batch. The creator's `storage` object is a
+different seam — a promise a handler awaits — and this crate does not grant one, so a world it runs
+falls back to core's in-memory store and loses those writes at session end. The in-process host
+grants it; this one does not yet.
+
+## When a tick dies
+
+A terminated or throwing tick is terminal. `Sim.tick` mutates the world in place with no transaction,
+so half a step is a world no later delta repairs: every peer is closed with the reason token
+(`heap-limit`, `tick-budget`, `sim-threw`), the killed tick's saves are discarded, and the process
+ends. Saves from earlier completed ticks are already durable.
+
+The near-heap-limit callback grants V8 headroom rather than refusing it, which reads backwards and is
+not: `terminate_execution` is not instantaneous and V8 keeps allocating while it unwinds, so a
+callback that returned the limit unchanged would reach `FatalProcessOutOfMemory` and abort the whole
+process. The isolate is discarded either way, so the headroom is never actually spent.
 
 ## What it does not own
 

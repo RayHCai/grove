@@ -11,11 +11,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use serde_json::Value;
+use serde_json::value::RawValue;
 use tokio::sync::mpsc;
 
 use crate::clock::Clock;
-use crate::isolate::{Isolate, IsolateOptions};
+use crate::isolate::{Death, Isolate, IsolateOptions};
 use crate::net::Outgoing;
 use crate::protocol::{
     ConnectionId, InboundFrame, InputBatch, LoadedRecord, OpenedConnection, OutputBatch, SendClass,
@@ -32,7 +32,7 @@ pub enum HostEvent {
     },
     Frame {
         connection_id: ConnectionId,
-        message: Value,
+        message: Box<RawValue>,
     },
     Closed {
         connection_id: ConnectionId,
@@ -41,7 +41,7 @@ pub enum HostEvent {
     /// from a store that simply held nothing.
     Loaded {
         connection_id: ConnectionId,
-        fields: Option<Value>,
+        fields: Option<Box<RawValue>>,
     },
     /// A `SaveOrder` that reached the store, so the sim may release the record it was holding.
     Saved {
@@ -131,10 +131,16 @@ pub fn run(
 
             match out {
                 Ok(out) => apply(out, &mut writers, &opts.store, &io, &answers),
-                // A tick that threw is a world that cannot be trusted to be advanced again: the
-                // session ends here rather than continuing against half a step.
+                // A tick that threw is a world that cannot be trusted to be advanced again — it
+                // mutates in place and there is no transaction, so half a step is a world no later
+                // delta repairs. Every peer is told why, and the process ends.
                 Err(error) => {
-                    tracing::error!(%error, "the tick failed; ending the session");
+                    let reason = isolate.death().map_or("sim-threw", Death::token);
+                    tracing::error!(%error, reason, "the tick failed; ending the session");
+                    for connection_id in writers.keys() {
+                        tracing::info!(conn = %connection_id, reason, "close conn");
+                    }
+                    writers.clear();
                     return Err(error);
                 }
             }
@@ -189,13 +195,9 @@ fn apply(
     }
 
     for send in out.sends {
-        // Encoded once for the whole list, which is the only reason `to` is a list: most of a state
-        // envelope is per-connection, so the transform frame is the whole of the shared subset.
-        let Ok(text) = serde_json::to_string(&send.envelope) else {
-            tracing::error!("an envelope the sim produced could not be encoded");
-            continue;
-        };
-        let text = Arc::new(text);
+        // The sim's own bytes, written verbatim and shared across the whole list — which is the only
+        // reason `to` is a list. Re-serializing here would hand a peer bytes the sim never measured.
+        let text = Arc::new(send.envelope.get().to_owned());
         for connection_id in &send.to {
             let Some(writer) = writers.get(connection_id) else { continue };
             let outgoing = Outgoing { text: text.clone(), class: send.class };
@@ -231,7 +233,7 @@ fn apply(
                 // `{}` for a store that held nothing, so the leave still writes; `null` only for the
                 // read that failed, which is what stops the leave overwriting a save nobody read.
                 Ok(Some(fields)) => Some(fields),
-                Ok(None) => Some(Value::Object(Default::default())),
+                Ok(None) => RawValue::from_string("{}".to_owned()).ok(),
                 Err(error) => {
                     tracing::warn!(%error, key = %load.host_key, "reading state failed");
                     None

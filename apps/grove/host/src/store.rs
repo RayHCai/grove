@@ -6,7 +6,7 @@
 //! input batch, and the round trip costs a joiner one turn rather than blocking the world.
 
 use anyhow::{bail, Context, Result};
-use serde_json::Value;
+use serde_json::value::RawValue;
 
 #[derive(Clone)]
 pub struct Store {
@@ -25,7 +25,7 @@ impl Store {
     /// `Ok(Some(fields))` for a record, `Ok(None)` for a key the store holds nothing under, and an
     /// `Err` for a read that FAILED — three answers, not two, because the sim writes back over the
     /// second and must never write back over the third.
-    pub async fn load(&self, host_key: &str) -> Result<Option<Value>> {
+    pub async fn load(&self, host_key: &str) -> Result<Option<Box<RawValue>>> {
         let response = self
             .client
             .get(format!("{}/v1/state/{}", self.base, urlencode(host_key)))
@@ -40,10 +40,13 @@ impl Store {
         if !response.status().is_success() {
             bail!("the game manager answered {} for {host_key}", response.status());
         }
-        Ok(Some(response.json().await.context("decoding a state record")?))
+        // Taken as text and wrapped rather than deserialized: the host never reads a field, and a
+        // record that round-tripped through a tree would reach the sim as different bytes.
+        let body = response.text().await.context("reading a state record")?;
+        Ok(Some(RawValue::from_string(body).context("a state record that is not JSON")?))
     }
 
-    pub async fn save(&self, host_key: &str, fields: &Value) -> Result<()> {
+    pub async fn save(&self, host_key: &str, fields: &RawValue) -> Result<()> {
         let response = self
             .client
             .put(format!("{}/v1/state/{}", self.base, urlencode(host_key)))

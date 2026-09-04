@@ -1,11 +1,13 @@
 //! The seam, in Rust. Every type here mirrors one in `packages/sim/src/batch.ts` field for field,
 //! and the field names are the wire — a rename on either side is a silent mismatch, not an error.
 //!
-//! Envelopes cross as `serde_json::Value`: the host neither reads nor narrows one, and a Rust
-//! restatement of `@platform/protocol` would be a second copy of a shape that package owns.
+//! Envelopes and frames cross as `RawValue`, never `Value`: the host routes by `to` and `class` and
+//! reads nothing inside, so parsing one into a tree would allocate it, re-serialize it, and hand V8
+//! bytes that are no longer the peer's. A Rust restatement of `@platform/protocol` would be a second
+//! copy of a shape that package owns.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::value::RawValue;
 
 /// A host-minted id for one established connection, stable for its life.
 pub type ConnectionId = String;
@@ -22,8 +24,9 @@ pub struct OpenedConnection {
 #[serde(rename_all = "camelCase")]
 pub struct InboundFrame {
     pub connection_id: ConnectionId,
-    /// Decoded but NOT narrowed: the sim owns the narrowing, since it owns what each field bounds.
-    pub message: Value,
+    /// Validated as JSON but NOT narrowed and never parsed into a tree: the sim owns the narrowing,
+    /// since it owns what each field bounds, and these bytes reach it exactly as the peer sent them.
+    pub message: Box<RawValue>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,7 +35,7 @@ pub struct LoadedRecord {
     pub connection_id: ConnectionId,
     /// `{}` for a host the store holds nothing for; `null` ONLY when the read failed, which is what
     /// stops the leave writing this session's initializers over a save nobody could read.
-    pub fields: Option<Value>,
+    pub fields: Option<Box<RawValue>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -77,7 +80,9 @@ pub struct Send {
     /// One entry per recipient. More than one means the frame is byte-identical for all of them,
     /// which is the only thing worth encoding once.
     pub to: Vec<ConnectionId>,
-    pub envelope: Value,
+    /// Written to the socket verbatim. The host does not look inside one and must not re-serialize
+    /// it: the sim measured a `Welcome` against these exact bytes when it decided whether to chunk.
+    pub envelope: Box<RawValue>,
     pub class: SendClass,
 }
 
@@ -99,7 +104,7 @@ pub struct LoadOrder {
 #[serde(rename_all = "camelCase")]
 pub struct SaveOrder {
     pub host_key: String,
-    pub fields: Value,
+    pub fields: Box<RawValue>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
