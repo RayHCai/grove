@@ -167,9 +167,4 @@ describe('a misconfigured clock says so instead of going quiet', () => {
         expect(() => spyDriver(0)).toThrow(/simRate/);
         expect(() => spyDriver(60, Number.NaN)).toThrow(/sendRate/);
     });
-
-    it('refuses start() with no injected timer, rather than self-driving nothing', () => {
-        const spy = spyDriver();
-        expect(() => spy.driver.start()).toThrow(/TimerSource/);
-    });
 });

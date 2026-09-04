@@ -145,11 +145,15 @@ export class GameInstance {
     }
 
     /**
-     * Admits one established connection under the identity the HOST resolved.
+     * Offers one established connection to the world, under the identity the HOST resolved.
      *
      * The id is never taken from a frame: whatever the host trusts is what the game trusts. It must
      * be a per-game id rather than an account key, because `player.id` reaches every other peer.
-     * Answers `null` once this instance is closed, having already closed the transport.
+     *
+     * The id it returns names a socket this class now holds; it is NOT an admission. The sim sees the
+     * connection at the top of the next tick and may refuse it there — at the unjoined cap, or under
+     * an identity another unjoined session already holds — and answers with a close this class acts
+     * on. `null` means only that this instance is already shut down.
      */
     accept(transport: Transport, playerId?: string): ConnectionId | null {
         if (this.#shutdown) {
@@ -177,6 +181,21 @@ export class GameInstance {
     }
 
     /**
+     * Changes the timestep mid-session, on the world AND on the clock that drives it.
+     *
+     * Both, always: the sim retunes core and tells every client, and the driver holds the cadence —
+     * so a rate changed on one alone runs the world at a speed nothing agrees on.
+     */
+    setSimRate(simRate: number): void {
+        this.sim.setSimRate(simRate);
+        this.#driver.setRates(simRate, this.sim.config.sendRate);
+        if (this.#timer === undefined) return;
+        // The interval is the tick length, so it is restarted rather than left at the old one.
+        clearInterval(this.#timer);
+        this.#timer = setInterval(() => this.pump(), 1000 / simRate);
+    }
+
+    /**
      * Stops the clock, releases every session and settles once every departing player's save has
      * landed.
      *
@@ -188,7 +207,6 @@ export class GameInstance {
         this.#shutdown = true;
         if (this.#timer !== undefined) clearInterval(this.#timer);
         this.#timer = undefined;
-        this.#driver.stop();
         this.#apply(this.sim.close());
         for (const transport of this.#transports.values()) transport.close();
         this.#forgetAll();
@@ -257,8 +275,9 @@ export class GameInstance {
         void this.#kv
             .get(PERSISTENCE_SCOPE, hostKey)
             .then((stored) => {
-                // `{}` for a store that held nothing, so the leave still writes what this session
-                // produced; `null` is reserved for the read below that failed.
+                // `{}` for a store that held nothing — and for one holding a value no reader could
+                // use, which is the same answer core's own cache gave it — so the leave still writes
+                // what this session produced. `null` is reserved for the read below that FAILED.
                 this.#records.push({ connectionId, fields: asFields(stored) ?? {} });
             })
             // Answered with nothing rather than left unanswered: a store that cannot be read is a
@@ -286,12 +305,20 @@ export class GameInstance {
         void write.finally(() => this.#saves.delete(write));
     }
 
+    /**
+     * Closes one socket and tells the sim it is gone.
+     *
+     * Reported here rather than left to `transport.onClose`, because the disposers below unregister
+     * that handler: without this line the sim keeps the session, its `Player` is never released, and
+     * every later broadcast is built for a peer nothing is listening on.
+     */
     #closeConnection(connectionId: ConnectionId): void {
         const transport = this.#transports.get(connectionId);
         if (transport === undefined) return;
         this.#transports.delete(connectionId);
         for (const dispose of this.#disposers.get(connectionId) ?? []) dispose();
         this.#disposers.delete(connectionId);
+        this.#closed.push(connectionId);
         transport.close();
     }
 
@@ -303,7 +330,7 @@ export class GameInstance {
     }
 }
 
-/** Anything but a plain object is another writer's value or a corrupted one, and seeds nothing. */
+/** Anything but a plain object is another writer's value or a corrupted one, and reads as no record. */
 function asFields(stored: unknown): { [field: string]: JsonValue } | null {
     if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return null;
     return stored as { [field: string]: JsonValue };

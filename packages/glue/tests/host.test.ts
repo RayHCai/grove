@@ -296,3 +296,47 @@ function walletOf(instance: GameInstance, id: string): Wallet {
         .map((si) => si.instance)
         .find((i): i is Wallet => i instanceof Wallet)!;
 }
+
+describe('the sim always learns that a socket is gone', () => {
+    it('tells it about a peer this half closed itself, so the Player is released', async () => {
+        const h = hosted();
+        const flaky = new FlakyTransport();
+        h.instance.accept(flaky, 'flaky');
+        flaky.receive(JOIN);
+        await h.step(24);
+        expect(h.instance.sim.runtime.playerManager?.players).toHaveLength(1);
+
+        flaky.failSend = true;
+        flaky.failEncoded = true;
+        await h.step(12);
+
+        // Closed here and never reported, the sim keeps the session forever: its `Player` is never
+        // released, its entities are never destroyed, and every later broadcast is built for a peer
+        // nothing is listening on. The socket's own close handler cannot report it — it was
+        // unregistered on the way out.
+        expect(h.instance.sim.sessions).toHaveLength(0);
+        expect(h.instance.sim.runtime.playerManager?.players).toHaveLength(0);
+        void h.instance.close();
+    });
+});
+
+describe('a rate change reaches both halves', () => {
+    it('retunes the clock as well as the world', async () => {
+        const h = hosted();
+        const peer = new Peer(h.instance, 'alice');
+        h.peers.push(peer);
+        peer.join();
+        await h.step(24);
+
+        h.instance.setSimRate(30);
+
+        // The sim retunes core and tells every client; the driver holds the cadence. Retuned on one
+        // alone, the world runs at a speed nothing agrees on and no test of either half sees it.
+        expect(h.instance.sim.config.simRate).toBe(30);
+        const before = h.instance.sim.runtime.tick;
+        await h.step(6);
+        // Six wakes of 1/60 s is three ticks at 30 Hz, not six.
+        expect(h.instance.sim.runtime.tick - before).toBe(3);
+        void h.instance.close();
+    });
+});

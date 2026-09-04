@@ -1,7 +1,9 @@
 // Real time into ticks, for the in-process host. The Rust host at `apps/grove/host` owns the same
 // policy over its own clock; this is the copy the tests, the playground and local dev run on.
-
-import type { TimerSource } from '@platform/transport';
+//
+// It drives nothing itself: `pump` reports the ticks real time owes and the caller runs them, which
+// is what keeps the batch loop — the part that answers the sim's loads and saves — on one side of the
+// seam rather than behind a callback the driver owns.
 
 /** Slack on the accumulator's `>= dt` test: a host advancing by exactly `1 / simRate` rounds short, and a wake owing one tick would step zero times. */
 const STEP_EPSILON = 1e-9;
@@ -21,7 +23,7 @@ export function ticksPerSend(simRate: number, sendRate: number): number {
 }
 
 /** Why the driver refused. The code, not the message, is what a host branches on. */
-export type HostErrorCode = 'invalid-config' | 'no-timer';
+export type HostErrorCode = 'invalid-config';
 
 /** A host failure with a machine-readable {@link HostErrorCode}. */
 export class HostError extends Error {
@@ -55,10 +57,6 @@ export interface DriverOptions {
     sendRate: number;
     /** Flushes inbound frames into the sessions' handlers, before this wake's steps. */
     deliver?: () => void;
-    /** The scheduling seam for {@link Driver.start}. */
-    timer?: TimerSource;
-    /** The clock {@link Driver.start} reads; absent, the interval is the clock — a fixed-step loop with no drift correction. */
-    now?: () => number;
 }
 
 /** What one `pump` did, so a test reads the accumulator's behaviour rather than inferring it. */
@@ -72,8 +70,6 @@ export interface PumpResult {
 export class Driver {
     readonly #hooks: DriverHooks;
     readonly #deliver: (() => void) | undefined;
-    readonly #timer: TimerSource | undefined;
-    readonly #now: (() => number) | undefined;
 
     #simRate: number;
     #sendRate: number;
@@ -83,7 +79,6 @@ export class Driver {
     /** Ticks since the last broadcast, counted here rather than derived from the tick index. */
     #sinceSend = 0;
     #shedCount = 0;
-    #handle: unknown = null;
     #nowSeconds = 0;
 
     constructor(hooks: DriverHooks, opts: DriverOptions) {
@@ -91,8 +86,6 @@ export class Driver {
         assertRate('sendRate', opts.sendRate);
         this.#hooks = hooks;
         this.#deliver = opts.deliver;
-        this.#timer = opts.timer;
-        this.#now = opts.now;
         this.#simRate = opts.simRate;
         this.#sendRate = opts.sendRate;
     }
@@ -100,11 +93,6 @@ export class Driver {
     /** The clock the last `pump` reported — the host's only reading of time. */
     get nowSeconds(): number {
         return this.#nowSeconds;
-    }
-
-    /** Whether any finite reading has been taken — `nowSeconds` is a placeholder until it has, and the clock's epoch is unknown. */
-    get hasReading(): boolean {
-        return this.#lastNow !== null;
     }
 
     /** Unsimulated real time still owed, in seconds. */
@@ -177,28 +165,5 @@ export class Driver {
         }
 
         return { steps, sends, shed };
-    }
-
-    /** Networked: self-drive off the injected timer. Idempotent; throws if no timer was injected. */
-    start(): void {
-        const timer = this.#timer;
-        if (timer === undefined) {
-            throw new HostError(
-                'no-timer',
-                'Driver.start() needs an injected TimerSource; a host-pumped world calls pump(now) instead.',
-            );
-        }
-        if (this.#handle !== null) return;
-        const ms = 1000 / this.#simRate;
-        const read = this.#now;
-        this.#handle = timer.setInterval(() => {
-            this.pump(read === undefined ? this.#nowSeconds + ms / 1000 : read());
-        }, ms);
-    }
-
-    stop(): void {
-        if (this.#handle === null || this.#timer === undefined) return;
-        this.#timer.clearInterval(this.#handle);
-        this.#handle = null;
     }
 }
