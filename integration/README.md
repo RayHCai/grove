@@ -4,7 +4,7 @@ The packages composed the way an application composes them, and the creator-faci
 through the games that composition makes possible.
 
 Every other suite in this repo belongs to one package and validates it against a scripted peer:
-`@platform/server` against a recording client, `@platform/client` against a fake server,
+`@platform/sim` against a recording client, `@platform/client` against a fake server,
 `@platform/core` against no wire at all. This one belongs to no package. Its subject is the
 composition — one authority, several browser tabs, real transports, a real renderer and real
 prediction, all in one process on a clock the suite turns by hand.

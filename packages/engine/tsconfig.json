@@ -23,7 +23,7 @@
             "path": "../../packages/transport"
         },
         {
-            "path": "../../packages/server"
+            "path": "../../packages/sim"
         },
         {
             "path": "../../packages/client"

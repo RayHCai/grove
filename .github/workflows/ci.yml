@@ -27,7 +27,7 @@ jobs:
                       # Warn-tier rules only ratchet if they exit non-zero somewhere.
                       run: pnpm run lint --deny-warnings
                     - name: format
-                      run: pnpm run format:check
+                      run: pnpm run format:check && pnpm --filter @grove/host run format:check
                     - name: typecheck
                       run: pnpm run typecheck
                     - name: build
@@ -45,6 +45,18 @@ jobs:
               with:
                   node-version-file: .node-version
                   cache: pnpm
+
+            # @grove/host is a cargo crate whose build, test and typecheck shell to cargo. Without a
+            # toolchain its scripts skip with a line rather than failing, which would make the gate
+            # green over a half that was never compiled.
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  toolchain: 1.85.0
+                  components: clippy, rustfmt
+
+            - uses: Swatinem/rust-cache@v2
+              with:
+                  workspaces: apps/grove/host
 
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
@@ -98,7 +110,9 @@ jobs:
                       turbo-test-${{ runner.os }}-node${{ matrix.node }}-
 
             - name: test
-              run: pnpm run test
+              # The TypeScript half only — this job exists to run one simulation on two V8 builds,
+              # and @grove/host's tests answer a question no second architecture changes.
+              run: pnpm run test --filter='!@grove/host'
 
     citations:
         name: no design-doc citations

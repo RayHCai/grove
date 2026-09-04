@@ -69,7 +69,7 @@ async function installed(widget: string): Promise<{ session: Session; tab: Tab }
  * a host filling it with real physics would provide — and the only way `blocked` is ever true.
  */
 function floorAt(session: Session, y: number): void {
-    const rt = session.server.runtime;
+    const rt = session.sim.runtime;
     const at = rt.transforms;
     rt.physics = {
         move: (id, dt, velocity) => {
@@ -107,7 +107,7 @@ function drawn(tab: Tab): ReturnType<typeof transformIn> {
 
 /** The same avatar, in the world the authority holds. */
 function authoritative(session: Session, tab: Tab): ReturnType<typeof transformIn> {
-    const rt = session.server.runtime;
+    const rt = session.sim.runtime;
     const id = avatarIn(rt, idOf(tab));
     if (id === undefined) throw new Error('no avatar on the authority');
     return transformIn(rt, id);

@@ -85,7 +85,7 @@ describe('a stream nobody seeded', () => {
         const { session, tab } = await open();
         await press(session, tab, W.draw);
 
-        const authority = gameField<string>(session.server.runtime, S.digest);
+        const authority = gameField<string>(session.sim.runtime, S.digest);
         expect(authority).not.toBe('');
         expect(reading(tab, S.digest)).toBe(authority);
     });

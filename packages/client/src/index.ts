@@ -11,7 +11,7 @@
 // TYPES, so nothing outside can mint a second one or reach past `GameClient` to drive it. This package's
 // own tests import `./src/*.js` directly for the same reason: they are inside the boundary.
 //
-// It never imports @platform/server. The two agree through @platform/protocol and nowhere else.
+// It never imports @platform/sim. The two agree through @platform/protocol and nowhere else.
 
 export { GameClient } from './client.js';
 export type { ClientStats, GameClientOptions } from './client.js';

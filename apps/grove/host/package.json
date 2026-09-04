@@ -1,0 +1,15 @@
+{
+    "name": "@grove/host",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "One game session, in one process: the sockets, the clock, the isolate and the drain. Rust.",
+    "scripts": {
+        "build": "node scripts/cargo.mjs build --release",
+        "typecheck": "node scripts/cargo.mjs clippy --all-targets -- -D warnings",
+        "test": "node scripts/cargo.mjs test",
+        "format": "node scripts/cargo.mjs fmt",
+        "format:check": "node scripts/cargo.mjs fmt --check",
+        "clean": "node scripts/cargo.mjs clean"
+    }
+}

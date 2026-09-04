@@ -13,11 +13,91 @@ import { PROJECT_FORMAT_VERSION, assetId, scriptId, templateId } from '@platform
 import { createReadyNullRenderer } from '@platform/renderer/null';
 import { ScriptRegistry } from '@platform/scripting';
 import type { ScriptEntry } from '@platform/scripting';
+import type { Message, Transport } from '@platform/transport';
 import { loopbackPair } from '@platform/transport';
-import { createClient, createServer } from '../src/host/index.js';
+import type { InputBatch, LoadedRecord, OutputBatch, Sim } from '@platform/sim';
+import { createClient, createSim } from '../src/host/index.js';
 import type { ProjectManifest } from '../src/host/index.js';
 
 const TICK = 1 / 60;
+
+/**
+ * The smallest host a `Sim` runs under: one socket, one tick per call, and the sends written back.
+ *
+ * `@platform/glue` is the real one; this exists because engine is BELOW glue and a composition root
+ * still has to be shown driving what it built.
+ */
+class MiniHost {
+    readonly #sim: Sim;
+    readonly #transports = new Map<string, Transport>();
+    #opened: InputBatch['opened'] = [];
+    #frames: InputBatch['frames'] = [];
+    #closed: string[] = [];
+    #records: LoadedRecord[] = [];
+    #next = 1;
+    #sinceSend = 0;
+    #nowMs = 0;
+
+    constructor(sim: Sim) {
+        this.#sim = sim;
+    }
+
+    accept(transport: Transport, playerId?: string): string {
+        const connectionId = `c${this.#next++}`;
+        this.#transports.set(connectionId, transport);
+        transport.onMessage((message) => this.#frames.push({ connectionId, message }));
+        transport.onClose(() => this.#closed.push(connectionId));
+        this.#opened.push({ connectionId, identity: playerId ?? null });
+        return connectionId;
+    }
+
+    tick(): void {
+        this.#nowMs += 1000 / this.#sim.config.simRate;
+        const perSend = Math.max(
+            1,
+            Math.round(this.#sim.config.simRate / this.#sim.config.sendRate),
+        );
+        this.#sinceSend += 1;
+        const drain = this.#sinceSend >= perSend;
+        if (drain) this.#sinceSend = 0;
+        const batch: InputBatch = {
+            nowMs: this.#nowMs,
+            drain,
+            opened: this.#opened,
+            frames: this.#frames,
+            closed: this.#closed,
+            records: this.#records,
+            saved: [],
+        };
+        this.#opened = [];
+        this.#frames = [];
+        this.#closed = [];
+        this.#records = [];
+        this.#apply(this.#sim.tick(batch));
+    }
+
+    close(): void {
+        this.#apply(this.#sim.close());
+        for (const transport of this.#transports.values()) transport.close();
+        this.#transports.clear();
+    }
+
+    #apply(out: OutputBatch): void {
+        for (const send of out.sends) {
+            for (const connectionId of send.to) {
+                this.#transports.get(connectionId)?.send(send.envelope as unknown as Message);
+            }
+        }
+        for (const order of out.closes) {
+            this.#transports.get(order.connectionId)?.close();
+            this.#transports.delete(order.connectionId);
+        }
+        // No store here, so every load is answered with nothing rather than left to hang the join.
+        for (const load of out.loads) {
+            this.#records.push({ connectionId: load.connectionId, fields: {} });
+        }
+    }
+}
 
 const COIN = templateId('coin');
 const COIN_TEXTURE = assetId('coin-texture');
@@ -28,7 +108,7 @@ const LOOT = scriptId('loot');
 /** Every construction this process performs, so a test can say which side wired what. */
 const constructed: string[] = [];
 
-/** Game-hosted and server-located: `gameScripts` is the path createServer resolves it through. */
+/** Game-hosted and server-located: `gameScripts` is the path createSim resolves it through. */
 class Rules extends ServerScript {
     constructor() {
         super();
@@ -130,10 +210,7 @@ async function session(
     const shared = registry();
 
     constructed.length = 0;
-    const authority = createServer(server, {
-        scripts: shared,
-        deliver: () => pair.deliver(),
-    });
+    const authority = new MiniHost(createSim(server, { scripts: shared }));
     const booted = constructed.splice(0);
     // Taken after construction, as every host does: the world has to exist before a joiner is
     // answered with a snapshot of it.
@@ -160,7 +237,10 @@ async function session(
     const run = (n: number): void => {
         for (let i = 0; i < n; i++) {
             now += TICK;
-            authority.pump(now);
+            // Delivery first, then the tick — the order every host runs, and reversing it costs
+            // every input a tick of latency while reporting nothing.
+            pair.deliver();
+            authority.tick();
             frames.frame(now);
         }
     };
@@ -183,7 +263,7 @@ async function session(
     };
 }
 
-describe('createServer and createClient', () => {
+describe('createSim and createClient', () => {
     it('stand up a session over a loopback pair', async () => {
         const s = await session();
         s.settle();

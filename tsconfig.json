@@ -27,7 +27,7 @@
             "path": "./packages/protocol"
         },
         {
-            "path": "./packages/server"
+            "path": "./packages/sim"
         },
         {
             "path": "./packages/client"

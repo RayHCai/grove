@@ -1,7 +1,7 @@
 // The real clients against the real authority, in one process, over loopback pairs.
 //
 // Both packages are otherwise validated against a scripted peer — `@platform/client` against a fake
-// server, `@platform/server` against a fake client — so this is the first place the two halves meet.
+// server, `@platform/sim` against a fake client — so this is the first place the two halves meet.
 // It is the same project `main.ts` hosts, booted through the same composition roots; only the
 // transport and the clock differ, which is what makes it worth running before a socket is involved.
 //
@@ -15,7 +15,7 @@ import type { GameClient } from '@platform/glue/client';
 import { createReadyNullRenderer } from '@platform/renderer/null';
 import type { IRenderer } from '@platform/renderer';
 import type { GameInstance } from '@platform/glue/server';
-import type { GameServer } from '@platform/server';
+import type { Sim } from '@platform/sim';
 import { loopbackPair } from '@platform/transport';
 import type { LoopbackPair } from '@platform/transport';
 import { createGameInstance } from '../dist/server/host.js';
@@ -99,8 +99,8 @@ class Session {
     }
 
     /** The authority, for the assertions that read the world the server actually holds. */
-    get server(): GameServer {
-        return this.instance.server;
+    get sim(): Sim {
+        return this.instance.sim;
     }
 
     async join(name: string, identity = name): Promise<Tab> {
@@ -406,7 +406,7 @@ describe('a session over the real wire', () => {
 
         // The authority ran the same script on the same input, so the two agree exactly — and the
         // client never had to be snapped back to get there.
-        const server = session.server.runtime;
+        const server = session.sim.runtime;
         const authoritative = [...server.entities.liveIds()].find((id) => {
             const record = server.entities.record(id);
             return (
@@ -927,7 +927,7 @@ describe('the wire itself', () => {
         expect(tab.client.stats().ringSize).toBe(0);
         expect(tab.client.stats().state).toBe('live');
         // Nonzero means replication silently dropped something as unrepresentable.
-        expect(session.server.droppedMarks).toBe(0);
+        expect(session.sim.droppedMarks).toBe(0);
         expect(tab.client.mirror?.counters.oversizedList).toBe(0);
         expect(tab.client.mirror?.counters.invalidNetId).toBe(0);
     });
