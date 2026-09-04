@@ -38,6 +38,12 @@ pub struct Outgoing {
     pub class: SendClass,
 }
 
+/// The session thread's end of one peer's life: dropping it closes that socket.
+///
+/// A sender rather than a flag because the reader is parked in `.next()` and cannot poll anything —
+/// only a cancellation it is selecting on can wake it, and a dropped sender is that cancellation.
+pub struct HangUp(#[allow(dead_code)] mpsc::Sender<()>);
+
 #[derive(Clone)]
 pub struct Listener {
     events: mpsc::UnboundedSender<HostEvent>,
@@ -114,12 +120,14 @@ fn subprotocol(headers: &HeaderMap, prefix: &str) -> Option<String> {
 
 async fn serve(socket: WebSocket, listener: Listener, connection_id: ConnectionId, identity: String) {
     let (writes, mut queue) = mpsc::channel::<Outgoing>(WRITE_QUEUE_DEPTH);
+    let (hangup, mut hung_up) = mpsc::channel::<()>(1);
     if listener
         .events
         .send(HostEvent::Opened {
             connection_id: connection_id.clone(),
             identity,
             writes,
+            hangup: HangUp(hangup),
         })
         .is_err()
     {
@@ -136,8 +144,15 @@ async fn serve(socket: WebSocket, listener: Listener, connection_id: ConnectionI
         }
     });
 
-    while let Some(frame) = stream.next().await {
-        let Ok(frame) = frame else { break };
+    loop {
+        let frame = tokio::select! {
+            // The session thread hung this peer up: its `HangUp` was dropped, so this arm completes.
+            _ = hung_up.recv() => break,
+            frame = stream.next() => match frame {
+                Some(Ok(frame)) => frame,
+                _ => break,
+            },
+        };
         let text = match frame {
             Message::Text(text) => text,
             Message::Close(_) => break,

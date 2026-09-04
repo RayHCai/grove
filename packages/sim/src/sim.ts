@@ -438,6 +438,13 @@ export class Sim {
                 forward?.warn(message);
             },
             error: (record: Parameters<LogSink['error']>[0]): void => {
+                // Flattened into a line as well as forwarded: a host in another process holds no
+                // `LogSink`, so without this every handler throw is invisible to the only channel
+                // that reaches it.
+                this.#log.push({
+                    level: 'error',
+                    line: `handler-threw script=${record.scriptClass}.${record.method} event=${record.event} host=${record.hostId}`,
+                });
                 forward?.error(record);
             },
         };
@@ -641,8 +648,8 @@ export class Sim {
     }
 
     /** Orders the host to close a session and releases it here, so this tick's step already skips it. */
-    #closeFor(session: Session, reason: string): void {
-        this.#deny('close', session, reason);
+    #closeFor(session: Session, reason: string, detail?: string): void {
+        this.#deny('close', session, reason, detail);
         this.#closes.push({ connectionId: session.connectionId, reason });
         this.#release(session);
     }
@@ -703,21 +710,34 @@ export class Sim {
         for (const session of this.#sessions.values()) {
             const player = session.livePlayer;
             if (player === null) continue;
-            if (session.wantsBroadcast) {
-                // Reliable first: the client holds a transform envelope until the state envelope for
-                // that tick has been applied.
-                this.#send(
-                    [session.connectionId],
-                    stateEnvelopeFor(session, player, set),
-                    'reliable',
+            // Per session, for the reason the host's write loop is: a snapshot walk or an encode is
+            // creator-influenced, and one peer's throw would otherwise take this send's whole journal
+            // down with it — ops that are already drained and would never be produced again.
+            try {
+                if (session.wantsBroadcast) {
+                    // Reliable first: the client holds a transform envelope until the state envelope
+                    // for that tick has been applied.
+                    this.#send(
+                        [session.connectionId],
+                        stateEnvelopeFor(session, player, set),
+                        'reliable',
+                    );
+                    continue;
+                }
+                const pending = session.pendingJoin;
+                if (pending === null) continue;
+                session.structuralSkip = this.#spill.length;
+                this.#welcome(session, player, pending, nowMs);
+                // Cleared only once the `Welcome` is queued: cleared first, a throw in the snapshot
+                // walk above would leave this session reading as broadcast-ready with no baseline.
+                session.pendingJoin = null;
+            } catch (error) {
+                this.#closeFor(
+                    session,
+                    'send-failed',
+                    error instanceof Error ? error.message : String(error),
                 );
-                continue;
             }
-            const pending = session.pendingJoin;
-            if (pending === null) continue;
-            session.structuralSkip = this.#spill.length;
-            this.#welcome(session, player, pending, nowMs);
-            session.pendingJoin = null;
         }
 
         // One envelope, however many peers take it: most of a state envelope is per-connection, so

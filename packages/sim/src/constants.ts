@@ -5,7 +5,7 @@ import { simError } from './errors.js';
 /** Both sides of the tick window: a frame older than the rewind limit is unusable, and the client's own lead is capped at the same span. */
 export const INPUT_WINDOW_MS = MAX_REWIND_MS;
 
-/** Silence an opened session may hold before it is closed still unjoined, converted to ticks like every other window here. */
+/** How long an opened session may go unjoined before it is closed, converted to ticks like every other window here. */
 export const JOIN_DEADLINE_MS = 5_000;
 
 /** Silence before held actions are released server-side, above the client's 2 s `TimeSync` refresh because the uplink carries edges only. */
