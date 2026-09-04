@@ -1,8 +1,8 @@
 //! One V8 isolate per session, holding the compiled `@platform/sim` bundle and the creator's code.
 //!
 //! The isolate is the containment: its own heap limit, its own `terminate_execution` handle, and no
-//! ambient capability at all — the bundle reaches the outside world only through the ops declared
-//! here, which is why this module is where `storage` and the session's own `console` live.
+//! ambient capability at all — the bundle reaches the outside world only through the two ops
+//! declared here, which carry one JSON message in each direction and nothing else.
 //!
 //! A `JsRuntime` is neither `Send` nor re-entrant, so everything here runs on the one session thread
 //! and never inside a `tokio` task.
@@ -11,14 +11,13 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::task::{Context, Poll, Wake, Waker};
 
-use anyhow::{anyhow, bail, Context as _, Result};
-use deno_core::{extension, op2, JsRuntime, OpState, PollEventLoopOptions, RuntimeOptions};
+use anyhow::{anyhow, Context as _, Result};
+use deno_core::{extension, op2, JsRuntime, OpState, RuntimeOptions};
 
 use crate::protocol::{InputBatch, OutputBatch};
 
-/// What the bundle is called in a stack trace, and what a module specifier resolves against.
+/// What the bundle is called in a stack trace.
 const BUNDLE_URL: &str = "grove:sim";
 
 /// Boot, one tick, and close — the three scripts this host ever runs, held as constants so a tick
@@ -31,8 +30,7 @@ const CLOSE_SOURCE: &str = "Deno.core.ops.op_grove_put_message(globalThis.__grov
 /// The one slot a message crosses in, in either direction.
 ///
 /// A slot rather than a call argument because `execute_script` takes source and returns a V8 value:
-/// building the batch into the source would re-parse a megabyte of JSON as JAVASCRIPT every tick,
-/// and reading the result back out of a `v8::Value` needs a scope this side does not otherwise open.
+/// building the batch into the source would re-parse a megabyte of JSON as JAVASCRIPT every tick.
 #[derive(Default)]
 struct Mailbox {
     inbound: Option<String>,
@@ -64,15 +62,31 @@ extension!(
     },
 );
 
-/// A waker that does nothing, so the event loop can be polled from a thread that is not a reactor.
-struct Idle;
+/// Why an isolate stopped. Terminal in every arm: `Sim.tick` mutates the world in place and there is
+/// no transaction, so a half-run tick leaves a world no later delta repairs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Death {
+    /// The session reached its heap limit.
+    OutOfMemory,
+    /// A tick outstayed its budget and the watchdog terminated it.
+    Runaway,
+    /// The bundle threw.
+    Threw,
+}
 
-impl Wake for Idle {
-    fn wake(self: Arc<Self>) {}
+impl Death {
+    /// The token an operator greps for, and the reason every open socket is closed with.
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::OutOfMemory => "heap-limit",
+            Self::Runaway => "tick-budget",
+            Self::Threw => "sim-threw",
+        }
+    }
 }
 
 pub struct IsolateOptions {
-    /// The compiled sim bundle, one ESM-free script that assigns `globalThis.__grove`.
+    /// The compiled sim bundle: one classic script that assigns `globalThis.__grove`.
     pub bundle: String,
     /// What `Sim` is constructed with, already JSON.
     pub config: String,
@@ -86,6 +100,8 @@ pub struct Isolate {
     mailbox: Rc<RefCell<Mailbox>>,
     /// Set by the near-heap-limit callback, which V8 calls on ITS thread and which may not allocate.
     over_heap: Arc<AtomicBool>,
+    /// Once set, every later call fails fast rather than re-entering a world that is already wrong.
+    dead: Option<Death>,
 }
 
 impl Isolate {
@@ -100,17 +116,18 @@ impl Isolate {
             ..Default::default()
         });
 
-        // Termination rather than a growth grant: a session over its limit is a session whose world
-        // is already wrong, and letting V8 grow the heap turns one bad game into the whole host's
-        // problem. The flag is read on the session thread, which is where the tear-down belongs.
         let over_heap = Arc::new(AtomicBool::new(false));
         let flag = over_heap.clone();
         let terminator = runtime.v8_isolate().thread_safe_handle();
         runtime.add_near_heap_limit_callback(move |current, _initial| {
             flag.store(true, Ordering::SeqCst);
             terminator.terminate_execution();
-            // Returned unchanged: raising it here would be the grant this callback exists to refuse.
-            current
+            // The grant is REQUIRED, not a concession: `terminate_execution` is not instantaneous —
+            // V8 keeps allocating while it unwinds — and a callback that returned the limit
+            // unchanged would hit it again and reach `FatalProcessOutOfMemory`, aborting the whole
+            // process and every other session in it. The isolate is discarded either way, so the
+            // headroom is never actually spent.
+            current * 2
         });
 
         runtime
@@ -118,9 +135,14 @@ impl Isolate {
             .context("the sim bundle threw while it was being evaluated")?;
 
         mailbox.borrow_mut().inbound = Some(opts.config);
-        let mut isolate = Self { runtime, mailbox, over_heap };
+        let mut isolate = Self { runtime, mailbox, over_heap, dead: None };
         isolate.run("[grove:boot]", BOOT_SOURCE)?;
         Ok(isolate)
+    }
+
+    /// Why this isolate stopped, or `None` while it is still live.
+    pub fn death(&self) -> Option<Death> {
+        self.dead
     }
 
     /// One fixed step. The batch crosses as JSON and the output comes back the same way.
@@ -143,29 +165,36 @@ impl Isolate {
     }
 
     fn run(&mut self, name: &'static str, source: &'static str) -> Result<()> {
-        self.runtime
-            .execute_script(name, deno_core::FastString::from_static(source))
-            .map_err(|error| {
-                if self.over_heap.load(Ordering::SeqCst) {
-                    anyhow!("the session exceeded its heap limit")
-                } else {
-                    anyhow!(error)
-                }
-            })?;
+        if let Some(death) = self.dead {
+            return Err(anyhow!("the isolate is dead: {}", death.token()));
+        }
 
-        // Polled to `Pending` rather than awaited: core's `startGame` is deliberately not awaited and
-        // a handler may await a timer that only the NEXT tick advances, so a loop that ran to
-        // completion would deadlock the world against its own clock. What this drains is the
-        // microtask queue and whatever settled already, which is exactly the synchronous-to-the-
-        // first-await guarantee the sim is written against.
-        let waker = Waker::from(Arc::new(Idle));
-        let mut cx = Context::from_waker(&waker);
-        match self.runtime.poll_event_loop(
-            &mut cx,
-            PollEventLoopOptions { wait_for_inspector: false, pump_v8_message_loop: true },
-        ) {
-            Poll::Ready(Err(error)) => bail!(error),
-            Poll::Ready(Ok(())) | Poll::Pending => Ok(()),
+        let outcome = self
+            .runtime
+            .execute_script(name, deno_core::FastString::from_static(source));
+
+        // Drained explicitly, because deno_core runs V8 under an Explicit microtask policy and
+        // nothing else here polls an event loop: this is what lets `startGame` — deliberately not
+        // awaited — and every awaiting handler make progress. It runs even on a throw, so a
+        // rejection settled before the throw still reaches its own handler.
+        {
+            deno_core::scope!(scope, &mut self.runtime);
+            scope.perform_microtask_checkpoint();
+        }
+
+        match outcome {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                let death = if self.over_heap.load(Ordering::SeqCst) {
+                    Death::OutOfMemory
+                } else if self.runtime.v8_isolate().is_execution_terminating() {
+                    Death::Runaway
+                } else {
+                    Death::Threw
+                };
+                self.dead = Some(death);
+                Err(anyhow!("{}: {error}", death.token()))
+            }
         }
     }
 

@@ -15,6 +15,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
+use serde_json::value::RawValue;
 use tokio::sync::mpsc;
 
 use crate::protocol::{ConnectionId, SendClass};
@@ -148,9 +149,10 @@ async fn serve(socket: WebSocket, listener: Listener, connection_id: ConnectionI
             tracing::warn!(conn = %connection_id, "close conn reason=frame-too-large");
             break;
         }
-        // Decoded, never narrowed: what a frame is allowed to CONTAIN is the sim's to bound, and a
-        // second opinion here would be a second copy of every cap that package already states.
-        let Ok(message) = serde_json::from_str(&text) else { continue };
+        // Validated as JSON and never parsed into a tree: what a frame is allowed to CONTAIN is the
+        // sim's to bound, a second opinion here would be a second copy of every cap that package
+        // already states, and the bytes reach it exactly as the peer sent them.
+        let Ok(message) = RawValue::from_string(text.to_string()) else { continue };
         if listener
             .events
             .send(HostEvent::Frame { connection_id: connection_id.clone(), message })
