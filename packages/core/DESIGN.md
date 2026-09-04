@@ -4,7 +4,7 @@
 its decorators, handler dispatch, the fixed-step loop, timers/tweens, `@serverState` and the replication
 marks. No canvas, no sockets, no DOM, no clock of its own — core is **pumped** (`Loop.step`), and everything
 outside its walls is a seam with a null implementation, so the whole package runs in Node. `@platform/engine`
-re-exports it as the creator API; `@platform/server` and `@platform/client` drive it from either side of the
+re-exports it as the creator API; `@platform/sim` and `@platform/client` drive it from either side of the
 wire and read its marks to replicate. Dependencies: `@platform/math`, and `@platform/project` for the
 authoring types alone — its `validate` is the server's to call, so the validator stays out of core's import
 path and core only ever receives an already-valid manifest.

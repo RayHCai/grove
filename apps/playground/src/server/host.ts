@@ -42,6 +42,6 @@ export function createGameInstance(opts: HostOptions = {}): GameInstance {
             onBreakerTrip: opts.onBreakerTrip,
         }),
     });
-    onCrownNeeded(() => instance.server.declareVisuals(CROWN_VISUALS));
+    onCrownNeeded(() => instance.declareVisuals(CROWN_VISUALS));
     return instance;
 }

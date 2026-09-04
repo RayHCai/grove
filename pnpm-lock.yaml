@@ -122,18 +122,6 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.2)(vite@8.2.0(@types/node@26.1.2)(yaml@2.9.0))
 
-  apps/grove/game-instance:
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.5
-        version: 22.20.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@types/node@22.20.1)(vite@8.2.0(@types/node@22.20.1)(yaml@2.9.0))
-
   apps/grove/game-manager:
     dependencies:
       '@fastify/rate-limit':
@@ -167,6 +155,8 @@ importers:
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@22.20.1)(vite@8.2.0(@types/node@22.20.1)(yaml@2.9.0))
+
+  apps/grove/host: {}
 
   apps/grove/platform:
     dependencies:
@@ -274,9 +264,9 @@ importers:
       '@platform/scripting':
         specifier: workspace:*
         version: link:../../packages/scripting
-      '@platform/server':
+      '@platform/sim':
         specifier: workspace:*
-        version: link:../../packages/server
+        version: link:../../packages/sim
       '@platform/transport':
         specifier: workspace:*
         version: link:../../packages/transport
@@ -382,9 +372,9 @@ importers:
       '@platform/scripting':
         specifier: workspace:*
         version: link:../packages/scripting
-      '@platform/server':
+      '@platform/sim':
         specifier: workspace:*
-        version: link:../packages/server
+        version: link:../packages/sim
       '@platform/transport':
         specifier: workspace:*
         version: link:../packages/transport
@@ -506,9 +496,9 @@ importers:
       '@platform/scripting':
         specifier: workspace:*
         version: link:../scripting
-      '@platform/server':
+      '@platform/sim':
         specifier: workspace:*
-        version: link:../server
+        version: link:../sim
       '@platform/transport':
         specifier: workspace:*
         version: link:../transport
@@ -540,9 +530,9 @@ importers:
       '@platform/scripting':
         specifier: workspace:*
         version: link:../scripting
-      '@platform/server':
+      '@platform/sim':
         specifier: workspace:*
-        version: link:../server
+        version: link:../sim
       '@platform/transport':
         specifier: workspace:*
         version: link:../transport
@@ -550,6 +540,12 @@ importers:
         specifier: ^8.21.3
         version: 8.21.3
     devDependencies:
+      '@platform/math':
+        specifier: workspace:*
+        version: link:../math
+      '@platform/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@platform/renderer':
         specifier: workspace:*
         version: link:../renderer
@@ -639,7 +635,7 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.2)(vite@8.2.0(@types/node@26.1.2)(yaml@2.9.0))
 
-  packages/server:
+  packages/sim:
     dependencies:
       '@platform/core':
         specifier: workspace:*

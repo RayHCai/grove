@@ -1,7 +1,7 @@
 # @platform/playground
 
 **Leaf Harvest** — a complete round-based game for N players, over the whole stack. One
-`@platform/server` process holds the world; every open tab is a `@platform/client` session reaching
+one game process holds the world; every open tab is a `@platform/client` session reaching
 it over a real WebSocket. Both ends are built from **one authored project file**, `src/project.ts` —
 the authority through `@platform/glue`, the browser through `createClient` in
 `@platform/engine/host`.

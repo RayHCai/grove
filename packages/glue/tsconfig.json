@@ -4,7 +4,11 @@
         "rootDir": "src",
         "outDir": "dist",
         "tsBuildInfoFile": "dist/.tsbuildinfo",
-        "types": ["node"]
+        "types": ["node"],
+
+        // Only `src/testkit/fixtures.ts` carries decorators, and `tsc` lowers them where the test
+        // runner's transform does not, so the fixtures are built and imported from `dist`.
+        "lib": ["ES2023", "ESNext.Decorators"]
     },
     "include": ["src/**/*.ts"],
     "references": [
@@ -14,7 +18,7 @@
         { "path": "../../packages/project" },
         { "path": "../../packages/renderer" },
         { "path": "../../packages/scripting" },
-        { "path": "../../packages/server" },
+        { "path": "../../packages/sim" },
         { "path": "../../packages/transport" }
     ]
 }

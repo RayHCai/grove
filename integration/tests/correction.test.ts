@@ -30,7 +30,7 @@ function snaps(tab: Tab): number {
 
 /** Where this tab's own avatar stands, in whichever world is asked. */
 function xIn(session: Session, tab: Tab, mirror: boolean): number {
-    const rt = mirror ? runtimeOf(tab) : session.server.runtime;
+    const rt = mirror ? runtimeOf(tab) : session.sim.runtime;
     const me = tab.client.localPlayer?.id;
     if (me === undefined) throw new Error('no local player');
     const avatar = avatarIn(rt, me);

@@ -35,11 +35,13 @@
         "@platform/engine": "workspace:*",
         "@platform/project": "workspace:*",
         "@platform/scripting": "workspace:*",
-        "@platform/server": "workspace:*",
+        "@platform/sim": "workspace:*",
         "@platform/transport": "workspace:*",
         "ws": "^8.21.3"
     },
     "devDependencies": {
+        "@platform/math": "workspace:*",
+        "@platform/protocol": "workspace:*",
         "@platform/renderer": "workspace:*",
         "@types/node": "^22.10.5",
         "@types/ws": "^8.18.1",

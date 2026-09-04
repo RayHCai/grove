@@ -3,7 +3,7 @@
 //
 // Core's table is whole-world — it ignores the `scope` a client step hands it — so the narrowing lives
 // here or a remote avatar is extrapolated off input this client never had. The input half must agree
-// with `@platform/server`'s pass edge for edge: it cannot be imported (the client never imports the
+// with `@platform/sim`'s pass edge for edge: it cannot be imported (the client never imports the
 // server), and a second one-tick-wide rule would read as a prediction bug rather than a copied one.
 
 import type {

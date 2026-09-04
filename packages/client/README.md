@@ -5,7 +5,7 @@ world, device input stamped with a tick, and the display loop that pushes transf
 mirror is written by what the server sent and — when prediction is on — by replaying the input the server
 has not acknowledged yet, over a baseline it can rewind to.
 
-It is `@platform/server`'s wire peer, and the two share exactly one thing: the envelopes in
+It is `@platform/sim`'s wire peer, and the two share exactly one thing: the envelopes in
 `@platform/protocol`. It never imports the server.
 
 See [DESIGN.md](DESIGN.md) for the internals.

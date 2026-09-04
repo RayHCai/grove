@@ -2,7 +2,7 @@
 //
 // There is no second `GameClient` to gate, so the reusable suite is this: it answers a `JoinRequest`,
 // emits envelopes on a scripted schedule, and acks. It makes every test a BLACK-BOX test of the real
-// client, and it is what `@platform/server` can later run against to prove the two halves agree — the
+// client, and it is what `@platform/sim` can later run against to prove the two halves agree — the
 // acceptance test for the pair, which neither package can write alone.
 
 import { defined } from '@platform/math';

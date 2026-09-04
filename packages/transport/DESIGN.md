@@ -2,7 +2,7 @@
 
 **TL;DR** — A per-connection message pipe. One end of one _already established_ connection moves
 opaque JSON values to its single peer with the value semantics of a real wire. It sits between
-`@platform/server` (which drains core's replication channels) and `@platform/client` (which feeds
+`@platform/sim` (which drains core's replication channels) and `@platform/client` (which feeds
 interpolation and prediction), and it is a **leaf**: no dependencies, no engine types, no clock. Two
 run modes — networked and local — differ only in which implementation sits behind the interface.
 It ships the `Transport` seam, the `Codec` seam with `jsonCodec`, `loopbackPair`, a WebSocket backend
@@ -114,7 +114,7 @@ bytes (`frame-too-large`), counted and refused BEFORE the parse, because the par
 bigger frame.** It bounds what one parse allocates on an untrusted path, and raising it to fit one sender's
 largest message gives that bound away for every peer and every message. A producer sizes its own frames
 against `MAX_FRAME_BYTES` — `Codec.byteLength` over an encoded frame is the measurement — and splits above
-it; `@platform/server` does this for a join snapshot, over its own budget held below this number so an
+it; `@platform/sim` does this for a join snapshot, over its own budget held below this number so an
 envelope's wrapper has room.
 
 **Both walks are iterative** with an explicit stack. A recursive walk — including a `JSON.parse`
@@ -258,6 +258,6 @@ last four and the frame rejections reach `onError` instead — a socket event ha
 
 ## 8. Consumers
 
-`@platform/server` (`Transport`, `Codec`, `EncodedFrame`, `Message`, `TimerSource`, `jsonCodec`),
+`@platform/sim` (`Codec`, `Message`, `jsonCodec`) and its hosts (`Transport`, `EncodedFrame`, `TimerSource`),
 `@platform/client` (`Transport`, `Message`, `TransportError`), `@platform/protocol` (`JsonValue`, and
 the codec gate), `@platform/project` (`JsonValue`), `@platform/engine` (dependency only).

@@ -6,6 +6,11 @@ out.
 Every step it takes belongs to another package. What belongs here is that they happen in the one
 sequence that is correct — including the choices that fail **silently** when made wrongly.
 
+Its server half is also the **in-process host** for `@platform/sim`: the clock, the sockets and the
+store the sim deliberately holds none of. `@grove/host` does the same job in Rust for a deployed
+session; this is the one the tests, the integration suite and `apps/playground` drive, and it is what
+lets a whole game run over `loopbackPair()` with no socket, no port and no GPU.
+
 ## Scope
 
 It owns the standing-up of a game and nothing else. It owns no simulation, no wire format, no
@@ -23,6 +28,7 @@ import type { BundleRef } from '@platform/glue';
 | Export                     | Path      | Is                                                            |
 | -------------------------- | --------- | ------------------------------------------------------------- |
 | `GameInstance`             | `/server` | One booted world, and the two verbs a host drives it with     |
+| `Driver`                   | `/server` | Real time into ticks: the accumulator, the cap and the shed   |
 | `listenOn(instance, opts)` | `/server` | Bind in front of a world the caller already holds             |
 | `fileKVStore(path)`        | `/server` | `@serverState` that outlives the process, in one JSON file    |
 | `ClientInstance`           | `/client` | One composed session, and the two verbs a host drives it with |
@@ -62,9 +68,10 @@ repairs.
 
 Two further choices are encoded rather than left to a caller:
 
-- **`pump`, never `GameServer.start()`.** `start` drives the Driver directly and skips the
-  join-deadline sweep, so a connection that opens and never joins holds one of the unjoined slots
-  for good. `GameInstance.start()` runs an interval that pumps.
+- **`pump`, never the `Driver`'s own `start()`.** The driver only turns time into ticks; the batch
+  loop that answers the sim's loads and saves lives on the instance, so a world driven through the
+  driver alone would ask for a persisted record and never be handed one. `GameInstance.start()` runs
+  an interval that pumps.
 - **The transport is built synchronously, before any await.** A WebSocket resumes its stream on the
   next tick, so a frame arriving before the transport's own listener exists is simply gone.
   Retention covers a late handler, not a late transport.
@@ -88,6 +95,19 @@ quietly:
 
 A host disposing anything of its own that touches the renderer does it **before** `close()`: the
 session's teardown reaches the same renderer, and only the host knows which nodes are its.
+
+## What the host owes the sim
+
+The sim reads no clock, opens no socket and writes to no store. Everything it needs arrives in one
+input batch and everything it wants done comes back in one output batch, and this class is the half
+that acts on it: it writes the `sends` (one `encode` per envelope, however many peers are in its
+`to`), closes the sockets `closes` names, reads the records `loads` asks for and hands them back on
+a later tick, and writes `saves` through — telling the sim which of them landed, so a rejoin inside
+one session reads its own values back whether or not the store has caught up.
+
+`close()` settles once every write it started has, over `allSettled` rather than `all`: a store that
+rejects must release the drain rather than hold a shutdown open on the one write that will never
+land.
 
 ## Identity is the host's
 

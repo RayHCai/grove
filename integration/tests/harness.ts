@@ -17,7 +17,7 @@ import { GAME_KEY, MemoryKVStore, hud, playerKey, withRuntime } from '@platform/
 import type { GameInstance } from '@platform/glue/server';
 import type { IRenderer, NodeId } from '@platform/renderer';
 import { createReadyNullRenderer } from '@platform/renderer/null';
-import type { GameServer } from '@platform/server';
+import type { Sim } from '@platform/sim';
 import type { LoopbackPair } from '@platform/transport';
 import { loopbackPair } from '@platform/transport';
 import { TEMPLATE_AVATAR } from '../dist/world.js';
@@ -139,8 +139,8 @@ export class Session {
     }
 
     /** The authority, for the assertions that read the world the server actually holds. */
-    get server(): GameServer {
-        return this.instance.server;
+    get sim(): Sim {
+        return this.instance.sim;
     }
 
     get now(): number {

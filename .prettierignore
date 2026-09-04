@@ -12,3 +12,7 @@ bench/runs
 
 # A symlink to AGENTS.md — formatting it rewrites the link target, not a file.
 CLAUDE.md
+
+# Cargo's output, and a lockfile prettier did not write.
+target
+apps/grove/host/Cargo.lock

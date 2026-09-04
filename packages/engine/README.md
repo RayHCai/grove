@@ -77,8 +77,8 @@ site, which is the only place that knows an attachment arrived at all.
 ## Dependencies, and which graph they are in
 
 `@platform/core` and `@platform/math` are the creator surface, and are the only two the root barrel
-reaches. `@platform/server`, `@platform/client` and `@platform/project` are runtime dependencies of
-`./host` alone — `GameServer`, `GameClient`, and the validator with its three narrowings.
+reaches. `@platform/sim`, `@platform/client` and `@platform/project` are runtime dependencies of
+`./host` alone — `Sim`, `GameClient`, and the validator with its three narrowings.
 `@platform/scripting` is type-only: a `ScriptRegistry` is named in the roots' signatures and built by
 the host, so it is not in this package's runtime graph. `@platform/transport` is named in neither
 root's signature — the host holds the sockets — and is reached only by this package's test.

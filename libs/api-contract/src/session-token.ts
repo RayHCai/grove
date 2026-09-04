@@ -1,9 +1,10 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { GameId, SessionId } from './ids.js';
+import { GameId, PlayerId, SessionId } from './ids.js';
 
 /**
- * What a game process presents to reach its own data, and nothing else's.
+ * What a game process presents to reach its own data, and what a browser presents to reach a game
+ * process — one token type, because both answer the same question about the same session.
  *
  * `gameId` is carried here rather than in a URL on purpose: a request cannot name a game its token
  * did not, so cross-game access is unrepresentable instead of merely checked for.
@@ -11,6 +12,14 @@ import { GameId, SessionId } from './ids.js';
 export const SessionTokenClaims = z.object({
     gameId: GameId,
     sessionId: SessionId,
+    /**
+     * Who the API says the bearer is.
+     *
+     * The game host takes `player.id` from here and never from a frame, and every other peer sees
+     * it — so this is the one field that makes a ticket a claim about a PERSON rather than about a
+     * session, and it is what persisted `@serverState` is keyed by across a rejoin.
+     */
+    playerId: PlayerId,
     /** Seconds since the epoch. Short — a session outliving its token re-asks the allocator. */
     exp: z.int().positive(),
 });
