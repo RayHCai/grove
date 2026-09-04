@@ -31,7 +31,7 @@
         "@platform/project": "workspace:*",
         "@platform/scripting": "workspace:*",
         "@platform/transport": "workspace:*",
-        "@platform/server": "workspace:*",
+        "@platform/sim": "workspace:*",
         "@platform/client": "workspace:*"
     },
     "devDependencies": {

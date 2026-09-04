@@ -277,7 +277,7 @@ describe("the authority's own copy of a camera", () => {
         await press(session, one, W.pan);
         // The synced handler runs on both ends, so the authority holds a moved camera for this
         // player...
-        expect(cameraIn(session.server.runtime, mine).position.x).toBe(PAN_TO.x);
+        expect(cameraIn(session.sim.runtime, mine).position.x).toBe(PAN_TO.x);
         // ...and the other tab, which holds the same player, has one still at the origin. Camera
         // state is in no snapshot and on no channel; each end computes its own or has none.
         expect(cameraIn(runtimeOf(two), mine).position.x).toBe(0);

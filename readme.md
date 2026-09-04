@@ -22,6 +22,8 @@ The beginner subset follows three rules that make round-tripping between code an
 
 **Server-authoritative, with a declared client side.** The world simulation runs on the server as the authority; clients render and predict it. There is no solo-versus-networked fork for the creator to reason about.
 
+That authority is two pieces with one seam. The **sim** is a deterministic fixed-step advance — `tick(inputBatch) -> outputBatch` — and it holds no socket, no clock and no store; the **host** owns the sockets, the ticket check, the tick clock, the isolate the sim runs in, and the drain. The host is Rust and the sim is TypeScript, and the same sim runs in the browser for prediction, which is what a batch narrow enough to hand across a process boundary buys.
+
 All creator code lives in a script, and a script declares two things in its header: **where it runs** and **what it's attached to**. Where it runs is the base class — `ServerScript` for authority, `ClientScript` for one person's screen, `SyncedScript` for gameplay the server owns and the client re-produces locally so it feels immediate. What it's attached to is a type parameter: `<Entity>`, `<Player>`, `<Game>`, `<Camera>`, or `<HUDScreen>`. So `SyncedScript<Entity>` is a coin that can be collected, and `ClientScript<HUDScreen>` is a shop menu.
 
 Those two axes are deliberately separate words. Fusing them — one class that meant "entity-attached and predicted," another that meant "session-scoped and server-only" — made whole categories of ordinary code unspellable: a server-only loot roll on an entity, a per-player wallet as its own small class, camera smoothing that reads the local viewport.

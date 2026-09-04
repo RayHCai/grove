@@ -3,7 +3,7 @@
 A per-connection message pipe, with a loopback implementation and a websocket backend.
 
 The `Transport` interface — `send` / `sendEncoded` / `onMessage` / `onClose` / `close` — is the pipe
-between `@platform/server` (which drains core's three replication channels) and `@platform/client`.
+between `@platform/sim` (which drains core's three replication channels) and `@platform/client`.
 **It names no engine type: transport is a leaf of the package graph, beside `@platform/math`.** One
 interface serves both run modes — **networked** (N clients, one remote server) and **local** (one client,
 a co-located server over `loopbackPair()`, no deployment to stand up); only the implementation behind it

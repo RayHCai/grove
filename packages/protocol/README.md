@@ -1,6 +1,6 @@
 # @platform/protocol
 
-The shared wire vocabulary. **The one thing `@platform/server` and `@platform/client` both import**, so the
+The shared wire vocabulary. **The one thing `@platform/sim` and `@platform/client` both import**, so the
 bytes one writes are the bytes the other reads.
 
 It holds the **envelope types** — the handshake, the refusal, the reliable state diff, the droppable transform

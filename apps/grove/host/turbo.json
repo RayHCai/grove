@@ -1,0 +1,20 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "extends": ["//"],
+    "tasks": {
+        "build": {
+            "inputs": ["src/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "package.json"],
+            // Cargo keeps its own incremental cache, and declaring target/ here makes turbo warn on
+            // every machine without a Rust toolchain, where the task correctly produces nothing.
+            "outputs": []
+        },
+        "typecheck": {
+            "inputs": ["src/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml"],
+            "outputs": []
+        },
+        "test": {
+            "inputs": ["src/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml"],
+            "outputs": []
+        }
+    }
+}

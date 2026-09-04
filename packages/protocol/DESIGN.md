@@ -1,7 +1,7 @@
 # `@platform/protocol`
 
 **TL;DR** — the shared wire vocabulary, and nothing else. It declares every message that crosses the wire as
-a TypeScript `type`, so `@platform/server` and `@platform/client` narrow to one definition instead of two that
+a TypeScript `type`, so `@platform/sim` and `@platform/client` narrow to one definition instead of two that
 drift. Types only: no bytes move here, no frame is validated here. It sits above `@platform/transport` and
 `@platform/project` — its two dependencies — and below both endpoints.
 

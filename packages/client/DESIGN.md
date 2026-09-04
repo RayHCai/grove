@@ -3,7 +3,7 @@
 **TLDR.** The viewer, and the only package that owns a clock. It holds one `Transport` to the server, a
 **`@platform/core` runtime** it writes by applying server envelopes and by replaying its own unacked input
 over them, device input stamped with a tick, and the display loop that pushes transforms into `IRenderer`.
-It is `@platform/server`'s wire peer — they agree through `@platform/protocol` and never import each other.
+It is `@platform/sim`'s wire peer — they agree through `@platform/protocol` and never import each other.
 It has **no authority**: what it simulates is provisional, scoped to the entities the local player owns, and
 rewound to the authoritative pose before the next delta lands.
 

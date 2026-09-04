@@ -23,7 +23,7 @@
         "@platform/protocol": "workspace:*",
         "@platform/renderer": "workspace:*",
         "@platform/scripting": "workspace:*",
-        "@platform/server": "workspace:*",
+        "@platform/sim": "workspace:*",
         "@platform/transport": "workspace:*",
         "react": "^19.2.8",
         "react-dom": "^19.2.8"

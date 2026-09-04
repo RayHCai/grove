@@ -26,7 +26,7 @@
         "@platform/protocol": "workspace:*",
         "@platform/renderer": "workspace:*",
         "@platform/scripting": "workspace:*",
-        "@platform/server": "workspace:*",
+        "@platform/sim": "workspace:*",
         "@platform/transport": "workspace:*"
     },
     "devDependencies": {

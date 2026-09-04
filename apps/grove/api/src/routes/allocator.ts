@@ -42,7 +42,14 @@ export function allocatorRoutes(env: Env): FastifyPluginAsyncZod {
                     sessionId: placement.sessionId,
                     serverUrl: placement.serverUrl,
                     ticket: signSessionToken(
-                        { gameId: request.params.gameId, sessionId: placement.sessionId, exp },
+                        {
+                            gameId: request.params.gameId,
+                            sessionId: placement.sessionId,
+                            // From the cookie session, never from the request: the game host trusts
+                            // whatever this names, and it reaches every other peer as `player.id`.
+                            playerId: request.viewer.playerId,
+                            exp,
+                        },
                         env.GAME_TOKEN_SECRET,
                     ),
                     expiresAt: new Date(exp * 1000).toISOString(),

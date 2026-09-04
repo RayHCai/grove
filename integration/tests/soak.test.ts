@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { EntityId, Runtime } from '@platform/core';
 import { GAME_KEY, MemoryKVStore, playerKey } from '@platform/core';
 import { SeededRandom } from '@platform/math';
-import type { GameServer } from '@platform/server';
+import type { Sim } from '@platform/sim';
 import {
     CODE_DOWN,
     CODE_LEFT,
@@ -194,7 +194,7 @@ async function soak(seed: number, beats: number): Promise<Report> {
         await session.step(1 + Math.floor(rng.between(0, 6)));
 
         peakTabs = Math.max(peakTabs, session.tabs.length);
-        for (const id of orbsIn(session.server.runtime)) orbsEverSeen.add(id);
+        for (const id of orbsIn(session.sim.runtime)) orbsEverSeen.add(id);
         faults.push(...health(session, beat, watch));
     }
 
@@ -213,15 +213,15 @@ async function soak(seed: number, beats: number): Promise<Report> {
     await session.step(120);
     faults.push(...health(session, beats, watch));
 
-    const settled = session.tabs.map((tab) => settle(tab, session.server));
-    const digest = digestOf(session.server);
-    const scored = replicated(session.server.runtime) as Record<string, number>;
+    const settled = session.tabs.map((tab) => settle(tab, session.sim));
+    const digest = digestOf(session.sim);
+    const scored = replicated(session.sim.runtime) as Record<string, number>;
 
     // Everyone closes their tab. The authority notices on the next deliver, and what it holds
     // afterwards is the whole leak check.
     for (const tab of session.tabs) session.leave(tab);
     await session.step(120);
-    const rt = session.server.runtime;
+    const rt = session.sim.runtime;
 
     return {
         tally,
@@ -311,7 +311,7 @@ function health(session: Session, beat: number, watch: Watch): string[] {
     // `droppedMarks` is deliberately not a fault here. It counts unrepresentable values AND marks
     // whose host died before the next send — and the second is ordinary in this game, where the
     // region pass reprices an orb that is then taken inside the same send interval.
-    for (const record of since(watch, session.server.runtime.log)) {
+    for (const record of since(watch, session.sim.runtime.log)) {
         faults.push(`${at}: server ${record.scriptClass}.${record.method} — ${why(record)}`);
     }
 
@@ -382,12 +382,12 @@ function describeFailure(tab: Tab): string {
 }
 
 /** What one tab holds against what the authority holds, field by field. */
-function settle(tab: Tab, server: GameServer): Settled {
+function settle(tab: Tab, sim: Sim): Settled {
     const rt = runtimeOf(tab);
     const player = tab.client.localPlayer;
     const mine = player?.id;
     const mirrored = mine === undefined ? undefined : avatarIn(rt, mine);
-    const authoritative = mine === undefined ? undefined : avatarIn(server.runtime, mine);
+    const authoritative = mine === undefined ? undefined : avatarIn(sim.runtime, mine);
     const counters = tab.client.prediction?.counters;
 
     return {
@@ -399,20 +399,18 @@ function settle(tab: Tab, server: GameServer): Settled {
                 : {
                       mirror: [rt.transforms.posX(mirrored), rt.transforms.posY(mirrored)],
                       server: [
-                          server.runtime.transforms.posX(authoritative),
-                          server.runtime.transforms.posY(authoritative),
+                          sim.runtime.transforms.posX(authoritative),
+                          sim.runtime.transforms.posY(authoritative),
                       ],
                   },
-        orbs: { mirror: orbsIn(rt).length, server: orbsIn(server.runtime).length },
-        game: { mirror: replicated(rt), server: replicated(server.runtime) },
+        orbs: { mirror: orbsIn(rt).length, server: orbsIn(sim.runtime).length },
+        game: { mirror: replicated(rt), server: replicated(sim.runtime) },
         taken: {
             mirror: mine === undefined ? 0 : (playerField<number>(rt, mine, STATE_TAKEN) ?? 0),
             server:
-                mine === undefined
-                    ? 0
-                    : (playerField<number>(server.runtime, mine, STATE_TAKEN) ?? 0),
+                mine === undefined ? 0 : (playerField<number>(sim.runtime, mine, STATE_TAKEN) ?? 0),
         },
-        leaked: server.runtime.playerManager.players
+        leaked: sim.runtime.playerManager.players
             .filter((other) => other.id !== mine)
             .flatMap((other) => {
                 const seen = playerField<number>(rt, other.id, STATE_TAKEN);
@@ -449,8 +447,8 @@ function replicated(rt: Runtime): Record<string, unknown> {
  * Sorted by entity id rather than taken in table order, so the comparison is over what the world IS
  * and not over the order a particular run happened to allocate it in.
  */
-function digestOf(server: GameServer): string {
-    const rt = server.runtime;
+function digestOf(sim: Sim): string {
+    const rt = sim.runtime;
     const lines: string[] = [];
     const ids = [...rt.entities.liveIds()].toSorted((a, b) => a - b);
     for (const id of ids) {
@@ -611,11 +609,11 @@ describe('a player who comes back', () => {
 function scoreOn(session: Session, tab: Tab): number {
     const id = tab.client.localPlayer?.id;
     if (id === undefined) return 0;
-    return playerField<number>(session.server.runtime, id, STATE_TAKEN) ?? 0;
+    return playerField<number>(session.sim.runtime, id, STATE_TAKEN) ?? 0;
 }
 
 function lifetimeOn(session: Session, tab: Tab): number {
     const id = tab.client.localPlayer?.id;
     if (id === undefined) return 0;
-    return playerField<number>(session.server.runtime, id, STATE_LIFETIME) ?? 0;
+    return playerField<number>(session.sim.runtime, id, STATE_LIFETIME) ?? 0;
 }

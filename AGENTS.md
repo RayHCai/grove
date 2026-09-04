@@ -15,12 +15,12 @@ Default to no comment. Comment only what the code cannot say itself.
 
 ## Docs
 
-| Path                   | Holds                                                                                       |
-| ---------------------- | ------------------------------------------------------------------------------------------- |
-| `docs/api_design.md`   | Creator-facing API and the reasoning behind it                                              |
-| `docs/api_spec.ts`     | The authoritative TS surface — a spec artifact, never shipped                               |
-| `packages/*/README.md` | What that package owns                                                                      |
-| `packages/*/DESIGN.md` | That package's technical architecture — core, renderer, transport, protocol, server, client |
+| Path                   | Holds                                                                                    |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `docs/api_design.md`   | Creator-facing API and the reasoning behind it                                           |
+| `docs/api_spec.ts`     | The authoritative TS surface — a spec artifact, never shipped                            |
+| `packages/*/README.md` | What that package owns                                                                   |
+| `packages/*/DESIGN.md` | That package's technical architecture — core, renderer, transport, protocol, sim, client |
 
 Where design prose and the spec disagree, the spec wins. Change both in the same commit.
 
@@ -81,7 +81,7 @@ means both files; widening one means widening its suite in the same commit.
 
 - Reach the API the way a creator does: in a handler, on a host, entered through a real frame. A call made
   from the test body proves only that the method exists.
-- Assert on the **mirror** (`runtimeOf(tab)`), not only on `session.server.runtime`.
+- Assert on the **mirror** (`runtimeOf(tab)`), not only on `session.sim.runtime`.
 - Import a decorated world from `../dist/worlds/<name>.js`; only `tsc` lowers standard decorators.
 - A member that turns out inert or unreachable is pinned **as that**, with the evidence for the claim.
   Never assert behaviour the platform does not have.
