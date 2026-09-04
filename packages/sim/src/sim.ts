@@ -277,8 +277,16 @@ export class Sim {
         };
 
         // Not awaited: a start handler awaiting a timer cannot complete until the loop steps, so
-        // awaiting this would deadlock the world against whatever drives it.
+        // awaiting this would deadlock the world against whatever drives it. The rejection is caught
+        // rather than left floating, because a host that never reads `started` — and a V8 isolate
+        // with no event loop to surface an unhandled rejection into — would lose a Game `@onStart`
+        // that threw with nothing anywhere to say so.
         this.#started = startGame(this.#rt);
+        void this.#started.catch((error: unknown) => {
+            this.#rt.log.warn(
+                `start-failed reason=threw: ${error instanceof Error ? error.message : String(error)}`,
+            );
+        });
 
         this.#booted = true;
     }
