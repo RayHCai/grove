@@ -1,5 +1,5 @@
 # Pinned for the reason `.node-version` is: a float difference between two toolchains is a desync a
 # playtest cannot reproduce, and `cargo` picks up this file without anything being prefixed.
 [toolchain]
-channel = "1.85.0"
+channel = "1.98.1"
 components = ["rustfmt", "clippy"]

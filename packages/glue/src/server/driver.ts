@@ -74,7 +74,6 @@ export class Driver {
     #simRate: number;
     #sendRate: number;
     #accumulator = 0;
-    #elapsed = 0;
     #lastNow: number | null = null;
     /** Ticks since the last broadcast, counted here rather than derived from the tick index. */
     #sinceSend = 0;
@@ -98,16 +97,6 @@ export class Driver {
     /** Unsimulated real time still owed, in seconds. */
     get accumulator(): number {
         return this.#accumulator;
-    }
-
-    /**
-     * Real time this driver has taken in since it was built, in seconds.
-     *
-     * Monotonic from zero, so a backwards clock step neither rewinds it nor buys anything measured
-     * against it an extension the length of the step; `nowSeconds` is the raw reading and moves back.
-     */
-    get elapsedSeconds(): number {
-        return this.#elapsed;
     }
 
     /** How many times the step cap has shed a backlog — a visible slowdown, not a silent one. */
@@ -135,9 +124,9 @@ export class Driver {
         if (this.#lastNow === null) this.#lastNow = nowSeconds;
 
         const dt = 1 / this.#simRate;
-        const advanced = Math.max(0, nowSeconds - this.#lastNow);
-        this.#accumulator += advanced;
-        this.#elapsed += advanced;
+        // Clamped rather than subtracted: an NTP correction or a restored VM snapshot arrives as a
+        // reading behind the last one, and a negative delta would rewind the accumulator.
+        this.#accumulator += Math.max(0, nowSeconds - this.#lastNow);
         this.#lastNow = nowSeconds;
 
         const cap = maxStepsPerWake(this.#simRate);

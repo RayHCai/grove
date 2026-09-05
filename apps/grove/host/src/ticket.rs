@@ -130,7 +130,12 @@ mod tests {
 
     #[test]
     fn refuses_another_secret() {
-        let err = verify(&mint(&claims(2_000), b"another-secret-entirely"), SECRET, GAME, 1_000);
+        let err = verify(
+            &mint(&claims(2_000), b"another-secret-entirely"),
+            SECRET,
+            GAME,
+            1_000,
+        );
         assert_eq!(err.unwrap_err(), TicketFailure::BadSignature);
     }
 
@@ -168,6 +173,36 @@ mod tests {
         });
         let err = verify(&mint(&other, SECRET), SECRET, GAME, 1_000);
         assert_eq!(err.unwrap_err(), TicketFailure::WrongGame);
+    }
+
+    /// A token `libs/api-contract`'s own `signSessionToken` minted, pasted verbatim.
+    ///
+    /// The two halves are in different languages over one shared secret, so agreeing about the
+    /// FORMAT is not the same as agreeing about the bytes: this is the only test that would catch a
+    /// base64 variant, a key-order difference or a signing-input change on the far side.
+    const MINTED_BY_TS: &str = concat!(
+        "eyJnYW1lSWQiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJzZXNzaW9uSWQiOiIy",
+        "MjIyMjIyMi0yMjIyLTQyMjItODIyMi0yMjIyMjIyMjIyMjIiLCJwbGF5ZXJJZCI6IjMzMzMzMzMzLTMzMzMt",
+        "NDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsImV4cCI6MjAwMH0",
+        ".TlkE2PGo2MpQQx5QxOz5fq1W9ljiINYjJe8cx-MVle0",
+    );
+
+    #[test]
+    fn accepts_the_bytes_the_typescript_signer_actually_produces() {
+        let ok = verify(MINTED_BY_TS, SECRET, GAME, 1_000).unwrap();
+        assert_eq!(ok.player_id, "33333333-3333-4333-8333-333333333333");
+        assert_eq!(ok.session_id, "22222222-2222-4222-8222-222222222222");
+        assert_eq!(ok.exp, 2_000);
+    }
+
+    #[test]
+    fn refuses_a_signature_lifted_from_another_ticket_by_the_same_signer() {
+        // Also minted by the TypeScript signer, for the same claims but another `playerId`. Swapping
+        // its signature onto the payload above is the forgery the HMAC exists to refuse.
+        let other_signature = "qS6fp9f8V9dDtzhD6dKCGapDATg8eWSCHhMiLLGTaFM";
+        let payload = MINTED_BY_TS.split_once('.').unwrap().0;
+        let err = verify(&format!("{payload}.{other_signature}"), SECRET, GAME, 1_000);
+        assert_eq!(err.unwrap_err(), TicketFailure::BadSignature);
     }
 
     #[test]

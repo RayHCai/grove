@@ -1,0 +1,5 @@
+# V8 ships prebuilt against the STATIC CRT, and rustc defaults to the dynamic one on MSVC. Linking
+# both is LNK4098, and a mixed CRT means two allocators in one process — a `free` on the wrong heap
+# is the kind of fault that surfaces as a crash somewhere else entirely.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
