@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 
 # The ticket. `subtle` rather than a bare `==`, because the comparison is over a signature.
-hmac = "0.12"
+hmac = "0.13"
 sha2 = "0.10"
 subtle = "2.6"
 base64 = "0.22"
