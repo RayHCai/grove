@@ -101,6 +101,14 @@ async fn upgrade(
     };
 
     let connection_id = format!("c{}", listener.next_id.fetch_add(1, Ordering::Relaxed));
+    // The session id is logged and never used again: it is what correlates this process's lines with
+    // the allocator's that minted the ticket and the manager's that answers its reads.
+    tracing::info!(
+        conn = %connection_id,
+        session = %claims.session_id,
+        player = %claims.player_id,
+        "accept conn"
+    );
     let identity = claims.player_id;
     // Echoed back, because a peer that named a subprotocol expects one and closes if it gets none.
     ws.protocols([offered.clone()])
@@ -118,7 +126,12 @@ fn subprotocol(headers: &HeaderMap, prefix: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-async fn serve(socket: WebSocket, listener: Listener, connection_id: ConnectionId, identity: String) {
+async fn serve(
+    socket: WebSocket,
+    listener: Listener,
+    connection_id: ConnectionId,
+    identity: String,
+) {
     let (writes, mut queue) = mpsc::channel::<Outgoing>(WRITE_QUEUE_DEPTH);
     let (hangup, mut hung_up) = mpsc::channel::<()>(1);
     if listener
@@ -138,7 +151,11 @@ async fn serve(socket: WebSocket, listener: Listener, connection_id: ConnectionI
 
     let writer = tokio::spawn(async move {
         while let Some(outgoing) = queue.recv().await {
-            if sink.send(Message::Text(outgoing.text.as_str().into())).await.is_err() {
+            if sink
+                .send(Message::Text(outgoing.text.as_str().into()))
+                .await
+                .is_err()
+            {
                 break;
             }
         }
@@ -167,10 +184,15 @@ async fn serve(socket: WebSocket, listener: Listener, connection_id: ConnectionI
         // Validated as JSON and never parsed into a tree: what a frame is allowed to CONTAIN is the
         // sim's to bound, a second opinion here would be a second copy of every cap that package
         // already states, and the bytes reach it exactly as the peer sent them.
-        let Ok(message) = RawValue::from_string(text.to_string()) else { continue };
+        let Ok(message) = RawValue::from_string(text.to_string()) else {
+            continue;
+        };
         if listener
             .events
-            .send(HostEvent::Frame { connection_id: connection_id.clone(), message })
+            .send(HostEvent::Frame {
+                connection_id: connection_id.clone(),
+                message,
+            })
             .is_err()
         {
             break;

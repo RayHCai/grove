@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use serde_json::value::RawValue;
@@ -19,6 +19,7 @@ use crate::isolate::{Death, Isolate, IsolateOptions};
 use crate::net::{HangUp, Outgoing};
 use crate::protocol::{
     ConnectionId, InboundFrame, InputBatch, LoadedRecord, OpenedConnection, OutputBatch, SendClass,
+    SimDiagnostics,
 };
 use crate::store::Store;
 
@@ -74,6 +75,11 @@ pub fn run(
     answers: mpsc::UnboundedSender<HostEvent>,
     io: tokio::runtime::Handle,
 ) -> Result<()> {
+    // Held for the life of this thread, before the isolate exists: V8 posts delayed tasks and
+    // deno_core schedules them on the ambient runtime, so an isolate built outside one silently
+    // loses every timer it asks for.
+    let _entered = io.enter();
+
     let mut isolate = Isolate::boot(IsolateOptions {
         bundle: opts.bundle,
         config: opts.sim_config,
@@ -89,43 +95,70 @@ pub fn run(
     let mut pending = Pending::default();
     let mut drains: Vec<bool> = Vec::new();
     let mut draining = false;
+    let mut reported = SimDiagnostics {
+        dropped: 0,
+        stale: 0,
+    };
 
     let interval = Duration::from_secs_f64(1.0 / opts.sim_rate);
-    let started = Instant::now();
 
     loop {
         // Non-blocking: the loop's pace is the clock's, not the channel's, and a wake that waited on
         // a message would run the game at the rate its players happened to type.
         while let Ok(event) = events.try_recv() {
             match event {
-                HostEvent::Opened { connection_id, identity, writes, hangup } => {
+                HostEvent::Opened {
+                    connection_id,
+                    identity,
+                    writes,
+                    hangup,
+                } => {
                     peers.insert(connection_id.clone(), Peer { writes, hangup });
-                    pending
-                        .opened
-                        .push(OpenedConnection { connection_id, identity: Some(identity) });
+                    pending.opened.push(OpenedConnection {
+                        connection_id,
+                        identity: Some(identity),
+                    });
                 }
-                HostEvent::Frame { connection_id, message } => {
-                    pending.frames.push(InboundFrame { connection_id, message });
+                HostEvent::Frame {
+                    connection_id,
+                    message,
+                } => {
+                    pending.frames.push(InboundFrame {
+                        connection_id,
+                        message,
+                    });
                 }
                 HostEvent::Closed { connection_id } => {
                     peers.remove(&connection_id);
                     pending.closed.push(connection_id);
                 }
-                HostEvent::Loaded { connection_id, fields } => {
-                    pending.records.push(LoadedRecord { connection_id, fields });
+                HostEvent::Loaded {
+                    connection_id,
+                    fields,
+                } => {
+                    pending.records.push(LoadedRecord {
+                        connection_id,
+                        fields,
+                    });
                 }
                 HostEvent::Saved { host_key } => pending.saved.push(host_key),
                 HostEvent::Drain => draining = true,
             }
         }
 
-        let wake = clock.wake(started.elapsed().as_secs_f64(), &mut drains);
+        // Wall-clock, as `GameInstance` feeds its own driver: the accumulator clamps a reading that
+        // moved backwards, so a corrected clock costs at most the correction, and the same reading is
+        // what the batch is stamped with — a monotonic one would put 1970 on every `serverSentMs`.
+        let wake = clock.wake(unix_millis() / 1000.0, &mut drains);
         if wake.shed {
-            tracing::warn!(shed = clock.shed_count(), "the world is behind and shed its backlog");
+            tracing::warn!(
+                shed = clock.shed_count(),
+                "the world is behind and shed its backlog"
+            );
         }
 
         for drain in drains.iter().copied() {
-            let mut batch = InputBatch::new(unix_millis(), drain);
+            let mut batch = InputBatch::new(clock.now_seconds() * 1000.0, drain);
             pending.take_into(&mut batch);
 
             watchdog.enter();
@@ -133,7 +166,22 @@ pub fn run(
             watchdog.leave();
 
             match out {
-                Ok(out) => apply(out, &mut peers, &opts.store, &io, &answers),
+                Ok(out) => {
+                    // Only when they move: they are cumulative, so a line per tick would say the
+                    // same thing sixty times a second and a rate is what an operator watches.
+                    if out.diagnostics.dropped != reported.dropped
+                        || out.diagnostics.stale != reported.stale
+                    {
+                        tracing::warn!(
+                            tick = out.tick,
+                            dropped = out.diagnostics.dropped,
+                            stale = out.diagnostics.stale,
+                            "unrepresentable marks"
+                        );
+                        reported = out.diagnostics;
+                    }
+                    apply(out, &mut peers, &opts.store, &io, &answers);
+                }
                 // A tick that threw is a world that cannot be trusted to be advanced again — it
                 // mutates in place and there is no transaction, so half a step is a world no later
                 // delta repairs. Every peer is told why, and the process ends.
@@ -215,8 +263,13 @@ fn apply(
         // reason `to` is a list. Re-encoding here would hand a peer bytes the sim never measured.
         let text = Arc::new(send.envelope);
         for connection_id in &send.to {
-            let Some(peer) = peers.get(connection_id) else { continue };
-            let outgoing = Outgoing { text: text.clone(), class: send.class };
+            let Some(peer) = peers.get(connection_id) else {
+                continue;
+            };
+            let outgoing = Outgoing {
+                text: text.clone(),
+                class: send.class,
+            };
             match peer.writes.try_send(outgoing) {
                 Ok(()) => {}
                 // A full queue is a peer that cannot keep up. A droppable frame is superseded by the
@@ -257,7 +310,10 @@ fn apply(
                     None
                 }
             };
-            let _ = events.send(HostEvent::Loaded { connection_id: load.connection_id, fields });
+            let _ = events.send(HostEvent::Loaded {
+                connection_id: load.connection_id,
+                fields,
+            });
         });
     }
 
@@ -267,7 +323,9 @@ fn apply(
         io.spawn(async move {
             match store.save(&save.host_key, &save.fields).await {
                 Ok(()) => {
-                    let _ = events.send(HostEvent::Saved { host_key: save.host_key });
+                    let _ = events.send(HostEvent::Saved {
+                        host_key: save.host_key,
+                    });
                 }
                 // Not acknowledged: the sim holds the record so a rejoin inside this session still
                 // reads its own values back, which is the better of the two wrong answers.

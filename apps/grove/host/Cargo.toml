@@ -2,7 +2,7 @@
 name = "grove-host"
 version = "0.0.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.98"
 publish = false
 description = "One game session, in one process: the sockets, the clock, the isolate and the drain around @platform/sim."
 

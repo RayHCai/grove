@@ -80,8 +80,14 @@ what every other peer sees and what persisted `@serverState` is keyed by across 
 ## Running it
 
 ```bash
+pnpm --filter @grove/host run build:bundle   # rolls the sim into dist/sim.js
 cargo run --release
 ```
+
+`bundle/entry.ts` is the file a real game replaces: it imports its own project manifest and script
+registry and hands `createSim` both. What cannot change is its last line — `installIsolateEntry` is
+what puts the three functions on the global this process reaches the bundle through. It is bundled
+`platform: neutral`, so esbuild refuses a Node built-in here rather than shimming one in.
 
 | Variable                 | What                                                               |
 | ------------------------ | ------------------------------------------------------------------ |
@@ -96,8 +102,13 @@ cargo run --release
 | `GROVE_TICK_BUDGET_MS`   | wall-clock one tick may spend inside the isolate                   |
 
 `pnpm run build | test | typecheck` at the repo root reach this crate through `package.json`, whose
-scripts shell to cargo. With no Rust toolchain on `PATH` they print one `skipped:` line and succeed,
-so working on the TypeScript half does not require installing Rust.
+scripts shell to cargo — `build` bundles the sim first, `typecheck` is `clippy -D warnings`. With no
+Rust toolchain on `PATH` they print one `skipped:` line and succeed, so working on the TypeScript
+half does not require installing Rust.
+
+The toolchain is pinned in `rust-toolchain.toml`, and `cargo` reads it without being asked. On
+Windows the crate links against the **static** CRT, because V8 ships prebuilt that way and a process
+with two CRTs has two allocators in it.
 
 ## What the bundle must publish
 
