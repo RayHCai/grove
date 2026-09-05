@@ -68,17 +68,14 @@ describe('real time becomes ticks', () => {
         expect(spy.steps).toHaveLength(3);
     });
 
-    it('advances elapsed time monotonically, whatever the clock does', () => {
+    it('reports the reading it was last given, however that reading moved', () => {
         const spy = spyDriver();
         spy.driver.pump(100);
         spy.driver.pump(101);
-        expect(spy.driver.elapsedSeconds).toBeCloseTo(1, 10);
-
-        // The raw reading moves back and elapsed does not, which is why every wall-clock deadline is
-        // measured against this one.
         spy.driver.pump(50);
+        // The raw reading the batch stamps its clock from. The accumulator is what refuses to go
+        // backwards, not this.
         expect(spy.driver.nowSeconds).toBe(50);
-        expect(spy.driver.elapsedSeconds).toBeCloseTo(1, 10);
     });
 });
 

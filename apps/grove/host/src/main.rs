@@ -68,15 +68,26 @@ fn main() -> Result<()> {
     let (events, receiver) = mpsc::unbounded_channel::<HostEvent>();
     let store = store::Store::new(config.manager_url.clone(), config.manager_token.clone());
 
-    let listener = net::Listener::new(events.clone(), config.token_secret.clone(), config.game_id.clone());
-    let bind: SocketAddr = config.bind.parse().context("GROVE_BIND is not an address")?;
+    let listener = net::Listener::new(
+        events.clone(),
+        config.token_secret.clone(),
+        config.game_id.clone(),
+    );
+    let bind: SocketAddr = config
+        .bind
+        .parse()
+        .context("GROVE_BIND is not an address")?;
     let router = listener.router();
 
     let serving = io.spawn(async move {
         let socket = tokio::net::TcpListener::bind(bind).await?;
         // Reported rather than assumed: `server-manager` binds port 0 and learns the port from here.
         tracing::info!(addr = %socket.local_addr()?, "listening");
-        axum::serve(socket, router.into_make_service_with_connect_info::<SocketAddr>()).await?;
+        axum::serve(
+            socket,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await?;
         Ok::<(), anyhow::Error>(())
     });
 

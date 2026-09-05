@@ -50,7 +50,10 @@ fn op_grove_take_message(state: &mut OpState) -> String {
 
 #[op2(fast)]
 fn op_grove_put_message(state: &mut OpState, #[string] message: String) {
-    state.borrow_mut::<Rc<RefCell<Mailbox>>>().borrow_mut().outbound = Some(message);
+    state
+        .borrow_mut::<Rc<RefCell<Mailbox>>>()
+        .borrow_mut()
+        .outbound = Some(message);
 }
 
 extension!(
@@ -135,7 +138,12 @@ impl Isolate {
             .context("the sim bundle threw while it was being evaluated")?;
 
         mailbox.borrow_mut().inbound = Some(opts.config);
-        let mut isolate = Self { runtime, mailbox, over_heap, dead: None };
+        let mut isolate = Self {
+            runtime,
+            mailbox,
+            over_heap,
+            dead: None,
+        };
         isolate.run("[grove:boot]", BOOT_SOURCE)?;
         Ok(isolate)
     }

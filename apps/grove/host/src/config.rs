@@ -58,6 +58,8 @@ fn required(name: &str) -> Result<String> {
 fn number(name: &str, fallback: usize) -> Result<usize> {
     match std::env::var(name) {
         Err(_) => Ok(fallback),
-        Ok(raw) => raw.parse().with_context(|| format!("{name} must be a whole number")),
+        Ok(raw) => raw
+            .parse()
+            .with_context(|| format!("{name} must be a whole number")),
     }
 }

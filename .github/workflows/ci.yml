@@ -51,7 +51,7 @@ jobs:
             # green over a half that was never compiled.
             - uses: dtolnay/rust-toolchain@stable
               with:
-                  toolchain: 1.85.0
+                  toolchain: 1.98.1
                   components: clippy, rustfmt
 
             - uses: Swatinem/rust-cache@v2

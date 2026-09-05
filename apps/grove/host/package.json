@@ -5,11 +5,16 @@
     "type": "module",
     "description": "One game session, in one process: the sockets, the clock, the isolate and the drain. Rust.",
     "scripts": {
-        "build": "node scripts/cargo.mjs build --release",
+        "build:bundle": "node bundle/build.mjs",
+        "build": "node bundle/build.mjs && node scripts/cargo.mjs build --release",
         "typecheck": "node scripts/cargo.mjs clippy --all-targets -- -D warnings",
         "test": "node scripts/cargo.mjs test",
         "format": "node scripts/cargo.mjs fmt",
         "format:check": "node scripts/cargo.mjs fmt --check",
         "clean": "node scripts/cargo.mjs clean"
+    },
+    "devDependencies": {
+        "@platform/sim": "workspace:*",
+        "esbuild": "^0.28.2"
     }
 }

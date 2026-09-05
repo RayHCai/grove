@@ -17,7 +17,11 @@ pub struct Store {
 
 impl Store {
     pub fn new(base: String, token: String) -> Self {
-        Self { client: reqwest::Client::new(), base, token }
+        Self {
+            client: reqwest::Client::new(),
+            base,
+            token,
+        }
     }
 
     /// Reads one host's persisted fields.
@@ -38,12 +42,17 @@ impl Store {
             return Ok(None);
         }
         if !response.status().is_success() {
-            bail!("the game manager answered {} for {host_key}", response.status());
+            bail!(
+                "the game manager answered {} for {host_key}",
+                response.status()
+            );
         }
         // Taken as text and wrapped rather than deserialized: the host never reads a field, and a
         // record that round-tripped through a tree would reach the sim as different bytes.
         let body = response.text().await.context("reading a state record")?;
-        Ok(Some(RawValue::from_string(body).context("a state record that is not JSON")?))
+        Ok(Some(
+            RawValue::from_string(body).context("a state record that is not JSON")?,
+        ))
     }
 
     pub async fn save(&self, host_key: &str, fields: &RawValue) -> Result<()> {
@@ -57,7 +66,10 @@ impl Store {
             .context("reaching the game manager")?;
 
         if !response.status().is_success() {
-            bail!("the game manager answered {} for {host_key}", response.status());
+            bail!(
+                "the game manager answered {} for {host_key}",
+                response.status()
+            );
         }
         Ok(())
     }

@@ -16,7 +16,9 @@ pub fn max_steps_per_wake(sim_rate: f64) -> u32 {
 
 /// Ticks between broadcasts, never below one.
 pub fn ticks_per_send(sim_rate: f64, send_rate: f64) -> u32 {
-    if !(send_rate > 0.0) {
+    // NaN answers one, like a rate of zero: this is asked on every wake and must never divide by
+    // something that has no ordering.
+    if !send_rate.is_finite() || send_rate <= 0.0 {
         return 1;
     }
     ((sim_rate / send_rate).round() as u32).max(1)
@@ -40,7 +42,6 @@ pub struct Clock {
     sim_rate: f64,
     send_rate: f64,
     accumulator: f64,
-    elapsed: f64,
     last_now: Option<f64>,
     /// Ticks since the last broadcast, counted here rather than derived from the tick index, so a
     /// mid-session rate change cannot desync it.
@@ -51,13 +52,18 @@ pub struct Clock {
 
 impl Clock {
     pub fn new(sim_rate: f64, send_rate: f64) -> Self {
-        assert!(sim_rate.is_finite() && sim_rate > 0.0, "simRate must be positive and finite");
-        assert!(send_rate.is_finite() && send_rate > 0.0, "sendRate must be positive and finite");
+        assert!(
+            sim_rate.is_finite() && sim_rate > 0.0,
+            "simRate must be positive and finite"
+        );
+        assert!(
+            send_rate.is_finite() && send_rate > 0.0,
+            "sendRate must be positive and finite"
+        );
         Self {
             sim_rate,
             send_rate,
             accumulator: 0.0,
-            elapsed: 0.0,
             last_now: None,
             since_send: 0,
             shed_count: 0,
@@ -70,24 +76,9 @@ impl Clock {
         self.now_seconds
     }
 
-    /// Real time taken in since construction, monotonic from zero.
-    ///
-    /// A backwards clock step neither rewinds this nor buys anything measured against it an
-    /// extension its own length; `now_seconds` is the raw reading and does move back.
-    pub fn elapsed_seconds(&self) -> f64 {
-        self.elapsed
-    }
-
     /// How many times the cap has shed a backlog — a visible slowdown, not a silent one.
     pub fn shed_count(&self) -> u64 {
         self.shed_count
-    }
-
-    pub fn set_rates(&mut self, sim_rate: f64, send_rate: f64) {
-        assert!(sim_rate.is_finite() && sim_rate > 0.0, "simRate must be positive and finite");
-        assert!(send_rate.is_finite() && send_rate > 0.0, "sendRate must be positive and finite");
-        self.sim_rate = sim_rate;
-        self.send_rate = send_rate;
     }
 
     /// One wake. Returns the ticks owed, and `drains` says which of them close a send interval.
@@ -109,9 +100,7 @@ impl Clock {
         let dt = 1.0 / self.sim_rate;
         // Clamped rather than subtracted: an NTP correction or a restored snapshot arrives as a
         // reading behind the last one, and a negative delta would rewind the accumulator.
-        let advanced = (now_seconds - last).max(0.0);
-        self.accumulator += advanced;
-        self.elapsed += advanced;
+        self.accumulator += (now_seconds - last).max(0.0);
         self.last_now = Some(now_seconds);
 
         let cap = max_steps_per_wake(self.sim_rate);
@@ -164,9 +153,9 @@ mod tests {
         clock.wake(0.0, &mut drains);
         clock.wake(1.0, &mut drains);
         assert_eq!(clock.wake(0.5, &mut drains).steps, 0);
-        // The raw reading moves back and elapsed does not, which is why every deadline reads elapsed.
+        // Clamped rather than subtracted: an NTP correction arrives as a reading behind the last
+        // one, and a negative delta would rewind the accumulator.
         assert_eq!(clock.now_seconds(), 0.5);
-        assert!((clock.elapsed_seconds() - 1.0).abs() < 1e-9);
     }
 
     #[test]
@@ -214,12 +203,14 @@ mod tests {
     }
 
     #[test]
-    fn keeps_the_cadence_across_a_mid_session_rate_change() {
+    fn counts_the_cadence_here_rather_than_off_the_tick_index() {
         let mut clock = Clock::new(60.0, 20.0);
         let mut drains = Vec::new();
         clock.wake(0.0, &mut drains);
-        assert_eq!(clock.wake(3.0 / 60.0, &mut drains).sends, 1);
-        clock.set_rates(30.0, 10.0);
-        assert_eq!(clock.wake(3.0 / 60.0 + 3.0 / 30.0, &mut drains).sends, 1);
+        // Two wakes of two ticks each: the send lands on the third TICK, which falls inside the
+        // second wake — a boundary a cadence derived from the tick index could not see.
+        assert_eq!(clock.wake(2.0 / 60.0, &mut drains).sends, 0);
+        assert_eq!(clock.wake(4.0 / 60.0, &mut drains).sends, 1);
+        assert_eq!(drains, vec![true, false]);
     }
 }
