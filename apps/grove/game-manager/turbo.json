@@ -1,0 +1,20 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "extends": ["//"],
+    "tasks": {
+        "build": {
+            "inputs": ["**/*.go", "go.mod", "go.sum", "package.json"],
+            // The binary goes to dist/, but declaring it makes turbo warn on every machine without
+            // a Go toolchain, where the task correctly produces nothing at all.
+            "outputs": []
+        },
+        "typecheck": {
+            "inputs": ["**/*.go", "go.mod", "go.sum", "package.json"],
+            "outputs": []
+        },
+        "test": {
+            "inputs": ["**/*.go", "go.mod", "go.sum", "package.json"],
+            "outputs": []
+        }
+    }
+}
