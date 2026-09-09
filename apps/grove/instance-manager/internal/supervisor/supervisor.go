@@ -1,0 +1,456 @@
+// Package supervisor is every game process on this box: what is running, what each one is doing,
+// and what each one last said.
+package supervisor
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/RayHCai/grove/libs/go-grove/contract"
+)
+
+var (
+	// ErrAtCapacity is the 409: this box is full, and which box a session lands on is
+	// @grove/server-manager's to decide again.
+	ErrAtCapacity = errors.New("host is at its instance cap")
+	// ErrUnknown is the 404.
+	ErrUnknown = errors.New("no such instance")
+)
+
+// What a child is given when this agent has no narrower answer, matching the game process's own
+// defaults so the two halves never disagree about a limit.
+const (
+	defaultHeapLimitBytes = 256 * 1024 * 1024
+	defaultTickBudget     = 250 * time.Millisecond
+	defaultLogLines       = 512
+	defaultStartGrace     = 20 * time.Second
+	defaultStopTimeout    = 20 * time.Second
+	defaultRetention      = 10 * time.Minute
+)
+
+// Options is the whole configuration of a Registry, seams included.
+type Options struct {
+	Launcher Launcher
+	Prober   Prober
+	Ports    Ports
+	Log      *slog.Logger
+
+	MaxInstances int
+	// Lines of a child's output kept per instance.
+	LogLines int
+	// How long a child may take to bind its port before a failed probe means unhealthy.
+	StartGrace time.Duration
+	// How long a drain may take before the process is taken anyway.
+	StopTimeout time.Duration
+	// How long a reaped instance stays listed, since its last lines are the account of why it ended.
+	Retention time.Duration
+
+	TokenSecret    []byte
+	HeapLimitBytes int64
+	TickBudget     time.Duration
+}
+
+// Request is one session this box was told to run.
+type Request struct {
+	GameID        string
+	SessionID     string
+	BundlePath    string
+	SimConfigPath string
+	ManagerURL    string
+	ManagerToken  string
+}
+
+// View is an InstanceReport plus the port this box bound for it. The report is the fleet's shape and
+// has no room for a port, because the fleet addresses a session by url.
+type View struct {
+	contract.InstanceReport
+	Port int `json:"port"`
+}
+
+type instance struct {
+	id        string
+	gameID    string
+	sessionID string
+	port      int
+	addr      string
+	startedAt time.Time
+	child     Child
+	logs      *Ring
+	ended     chan struct{}
+	stopOnce  sync.Once
+
+	mu      sync.Mutex
+	state   contract.InstanceState
+	players int
+	exited  bool
+	endedAt time.Time
+}
+
+// Registry holds one entry per game process this box started.
+type Registry struct {
+	opts Options
+
+	mu        sync.Mutex
+	instances map[string]*instance
+}
+
+// New builds the registry the routes and the heartbeat both read.
+func New(opts Options) *Registry {
+	if opts.LogLines < 1 {
+		opts.LogLines = defaultLogLines
+	}
+	if opts.StartGrace <= 0 {
+		opts.StartGrace = defaultStartGrace
+	}
+	if opts.StopTimeout <= 0 {
+		opts.StopTimeout = defaultStopTimeout
+	}
+	if opts.Retention <= 0 {
+		opts.Retention = defaultRetention
+	}
+	if opts.HeapLimitBytes <= 0 {
+		opts.HeapLimitBytes = defaultHeapLimitBytes
+	}
+	if opts.TickBudget <= 0 {
+		opts.TickBudget = defaultTickBudget
+	}
+	if opts.Log == nil {
+		opts.Log = slog.Default()
+	}
+	return &Registry{opts: opts, instances: make(map[string]*instance)}
+}
+
+// Start spawns one game process and returns what this box will report about it.
+func (r *Registry) Start(ctx context.Context, req Request) (View, error) {
+	// Held across the spawn so the cap is a real cap: two concurrent starts must not both pass it.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// One session, one world. A retried start — a @grove/server-manager timeout, a duplicated
+	// request — must be handed the process already holding the session, because a second one beside
+	// it is a second world that half the players would be talking to.
+	for _, held := range r.instances {
+		if held.sessionID == req.SessionID && !held.done() {
+			return held.view(time.Now()), nil
+		}
+	}
+
+	if r.running() >= r.opts.MaxInstances {
+		return View{}, ErrAtCapacity
+	}
+
+	id := contract.NewUUID()
+	port, err := r.opts.Ports.Take()
+	if err != nil {
+		return View{}, err
+	}
+
+	logs := NewRing(r.opts.LogLines)
+	child, err := r.opts.Launcher.Start(ctx, Spec{
+		GameID: req.GameID,
+		// Bound on every interface because a player dials the box directly; the probe still reaches
+		// it over loopback, which is the only path this agent uses.
+		Bind:           fmt.Sprintf("0.0.0.0:%d", port),
+		BundlePath:     req.BundlePath,
+		SimConfigPath:  req.SimConfigPath,
+		TokenSecret:    r.opts.TokenSecret,
+		ManagerURL:     req.ManagerURL,
+		ManagerToken:   req.ManagerToken,
+		HeapLimitBytes: r.opts.HeapLimitBytes,
+		TickBudget:     r.opts.TickBudget,
+	}, logs)
+	if err != nil {
+		return View{}, fmt.Errorf("spawn a game process: %w", err)
+	}
+
+	inst := &instance{
+		id:        id,
+		gameID:    req.GameID,
+		sessionID: req.SessionID,
+		port:      port,
+		addr:      fmt.Sprintf("127.0.0.1:%d", port),
+		startedAt: time.Now(),
+		child:     child,
+		logs:      logs,
+		ended:     make(chan struct{}),
+		state:     contract.InstanceStarting,
+	}
+	r.instances[id] = inst
+	go r.reap(inst)
+
+	r.opts.Log.Info("instance started",
+		"instanceId", id, "gameId", req.GameID, "sessionId", req.SessionID, "port", port)
+	return inst.view(time.Now()), nil
+}
+
+// reap waits for a child to exit and records how it went.
+//
+// Nothing is restarted here: a game-instance that died took its world with it, and a restart would
+// hand its players a world that never existed.
+func (r *Registry) reap(inst *instance) {
+	err := inst.child.Wait()
+
+	inst.mu.Lock()
+	inst.exited = true
+	inst.endedAt = time.Now()
+	inst.state = contract.InstanceUnhealthy
+	inst.mu.Unlock()
+	close(inst.ended)
+
+	if err != nil {
+		inst.logs.Add("game-instance exited: " + err.Error())
+	} else {
+		inst.logs.Add("game-instance exited cleanly")
+	}
+	r.opts.Log.Info("instance exited", "instanceId", inst.id, "sessionId", inst.sessionID, "err", err)
+}
+
+// Watch polls every child on an interval, which is the only way this box learns a state changed.
+func (r *Registry) Watch(ctx context.Context, every time.Duration) {
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			r.Poll(ctx)
+		}
+	}
+}
+
+// Poll asks every child how it is, once. The state that reaches a report is this box's own reading
+// of the process, never a claim the process made about itself.
+func (r *Registry) Poll(ctx context.Context) {
+	now := time.Now()
+	for _, inst := range r.snapshot() {
+		r.probe(ctx, inst, now)
+	}
+	r.sweep(now)
+}
+
+func (r *Registry) probe(ctx context.Context, inst *instance, now time.Time) {
+	if inst.done() {
+		inst.mark(contract.InstanceUnhealthy)
+		return
+	}
+
+	vitals, err := r.opts.Prober.Probe(ctx, inst.addr)
+
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+
+	// A drain is this agent's own decision, and no probe overrides it.
+	if inst.state == contract.InstanceDraining {
+		return
+	}
+	if err == nil {
+		inst.state = contract.InstanceHealthy
+		inst.players = vitals.Players
+		return
+	}
+	// A process that has not bound its port yet is starting, not failing — but only for as long as
+	// a boot takes.
+	if inst.state == contract.InstanceStarting && now.Sub(inst.startedAt) < r.opts.StartGrace {
+		return
+	}
+	inst.state = contract.InstanceUnhealthy
+}
+
+// sweep forgets instances whose retention has run out, so a long-lived box does not accumulate the
+// dead forever.
+func (r *Registry) sweep(now time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, inst := range r.instances {
+		inst.mu.Lock()
+		stale := inst.exited && now.Sub(inst.endedAt) >= r.opts.Retention
+		inst.mu.Unlock()
+
+		if stale {
+			delete(r.instances, id)
+		}
+	}
+}
+
+// Stop drains the child and waits for it to end, so a 204 means this session's saves are written.
+//
+// The teardown runs on its own goroutine rather than the caller's context, and the entry is dropped
+// only once the child has actually ended: a client that hangs up mid-drain must not leave a live
+// process with no entry naming it, which is a port this box could never account for again.
+func (r *Registry) Stop(ctx context.Context, id string) error {
+	r.mu.Lock()
+	inst, ok := r.instances[id]
+	r.mu.Unlock()
+	if !ok {
+		return ErrUnknown
+	}
+
+	inst.stopOnce.Do(func() { go r.teardown(inst) })
+
+	select {
+	case <-inst.ended:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	r.mu.Lock()
+	delete(r.instances, id)
+	r.mu.Unlock()
+
+	r.opts.Log.Info("instance stopped", "instanceId", id, "sessionId", inst.sessionID)
+	return nil
+}
+
+// teardown gives the drain its budget and then takes the process anyway: the port was asked for
+// back, and a child that ignored one signal will not answer the next.
+func (r *Registry) teardown(inst *instance) {
+	if inst.done() {
+		return
+	}
+
+	inst.mark(contract.InstanceDraining)
+	if err := inst.child.Drain(); err != nil {
+		r.opts.Log.Warn("drain refused", "instanceId", inst.id, "err", err)
+		_ = inst.child.Kill()
+	}
+
+	select {
+	case <-inst.ended:
+	case <-time.After(r.opts.StopTimeout):
+		// Not waited on again: `reap` closes `ended` when the process actually goes, and a child
+		// that survives a kill is a fact for the next probe rather than a goroutine held here.
+		_ = inst.child.Kill()
+	}
+}
+
+// List is every instance this box holds, oldest first, so a page of them reads as a timeline.
+func (r *Registry) List() []View {
+	now := time.Now()
+	held := r.snapshot()
+
+	out := make([]View, 0, len(held))
+	for _, inst := range held {
+		out = append(out, inst.view(now))
+	}
+	return out
+}
+
+// Get is one instance, whether it is still running or only still remembered.
+func (r *Registry) Get(id string) (View, error) {
+	r.mu.Lock()
+	inst, ok := r.instances[id]
+	r.mu.Unlock()
+	if !ok {
+		return View{}, ErrUnknown
+	}
+	return inst.view(time.Now()), nil
+}
+
+// Logs is the tail of one child's output, oldest first.
+func (r *Registry) Logs(id string, limit int) ([]string, error) {
+	r.mu.Lock()
+	inst, ok := r.instances[id]
+	r.mu.Unlock()
+	if !ok {
+		return nil, ErrUnknown
+	}
+	return inst.logs.Lines(limit), nil
+}
+
+// Live is what the heartbeat carries: one report per child this box still holds a process for. A
+// reaped one is absent rather than reported dead, so the fleet reads a whole box from one beat.
+func (r *Registry) Live() []contract.InstanceReport {
+	now := time.Now()
+	held := r.snapshot()
+
+	out := make([]contract.InstanceReport, 0, len(held))
+	for _, inst := range held {
+		if inst.done() {
+			continue
+		}
+		out = append(out, inst.view(now).InstanceReport)
+	}
+	return out
+}
+
+// Running counts the processes this box is actually holding, which is what its capacity is against.
+func (r *Registry) Running() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.running()
+}
+
+// Max is the cap this box was configured with.
+func (r *Registry) Max() int {
+	return r.opts.MaxInstances
+}
+
+// StopTimeout is how long a drain may hold Stop, which is what a caller has to give its response.
+func (r *Registry) StopTimeout() time.Duration {
+	return r.opts.StopTimeout
+}
+
+func (r *Registry) running() int {
+	live := 0
+	for _, inst := range r.instances {
+		if !inst.done() {
+			live++
+		}
+	}
+	return live
+}
+
+func (r *Registry) snapshot() []*instance {
+	r.mu.Lock()
+	held := make([]*instance, 0, len(r.instances))
+	for _, inst := range r.instances {
+		held = append(held, inst)
+	}
+	r.mu.Unlock()
+
+	// A map's order is deliberately unstable, and this list is read by a person.
+	sort.Slice(held, func(a, b int) bool {
+		if held[a].startedAt.Equal(held[b].startedAt) {
+			return held[a].id < held[b].id
+		}
+		return held[a].startedAt.Before(held[b].startedAt)
+	})
+	return held
+}
+
+func (i *instance) view(now time.Time) View {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	return View{
+		InstanceReport: contract.InstanceReport{
+			InstanceID:    i.id,
+			GameID:        i.gameID,
+			SessionID:     i.sessionID,
+			State:         i.state,
+			Players:       i.players,
+			UptimeSeconds: int64(now.Sub(i.startedAt).Seconds()),
+		},
+		Port: i.port,
+	}
+}
+
+func (i *instance) mark(state contract.InstanceState) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.state = state
+}
+
+func (i *instance) done() bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.exited
+}
