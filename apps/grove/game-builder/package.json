@@ -1,0 +1,28 @@
+{
+    "name": "@grove/game-builder",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Compiles a creator's source into the bundle set a session loads.",
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "dev": "tsc -p tsconfig.json && node --watch dist/main.js",
+        "start": "node dist/main.js",
+        "typecheck": "tsc -p tsconfig.test.json",
+        "test": "vitest run --passWithNoTests",
+        "clean": "rm -rf dist .turbo"
+    },
+    "dependencies": {
+        "@fastify/rate-limit": "^11.2.0",
+        "@fastify/swagger": "^9.8.1",
+        "@grove/api-contract": "workspace:*",
+        "fastify": "^5.12.1",
+        "fastify-type-provider-zod": "^7.0.0",
+        "zod": "^4.5.4"
+    },
+    "devDependencies": {
+        "@types/node": "^26.1.2",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    }
+}
