@@ -1,0 +1,12 @@
+# Provider plugins and module copies, fetched per root by `terraform init`.
+.terraform/
+
+# State never lives in the repo: it holds every value the providers read back, secrets included.
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# A saved plan is a credentialed snapshot of one moment, not a source file.
+*.tfplan
+crash.log
+crash.*.log
