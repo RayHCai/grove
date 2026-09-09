@@ -1,0 +1,13 @@
+{
+    "name": "@grove/infra",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "The AWS deployment: the games bucket and its distribution, the tables behind game data, the build listener, and the EC2 fleet. Terraform.",
+    "scripts": {
+        "typecheck": "node ../../../scripts/terraform-validate.mjs",
+        "format": "node ../../../scripts/terraform.mjs fmt -recursive",
+        "format:check": "node ../../../scripts/terraform.mjs fmt -recursive -check",
+        "clean": "rm -rf .turbo environments/*/.terraform"
+    }
+}
