@@ -44,7 +44,7 @@ each of them is owed.
 
 **A socket, a clock, a store or a codec for I/O.** It opens nothing, reads no time, and cannot
 persist anything: the time it stamps arrives in the batch, and a persisted record is asked for in one
-output batch and answered in a later input batch. Two hosts drive it — `@grove/host` in Rust for a
+output batch and answered in a later input batch. Two hosts drive it — `@grove/game-instance` in Rust for a
 deployed session, and `@platform/glue`'s `GameInstance` in process for local play, the test suites
 and the integration suite.
 

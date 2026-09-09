@@ -1,4 +1,4 @@
-# @grove/host
+# @grove/game-instance
 
 One game session, in one process: the sockets, the ticket check, the tick clock, the isolate the
 world runs in, and the drain. Written in Rust.
@@ -17,7 +17,7 @@ moved mid-step would not be a fixed step at all.
 | File          | Holds                                                                            |
 | ------------- | -------------------------------------------------------------------------------- |
 | `main.rs`     | the composition root: config, listener, the drain signal, the session thread     |
-| `config.rs`   | the environment `@grove/server-manager` spawns this process with                 |
+| `config.rs`   | the environment `@grove/instance-manager` spawns this process with               |
 | `ticket.rs`   | join-ticket verification, byte for byte with `libs/api-contract`'s minting       |
 | `net.rs`      | the WebSocket listener, one task per peer, and the frame-size cap                |
 | `session.rs`  | the tick loop, the write-out, and the watchdog that kills a runaway tick         |
@@ -80,7 +80,7 @@ what every other peer sees and what persisted `@serverState` is keyed by across 
 ## Running it
 
 ```bash
-pnpm --filter @grove/host run build:bundle   # rolls the sim into dist/sim.js
+pnpm --filter @grove/game-instance run build:bundle   # rolls the sim into dist/sim.js
 cargo run --release
 ```
 
@@ -106,9 +106,10 @@ scripts shell to cargo — `build` bundles the sim first, `typecheck` is `clippy
 Rust toolchain on `PATH` they print one `skipped:` line and succeed, so working on the TypeScript
 half does not require installing Rust.
 
-The toolchain is pinned in `rust-toolchain.toml`, and `cargo` reads it without being asked. On
-Windows the crate links against the **static** CRT, because V8 ships prebuilt that way and a process
-with two CRTs has two allocators in it.
+This crate and `@grove/upload-service` are one cargo workspace rooted at `apps/grove`, which is
+where the lock, the pinned toolchain and the release profile live — `cargo` finds all three by
+walking up from here. On Windows the crate links against the **static** CRT, because V8 ships
+prebuilt that way and a process with two CRTs has two allocators in it.
 
 ## What the bundle must publish
 

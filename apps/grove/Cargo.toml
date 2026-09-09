@@ -1,0 +1,33 @@
+# The Rust half of the fleet. Two crates, one lock and one pinned toolchain: a float difference
+# between two toolchains is a desync a playtest cannot reproduce, and a second lockfile is a second
+# place for a transitive dependency to be a different version.
+
+[workspace]
+resolver = "2"
+members = ["game-instance", "upload-service"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.98"
+publish = false
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+axum = "0.8"
+futures-util = { version = "0.3", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2.6"
+base64 = "0.22"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Both crates are latency budgets rather than throughput ones, so the optimiser is worth the build
+# time. Profiles only apply from a workspace root, which is why this sits here and not in a member.
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -1,7 +1,7 @@
 // The driver: the accumulator, the spiral guard, the shed's two halves, the send cadence, and the
 // deliver→step order.
 //
-// It runs against a STUB step, so the clock is exercised without a world behind it. `apps/grove/host`
+// It runs against a STUB step, so the clock is exercised without a world behind it. `apps/grove/game-instance`
 // owns this same policy in Rust, and these are the cases its own suite has to answer too.
 
 import { describe, expect, it } from 'vitest';

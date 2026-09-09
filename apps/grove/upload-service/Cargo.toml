@@ -1,0 +1,42 @@
+[package]
+name = "grove-upload-service"
+description = "Content-addressed object storage: the bundles a session loads and the assets a game draws with."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "grove-upload-service"
+path = "src/main.rs"
+
+[dependencies]
+# `fs` and `io-util` on top of the workspace set: an object is written a chunk at a time, and every
+# other crate in this workspace holds its state in memory.
+tokio = { workspace = true, features = ["fs", "io-util"] }
+axum = { workspace = true }
+
+# The streams an object arrives and leaves on. `tokio-util` for the file half, `futures-util` for the
+# socket half, `bytes` for the chunk type both of them speak.
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = { workspace = true }
+bytes = "1"
+
+# The store is an `Arc<dyn ObjectStore>` so a second backing store lands on it without the router
+# becoming generic over one, and a trait with an async fn in it is not dyn-safe.
+async-trait = "0.1"
+
+serde = { workspace = true }
+
+# The hash is the name, so it is the hot loop rather than a checksum on the side.
+sha2 = { workspace = true }
+# The fleet bearer, compared the way `grove-game-instance` compares a signature.
+subtle = { workspace = true }
+
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }

@@ -1,0 +1,44 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "extends": ["//"],
+    "tasks": {
+        "build": {
+            "dependsOn": ["^build"],
+            "inputs": [
+                "src/**",
+                "Cargo.toml",
+                "package.json",
+                "$TURBO_ROOT$/apps/grove/Cargo.toml",
+                "$TURBO_ROOT$/apps/grove/Cargo.lock",
+                "$TURBO_ROOT$/apps/grove/rust-toolchain.toml"
+            ],
+            // Cargo keeps its own incremental cache, and declaring target/ here makes turbo warn on
+            // every machine without a Rust toolchain, where the task correctly produces nothing.
+            "outputs": []
+        },
+        "typecheck": {
+            // Back to `^build` alone. The root adds the package's own `build` so a suite can import
+            // its `../dist`, but this one is `cargo clippy` and its build is a release compile of
+            // the whole crate — the check does not need it, and waiting for it is minutes.
+            "dependsOn": ["^build"],
+            "inputs": [
+                "src/**",
+                "Cargo.toml",
+                "$TURBO_ROOT$/apps/grove/Cargo.toml",
+                "$TURBO_ROOT$/apps/grove/Cargo.lock",
+                "$TURBO_ROOT$/apps/grove/rust-toolchain.toml"
+            ],
+            "outputs": []
+        },
+        "test": {
+            "inputs": [
+                "src/**",
+                "Cargo.toml",
+                "$TURBO_ROOT$/apps/grove/Cargo.toml",
+                "$TURBO_ROOT$/apps/grove/Cargo.lock",
+                "$TURBO_ROOT$/apps/grove/rust-toolchain.toml"
+            ],
+            "outputs": []
+        }
+    }
+}
