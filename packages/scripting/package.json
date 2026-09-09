@@ -27,7 +27,7 @@
     },
     "dependencies": {
         "@platform/core": "workspace:*",
-        "rolldown": "^1.2.1"
+        "rolldown": "^1.2.7"
     },
     "devDependencies": {
         "typescript": "^7.0.2",
