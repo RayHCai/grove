@@ -2,17 +2,16 @@
     "name": "@grove/server-manager",
     "version": "0.0.0",
     "private": true,
-    "type": "module",
-    "description": "The agent on one fleet host: spawns game processes, caps them, reaps them, reports capacity.",
+    "description": "The fleet load balancer and join router: which box a version deploys to, and which box a joining player is sent to. Go.",
     "scripts": {
-        "build": "tsc -p tsconfig.json",
-        "typecheck": "tsc -p tsconfig.test.json",
-        "test": "vitest run --passWithNoTests",
+        "build": "node ../../../scripts/go.mjs build -o dist/server-manager .",
+        "typecheck": "node ../../../scripts/go.mjs vet ./... && node ../../../scripts/staticcheck.mjs ./...",
+        "test": "node ../../../scripts/go.mjs test ./...",
+        "format": "node ../../../scripts/go.mjs fmt ./...",
+        "format:check": "node ../../../scripts/gofmt-check.mjs",
         "clean": "rm -rf dist .turbo"
     },
-    "devDependencies": {
-        "@types/node": "^22.10.5",
-        "typescript": "^7.0.2",
-        "vitest": "^4.1.10"
+    "dependencies": {
+        "@grove/go-grove": "workspace:*"
     }
 }
