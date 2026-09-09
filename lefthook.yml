@@ -13,14 +13,41 @@ pre-commit:
               - 'docs/*'
           run: pnpm exec oxlint --deny-warnings {staged_files}
 
+        # Go rides this job where Rust needed its own: all four Go modules carry a package.json, so
+        # turbo reaches every one of them.
         - name: typecheck
-          glob: '*.{ts,tsx}'
+          glob: '*.{ts,tsx,go}'
           run: pnpm run typecheck
 
+        # Rust gets its own two jobs rather than a glob on the ones above: prettier cannot format a
+        # crate and oxlint cannot read one, and routing through turbo would reach only the crates that
+        # carry a package.json. `cargo` walks up from this root, so both workspace members are covered.
+        - name: rust-format
+          root: 'apps/grove/'
+          glob: '*.rs'
+          run: node ../../scripts/cargo.mjs fmt --all --check
+
+        - name: rust-lint
+          root: 'apps/grove/'
+          glob: '*.rs'
+          run: node ../../scripts/cargo.mjs clippy --workspace --all-targets -- -D warnings
+
+        # Prettier cannot format Go any more than it can a crate, so formatting gets its own job here
+        # too — handed the staged paths, because gofmt needs no module to read a file.
+        - name: go-format
+          glob: '*.go'
+          run: node scripts/gofmt-check.mjs {staged_files}
+
+        # Excluded rather than extension-listed, so this matches the CI gate file for file. An
+        # allowlist of extensions is how integration/, libs/ and bench/ went unscanned for months.
         - name: no-design-doc-citations
-          glob: '*.{ts,tsx,js,mjs,cjs,json,yml,yaml}'
           exclude:
               - 'docs/*'
+              - 'docs/**'
+              - '**/DESIGN.md'
+              - '**/README.md'
+              - '**/readme.md'
+              - 'AGENTS.md'
           run: |
               if grep -lE '§ ?[0-9]' {staged_files}; then
                   echo 'Design-doc section citations are banned outside docs/ — state the constraint itself.'

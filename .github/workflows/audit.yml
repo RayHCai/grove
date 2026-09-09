@@ -14,6 +14,10 @@ concurrency:
     group: audit-${{ github.ref }}
     cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# Reads the tree, reports, writes nothing back.
+permissions:
+    contents: read
+
 env:
     DO_NOT_TRACK: 1
 
@@ -38,3 +42,40 @@ jobs:
             # The whole tree, not --prod: the bundler that processes creator scripts is a dev dependency.
             - name: pnpm audit
               run: pnpm audit --audit-level=high
+
+    go-advisories:
+        name: Go standard-library advisories
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@v6
+
+            # setup-go reads go.work's `toolchain` line ahead of its `go` line, so the scan
+            # runs on the toolchain the services ship, not whatever 1.24.x the runner cached.
+            - uses: actions/setup-go@v6
+              with:
+                  go-version-file: go.work
+                  # No go.sum exists to hash — the Go half takes no third-party dependency.
+                  cache-dependency-path: |
+                      go.work
+                      libs/go-grove/go.mod
+                      apps/grove/*/go.mod
+
+            # Pinned like every other toolchain here: `@latest` would change what this job reports
+            # without a commit. Installed by version, so it adds no requirement to any module.
+            - name: Install govulncheck
+              run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+
+            # Once per module and driven off go.work, so a new service cannot join the tree
+            # unscanned: govulncheck refuses a workspace root. The status is carried rather than
+            # thrown, so one run names every affected module instead of only the first.
+            - name: govulncheck
+              run: |
+                  status=0
+                  # Assigned before the loop so a `go list` that fails aborts the step, rather than
+                  # yielding an empty word list that reports every module clean.
+                  modules=$(go list -m -f '{{.Dir}}')
+                  for module in $modules; do
+                    govulncheck -C "$module" ./... || status=1
+                  done
+                  exit $status
