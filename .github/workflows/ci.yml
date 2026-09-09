@@ -10,6 +10,12 @@ concurrency:
     group: ci-${{ github.workflow }}-${{ github.ref }}
     cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# Every job here reads the tree and writes nothing back. Stated rather than inherited, because the
+# default is whatever the repository setting happens to be, and a workflow that runs third-party
+# actions over a pull request's code should not be one settings change away from a writable token.
+permissions:
+    contents: read
+
 env:
     TURBO_TELEMETRY_DISABLED: 1
     DO_NOT_TRACK: 1
@@ -19,6 +25,11 @@ jobs:
         name: ${{ matrix.task.name }}
         runs-on: ubuntu-latest
         timeout-minutes: 20
+        # The toolchains this job installs, so their absence fails here rather than skipping. Terraform
+        # is deliberately not among them: no step here installs it, and `@grove/infra` must go on
+        # skipping rather than blocking every merge. Not set on `determinism`, which installs none.
+        env:
+            GROVE_REQUIRE_TOOLCHAIN: go,cargo,staticcheck
         strategy:
             fail-fast: false
             matrix:
@@ -27,7 +38,7 @@ jobs:
                       # Warn-tier rules only ratchet if they exit non-zero somewhere.
                       run: pnpm run lint --deny-warnings
                     - name: format
-                      run: pnpm run format:check && pnpm --filter @grove/host run format:check
+                      run: pnpm run format:check && pnpm -r --if-present run format:check
                     - name: typecheck
                       run: pnpm run typecheck
                     - name: build
@@ -46,9 +57,9 @@ jobs:
                   node-version-file: .node-version
                   cache: pnpm
 
-            # @grove/host is a cargo crate whose build, test and typecheck shell to cargo. Without a
-            # toolchain its scripts skip with a line rather than failing, which would make the gate
-            # green over a half that was never compiled.
+            # The native services shell to cargo and go. Without a toolchain their scripts skip with a
+            # line rather than failing, which would make the gate green over a half that was never
+            # compiled — so both are installed here even though only some jobs reach them.
             - uses: dtolnay/rust-toolchain@stable
               with:
                   toolchain: 1.98.1
@@ -56,7 +67,26 @@ jobs:
 
             - uses: Swatinem/rust-cache@v2
               with:
-                  workspaces: apps/grove/host
+                  workspaces: apps/grove
+
+            # Keyed on the go.mod files rather than go.sum: the Go half takes no
+            # third-party dependency, so no go.sum exists to hash. A guard on go.work being present
+            # would turn a lost workspace file into a skipped gate rather than a failing one.
+            - uses: actions/setup-go@v6
+              with:
+                  go-version-file: go.work
+                  cache-dependency-path: |
+                      go.work
+                      libs/go-grove/go.mod
+                      apps/grove/*/go.mod
+
+            # Installed rather than run through dominikh/staticcheck-action: the gate is the same
+            # `pnpm run typecheck` a contributor runs, and an action that runs the linter itself is a
+            # second invocation of it that exists only here.
+            - name: Install staticcheck
+              run: |
+                  go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
+                  echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
@@ -105,14 +135,62 @@ jobs:
               uses: actions/cache@v4
               with:
                   path: .turbo
-                  key: turbo-test-${{ runner.os }}-node${{ matrix.node }}-${{ github.sha }}
+                  # Namespaced away from `turbo-test-`: restore-keys match by prefix, so the ci
+                  # job's test leg could otherwise restore a cache written where Go was absent.
+                  key: turbo-determinism-${{ runner.os }}-node${{ matrix.node }}-${{ github.sha }}
                   restore-keys: |
-                      turbo-test-${{ runner.os }}-node${{ matrix.node }}-
+                      turbo-determinism-${{ runner.os }}-node${{ matrix.node }}-
 
             - name: test
-              # The TypeScript half only — this job exists to run one simulation on two V8 builds,
-              # and @grove/host's tests answer a question no second architecture changes.
-              run: pnpm run test --filter='!@grove/host'
+              # The TypeScript half only — this job exists to run one simulation on two V8 builds, and
+              # no native service's tests answer a question a second architecture changes. Every native
+              # package is named: these runners ship Go and Rust on PATH, so nothing here would skip, and
+              # the toolchains go.work and rust-toolchain.toml pin are one download apiece per leg.
+              run: >-
+                  pnpm run test --filter='!@grove/game-instance' --filter='!@grove/upload-service'
+                  --filter='!@grove/go-grove' --filter='!@grove/game-manager'
+                  --filter='!@grove/instance-manager' --filter='!@grove/server-manager'
+
+    # `-race` needs cgo and therefore a C compiler, so it stays out of the shared `test` script:
+    # folded in there it would fail `pnpm run test`, and the pre-push hook, on every machine
+    # without one — the outcome scripts/toolchain.mjs exists to avoid.
+    race:
+        name: race detector
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@v6
+
+            - uses: actions/setup-go@v6
+              with:
+                  go-version-file: go.work
+                  cache-dependency-path: |
+                      go.work
+                      libs/go-grove/go.mod
+                      apps/grove/*/go.mod
+
+            # One job rather than a matrix over the modules: `-race` compiles the standard library
+            # from source, and one build cache pays for that once instead of four times.
+            #
+            # `./...` from the workspace root matches no module, so each is entered in turn, and the
+            # loop runs to the end — a race in the first must not hide the state of the other three.
+            - name: race
+              run: |
+                  # Assigned before the loop so a `go list` that fails aborts the step, rather than
+                  # yielding an empty word list that reports every module clean.
+                  modules=$(go list -m -f '{{.Dir}}')
+                  raced=
+                  for module in $modules; do
+                    echo "::group::$module"
+                    # A cached pass replays one past interleaving, and a fresh schedule on
+                    # every run is the only leverage the detector has.
+                    (cd "$module" && go test -race -count=1 -shuffle=on ./...) || raced="$raced $module"
+                    echo "::endgroup::"
+                  done
+                  if [ -n "$raced" ]; then
+                    echo "Races or failures in:$raced"
+                    exit 1
+                  fi
 
     citations:
         name: no design-doc citations
@@ -123,11 +201,17 @@ jobs:
 
             # Grep, not lint: the ban covers comments, test titles, JSX text and JSON alike.
             # Matched with a trailing digit so this job and the pre-commit hook can name the char.
+            #
+            # Everything tracked minus the places the citation belongs. Listing the trees to scan is
+            # what left integration/, libs/ and bench/ — 65 TypeScript files — outside the gate, and
+            # a new top-level directory joined them silently. AGENTS.md is excluded because the rule
+            # it states is written with the character the rule bans.
             - name: Reject section citations outside docs/
               run: |
-                  if git grep -nE '§ ?[0-9]' -- 'packages' 'apps' 'examples' '*.json' \
+                  if git grep -nE '§ ?[0-9]' -- . \
                       ':(exclude,glob)**/DESIGN.md' ':(exclude,glob)**/README.md' \
-                      ':(exclude,glob)**/readme.md' ':(exclude,glob)docs/**'; then
+                      ':(exclude,glob)**/readme.md' ':(exclude,glob)docs/**' \
+                      ':(exclude)AGENTS.md'; then
                     echo
                     echo 'Design-doc section citations are banned outside docs/ and DESIGN.md/README.md.'
                     echo 'State the constraint itself — the numbering drifts and the reader is not holding the doc.'
@@ -138,7 +222,7 @@ jobs:
     ci-ok:
         name: CI passed
         if: always()
-        needs: [ci, determinism, citations]
+        needs: [ci, determinism, race, citations]
         runs-on: ubuntu-latest
         steps:
             - name: Verify all matrix jobs succeeded
@@ -149,6 +233,10 @@ jobs:
                   fi
                   if [ "${{ needs.determinism.result }}" != "success" ]; then
                     echo "Cross-platform test result: ${{ needs.determinism.result }}"
+                    exit 1
+                  fi
+                  if [ "${{ needs.race.result }}" != "success" ]; then
+                    echo "Race detector result: ${{ needs.race.result }}"
                     exit 1
                   fi
                   if [ "${{ needs.citations.result }}" != "success" ]; then
