@@ -1,7 +1,31 @@
 {
     "$schema": "https://turbo.build/schema.json",
     "ui": "tui",
-    "globalDependencies": ["tsconfig.base.json", ".oxlintrc.json"],
+    // Global for the same reason `tsconfig.base.json` is: `go.work` is the root file that resolves
+    // every service's `require` on libs/go-grove to the tree it is checked out with, not a proxy.
+    "globalDependencies": ["tsconfig.base.json", ".oxlintrc.json", "scripts/*.mjs", "go.work"],
+    // Hashed, not passed through: it decides whether a missing toolchain is a skip or a failure, so
+    // a cached pass produced by a skip must not be replayed for a run that requires the real thing.
+    "globalEnv": ["GROVE_REQUIRE_TOOLCHAIN"],
+    // Passed through rather than hashed: these say where a native toolchain keeps its caches, not
+    // what it builds. Without them turbo strict mode hands `go build` an environment with no home
+    // directory in it, and it fails on a cache it cannot place — a Go task that never runs, on the
+    // one gate that exists to run it.
+    "globalPassThroughEnv": [
+        "HOME",
+        "USERPROFILE",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "XDG_CACHE_HOME",
+        "GOCACHE",
+        "GOMODCACHE",
+        "GOPATH",
+        "GOFLAGS",
+        "GOPROXY",
+        "GOTOOLCHAIN",
+        "CARGO_HOME",
+        "RUSTUP_HOME"
+    ],
     "tasks": {
         "build": {
             "dependsOn": ["^build"],
@@ -9,7 +33,11 @@
             "outputs": ["dist/**"]
         },
         "typecheck": {
-            "dependsOn": ["^build"],
+            // Own `build`, not just `^build`: a suite imports its decorated worlds from `../dist`,
+            // because only `tsc` lowers standard decorators. Without the package's own build those
+            // specifiers resolve to nothing on a clean checkout, which is a red CI job against a
+            // tree that is fine — and a green one locally, off a `dist/` left behind by a build.
+            "dependsOn": ["^build", "build"],
             "inputs": ["src/**", "tests/**", "tsconfig*.json"],
             "outputs": []
         },

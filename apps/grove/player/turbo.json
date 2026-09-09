@@ -1,0 +1,24 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "extends": ["//"],
+    "tasks": {
+        "build": {
+            // index.html is the entry vite builds from and vite.config.ts decides what it emits;
+            // neither is under src/**, so the root task would cache a build across a change to either.
+            "inputs": [
+                "package.json",
+                "src/**",
+                "tsconfig*.json",
+                "vite.config.ts",
+                "index.html",
+                "public/**"
+            ]
+        },
+        "typecheck": {
+            "inputs": ["src/**", "tests/**", "tsconfig*.json", "*.config.ts"]
+        },
+        "test": {
+            "inputs": ["src/**", "tests/**", "vitest.config.ts", "tsconfig*.json"]
+        }
+    }
+}
