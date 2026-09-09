@@ -8,7 +8,7 @@ packages:
     - integration
 
 # lefthook's postinstall fetches its platform binary and installs the git hooks; esbuild's fetches
-# the bundler that rolls the sim into the one script @grove/host evaluates in an isolate.
+# the bundler that rolls the sim into the one script @grove/game-instance evaluates in an isolate.
 allowBuilds:
     lefthook: true
     esbuild: true

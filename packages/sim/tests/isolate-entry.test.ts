@@ -1,6 +1,6 @@
 // The contract a host reaches a bundle through: three functions on one global, JSON either way.
 //
-// Driven exactly as `apps/grove/host` drives it — a string in and a string out — because a host in
+// Driven exactly as `apps/grove/game-instance` drives it — a string in and a string out — because a host in
 // another language cannot hold anything else, and a shape that only works when both ends are
 // TypeScript is not a contract at all.
 

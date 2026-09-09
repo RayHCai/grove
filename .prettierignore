@@ -15,4 +15,4 @@ CLAUDE.md
 
 # Cargo's output, and a lockfile prettier did not write.
 target
-apps/grove/host/Cargo.lock
+apps/grove/Cargo.lock

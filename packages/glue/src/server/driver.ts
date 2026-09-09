@@ -1,4 +1,4 @@
-// Real time into ticks, for the in-process host. The Rust host at `apps/grove/host` owns the same
+// Real time into ticks, for the in-process host. The Rust host at `apps/grove/game-instance` owns the same
 // policy over its own clock; this is the copy the tests, the playground and local dev run on.
 //
 // It drives nothing itself: `pump` reports the ticks real time owes and the caller runs them, which

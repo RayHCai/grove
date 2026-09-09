@@ -1,7 +1,7 @@
 // One game instance in this process: a validated project and the seams a host supplies in, a running
 // world out.
 //
-// It is the in-process half of what `apps/grove/host` does in Rust — the clock, the sockets and the
+// It is the in-process half of what `apps/grove/game-instance` does in Rust — the clock, the sockets and the
 // store around `@platform/sim`'s deterministic advance. It opens no listener itself: a `Transport`
 // arrives from whatever the caller is listening on, which is what lets a world be driven over a
 // loopback pair with no I/O at all.

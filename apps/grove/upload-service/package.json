@@ -1,0 +1,15 @@
+{
+    "name": "@grove/upload-service",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Content-addressed object storage: the bundles a session loads, the assets a game draws with, and the source a build compiles. Rust.",
+    "scripts": {
+        "build": "node ../../../scripts/cargo.mjs build --release",
+        "typecheck": "node ../../../scripts/cargo.mjs clippy --all-targets -- -D warnings",
+        "test": "node ../../../scripts/cargo.mjs test",
+        "format": "node ../../../scripts/cargo.mjs fmt",
+        "format:check": "node ../../../scripts/cargo.mjs fmt --check",
+        "clean": "node ../../../scripts/cargo.mjs clean && rm -rf .turbo"
+    }
+}

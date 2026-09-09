@@ -22,6 +22,6 @@ updates:
           interval: weekly
 
     - package-ecosystem: cargo
-      directory: /apps/grove/host
+      directory: /apps/grove
       schedule:
           interval: weekly
