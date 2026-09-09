@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Boots @grove/instance-manager on a fleet box.
+#
+# Nothing the agent needs is discovered by the agent, exactly as nothing a game process needs is
+# discovered by the game process: this script resolves the whole environment and hands it over.
+set -euo pipefail
+
+TOKEN=$(curl -sfX PUT http://169.254.169.254/latest/api/token \
+    -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
+INSTANCE_ID=$(curl -sf -H "X-aws-ec2-metadata-token: $${TOKEN}" \
+    http://169.254.169.254/latest/meta-data/instance-id)
+
+install -d -m 0750 /etc/grove
+
+fleet_secret=$(aws ssm get-parameter --with-decryption --region '${region}' \
+    --name '${secret_path}/FLEET_SECRET' --query Parameter.Value --output text)
+game_token_secret=$(aws ssm get-parameter --with-decryption --region '${region}' \
+    --name '${secret_path}/GAME_TOKEN_SECRET' --query Parameter.Value --output text)
+
+# 0600 because the file holds both shared secrets, and a game process must never inherit either from
+# the environment of the agent that spawned it.
+install -m 0600 /dev/null /etc/grove/instance-manager.env
+cat > /etc/grove/instance-manager.env <<ENV
+GROVE_ENV=${grove_env}
+INSTANCE_MANAGER_HOST=0.0.0.0
+INSTANCE_MANAGER_PORT=${instance_manager_port}
+SERVER_MANAGER_URL=${server_manager_url}
+HOST_ID=$${INSTANCE_ID}
+HOST_REGION=${region}
+MAX_INSTANCES=${max_instances}
+HEARTBEAT_INTERVAL=${heartbeat_interval}
+GAME_INSTANCE_BIN=${game_instance_bin}
+FLEET_SECRET=$${fleet_secret}
+GAME_TOKEN_SECRET=$${game_token_secret}
+ENV
+
+cat > /etc/systemd/system/grove-instance-manager.service <<'UNIT'
+[Unit]
+Description=Grove instance manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/grove/instance-manager.env
+ExecStart=${agent_bin}
+Restart=always
+RestartSec=5
+
+# Kill the agent alone, never its cgroup. A game in progress outlives the agent that started it, and
+# a redeploy here must not end anyone's session.
+KillMode=process
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now grove-instance-manager.service

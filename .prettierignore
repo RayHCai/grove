@@ -16,3 +16,6 @@ CLAUDE.md
 # Cargo's output, and a lockfile prettier did not write.
 target
 apps/grove/Cargo.lock
+
+# Terraform's provider plugins and module copies, fetched per root by `terraform init`.
+.terraform
