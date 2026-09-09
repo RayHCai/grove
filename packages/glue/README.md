@@ -7,7 +7,7 @@ Every step it takes belongs to another package. What belongs here is that they h
 sequence that is correct — including the choices that fail **silently** when made wrongly.
 
 Its server half is also the **in-process host** for `@platform/sim`: the clock, the sockets and the
-store the sim deliberately holds none of. `@grove/host` does the same job in Rust for a deployed
+store the sim deliberately holds none of. `@grove/game-instance` does the same job in Rust for a deployed
 session; this is the one the tests, the integration suite and `apps/playground` drive, and it is what
 lets a whole game run over `loopbackPair()` with no socket, no port and no GPU.
 

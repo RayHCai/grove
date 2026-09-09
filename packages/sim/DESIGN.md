@@ -9,7 +9,7 @@ they share only `@platform/protocol`, which is authoritative for every envelope 
 which tick an input applies to, whether it is admissible, what each session is owed. It never opens a socket,
 never reads a clock, never touches a store for `@serverState`, and never re-implements the tick order.
 
-Two hosts drive it: `@grove/host` in Rust, which runs this bundle in a V8 isolate, and `@platform/glue`'s
+Two hosts drive it: `@grove/game-instance` in Rust, which runs this bundle in a V8 isolate, and `@platform/glue`'s
 `GameInstance` in process. The batch holds nothing a browser cannot supply and this package imports no
 `node:` anything, which is what a third host would need; `@platform/client` is not one — it re-produces
 the input fold in `passes.ts` rather than importing this package.
@@ -507,4 +507,4 @@ far below the codec's own 128-level cap, which the envelope's own nesting eats i
 encoder passes and the codec refuses throws out of the fan-out.
 
 The catch-up budget and the send cadence are **not here**: they are the host's clock policy, stated in
-`packages/glue/src/server/driver.ts` and in `apps/grove/host/src/clock.rs`.
+`packages/glue/src/server/driver.ts` and in `apps/grove/game-instance/src/clock.rs`.

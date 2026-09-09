@@ -1,6 +1,6 @@
 //! What one game process is told about itself, all of it from the environment.
 //!
-//! Nothing here is discovered and nothing is defaulted quietly: `@grove/server-manager` spawns this
+//! Nothing here is discovered and nothing is defaulted quietly: `@grove/instance-manager` spawns this
 //! process and every value below is a decision it already made, so a missing one is a wiring fault
 //! to fail on rather than a gap to paper over.
 
@@ -14,7 +14,7 @@ const MIN_SECRET_LEN: usize = 32;
 pub struct Config {
     /// Which game this process serves. A ticket naming another is refused outright.
     pub game_id: String,
-    /// The address to bind. `server-manager` picks the port and tells the API about it.
+    /// The address to bind. `instance-manager` picks the port and reports it upward.
     pub bind: String,
     /// The compiled sim bundle: `@platform/sim`, the engine it needs, and this game's own scripts.
     pub bundle_path: PathBuf,
