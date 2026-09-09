@@ -1,0 +1,17 @@
+// The Go half of the fleet. One workspace, so the three services resolve libs/go-grove from the
+// tree they are checked out with rather than from a proxy — a shared module published on every
+// change is a version skew between two services that were written together.
+
+go 1.24
+
+// Pinned newer than the go line, which stays a language floor: 1.24 is out of support and most
+// stdlib advisories against it were never backported, while a floor is what still builds under
+// GOTOOLCHAIN=local on a machine that cannot download this one.
+toolchain go1.26.8
+
+use (
+	./apps/grove/game-manager
+	./apps/grove/instance-manager
+	./apps/grove/server-manager
+	./libs/go-grove
+)

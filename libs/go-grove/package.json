@@ -1,0 +1,14 @@
+{
+    "name": "@grove/go-grove",
+    "version": "0.0.0",
+    "private": true,
+    "description": "The environment reader, HTTP layer, session-token codec and wire shapes every Go service shares. Go.",
+    "scripts": {
+        "build": "node ../../scripts/go.mjs build ./...",
+        "typecheck": "node ../../scripts/go.mjs vet ./... && node ../../scripts/staticcheck.mjs ./...",
+        "test": "node ../../scripts/go.mjs test ./...",
+        "format": "node ../../scripts/go.mjs fmt ./...",
+        "format:check": "node ../../scripts/gofmt-check.mjs",
+        "clean": "rm -rf dist .turbo"
+    }
+}

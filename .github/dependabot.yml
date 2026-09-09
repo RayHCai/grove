@@ -25,3 +25,12 @@ updates:
       directory: /apps/grove
       schedule:
           interval: weekly
+
+    - package-ecosystem: gomod
+      directories:
+          - /libs/go-grove
+          - /apps/grove/game-manager
+          - /apps/grove/server-manager
+          - /apps/grove/instance-manager
+      schedule:
+          interval: weekly
