@@ -1,8 +1,19 @@
 import type { FastifyError, FastifyInstance } from 'fastify';
+import type { ErrorBody } from '@grove/api-contract';
 import {
     hasZodFastifySchemaValidationErrors,
     isResponseSerializationError,
 } from 'fastify-type-provider-zod';
+
+// An error a plugin raised carries a status and no code, and collapsing every one of them into
+// `invalid_request` is what would leave a caller reading the status anyway.
+const CODE_BY_STATUS: ReadonlyMap<number, ErrorBody['code']> = new Map([
+    [401, 'unauthorized'],
+    [403, 'forbidden'],
+    [404, 'not_found'],
+    [409, 'conflict'],
+    [429, 'rate_limited'],
+]);
 
 /**
  * One shape for every failure, so a caller branches on `code` rather than guessing from a status.
@@ -28,7 +39,7 @@ export function installErrorHandler(app: FastifyInstance): void {
         if (status >= 500) request.log.error({ err: error }, 'unhandled');
 
         return reply.code(status).send({
-            code: status >= 500 ? 'internal' : 'invalid_request',
+            code: status >= 500 ? 'internal' : (CODE_BY_STATUS.get(status) ?? 'invalid_request'),
             message: status >= 500 ? 'internal error' : error.message,
         });
     });
