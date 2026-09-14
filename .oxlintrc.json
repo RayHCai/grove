@@ -222,7 +222,7 @@
             }
         },
         {
-            "files": ["apps/grove/api/src/**", "apps/grove/game-manager/src/**"],
+            "files": ["apps/grove/api/src/**"],
             "rules": {
                 "oxc/no-async-endpoint-handlers": "off"
             }
