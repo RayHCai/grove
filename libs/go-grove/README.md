@@ -17,9 +17,9 @@ the listener that drains what is in flight on the way down. Its status-to-code m
 `internal error` rather than handing a caller this end's internals. The outermost wrap reads
 `X-Request-Id`, bounds it to one token a log can hold, mints a fresh one where the caller's is not,
 echoes it back, and tags the request and panic lines with `requestId`; `Forward` puts the same id on
-an outbound call, so one request is one id across every service it touches. `Ready` answers the
-readiness poll against a probe the service supplies, since what readiness means is the service's to
-say, and reports 503 when the probe fails. The listener sets read, write and idle deadlines, so no
+an outbound call, so a service reached that way logs under the one its caller did. `Ready` answers
+the readiness poll against a probe the service supplies, since what readiness means is the service's
+to say, and reports 503 when the probe fails. The listener sets read, write and idle deadlines, so no
 caller holds a connection for free, and a route that legitimately takes longer sets its own with
 `http.ResponseController`.
 

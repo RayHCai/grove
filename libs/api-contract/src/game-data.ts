@@ -24,7 +24,15 @@ export type StateWrite = z.infer<typeof StateWrite>;
 
 export const LeaderboardQuery = z.object({
     board: z.string().min(1).max(64),
-    limit: z.coerce.number().int().min(1).max(100).default(25),
+    /**
+     * Clamped rather than refused: a caller asking for more rows than a page holds wants the page,
+     * and paging is what the cursor is for.
+     */
+    limit: z.coerce
+        .number()
+        .int()
+        .transform((value) => Math.min(Math.max(value, 1), 100))
+        .default(25),
     cursor: z.string().optional(),
 });
 export type LeaderboardQuery = z.infer<typeof LeaderboardQuery>;
@@ -36,6 +44,20 @@ export const LeaderboardEntry = z.object({
     rank: z.int().positive(),
 });
 export type LeaderboardEntry = z.infer<typeof LeaderboardEntry>;
+
+/**
+ * One player's standing, as a game process submits it.
+ *
+ * No rank: a rank is a position in a board rather than a property of a player, so it is assigned
+ * when a page is built and a writer that sent one would be sending a guess.
+ */
+export const LeaderboardWrite = z.object({
+    board: z.string().min(1).max(64),
+    playerId: PlayerId,
+    displayName: z.string().min(1).max(64),
+    score: z.number().finite(),
+});
+export type LeaderboardWrite = z.infer<typeof LeaderboardWrite>;
 
 export const LeaderboardPage = z.object({
     board: z.string(),
