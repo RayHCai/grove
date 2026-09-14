@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import {
@@ -6,9 +7,9 @@ import {
     validatorCompiler,
 } from 'fastify-type-provider-zod';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { REQUEST_ID_HEADER, validRequestId } from '@grove/api-contract';
 import type { Env } from './env.js';
 import { installErrorHandler } from './errors.js';
-import { InMemoryJobQueue, unattachedToolchain } from './pipeline.js';
 import type { JobQueue } from './pipeline.js';
 import { buildRoutes } from './routes/builds.js';
 import { verifyFleetSecret } from './service-scope.js';
@@ -18,26 +19,39 @@ import { verifyFleetSecret } from './service-scope.js';
  * shape — with a shared fleet bearer instead of a session token, and no browser-facing plugins at
  * all: no CORS, no cookies, no CSRF. Nothing with an origin talks to this service.
  */
-export async function buildApp(
-    env: Env,
-    queue: JobQueue = new InMemoryJobQueue(unattachedToolchain),
-): Promise<FastifyInstance> {
+export async function buildApp(env: Env, queue: JobQueue): Promise<FastifyInstance> {
     const app = Fastify({
         logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
+        // The correlation id the Go half of the fleet already carries: a caller's when it is one
+        // token a log can hold unchanged, a fresh one when it is not. Bounded here rather than
+        // through `requestIdHeader`, which hands the raw header to the logger unmeasured.
+        genReqId: (request) => {
+            const presented = request.headers[REQUEST_ID_HEADER];
+            return typeof presented === 'string' && validRequestId(presented)
+                ? presented
+                : randomUUID();
+        },
     }).withTypeProvider<ZodTypeProvider>();
 
     app.setValidatorCompiler(validatorCompiler);
     app.setSerializerCompiler(serializerCompiler);
     installErrorHandler(app);
 
+    // Registered before the authenticated scope below, so a bearer this service refuses is refused
+    // under the same id as the request that earned it.
+    app.addHook('onSend', async (request, reply) => {
+        reply.header(REQUEST_ID_HEADER, request.id);
+    });
+
     // A tenth of what the sibling services allow, since one accepted request buys minutes of a
-    // build box's CPU rather than a database round trip. Keyed by the presented bearer, not the
-    // address: every caller sits behind the same fleet network, so an IP-keyed limit would be one
-    // bucket for the whole host.
+    // build box's CPU rather than a database round trip. One key for every caller, because the
+    // fleet bearer is one value: this bucket is the box's own ceiling, shared with the polls an
+    // editor makes while a build runs, and the ration that tells two creators apart sits on the
+    // build route, where the game id has been validated.
     await app.register(import('@fastify/rate-limit'), {
         max: 30,
         timeWindow: '1 minute',
-        keyGenerator: (request) => request.headers.authorization ?? request.ip,
+        keyGenerator: () => 'fleet',
     });
 
     await app.register(import('@fastify/swagger'), {

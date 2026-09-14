@@ -10,9 +10,9 @@ const Env = z.object({
     /** The bearer `@grove/api` presents. Shared across the fleet, and never handed to a browser. */
     FLEET_SECRET: z.string().min(32),
 
-    /** Where a finished build puts its artifacts, and where it registers the resulting bundle set. */
-    UPLOAD_SERVICE_URL: z.url(),
-    GAME_MANAGER_URL: z.url(),
+    // How long one compile may hold the single build slot. Fifteen minutes for the same reason the
+    // upload queue hides a claimed build that long: a compile is minutes, not seconds.
+    BUILD_TIMEOUT_MS: z.coerce.number().int().positive().default(900_000),
 });
 
 export type Env = z.infer<typeof Env>;
