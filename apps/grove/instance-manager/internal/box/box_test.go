@@ -27,8 +27,7 @@ func TestSampleReadsTheKernel(t *testing.T) {
 
 	load, free := procSampler{root: root}.Sample()
 
-	// Divided by the core count, so one number compares two boxes of different sizes.
-	if want := 1.50 / float64(runtime.NumCPU()); load != want {
+	if want := min(1.50/float64(runtime.NumCPU()), 1); load != want {
 		t.Errorf("load: got %v, want %v", load, want)
 	}
 	if free != 8192000*1024 {
@@ -56,5 +55,15 @@ func TestSampleIsZeroWithoutProc(t *testing.T) {
 				t.Errorf("got load %v and %d bytes free", load, free)
 			}
 		})
+	}
+}
+
+// An overloaded box stays in the fleet: the router refuses any beat above 1, so the number the
+// kernel reports has to be ceilinged before it leaves the box.
+func TestLoadIsCeilingedAtFullyLoaded(t *testing.T) {
+	root := procRoot(t, map[string]string{"loadavg": "9999.00 1.20 0.90 2/523 9182\n"})
+
+	if load, _ := (procSampler{root: root}).Sample(); load != 1 {
+		t.Errorf("load: got %v, want 1", load)
 	}
 }

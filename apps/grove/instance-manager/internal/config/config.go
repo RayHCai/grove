@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/RayHCai/grove/libs/go-grove/contract"
@@ -30,7 +31,11 @@ type Config struct {
 	MaxInstances      int
 	HeartbeatInterval time.Duration
 	GameInstanceBin   string
-	// Handed to every child, which verifies join tickets with it. This agent never mints one.
+	// Where the children this box started are written down, so a restart of this agent finds the
+	// ones it left running.
+	StateDir string
+	// Handed to every child, which verifies join tickets with it, and what this agent signs each
+	// child's bearer for @grove/game-manager with.
 	GameTokenSecret []byte
 }
 
@@ -49,7 +54,10 @@ func Read(r *env.Reader) (Config, error) {
 		MaxInstances:      r.Int("MAX_INSTANCES", 8),
 		HeartbeatInterval: r.Duration("HEARTBEAT_INTERVAL", 10*time.Second),
 		GameInstanceBin:   r.Required("GAME_INSTANCE_BIN"),
-		GameTokenSecret:   r.Secret("GAME_TOKEN_SECRET", secretMinLen),
+		// Defaulted rather than required: a box provisioned before this agent kept any state must
+		// still start, and the directory is made on the first child it writes down.
+		StateDir:        r.String("INSTANCE_STATE_DIR", "/var/lib/grove"),
+		GameTokenSecret: r.Secret("GAME_TOKEN_SECRET", secretMinLen),
 	}
 	if err := r.Err(); err != nil {
 		return Config{}, err
@@ -58,6 +66,10 @@ func Read(r *env.Reader) (Config, error) {
 	// Checked after that error, so an unset HOST_ID reads as missing rather than as malformed.
 	if !contract.ValidUUID(cfg.HostID) {
 		return Config{}, fmt.Errorf("HOST_ID must be a uuid, got %q", cfg.HostID)
+	}
+	// The fleet secret rides every beat as a bearer, so a cleartext control plane leaks it on a timer.
+	if cfg.Env == "production" && !strings.HasPrefix(cfg.ServerManagerURL, "https://") {
+		return Config{}, fmt.Errorf("SERVER_MANAGER_URL must be https in production, got %q", cfg.ServerManagerURL)
 	}
 	if cfg.MaxInstances < 1 {
 		return Config{}, fmt.Errorf("MAX_INSTANCES must be at least 1, got %d", cfg.MaxInstances)

@@ -28,7 +28,8 @@ func (s procSampler) Sample() (float64, int64) {
 	return s.load(), s.available()
 }
 
-// Divided by the core count, so one number compares two boxes of different sizes.
+// Divided by the core count, so one number compares two boxes of different sizes, and ceilinged at
+// fully loaded because the fleet router refuses any beat above 1.
 func (s procSampler) load() float64 {
 	fields := strings.Fields(s.read("loadavg"))
 	if len(fields) == 0 {
@@ -38,7 +39,7 @@ func (s procSampler) load() float64 {
 	if err != nil {
 		return 0
 	}
-	return one / float64(runtime.NumCPU())
+	return min(one/float64(runtime.NumCPU()), 1)
 }
 
 // MemAvailable rather than MemFree: the page cache is memory a process can have back, and MemFree

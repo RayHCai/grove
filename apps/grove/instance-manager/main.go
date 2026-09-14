@@ -43,13 +43,21 @@ func main() {
 		Log:          log,
 		MaxInstances: cfg.MaxInstances,
 		TokenSecret:  cfg.GameTokenSecret,
+		StateDir:     cfg.StateDir,
 	})
+
+	// Before anything can be placed here, or the first start of this boot would be weighed against
+	// a box that only looks empty.
+	if err := instances.Adopt(); err != nil {
+		log.Error("adopt", "err", err)
+	}
 
 	beater := heartbeat.New(heartbeat.Options{
 		ServerManagerURL: cfg.ServerManagerURL,
 		FleetSecret:      cfg.FleetSecret,
 		HostID:           cfg.HostID,
 		Region:           cfg.Region,
+		AgentPort:        cfg.Port,
 		Interval:         cfg.HeartbeatInterval,
 		Source:           instances,
 		Box:              box.NewProcSampler(),
