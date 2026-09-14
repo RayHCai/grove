@@ -62,10 +62,33 @@ func (s *service) writeState(w http.ResponseWriter, r *http.Request) {
 	// is a bug the caller has to see, not one to paper over.
 	case errors.Is(err, store.ErrStale):
 		httpx.WriteError(w, http.StatusConflict, httpx.CodeConflict, "revision moved")
+	// Never the 409 a stale write answers: @grove/game-instance reads that as a lost race and
+	// re-reads, re-writes and retries into the store that just refused it.
+	case errors.Is(err, store.ErrTooManyKeys):
+		atBound(w, "game holds as many keys as it may")
+	case errors.Is(err, store.ErrGameFull):
+		atBound(w, "game holds as many bytes as it may")
 	case err != nil:
 		s.fail(w, r, "write state", err)
 	default:
 		httpx.WriteJSON(w, http.StatusOK, written{Revision: revision})
+	}
+}
+
+func (s *service) deleteState(w http.ResponseWriter, r *http.Request) {
+	key, ok := stateKey(w, r)
+	if !ok {
+		return
+	}
+
+	err := s.store.Delete(r.Context(), gameID(r), key)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		httpx.WriteError(w, http.StatusNotFound, httpx.CodeNotFound, "no such key")
+	case err != nil:
+		s.fail(w, r, "delete state", err)
+	default:
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
