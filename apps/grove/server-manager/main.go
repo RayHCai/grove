@@ -28,7 +28,7 @@ func main() {
 		// service must share one registry rather than each holding half the fleet.
 		Registry: fleet.NewRegistry(cfg.StaleAfter),
 		Balancer: fleet.MostFree{},
-		Ingress:  fleet.DirectIngress{},
+		Ingress:  fleet.DirectIngress{Scheme: cfg.IngressScheme},
 		Secret:   cfg.FleetSecret,
 		Log:      log,
 	})

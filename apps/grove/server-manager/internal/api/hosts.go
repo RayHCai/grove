@@ -55,6 +55,9 @@ func checkHeartbeat(beat contract.HostHeartbeat, hostID string) (string, bool) {
 	if beat.Capacity.MemoryFreeBytes < 0 {
 		return "memoryFreeBytes must not be negative", false
 	}
+	if !validPort(beat.AgentPort) {
+		return "agentPort must be a port", false
+	}
 	// Parsed but not kept: a box with a skewed clock must not be able to claim it is fresh, so
 	// `lastSeenAt` is when this service heard the beat.
 	if _, err := contract.ParseTimestamp(beat.ReportedAt); err != nil {
@@ -72,6 +75,14 @@ func checkHeartbeat(beat contract.HostHeartbeat, hostID string) (string, bool) {
 		if inst.Players < 0 || inst.UptimeSeconds < 0 {
 			return "instance players and uptimeSeconds must not be negative", false
 		}
+		// A report the router keeps without one is a session it can name and no player can dial.
+		if !validPort(inst.Port) {
+			return "every instance must carry the port it bound", false
+		}
 	}
 	return "", true
+}
+
+func validPort(port int) bool {
+	return port >= 1 && port <= 65535
 }
