@@ -9,7 +9,7 @@
         "dev": "tsc -p tsconfig.json && node --watch dist/main.js",
         "start": "node dist/main.js",
         "typecheck": "tsc -p tsconfig.test.json",
-        "test": "vitest run --passWithNoTests",
+        "test": "vitest run",
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
