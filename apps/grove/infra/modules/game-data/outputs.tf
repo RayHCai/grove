@@ -1,23 +1,17 @@
 output "state_table_name" {
-  description = "Table behind `Read` and `Write`."
+  description = "Table keyed for `Read`, `Write` and `Leaderboard`."
   value       = aws_dynamodb_table.state.name
 }
 
-output "leaderboards_table_name" {
-  description = "Table behind `Leaderboard`."
-  value       = aws_dynamodb_table.leaderboards.name
-}
-
 output "bundles_table_name" {
-  description = "Table behind `Bundles`."
+  description = "Table keyed for `Bundles`."
   value       = aws_dynamodb_table.bundles.name
 }
 
 output "table_arns" {
-  description = "ARNs of all three tables in the primary region."
+  description = "ARNs of both tables in the primary region."
   value = [
     aws_dynamodb_table.state.arn,
-    aws_dynamodb_table.leaderboards.arn,
     aws_dynamodb_table.bundles.arn,
   ]
 }
@@ -29,7 +23,6 @@ output "table_arn_patterns" {
   value = flatten([
     for name in [
       aws_dynamodb_table.state.name,
-      aws_dynamodb_table.leaderboards.name,
       aws_dynamodb_table.bundles.name,
       ] : [
       "arn:${data.aws_partition.current.partition}:dynamodb:*:${data.aws_caller_identity.current.account_id}:table/${name}",

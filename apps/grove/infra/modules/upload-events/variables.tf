@@ -15,7 +15,7 @@ variable "source_prefix" {
 }
 
 variable "visibility_timeout_seconds" {
-  description = "How long a claimed build stays invisible to other builders. A compile is minutes, so this is not the default 30 seconds."
+  description = "How long a claimed build stays invisible to other builders. A compile is minutes, so this is not the default thirty seconds."
   type        = number
   default     = 900
 }

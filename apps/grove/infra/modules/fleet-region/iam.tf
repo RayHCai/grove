@@ -29,7 +29,7 @@ resource "aws_iam_role_policy_attachment" "ssm" {
 
 data "aws_iam_policy_document" "fleet" {
   # Bundles only. A box pulls the artifacts a session loads and never the source archives that
-  # produced them, which stay readable to the builder alone.
+  # produced them.
   statement {
     sid     = "ReadBundles"
     actions = ["s3:GetObject"]
@@ -66,21 +66,6 @@ data "aws_iam_policy_document" "fleet" {
         "dynamodb:BatchWriteItem",
       ]
       resources = var.dynamodb_arn_patterns
-    }
-  }
-
-  dynamic "statement" {
-    for_each = var.build_queue_arn == "" ? [] : [1]
-
-    content {
-      sid = "ClaimBuilds"
-      actions = [
-        "sqs:ReceiveMessage",
-        "sqs:DeleteMessage",
-        "sqs:ChangeMessageVisibility",
-        "sqs:GetQueueAttributes",
-      ]
-      resources = [var.build_queue_arn]
     }
   }
 

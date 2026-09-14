@@ -1,5 +1,6 @@
-# The one bucket every published game is served out of: `sources/` holds the archives a build
-# compiles, `bundles/` the artifacts a session loads, `assets/` what a game draws with.
+# The one bucket every published game is served out of. The policy is what tells its three prefixes
+# apart: `bundles/` and `assets/` are reachable from the distribution and the fleet, `sources/` from
+# no principal this module grants.
 
 resource "aws_s3_bucket" "games" {
   bucket        = var.bucket_name
@@ -78,13 +79,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "games" {
   depends_on = [aws_s3_bucket_versioning.games]
 }
 
-# What turns an upload into a build: with this on, every object event goes to the default event bus,
-# which is where `upload-events` picks the ones it cares about.
-resource "aws_s3_bucket_notification" "games" {
-  bucket      = aws_s3_bucket.games.id
-  eventbridge = true
-}
-
 data "aws_iam_policy_document" "games" {
   # The distribution reads through an origin access control, and only under the prefixes meant for
   # the edge: `sources/` is a creator's private code and never leaves the fleet.
@@ -131,4 +125,11 @@ resource "aws_s3_bucket_policy" "games" {
   policy = data.aws_iam_policy_document.games.json
 
   depends_on = [aws_s3_bucket_public_access_block.games]
+}
+
+# What turns an upload into a build: with this on, every object event goes to the default event bus,
+# which is where `upload-events` picks out the ones under `sources/`.
+resource "aws_s3_bucket_notification" "games" {
+  bucket      = aws_s3_bucket.games.id
+  eventbridge = true
 }

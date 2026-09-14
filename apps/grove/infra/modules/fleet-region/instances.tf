@@ -13,8 +13,8 @@ resource "aws_launch_template" "fleet" {
 
   vpc_security_group_ids = [aws_security_group.fleet.id]
 
-  # IMDSv2 only, one hop: the agent reads this box's instance id for `HOST_ID`, and a single hop
-  # keeps that credential out of reach of anything the box later runs in a container.
+  # IMDSv2 only, one hop: the instance profile's credentials are served here, and a single hop
+  # keeps them out of reach of anything the box later runs in a container.
   metadata_options {
     http_tokens                 = "required"
     http_put_response_hop_limit = 1

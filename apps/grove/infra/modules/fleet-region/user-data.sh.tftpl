@@ -5,12 +5,13 @@
 # discovered by the game process: this script resolves the whole environment and hands it over.
 set -euo pipefail
 
-TOKEN=$(curl -sfX PUT http://169.254.169.254/latest/api/token \
-    -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
-INSTANCE_ID=$(curl -sf -H "X-aws-ec2-metadata-token: $${TOKEN}" \
-    http://169.254.169.254/latest/meta-data/instance-id)
-
 install -d -m 0750 /etc/grove
+
+# Minted once and kept, because the fleet addresses a box by uuid and a restart must not rename it.
+if [ ! -s /etc/grove/host-id ]; then
+    cat /proc/sys/kernel/random/uuid > /etc/grove/host-id
+fi
+host_id=$(cat /etc/grove/host-id)
 
 fleet_secret=$(aws ssm get-parameter --with-decryption --region '${region}' \
     --name '${secret_path}/FLEET_SECRET' --query Parameter.Value --output text)
@@ -25,7 +26,7 @@ GROVE_ENV=${grove_env}
 INSTANCE_MANAGER_HOST=0.0.0.0
 INSTANCE_MANAGER_PORT=${instance_manager_port}
 SERVER_MANAGER_URL=${server_manager_url}
-HOST_ID=$${INSTANCE_ID}
+HOST_ID=$${host_id}
 HOST_REGION=${region}
 MAX_INSTANCES=${max_instances}
 HEARTBEAT_INTERVAL=${heartbeat_interval}

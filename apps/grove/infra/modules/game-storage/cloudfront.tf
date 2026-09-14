@@ -33,8 +33,8 @@ resource "aws_cloudfront_distribution" "games" {
     origin_access_control_id = aws_cloudfront_origin_access_control.games.id
   }
 
-  # Read-only by design: a bundle is published through `@grove/upload-service`, never through the
-  # edge, so the distribution has no method that could write one.
+  # Read-only by design: the distribution serves what is already in the bucket, and has no method
+  # that could put an object there.
   default_cache_behavior {
     target_origin_id       = "games"
     allowed_methods        = ["GET", "HEAD", "OPTIONS"]

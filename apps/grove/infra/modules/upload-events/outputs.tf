@@ -1,5 +1,5 @@
 output "queue_url" {
-  description = "URL `@grove/game-builder` polls for queued builds."
+  description = "URL a builder polls for queued builds."
   value       = aws_sqs_queue.builds.id
 }
 
