@@ -25,11 +25,10 @@ jobs:
         name: ${{ matrix.task.name }}
         runs-on: ubuntu-latest
         timeout-minutes: 20
-        # The toolchains this job installs, so their absence fails here rather than skipping. Terraform
-        # is deliberately not among them: no step here installs it, and `@grove/infra` must go on
-        # skipping rather than blocking every merge. Not set on `determinism`, which installs none.
+        # The toolchains this job installs, so their absence fails here rather than skipping. Not
+        # set on `determinism`, which installs none.
         env:
-            GROVE_REQUIRE_TOOLCHAIN: go,cargo,staticcheck
+            GROVE_REQUIRE_TOOLCHAIN: go,cargo,staticcheck,terraform
         strategy:
             fail-fast: false
             matrix:
@@ -87,6 +86,32 @@ jobs:
               run: |
                   go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
                   echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+            # Without a Terraform on `PATH`, `@grove/infra` skips its own validate and fmt gates, so
+            # every `.tf` file would land on main read by nothing. Unwrapped, so the exit code the
+            # scripts read is Terraform's own rather than the wrapper's.
+            - uses: hashicorp/setup-terraform@v3
+              with:
+                  terraform_version: 1.14.3
+                  terraform_wrapper: false
+
+            # Only `typecheck` runs `terraform init`, and uncached it pays one unretried provider
+            # download per root — twice a run, inside a timeout the whole TS, Go and Rust typecheck
+            # already shares.
+            - name: Cache Terraform providers
+              if: matrix.task.name == 'typecheck'
+              uses: actions/cache@v4
+              with:
+                  path: ${{ runner.temp }}/terraform-plugins
+                  key: terraform-plugins-${{ runner.os }}-${{ hashFiles('apps/grove/infra/environments/*/.terraform.lock.hcl') }}
+
+            # Created up front because a cache miss restores no directory, and Terraform reports a
+            # missing one as a CLI configuration error on every command it runs.
+            - name: Point Terraform at the plugin cache
+              if: matrix.task.name == 'typecheck'
+              run: |
+                  mkdir -p "$RUNNER_TEMP/terraform-plugins"
+                  echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/terraform-plugins" >> "$GITHUB_ENV"
 
             - name: Install dependencies
               run: pnpm install --frozen-lockfile

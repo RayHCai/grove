@@ -13,13 +13,8 @@ output "cdn_distribution_id" {
   value       = module.grove.cdn_distribution_id
 }
 
-output "build_queue_url" {
-  description = "URL `@grove/game-builder` polls for queued builds."
-  value       = module.grove.build_queue_url
-}
-
 output "tables" {
-  description = "The three tables behind `@grove/game-manager`."
+  description = "The three tables `@grove/game-manager`'s store is keyed for."
   value       = module.grove.tables
 }
 

@@ -25,9 +25,3 @@ variable "server_manager_url" {
   description = "Where every box's heartbeat goes."
   type        = string
 }
-
-variable "control_plane_cidrs" {
-  description = "Address blocks outside the fleet networks that may reach a box's agent."
-  type        = list(string)
-  default     = []
-}

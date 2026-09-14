@@ -30,4 +30,4 @@ fleet = {
   }
 }
 
-server_manager_url = "http://server-manager.grove.internal:4003"
+server_manager_url = "https://server-manager.grove.internal:4003"

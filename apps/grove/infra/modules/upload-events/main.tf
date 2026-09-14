@@ -1,6 +1,6 @@
-# A creator's upload landing in `sources/` is what queues a build. The rule is the only thing that
-# makes that happen, so a build is never triggered by the uploading client asking for one — a client
-# that forgot to ask would leave a game published and never compiled.
+# A creator's upload landing under `sources/` is what queues a build. The rule is the only thing
+# that makes that happen, so a build is never waiting on the uploading client to ask for one — a
+# client that uploaded and then failed would otherwise leave a game published and never compiled.
 
 locals {
   name = "grove-${var.environment}-game-builds"
@@ -32,7 +32,7 @@ resource "aws_sqs_queue" "builds" {
 
 resource "aws_cloudwatch_event_rule" "source_uploaded" {
   name        = "grove-${var.environment}-source-uploaded"
-  description = "A creator's source archive landed in the ${var.environment} games bucket"
+  description = "A source archive landed in the ${var.environment} games bucket"
 
   event_pattern = jsonencode({
     source        = ["aws.s3"]

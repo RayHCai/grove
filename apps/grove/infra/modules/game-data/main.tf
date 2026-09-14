@@ -1,7 +1,6 @@
-# The three tables behind `@grove/game-manager`'s store: one method group per table, and `gameId` as
-# the partition key of every one of them. A row belonging to another game is not in the partition a
-# handler's token lets it name, so cross-game access is unreachable at the datastore too and not
-# only at the scope above it.
+# The two tables `@grove/game-manager`'s store is keyed for. `gameId` partitions both, so a row
+# belonging to another game is not in the partition a handler's token lets it name — the guarantee
+# that service's scope makes, held at the datastore as well as above it.
 
 data "aws_partition" "current" {}
 
@@ -17,8 +16,14 @@ locals {
   table_name_base = "grove-${var.environment}"
 }
 
-# `Read` and `Write`. `revision` is the compare-and-set column: a write carrying `ifRevision` is a
-# conditional PutItem on it, which is why a stale write is a 409 rather than a lost update.
+# `Read`, `Write` and `Leaderboard`. `revision` is the compare-and-set column: a write carrying
+# `ifRevision` is a conditional PutItem on it, which is why a stale write is a 409 rather than a
+# lost update.
+#
+# A board is a value under a key here rather than a table of its own. Ordering a board is then the
+# store's work and not the datastore's, which is what the key schema buys: an index keyed on score
+# has to be partitioned by the board, and a board id carries no `gameId`, so the isolation every
+# other row gets from the partition key would have held for a leaderboard only by convention.
 resource "aws_dynamodb_table" "state" {
   name             = "${local.table_name_base}-state"
   billing_mode     = local.billing_mode
@@ -57,61 +62,6 @@ resource "aws_dynamodb_table" "state" {
   }
 
   tags = merge(local.common_tags, { Name = "${local.table_name_base}-state" })
-}
-
-# `Leaderboard`. The partition is one board of one game, and the local index orders that partition by
-# score — a page is one descending query, and its `LastEvaluatedKey` is the cursor the store mints.
-# A local index rather than a global one because a board's ranking is only ever read within its own
-# partition, and a global index would be a second eventually-consistent copy of it.
-resource "aws_dynamodb_table" "leaderboards" {
-  name             = "${local.table_name_base}-leaderboards"
-  billing_mode     = local.billing_mode
-  hash_key         = "boardId"
-  range_key        = "playerId"
-  stream_enabled   = local.replicated
-  stream_view_type = local.stream_view
-
-  deletion_protection_enabled = var.deletion_protection
-
-  attribute {
-    name = "boardId"
-    type = "S"
-  }
-
-  attribute {
-    name = "playerId"
-    type = "S"
-  }
-
-  attribute {
-    name = "score"
-    type = "N"
-  }
-
-  local_secondary_index {
-    name            = "by-score"
-    range_key       = "score"
-    projection_type = "ALL"
-  }
-
-  point_in_time_recovery {
-    enabled = var.point_in_time_recovery
-  }
-
-  server_side_encryption {
-    enabled = true
-  }
-
-  dynamic "replica" {
-    for_each = var.replica_regions
-
-    content {
-      region_name            = replica.value
-      point_in_time_recovery = var.point_in_time_recovery
-    }
-  }
-
-  tags = merge(local.common_tags, { Name = "${local.table_name_base}-leaderboards" })
 }
 
 # `Bundles`. One row per game, holding the set its sessions load — read on every session start and

@@ -8,9 +8,10 @@ locals {
     ManagedBy   = "terraform"
   })
 
-  # A box's agent is reachable from the other fleet networks and from the control plane. Derived from
-  # the slots' declared blocks rather than from the built VPCs, which would be a cycle.
-  agent_cidrs = concat([for slot in var.fleet : slot.vpc_cidr], var.control_plane_cidrs)
+  # A box's agent is reachable from the fleet's own declared blocks, of which only this region's is
+  # routable until the regions are peered. Taken from the slots rather than from the built VPCs,
+  # which would be a cycle.
+  agent_cidrs = [for slot in var.fleet : slot.vpc_cidr]
 }
 
 module "storage" {
@@ -22,15 +23,6 @@ module "storage" {
   access_logs_enabled = var.cdn_access_logs_enabled
   force_destroy       = !var.deletion_protection
   tags                = local.tags
-}
-
-module "events" {
-  source = "../upload-events"
-
-  environment   = var.environment
-  bucket_name   = module.storage.bucket_name
-  alarm_actions = var.build_alarm_actions
-  tags          = local.tags
 }
 
 module "data" {
@@ -59,7 +51,6 @@ module "fleet_a" {
   fleet_cidrs           = local.agent_cidrs
   artifact_bucket_arn   = module.storage.bucket_arn
   dynamodb_arn_patterns = module.data.table_arn_patterns
-  build_queue_arn       = module.events.queue_arn
   tags                  = local.tags
 }
 
@@ -79,7 +70,6 @@ module "fleet_b" {
   fleet_cidrs           = local.agent_cidrs
   artifact_bucket_arn   = module.storage.bucket_arn
   dynamodb_arn_patterns = module.data.table_arn_patterns
-  build_queue_arn       = module.events.queue_arn
   tags                  = local.tags
 }
 
@@ -99,6 +89,5 @@ module "fleet_c" {
   fleet_cidrs           = local.agent_cidrs
   artifact_bucket_arn   = module.storage.bucket_arn
   dynamodb_arn_patterns = module.data.table_arn_patterns
-  build_queue_arn       = module.events.queue_arn
   tags                  = local.tags
 }

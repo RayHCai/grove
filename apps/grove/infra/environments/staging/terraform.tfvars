@@ -27,4 +27,4 @@ fleet = {
   }
 }
 
-server_manager_url = "http://server-manager.staging.grove.internal:4003"
+server_manager_url = "https://server-manager.staging.grove.internal:4003"

@@ -24,11 +24,10 @@ module "grove" {
     aws.fleet_c = aws.fleet_c
   }
 
-  environment         = local.environment
-  bucket_name         = var.bucket_name
-  fleet               = var.fleet
-  server_manager_url  = var.server_manager_url
-  control_plane_cidrs = var.control_plane_cidrs
+  environment        = local.environment
+  bucket_name        = var.bucket_name
+  fleet              = var.fleet
+  server_manager_url = var.server_manager_url
 
   # A replica in every fleet region. A `@serverState` write sits inside a tick, and a tick that
   # crossed the continent to reach the store would spend its whole budget waiting.
@@ -41,8 +40,6 @@ module "grove" {
 
   cdn_price_class         = "PriceClass_All"
   cdn_access_logs_enabled = true
-
-  build_alarm_actions = var.build_alarm_actions
 
   tags = local.tags
 }

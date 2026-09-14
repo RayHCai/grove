@@ -93,7 +93,7 @@ resource "aws_vpc_security_group_ingress_rule" "agent" {
   for_each = toset(var.fleet_cidrs)
 
   security_group_id = aws_security_group.fleet.id
-  description       = "@grove/server-manager reaching this box's agent"
+  description       = "The fleet's own blocks reaching this box's agent"
   ip_protocol       = "tcp"
   from_port         = var.instance_manager_port
   to_port           = var.instance_manager_port

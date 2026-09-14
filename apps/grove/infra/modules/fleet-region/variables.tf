@@ -81,6 +81,11 @@ variable "fleet_cidrs" {
   description = "Address blocks allowed to reach the agent's own port. The fleet's own networks, never the internet."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for block in var.fleet_cidrs : can(cidrhost(block, 0))])
+    error_message = "Each block must be a CIDR, or its rule is one that matches nothing and is never noticed."
+  }
 }
 
 variable "artifact_bucket_arn" {
@@ -92,12 +97,6 @@ variable "dynamodb_arn_patterns" {
   description = "Tables and indexes a box may reach, as ARN patterns spanning every replica region."
   type        = list(string)
   default     = []
-}
-
-variable "build_queue_arn" {
-  description = "Build queue a box's `@grove/game-builder` claims work from. Empty grants nothing."
-  type        = string
-  default     = ""
 }
 
 variable "tags" {
