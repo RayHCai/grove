@@ -144,7 +144,13 @@ func TestScopeAdmitsOnlyAVerifiedToken(t *testing.T) {
 			code:   httpx.CodeUnauthorized,
 		},
 		{
-			name:   "a token the allocator signed",
+			name:   "a ticket minted for the game process",
+			bearer: joinTicket(t, gameA),
+			status: http.StatusUnauthorized,
+			code:   httpx.CodeUnauthorized,
+		},
+		{
+			name:   "the store bearer this service is handed",
 			bearer: ticket(t, gameA),
 			status: http.StatusOK,
 		},
@@ -283,6 +289,87 @@ func TestCompareAndSetRefusesAStaleRevision(t *testing.T) {
 	}
 }
 
+func TestAReleasedKeyIsAKeyNeverWritten(t *testing.T) {
+	memory, handler := newServer()
+	seedState(t, memory, gameA, "score", `{"points":1}`)
+	seedState(t, memory, gameB, "score", `{"points":2}`)
+
+	released := request(t, handler, http.MethodDelete, "/v1/state/score", ticket(t, gameA), "")
+	if released.Code != http.StatusNoContent {
+		t.Fatalf("status: got %d, want %d", released.Code, http.StatusNoContent)
+	}
+	if body := released.Body.String(); body != "" {
+		t.Fatalf("body: got %s, want nothing", body)
+	}
+
+	gone := request(t, handler, http.MethodGet, "/v1/state/score", ticket(t, gameA), "")
+	if gone.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d, want %d", gone.Code, http.StatusNotFound)
+	}
+	expectCode(t, gone, httpx.CodeNotFound)
+
+	// Releasing a key twice is not an error the second caller can act on, so it reads as the 404 a
+	// key never written reads as.
+	again := request(t, handler, http.MethodDelete, "/v1/state/score", ticket(t, gameA), "")
+	if again.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d, want %d", again.Code, http.StatusNotFound)
+	}
+	expectCode(t, again, httpx.CodeNotFound)
+
+	// A released key is at revision zero, so `ifRevision: 0` is again the first write of it.
+	landed := decodeAs[written](t, request(
+		t, handler, http.MethodPut, "/v1/state/score", ticket(t, gameA), `{"value":{"points":3},"ifRevision":0}`,
+	))
+	if landed.Revision != 1 {
+		t.Fatalf("revision: got %d, want 1", landed.Revision)
+	}
+
+	untouched := decodeAs[contract.StateRecord](
+		t, request(t, handler, http.MethodGet, "/v1/state/score", ticket(t, gameB), ""),
+	)
+	if got := string(untouched.Value); got != `{"points":2}` {
+		t.Fatalf("value: got %s, want a release by one game to leave another alone", got)
+	}
+}
+
+func TestAGameAtItsBoundIsToldWhichOneItHit(t *testing.T) {
+	cases := []struct {
+		name    string
+		refusal error
+		message string
+	}{
+		{
+			name:    "as many keys as a game may hold",
+			refusal: store.ErrTooManyKeys,
+			message: "game holds as many keys as it may",
+		},
+		{
+			name:    "as many bytes as a game may hold",
+			refusal: store.ErrGameFull,
+			message: "game holds as many bytes as it may",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			handler := New(boundedStore{store.NewMemory(), c.refusal}, []byte(secret),
+				slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+			res := request(t, handler, http.MethodPut, "/v1/state/score", ticket(t, gameA), `{"value":1}`)
+
+			// Never the 409 a stale write answers, which the game process reads as a lost race and
+			// retries into the store that just refused it.
+			if res.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("status: got %d, want %d", res.Code, http.StatusRequestEntityTooLarge)
+			}
+			expectCode(t, res, httpx.CodeInvalidRequest)
+			if got := decodeAs[httpx.ErrorBody](t, res).Message; got != c.message {
+				t.Fatalf("message: got %q, want %q", got, c.message)
+			}
+		})
+	}
+}
+
 func TestLeaderboardClampsItsLimit(t *testing.T) {
 	const players = 150
 
@@ -347,6 +434,12 @@ func TestLeaderboardClampsItsLimit(t *testing.T) {
 		{
 			name:   "a cursor this board never issued",
 			query:  "board=high&cursor=later",
+			status: http.StatusBadRequest,
+			code:   httpx.CodeInvalidRequest,
+		},
+		{
+			name:   "a cursor past the end of the board",
+			query:  "board=high&cursor=99999",
 			status: http.StatusBadRequest,
 			code:   httpx.CodeInvalidRequest,
 		},
@@ -426,6 +519,78 @@ func TestBundlesAnswerOnceAGameHasPublished(t *testing.T) {
 	}
 }
 
+// The contract carries a `LeaderboardWrite` and a bundle set is a value this store holds, but
+// neither has a verb here: state is the only thing a caller writes.
+func TestABoardAndABundleSetTakeNoWriteFromACaller(t *testing.T) {
+	_, handler := newServer()
+	bearer := ticket(t, gameA)
+
+	standing := encode(t, contract.LeaderboardWrite{
+		Board:       "high",
+		PlayerID:    "7f8e9d0c-1b2a-4c3d-8e5f-6a7b8c9d0e1f",
+		DisplayName: "one",
+		Score:       1,
+	})
+	set := encode(t, contract.BundleSet{
+		Server: contract.BundleRef{
+			Side:       contract.SideServer,
+			Hash:       strings.Repeat("a", 64),
+			URL:        "https://objects.grove.test/a",
+			ByteLength: 2048,
+		},
+		Client: contract.BundleRef{
+			Side:       contract.SideClient,
+			Hash:       strings.Repeat("b", 64),
+			URL:        "https://objects.grove.test/b",
+			ByteLength: 4096,
+		},
+		SyncedHash: strings.Repeat("c", 64),
+	})
+
+	cases := []struct {
+		name   string
+		method string
+		target string
+		body   string
+	}{
+		{
+			name:   "a standing submitted to the board that would rank it",
+			method: http.MethodPost,
+			target: "/v1/leaderboard?board=high",
+			body:   standing,
+		},
+		{
+			name:   "a set published where a game's sessions read one",
+			method: http.MethodPut,
+			target: "/v1/bundles",
+			body:   set,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res := request(t, handler, c.method, c.target, bearer, c.body)
+
+			if res.Code != http.StatusNotFound {
+				t.Fatalf("status: got %d, want %d", res.Code, http.StatusNotFound)
+			}
+			expectCode(t, res, httpx.CodeNotFound)
+		})
+	}
+
+	page := decodeAs[contract.LeaderboardPage](
+		t, request(t, handler, http.MethodGet, "/v1/leaderboard?board=high", bearer, ""),
+	)
+	if len(page.Entries) != 0 {
+		t.Fatalf("board: got %d entries, want the board a caller cannot write to", len(page.Entries))
+	}
+
+	never := request(t, handler, http.MethodGet, "/v1/bundles", bearer, "")
+	if never.Code != http.StatusNotFound {
+		t.Fatalf("bundles: got %d, want %d", never.Code, http.StatusNotFound)
+	}
+}
+
 func newServer() (*store.Memory, http.Handler) {
 	memory := store.NewMemory()
 	return memory, New(memory, []byte(secret), slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -437,6 +602,16 @@ type unreachableStore struct {
 }
 
 func (unreachableStore) Ping(context.Context) error { return errors.New("still dialing") }
+
+// What a store is to a game that has spent all of one of its bounds.
+type boundedStore struct {
+	*store.Memory
+	refusal error
+}
+
+func (b boundedStore) Write(context.Context, string, string, contract.StateWrite) (int64, error) {
+	return 0, b.refusal
+}
 
 func answerPresenting(t *testing.T, h http.Handler, requestID string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -480,9 +655,26 @@ func signWith(t *testing.T, game, key string, life time.Duration) string {
 	signed, err := token.Sign(token.Claims{
 		GameID:    game,
 		SessionID: "1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d",
-		PlayerID:  "7f8e9d0c-1b2a-4c3d-8e5f-6a7b8c9d0e1f",
+		Aud:       token.AudGameManager,
 		Exp:       time.Now().Add(life).Unix(),
 	}, []byte(key))
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	return signed
+}
+
+// What @grove/api hands a browser: the same secret signs it, so only the audience keeps it out.
+func joinTicket(t *testing.T, game string) string {
+	t.Helper()
+
+	signed, err := token.Sign(token.Claims{
+		GameID:    game,
+		SessionID: "1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d",
+		PlayerID:  "7f8e9d0c-1b2a-4c3d-8e5f-6a7b8c9d0e1f",
+		Aud:       token.AudGameInstance,
+		Exp:       time.Now().Add(time.Hour).Unix(),
+	}, []byte(secret))
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -496,6 +688,16 @@ func seedState(t *testing.T, memory *store.Memory, game, key, value string) {
 	if _, err := memory.Write(context.Background(), game, key, write); err != nil {
 		t.Fatalf("seed %s: %v", key, err)
 	}
+}
+
+func encode(t *testing.T, value any) string {
+	t.Helper()
+
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	return string(body)
 }
 
 func decodeAs[T any](t *testing.T, res *httptest.ResponseRecorder) T {
