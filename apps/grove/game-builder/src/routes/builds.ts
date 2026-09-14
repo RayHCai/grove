@@ -10,9 +10,17 @@ const RecentQuery = z.object({ limit: z.coerce.number().int().positive().max(50)
 /** Queue a build, watch it, call it off, and see what a game has asked for lately. */
 export function buildRoutes(queue: JobQueue): FastifyPluginAsyncZod {
     return async (app) => {
-        // 202 rather than 200: the reply is a place in the queue, because the child `tsc` and
-        // bundler behind it run for minutes and a caller that waited would hold a socket open for
-        // every one of them.
+        // A third of the box's minute, so one creator's save loop cannot spend all of it. The key is
+        // the validated body rather than the bearer, which is one shared value across the fleet, and
+        // reading a body is why this runs at `preHandler` instead of with the box-wide limit.
+        const perGame = app.createRateLimit({
+            max: 10,
+            timeWindow: '1 minute',
+            keyGenerator: (request) => (request.body as BuildRequest).gameId,
+        });
+
+        // 202 rather than 200: the reply is a place in the queue, because a compile runs for
+        // minutes and a caller that waited would hold a socket open for every one of them.
         app.post(
             '/builds',
             {
@@ -21,8 +29,22 @@ export function buildRoutes(queue: JobQueue): FastifyPluginAsyncZod {
                     body: BuildRequest,
                     response: { 202: BuildJob, 400: ErrorBody, 401: ErrorBody, 429: ErrorBody },
                 },
+                preHandler: async (request, reply) => {
+                    const ration = await perGame(request);
+                    if (ration.isAllowed || !ration.isExceeded) return;
+                    return reply
+                        .code(429)
+                        .header('retry-after', ration.ttlInSeconds)
+                        .send({ code: 'rate_limited', message: 'too many builds for this game' });
+                },
             },
-            async (request, reply) => reply.code(202).send(await queue.enqueue(request.body)),
+            async (request, reply) => {
+                // The 202 carries the job id and the request log does not, so this is the line that
+                // ties everything the queue later says about the build to the caller that asked.
+                const job = await queue.enqueue(request.body);
+                request.log.info({ jobId: job.jobId, gameId: job.gameId }, 'build queued');
+                return reply.code(202).send(job);
+            },
         );
 
         // Diagnostics ride on the job instead of on an endpoint of their own, so the editor that is
@@ -45,8 +67,8 @@ export function buildRoutes(queue: JobQueue): FastifyPluginAsyncZod {
             },
         );
 
-        // A finished build conflicts rather than succeeding quietly: its artifacts are already
-        // stored and registered, and a cancel cannot pull them back.
+        // A finished build conflicts rather than succeeding quietly: its outcome is settled, and
+        // a cancel cannot unsettle it.
         app.delete(
             '/builds/:jobId',
             {
