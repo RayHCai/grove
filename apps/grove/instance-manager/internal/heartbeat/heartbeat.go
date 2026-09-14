@@ -41,11 +41,13 @@ type Options struct {
 	FleetSecret      []byte
 	HostID           string
 	Region           string
-	Interval         time.Duration
-	Source           Source
-	Box              box.Sampler
-	Client           *http.Client
-	Log              *slog.Logger
+	// Where this agent listens, so the router reaches this box without a port compiled into it.
+	AgentPort int
+	Interval  time.Duration
+	Source    Source
+	Box       box.Sampler
+	Client    *http.Client
+	Log       *slog.Logger
 }
 
 // Beater sends the beat and owns nothing else.
@@ -76,8 +78,9 @@ func (b *Beater) Body(now time.Time) contract.HostHeartbeat {
 	cpu, memory := b.opts.Box.Sample()
 
 	return contract.HostHeartbeat{
-		HostID: b.opts.HostID,
-		Region: b.opts.Region,
+		HostID:    b.opts.HostID,
+		Region:    b.opts.Region,
+		AgentPort: b.opts.AgentPort,
 		Capacity: contract.HostCapacity{
 			RunningInstances: b.opts.Source.Running(),
 			MaxInstances:     b.opts.Source.Max(),

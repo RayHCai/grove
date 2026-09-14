@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/RayHCai/grove/libs/go-grove/contract"
+	"github.com/RayHCai/grove/libs/go-grove/token"
 )
 
 var (
@@ -33,6 +34,11 @@ const (
 	defaultRetention      = 10 * time.Minute
 )
 
+// How long the bearer this agent mints for a child is good for. Sized to the longest session this
+// box will hold rather than to a join ticket: a world that outlives its store credential loses
+// every save it had left, and there is no revocation behind this but the expiry.
+const storeBearerLifetime = 12 * time.Hour
+
 // Options is the whole configuration of a Registry, seams included.
 type Options struct {
 	Launcher Launcher
@@ -49,6 +55,9 @@ type Options struct {
 	StopTimeout time.Duration
 	// How long a reaped instance stays listed, since its last lines are the account of why it ended.
 	Retention time.Duration
+	// Where the children this box started are written down, so the next run of this agent finds
+	// the ones this one left running.
+	StateDir string
 
 	TokenSecret    []byte
 	HeapLimitBytes int64
@@ -57,19 +66,19 @@ type Options struct {
 
 // Request is one session this box was told to run.
 type Request struct {
+	// Chosen by @grove/server-manager, which hands it to the player in the same breath: a second id
+	// minted here would name a process nobody was told to dial.
+	InstanceID    string
 	GameID        string
 	SessionID     string
 	BundlePath    string
 	SimConfigPath string
 	ManagerURL    string
-	ManagerToken  string
 }
 
-// View is an InstanceReport plus the port this box bound for it. The report is the fleet's shape and
-// has no room for a port, because the fleet addresses a session by url.
+// View is what this box reports about one game process.
 type View struct {
 	contract.InstanceReport
-	Port int `json:"port"`
 }
 
 type instance struct {
@@ -93,7 +102,8 @@ type instance struct {
 
 // Registry holds one entry per game process this box started.
 type Registry struct {
-	opts Options
+	opts  Options
+	state store
 
 	mu        sync.Mutex
 	instances map[string]*instance
@@ -122,7 +132,11 @@ func New(opts Options) *Registry {
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
-	return &Registry{opts: opts, instances: make(map[string]*instance)}
+	return &Registry{
+		opts:      opts,
+		state:     store{dir: opts.StateDir},
+		instances: make(map[string]*instance),
+	}
 }
 
 // Start spawns one game process and returns what this box will report about it.
@@ -144,7 +158,19 @@ func (r *Registry) Start(ctx context.Context, req Request) (View, error) {
 		return View{}, ErrAtCapacity
 	}
 
-	id := contract.NewUUID()
+	id := req.InstanceID
+	// Minted here rather than carried in: nothing upstream holds GAME_TOKEN_SECRET on the placement
+	// path, and a credential that never crosses the fleet network cannot be read off it.
+	bearer, err := token.Sign(token.Claims{
+		GameID:    req.GameID,
+		SessionID: req.SessionID,
+		Aud:       token.AudGameManager,
+		Exp:       time.Now().Add(storeBearerLifetime).Unix(),
+	}, r.opts.TokenSecret)
+	if err != nil {
+		return View{}, fmt.Errorf("mint the store bearer: %w", err)
+	}
+
 	port, err := r.opts.Ports.Take()
 	if err != nil {
 		return View{}, err
@@ -152,7 +178,8 @@ func (r *Registry) Start(ctx context.Context, req Request) (View, error) {
 
 	logs := NewRing(r.opts.LogLines)
 	child, err := r.opts.Launcher.Start(ctx, Spec{
-		GameID: req.GameID,
+		GameID:    req.GameID,
+		SessionID: req.SessionID,
 		// Bound on every interface because a player dials the box directly; the probe still reaches
 		// it over loopback, which is the only path this agent uses.
 		Bind:           fmt.Sprintf("0.0.0.0:%d", port),
@@ -160,11 +187,13 @@ func (r *Registry) Start(ctx context.Context, req Request) (View, error) {
 		SimConfigPath:  req.SimConfigPath,
 		TokenSecret:    r.opts.TokenSecret,
 		ManagerURL:     req.ManagerURL,
-		ManagerToken:   req.ManagerToken,
+		ManagerToken:   bearer,
 		HeapLimitBytes: r.opts.HeapLimitBytes,
 		TickBudget:     r.opts.TickBudget,
 	}, logs)
 	if err != nil {
+		// Nothing else will hand this one back: no process holds it, and no entry names it.
+		r.opts.Ports.Release(port)
 		return View{}, fmt.Errorf("spawn a game process: %w", err)
 	}
 
@@ -181,6 +210,21 @@ func (r *Registry) Start(ctx context.Context, req Request) (View, error) {
 		state:     contract.InstanceStarting,
 	}
 	r.instances[id] = inst
+
+	// Written down before anything can reap it, so the record of a child that ends at once is
+	// dropped rather than left naming a pid this box no longer has.
+	if err := r.state.put(record{
+		InstanceID: id,
+		GameID:     req.GameID,
+		SessionID:  req.SessionID,
+		PID:        child.Pid(),
+		Port:       port,
+		StartedAt:  inst.startedAt,
+	}); err != nil {
+		// The session runs either way; all a box that cannot write this down loses is the process
+		// itself, on its next restart.
+		r.opts.Log.Warn("instance not written down", "instanceId", id, "err", err)
+	}
 	go r.reap(inst)
 
 	r.opts.Log.Info("instance started",
@@ -202,12 +246,81 @@ func (r *Registry) reap(inst *instance) {
 	inst.mu.Unlock()
 	close(inst.ended)
 
+	// Both belong to the process that just ended: the port it held is free again, and the record
+	// naming it has nothing left to adopt.
+	r.opts.Ports.Release(inst.port)
+	if err := r.state.drop(inst.id); err != nil {
+		r.opts.Log.Warn("instance not forgotten", "instanceId", inst.id, "err", err)
+	}
+
 	if err != nil {
 		inst.logs.Add("game-instance exited: " + err.Error())
 	} else {
 		inst.logs.Add("game-instance exited cleanly")
 	}
 	r.opts.Log.Info("instance exited", "instanceId", inst.id, "sessionId", inst.sessionID, "err", err)
+}
+
+// Adopt takes back the children an earlier run of this agent left running, and forgets the records
+// of those that have since ended.
+//
+// A redeploy deliberately outlives its children, so an agent that came back without looking for
+// them would double-book the box and leave a session in progress unroutable.
+func (r *Registry) Adopt() error {
+	held, err := r.state.all()
+	if err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, rec := range held {
+		child, err := r.opts.Launcher.Adopt(rec.PID)
+		if err != nil && !errors.Is(err, ErrNotOurs) {
+			// A read this agent could not make says nothing about the process, so the record stays
+			// for the next boot to retry and its port stays held against whatever still holds it.
+			r.opts.Ports.Hold(rec.Port)
+			r.opts.Log.Warn("instance neither adopted nor forgotten",
+				"instanceId", rec.InstanceID, "pid", rec.PID, "err", err)
+			continue
+		}
+		if err != nil {
+			r.opts.Log.Info("instance not adopted",
+				"instanceId", rec.InstanceID, "pid", rec.PID, "err", err)
+			if err := r.state.drop(rec.InstanceID); err != nil {
+				r.opts.Log.Warn("instance not forgotten", "instanceId", rec.InstanceID, "err", err)
+			}
+			continue
+		}
+
+		// The survivor holds this port whether or not it has bound it yet, and nothing else would
+		// tell this agent that: an empty issued set is a number the next start may be handed.
+		r.opts.Ports.Hold(rec.Port)
+
+		inst := &instance{
+			id:        rec.InstanceID,
+			gameID:    rec.GameID,
+			sessionID: rec.SessionID,
+			port:      rec.Port,
+			addr:      fmt.Sprintf("127.0.0.1:%d", rec.Port),
+			// The recorded start, so a survivor of a boot that finished long ago is read against a
+			// grace it has already spent rather than given a fresh one.
+			startedAt: rec.StartedAt,
+			child:     child,
+			// Its output went to a pipe that died with the agent that forked it, so this ring holds
+			// nothing before the line saying it ended.
+			logs:  NewRing(r.opts.LogLines),
+			ended: make(chan struct{}),
+			state: contract.InstanceStarting,
+		}
+		r.instances[rec.InstanceID] = inst
+		go r.reap(inst)
+
+		r.opts.Log.Info("instance adopted",
+			"instanceId", rec.InstanceID, "sessionId", rec.SessionID, "pid", rec.PID)
+	}
+	return nil
 }
 
 // Watch polls every child on an interval, which is the only way this box learns a state changed.
@@ -228,11 +341,19 @@ func (r *Registry) Watch(ctx context.Context, every time.Duration) {
 // Poll asks every child how it is, once. The state that reaches a report is this box's own reading
 // of the process, never a claim the process made about itself.
 func (r *Registry) Poll(ctx context.Context) {
-	now := time.Now()
+	// Concurrent, and each child timed at the moment it is asked: one wedged child must not age
+	// every other reading in the cycle, nor the grace those readings are tested against.
+	var probing sync.WaitGroup
 	for _, inst := range r.snapshot() {
-		r.probe(ctx, inst, now)
+		probing.Add(1)
+		go func() {
+			defer probing.Done()
+			r.probe(ctx, inst, time.Now())
+		}()
 	}
-	r.sweep(now)
+	probing.Wait()
+
+	r.sweep(time.Now())
 }
 
 func (r *Registry) probe(ctx context.Context, inst *instance, now time.Time) {
@@ -241,7 +362,7 @@ func (r *Registry) probe(ctx context.Context, inst *instance, now time.Time) {
 		return
 	}
 
-	vitals, err := r.opts.Prober.Probe(ctx, inst.addr)
+	vitals, requestID, err := r.opts.Prober.Probe(ctx, inst.addr)
 
 	inst.mu.Lock()
 	defer inst.mu.Unlock()
@@ -259,6 +380,12 @@ func (r *Registry) probe(ctx context.Context, inst *instance, now time.Time) {
 	// a boot takes.
 	if inst.state == contract.InstanceStarting && now.Sub(inst.startedAt) < r.opts.StartGrace {
 		return
+	}
+	// Once per transition rather than once per poll, so a box that is down for an hour is one
+	// account of why — under the id the child logged the refused probe against.
+	if inst.state != contract.InstanceUnhealthy {
+		r.opts.Log.Warn("instance unhealthy",
+			"err", err, "instanceId", inst.id, "requestId", requestID)
 	}
 	inst.state = contract.InstanceUnhealthy
 }
@@ -438,8 +565,8 @@ func (i *instance) view(now time.Time) View {
 			State:         i.state,
 			Players:       i.players,
 			UptimeSeconds: int64(now.Sub(i.startedAt).Seconds()),
+			Port:          i.port,
 		},
-		Port: i.port,
 	}
 }
 

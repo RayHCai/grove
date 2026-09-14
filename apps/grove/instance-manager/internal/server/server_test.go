@@ -21,12 +21,17 @@ import (
 
 const fleetSecret = "a-fleet-secret-of-at-least-32-chars"
 
+// What a child that was never forked answers when asked which process it is; nothing here goes
+// looking for one.
+const stubPid = 4242
+
 // A child that was never forked: it answers a drain and it ends when told to.
 type stubChild struct {
 	exit chan struct{}
 	once sync.Once
 }
 
+func (c *stubChild) Pid() int     { return stubPid }
 func (c *stubChild) Drain() error { c.end(); return nil }
 func (c *stubChild) Kill() error  { c.end(); return nil }
 func (c *stubChild) Wait() error  { <-c.exit; return nil }
@@ -38,6 +43,11 @@ func (stubLauncher) Start(context.Context, supervisor.Spec, io.Writer) (supervis
 	return &stubChild{exit: make(chan struct{})}, nil
 }
 
+// No test here outlives its own registry, so there is never a survivor of an earlier one to take.
+func (stubLauncher) Adopt(pid int) (supervisor.Child, error) {
+	return nil, fmt.Errorf("pid %d is not a game process", pid)
+}
+
 // A child that refuses the drain and outlives the kill that refusal earns it, so a stop takes the
 // supervisor's whole budget rather than returning the moment it is asked.
 type stubbornChild struct {
@@ -47,6 +57,8 @@ type stubbornChild struct {
 	mu    sync.Mutex
 	kills int
 }
+
+func (c *stubbornChild) Pid() int { return stubPid }
 
 func (c *stubbornChild) Drain() error { return errors.New("drain refused") }
 
@@ -72,10 +84,14 @@ func (stubbornLauncher) Start(
 	return &stubbornChild{exit: make(chan struct{})}, nil
 }
 
+func (stubbornLauncher) Adopt(pid int) (supervisor.Child, error) {
+	return nil, fmt.Errorf("pid %d is not a game process", pid)
+}
+
 type stubProber struct{}
 
-func (stubProber) Probe(context.Context, string) (supervisor.Vitals, error) {
-	return supervisor.Vitals{}, nil
+func (stubProber) Probe(context.Context, string) (supervisor.Vitals, string, error) {
+	return supervisor.Vitals{}, "probe-id", nil
 }
 
 type stubPorts struct {
@@ -89,6 +105,10 @@ func (p *stubPorts) Take() (int, error) {
 	p.next++
 	return 30000 + p.next, nil
 }
+
+func (p *stubPorts) Hold(int) {}
+
+func (p *stubPorts) Release(int) {}
 
 func newTestService(max int) http.Handler {
 	return newTestServiceWith(supervisor.Options{MaxInstances: max}, nil)
@@ -115,13 +135,18 @@ func newTestServiceWith(opts supervisor.Options, ready func(context.Context) err
 
 func startBodyFor(i int) string {
 	return fmt.Sprintf(`{
+		"instanceId": "%08d-2222-4222-8222-222222222222",
 		"gameId": "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
 		"sessionId": "%08d-1111-4111-8111-111111111111",
 		"bundlePath": "/srv/bundles/sim.js",
 		"simConfigPath": "/srv/bundles/sim.json",
-		"managerUrl": "http://game-manager:4001",
-		"managerToken": "session-scoped"
-	}`, i)
+		"managerUrl": "http://game-manager:4001"
+	}`, i, i)
+}
+
+// The id the placement named, which is the one the player was handed.
+func placedID(i int) string {
+	return fmt.Sprintf("%08d-2222-4222-8222-222222222222", i)
 }
 
 func call(handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -188,6 +213,10 @@ func TestStartingOneReportsThePortItBound(t *testing.T) {
 	if view.SessionID != "00000000-1111-4111-8111-111111111111" {
 		t.Errorf("sessionId: got %q", view.SessionID)
 	}
+	// The placement already told the player this id; a second one minted here names nothing they hold.
+	if view.InstanceID != placedID(0) {
+		t.Errorf("instanceId: got %q, want the placed %q", view.InstanceID, placedID(0))
+	}
 }
 
 func TestAFullBoxAnswers409(t *testing.T) {
@@ -229,19 +258,27 @@ func TestABadStartIsRefused(t *testing.T) {
 		{
 			name: "a game id that is not a uuid",
 			body: `{"gameId":"grove","sessionId":"00000000-1111-4111-8111-111111111111",
-				"bundlePath":"/b","simConfigPath":"/c","managerUrl":"http://m","managerToken":"t"}`,
+				"bundlePath":"/b","simConfigPath":"/c","managerUrl":"http://m"}`,
 		},
 		{
 			name: "no bundle to run",
-			body: `{"gameId":"6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
+			body: `{"instanceId":"00000000-2222-4222-8222-222222222222",
+				"gameId":"6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
 				"sessionId":"00000000-1111-4111-8111-111111111111","bundlePath":"",
-				"simConfigPath":"/c","managerUrl":"http://m","managerToken":"t"}`,
+				"simConfigPath":"/c","managerUrl":"http://m"}`,
 		},
 		{
-			name: "no bearer for the store",
+			name: "a placement that names no instance",
 			body: `{"gameId":"6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
 				"sessionId":"00000000-1111-4111-8111-111111111111","bundlePath":"/b",
-				"simConfigPath":"/c","managerUrl":"http://m","managerToken":""}`,
+				"simConfigPath":"/c","managerUrl":"http://m"}`,
+		},
+		{
+			name: "an instance id that is not a uuid",
+			body: `{"instanceId":"instance-7",
+				"gameId":"6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
+				"sessionId":"00000000-1111-4111-8111-111111111111","bundlePath":"/b",
+				"simConfigPath":"/c","managerUrl":"http://m"}`,
 		},
 	}
 

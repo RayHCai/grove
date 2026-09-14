@@ -7,17 +7,21 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/RayHCai/grove/libs/go-grove/contract"
+	"github.com/RayHCai/grove/libs/go-grove/token"
 )
 
 // A fake child is a process that was never forked: it is alive until something ends it, and the
 // fake prober answers for it the way a real one answers for a real port.
 type fakeChild struct {
+	pid int
+
 	mu      sync.Mutex
 	alive   bool
 	players int
@@ -27,6 +31,8 @@ type fakeChild struct {
 	exit chan struct{}
 	once sync.Once
 }
+
+func (c *fakeChild) Pid() int { return c.pid }
 
 func (c *fakeChild) Drain() error {
 	c.mu.Lock()
@@ -67,27 +73,50 @@ type fakeLauncher struct {
 	started int
 	specs   []Spec
 	byPort  map[string]*fakeChild
+	byPid   map[int]*fakeChild
 	inOrder []*fakeChild
 	writers []io.Writer
 }
 
 func newFakeLauncher() *fakeLauncher {
-	return &fakeLauncher{byPort: make(map[string]*fakeChild)}
+	return &fakeLauncher{byPort: make(map[string]*fakeChild), byPid: make(map[int]*fakeChild)}
 }
 
 func (l *fakeLauncher) Start(_ context.Context, spec Spec, logs io.Writer) (Child, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	child := &fakeChild{alive: true, exit: make(chan struct{})}
 	l.started++
+	child := &fakeChild{pid: 4000 + l.started, alive: true, exit: make(chan struct{})}
 	l.specs = append(l.specs, spec)
 	l.inOrder = append(l.inOrder, child)
 	l.writers = append(l.writers, logs)
 	l.byPort[portOf(spec.Bind)] = child
+	l.byPid[child.pid] = child
 
 	return child, nil
 }
+
+// The same box under a later agent: the process is still running under that pid, and the one that
+// forked it is not there to say so.
+func (l *fakeLauncher) Adopt(pid int) (Child, error) {
+	l.mu.Lock()
+	child, held := l.byPid[pid]
+	l.mu.Unlock()
+
+	if !held || !child.living() {
+		return nil, fmt.Errorf("pid %d is not a game process: %w", pid, ErrNotOurs)
+	}
+	return child, nil
+}
+
+// A launcher that cannot adopt, under a failure the caller is handed as-is.
+type refusingLauncher struct {
+	*fakeLauncher
+	err error
+}
+
+func (l refusingLauncher) Adopt(int) (Child, error) { return nil, l.err }
 
 func (l *fakeLauncher) at(addr string) *fakeChild {
 	l.mu.Lock()
@@ -130,37 +159,82 @@ func portOf(addr string) string {
 // A child is reachable exactly while it is alive, which is what a refused connection means on a box.
 type fakeProber struct{ launcher *fakeLauncher }
 
-func (p fakeProber) Probe(_ context.Context, addr string) (Vitals, error) {
+func (p fakeProber) Probe(_ context.Context, addr string) (Vitals, string, error) {
 	child := p.launcher.at(addr)
 	if child == nil || !child.living() {
-		return Vitals{}, errors.New("connection refused")
+		return Vitals{}, "probe-id", errors.New("connection refused")
 	}
 
 	child.mu.Lock()
 	defer child.mu.Unlock()
-	return Vitals{Players: child.players}, nil
+	return Vitals{Players: child.players}, "probe-id", nil
 }
 
+// A kernel that counts upward and, like the real one, offers any number nothing is bound to — so
+// what keeps two children off one port is the issued set, not the fake.
 type fakePorts struct {
-	mu   sync.Mutex
-	next int
+	mu       sync.Mutex
+	next     int
+	issued   map[int]struct{}
+	released []int
+}
+
+func newFakePorts() *fakePorts {
+	return &fakePorts{issued: make(map[int]struct{})}
 }
 
 func (p *fakePorts) Take() (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.next++
-	return 30000 + p.next, nil
+
+	for range 32 {
+		p.next++
+		port := 30000 + p.next
+		if _, held := p.issued[port]; held {
+			continue
+		}
+		p.issued[port] = struct{}{}
+		return port, nil
+	}
+	return 0, errors.New("every port this fake offers is already issued")
 }
 
-func newTestRegistry(max int) (*Registry, *fakeLauncher) {
-	launcher := newFakeLauncher()
+func (p *fakePorts) Hold(port int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.issued[port] = struct{}{}
+}
 
-	return New(Options{
-		Launcher: launcher,
-		Prober:   fakeProber{launcher: launcher},
-		Ports:    &fakePorts{},
-		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+func (p *fakePorts) Release(port int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.issued, port)
+	p.released = append(p.released, port)
+}
+
+func (p *fakePorts) gaveBack() []int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.released)
+}
+
+// A launcher on a box whose last deploy left nothing to fork.
+type brokenLauncher struct{}
+
+func (brokenLauncher) Start(context.Context, Spec, io.Writer) (Child, error) {
+	return nil, errors.New("start grove-game-instance: no such file or directory")
+}
+
+func (brokenLauncher) Adopt(pid int) (Child, error) {
+	return nil, fmt.Errorf("pid %d is not a game process: %w", pid, ErrNotOurs)
+}
+
+// The options every test shares, which are the ones a real value would only make the suite slower
+// for.
+func testOptions(max int) Options {
+	return Options{
+		Ports: newFakePorts(),
+		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 
 		MaxInstances: max,
 		LogLines:     4,
@@ -170,17 +244,33 @@ func newTestRegistry(max int) (*Registry, *fakeLauncher) {
 		StopTimeout: time.Second,
 		Retention:   time.Hour,
 		TokenSecret: []byte(strings.Repeat("s", 32)),
-	}), launcher
+	}
+}
+
+func newTestRegistry(max int) (*Registry, *fakeLauncher) {
+	launcher := newFakeLauncher()
+	return registryOver(launcher, "", max), launcher
+}
+
+// registryOver is this box under its next agent: the same processes still running on it, the same
+// records written down about them, and a registry that has heard of neither.
+func registryOver(launcher *fakeLauncher, stateDir string, max int) *Registry {
+	opts := testOptions(max)
+	opts.Launcher = launcher
+	opts.Prober = fakeProber{launcher: launcher}
+	opts.StateDir = stateDir
+
+	return New(opts)
 }
 
 func request(i int) Request {
 	return Request{
+		InstanceID:    fmt.Sprintf("%08d-2222-4222-8222-222222222222", i),
 		GameID:        "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
 		SessionID:     fmt.Sprintf("%08d-1111-4111-8111-111111111111", i),
 		BundlePath:    "/srv/bundles/sim.js",
 		SimConfigPath: "/srv/bundles/sim.json",
 		ManagerURL:    "http://game-manager:4001",
-		ManagerToken:  "session-scoped",
 	}
 }
 
@@ -408,8 +498,9 @@ func TestTheChildIsToldEverything(t *testing.T) {
 
 	// apps/grove/game-instance discovers none of these: a missing one is a session that never boots.
 	wanted := []string{
-		"GROVE_GAME_ID", "GROVE_BIND", "GROVE_BUNDLE", "GROVE_SIM_CONFIG", "GAME_TOKEN_SECRET",
-		"GROVE_MANAGER_URL", "GROVE_MANAGER_TOKEN", "GROVE_HEAP_LIMIT_BYTES", "GROVE_TICK_BUDGET_MS",
+		"GROVE_GAME_ID", "GROVE_SESSION_ID", "GROVE_BIND", "GROVE_BUNDLE", "GROVE_SIM_CONFIG",
+		"GAME_TOKEN_SECRET", "GROVE_MANAGER_URL", "GROVE_MANAGER_TOKEN", "GROVE_HEAP_LIMIT_BYTES",
+		"GROVE_TICK_BUDGET_MS",
 	}
 	for _, name := range wanted {
 		if environment[name] == "" {
@@ -421,6 +512,13 @@ func TestTheChildIsToldEverything(t *testing.T) {
 	}
 	if _, _, err := net.SplitHostPort(environment["GROVE_BIND"]); err != nil {
 		t.Errorf("GROVE_BIND %q is not an address: %v", environment["GROVE_BIND"], err)
+	}
+	// A value that is merely set is a session the child refuses every ticket for.
+	if environment["GROVE_SESSION_ID"] != request(0).SessionID {
+		t.Errorf("GROVE_SESSION_ID: got %q, want %q", environment["GROVE_SESSION_ID"], request(0).SessionID)
+	}
+	if environment["GROVE_GAME_ID"] != request(0).GameID {
+		t.Errorf("GROVE_GAME_ID: got %q, want %q", environment["GROVE_GAME_ID"], request(0).GameID)
 	}
 }
 
@@ -468,5 +566,311 @@ func TestAGiveUpMidStopLeavesTheChildAccountedFor(t *testing.T) {
 	}
 	if child.living() {
 		t.Error("the child outlived a Stop whose caller gave up")
+	}
+}
+
+// A redeploy leaves its children running, so the agent that comes back has to find them again: one
+// that started empty would offer slots this box does not have, and route new players past worlds
+// that are still being played.
+func TestARestartAdoptsTheChildrenItLeftRunning(t *testing.T) {
+	dir := t.TempDir()
+	launcher := newFakeLauncher()
+	views := startN(t, registryOver(launcher, dir, 2), 2)
+
+	second := registryOver(launcher, dir, 2)
+	if err := second.Adopt(); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+
+	if second.Running() != 2 {
+		t.Errorf("running after the restart: got %d, want 2", second.Running())
+	}
+	if _, err := second.Start(context.Background(), request(9)); !errors.Is(err, ErrAtCapacity) {
+		t.Errorf("a start on the full box: got %v, want ErrAtCapacity", err)
+	}
+
+	for _, want := range views {
+		adopted, err := second.Get(want.InstanceID)
+		if err != nil {
+			t.Fatalf("Get the adopted %s: %v", want.InstanceID, err)
+		}
+		if adopted.SessionID != want.SessionID {
+			t.Errorf("session: got %q, want %q", adopted.SessionID, want.SessionID)
+		}
+		if adopted.Port != want.Port {
+			t.Errorf("port: got %d, want %d", adopted.Port, want.Port)
+		}
+	}
+
+	// A survivor is this agent's to poll and to stop, or it was only listed rather than adopted.
+	second.Poll(context.Background())
+	polled, err := second.Get(views[0].InstanceID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if polled.State != contract.InstanceHealthy {
+		t.Errorf("state: got %q, want healthy", polled.State)
+	}
+	if err := second.Stop(context.Background(), views[0].InstanceID); err != nil {
+		t.Fatalf("Stop the adopted instance: %v", err)
+	}
+	if launcher.child(0).living() {
+		t.Error("the adopted child outlived a stop, so the drain reached nothing")
+	}
+}
+
+// A port belongs to the survivor holding it across the restart too. The agent comes back knowing
+// only what it wrote down, and a survivor that has not bound its port yet — this agent is restarted
+// five seconds after it dies — is one the kernel would offer that number for again.
+func TestAnAdoptedChildKeepsItsPort(t *testing.T) {
+	dir := t.TempDir()
+	launcher := newFakeLauncher()
+	survivors := startN(t, registryOver(launcher, dir, 3), 2)
+
+	second := registryOver(launcher, dir, 3)
+	if err := second.Adopt(); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+
+	next, err := second.Start(context.Background(), request(9))
+	if err != nil {
+		t.Fatalf("Start after the restart: %v", err)
+	}
+
+	for _, held := range survivors {
+		if next.Port == held.Port {
+			t.Errorf("a new child was sent to port %d, which %s is still on", next.Port, held.InstanceID)
+		}
+	}
+
+	// And the port the new child was issued survives an adopted one ending, which releases only its
+	// own number.
+	if err := second.Stop(context.Background(), survivors[0].InstanceID); err != nil {
+		t.Fatalf("Stop the adopted instance: %v", err)
+	}
+	ports := second.opts.Ports.(*fakePorts)
+	if slices.Contains(ports.gaveBack(), next.Port) {
+		t.Errorf("port %d was given back while its child was still running", next.Port)
+	}
+}
+
+// A pid this box no longer holds is a record to forget: adopting one would hold a slot against a
+// process that has ended, and a later stop would signal whatever now answers to that number. A pid
+// this agent could not read about is not that, and forgetting one loses a live session for good.
+func TestARecordIsForgottenOnlyWhereItsPidIsProvablyNotThisAgentsChild(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		kept bool
+	}{
+		{name: "a pid the kernel has nothing under", err: fmt.Errorf("pid 4041 is gone: %w", ErrNotOurs)},
+		{name: "a pid this agent could not read about", err: errors.New("read pid 4041: too many open files"), kept: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			state := store{dir: dir}
+			// The port the fake kernel offers first, so a new child is sent to it unless this
+			// survivor's number was held back.
+			survivor := record{
+				InstanceID: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+				GameID:     "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
+				SessionID:  "00000000-1111-4111-8111-111111111111",
+				PID:        4041,
+				Port:       30001,
+				StartedAt:  time.Now().Add(-time.Hour),
+			}
+			if err := state.put(survivor); err != nil {
+				t.Fatalf("write a record: %v", err)
+			}
+
+			launcher := newFakeLauncher()
+			opts := testOptions(2)
+			opts.Launcher = refusingLauncher{fakeLauncher: launcher, err: tc.err}
+			opts.Prober = fakeProber{launcher: launcher}
+			opts.StateDir = dir
+			registry := New(opts)
+
+			if err := registry.Adopt(); err != nil {
+				t.Fatalf("Adopt: %v", err)
+			}
+
+			if registry.Running() != 0 {
+				t.Errorf("running: got %d, want 0", registry.Running())
+			}
+			if len(registry.List()) != 0 {
+				t.Errorf("listed: got %d, want 0", len(registry.List()))
+			}
+
+			held, err := state.all()
+			if err != nil {
+				t.Fatalf("read the records back: %v", err)
+			}
+			if tc.kept && len(held) != 1 {
+				t.Fatalf("records left: got %d, want the record kept, since a session may still be running under that pid and nothing else would ever find it", len(held))
+			}
+			if !tc.kept && len(held) != 0 {
+				t.Fatalf("records left: got %d, want 0", len(held))
+			}
+
+			next, err := registry.Start(context.Background(), request(9))
+			if err != nil {
+				t.Fatalf("Start after the adoption: %v", err)
+			}
+			if tc.kept && next.Port == survivor.Port {
+				t.Errorf("a new child was sent to port %d, which the unread survivor may still hold", next.Port)
+			}
+			if !tc.kept && next.Port != survivor.Port {
+				t.Errorf("port: got %d, want %d back in circulation once its process was known gone", next.Port, survivor.Port)
+			}
+		})
+	}
+}
+
+// Nothing reaps a port no process ever took, so a failed spawn is the one path that has to hand it
+// back itself.
+func TestAFailedSpawnGivesItsPortBack(t *testing.T) {
+	ports := newFakePorts()
+	opts := testOptions(1)
+	opts.Launcher = brokenLauncher{}
+	opts.Prober = fakeProber{launcher: newFakeLauncher()}
+	opts.Ports = ports
+
+	registry := New(opts)
+	if _, err := registry.Start(context.Background(), request(0)); err == nil {
+		t.Fatal("a start with no binary to fork was accepted")
+	}
+
+	if got := ports.gaveBack(); len(got) != 1 || got[0] != 30001 {
+		t.Errorf("ports given back: got %v, want [30001]", got)
+	}
+}
+
+// A prober that answers only once every child is waiting on it, which a serial poll can never
+// satisfy.
+type gatheringProber struct {
+	arrived chan struct{}
+	release chan struct{}
+}
+
+func (p gatheringProber) Probe(context.Context, string) (Vitals, string, error) {
+	p.arrived <- struct{}{}
+	<-p.release
+	return Vitals{}, "probe-id", nil
+}
+
+// One wedged child must not age every other reading in the beat, which is what a cycle costing one
+// probe timeout per child does.
+func TestPollAsksEveryChildAtOnce(t *testing.T) {
+	const children = 4
+
+	prober := gatheringProber{
+		arrived: make(chan struct{}, children),
+		release: make(chan struct{}),
+	}
+	opts := testOptions(children)
+	opts.Launcher = newFakeLauncher()
+	opts.Prober = prober
+	registry := New(opts)
+	startN(t, registry, children)
+
+	polled := make(chan struct{})
+	go func() {
+		registry.Poll(context.Background())
+		close(polled)
+	}()
+
+	for asked := range children {
+		select {
+		case <-prober.arrived:
+		case <-time.After(2 * time.Second):
+			close(prober.release)
+			t.Fatalf("children asked at once: got %d, want %d", asked, children)
+		}
+	}
+	close(prober.release)
+
+	// Poll stays synchronous to its caller, because a beat reports what the last one left behind.
+	select {
+	case <-polled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Poll never returned")
+	}
+}
+
+// The player was handed this id with the placement, so a second one minted here would name a
+// process nobody was told to dial.
+func TestTheInstanceKeepsTheIdItWasPlacedUnder(t *testing.T) {
+	registry, _ := newTestRegistry(2)
+
+	started, err := registry.Start(context.Background(), request(3))
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if started.InstanceID != request(3).InstanceID {
+		t.Errorf("instance id: got %q, want the placed %q", started.InstanceID, request(3).InstanceID)
+	}
+	got, err := registry.Get(request(3).InstanceID)
+	if err != nil {
+		t.Fatalf("Get under the placed id: %v", err)
+	}
+	if got.SessionID != request(3).SessionID {
+		t.Errorf("session id: got %q, want %q", got.SessionID, request(3).SessionID)
+	}
+}
+
+// Nothing upstream holds GAME_TOKEN_SECRET on the placement path, so the bearer the child presents
+// to @grove/game-manager is one this agent signs, and it has to outlast a join ticket.
+func TestTheChildIsGivenAStoreBearerThisAgentMinted(t *testing.T) {
+	registry, launcher := newTestRegistry(1)
+	startN(t, registry, 1)
+
+	environment := map[string]string{}
+	for _, entry := range launcher.spec(0).Env() {
+		name, value, _ := strings.Cut(entry, "=")
+		environment[name] = value
+	}
+
+	secret := []byte(strings.Repeat("s", 32))
+	claims, err := token.Verify(environment["GROVE_MANAGER_TOKEN"], secret, token.AudGameManager, time.Now().Unix())
+	if err != nil {
+		t.Fatalf("@grove/game-manager refuses the bearer: %v", err)
+	}
+	if claims.SessionID != request(0).SessionID || claims.GameID != request(0).GameID {
+		t.Errorf("the bearer names %s/%s", claims.GameID, claims.SessionID)
+	}
+	// A store bearer belongs to the process, not to anyone in it.
+	if claims.PlayerID != "" {
+		t.Errorf("the bearer names a player: %q", claims.PlayerID)
+	}
+	// A world outlives the 60 seconds a join ticket is good for, and its saves go through this.
+	if _, err := token.Verify(environment["GROVE_MANAGER_TOKEN"], secret, token.AudGameManager,
+		time.Now().Add(time.Hour).Unix()); err != nil {
+		t.Errorf("the bearer is spent an hour into the session: %v", err)
+	}
+}
+
+// The heartbeat carries these verbatim, and a report without a port is a session no player reaches.
+func TestALiveReportCarriesThePortItsChildBound(t *testing.T) {
+	registry, _ := newTestRegistry(2)
+	views := startN(t, registry, 2)
+
+	live := registry.Live()
+	if len(live) != len(views) {
+		t.Fatalf("live reports: got %d, want %d", len(live), len(views))
+	}
+	byID := map[string]int{}
+	for _, view := range views {
+		byID[view.InstanceID] = view.Port
+	}
+	for _, report := range live {
+		if report.Port == 0 {
+			t.Errorf("%s is reported on no port", report.InstanceID)
+		}
+		if report.Port != byID[report.InstanceID] {
+			t.Errorf("port: got %d, want the bound %d", report.Port, byID[report.InstanceID])
+		}
 	}
 }
