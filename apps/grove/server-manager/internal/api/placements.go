@@ -1,4 +1,4 @@
-// The hot path into a game: one read of the registry, one ranking, no call to any box.
+// The hot path into a game: one ranking, one record of where it went, and no call to any box.
 
 package api
 
@@ -24,32 +24,21 @@ func (s *Server) place(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A box already running the game wins over an emptier one, and the ranking never gets a say:
-	// a game is a world its players share, and MostFree would send the second player to the box
-	// with the most free slots — which is never the box already spending one on this game.
-	if host, running, serving := s.registry.Serving(req.GameID, req.Region, s.now()); serving {
-		httpx.WriteJSON(w, http.StatusOK, contract.Placement{
-			HostID:     host.ID,
-			InstanceID: running.InstanceID,
-			SessionID:  running.SessionID,
-			ServerURL:  s.ingress.URL(host, running.InstanceID),
-		})
-		return
-	}
+	// Ranked outside the lock the decision below takes: a Balancer is handed a context because an
+	// implementation may go and ask something, and no join may hold the fleet while it does.
+	ordered := s.balancer.Rank(r.Context(), req, s.registry.Candidates(req.Region, s.now()))
 
-	// Nothing is running the game, so this is where it starts, and ranking decides where.
-	host, ok := s.balancer.Pick(r.Context(), req, s.registry.Candidates(req.Region, s.now()))
+	placed, ok := s.registry.Place(req, ordered, s.now())
 	if !ok {
 		httpx.WriteError(w, http.StatusConflict, httpx.CodeConflict, "no capacity")
 		return
 	}
 
-	instanceID, sessionID := contract.NewUUID(), contract.NewUUID()
 	httpx.WriteJSON(w, http.StatusOK, contract.Placement{
-		HostID:     host.ID,
-		InstanceID: instanceID,
-		SessionID:  sessionID,
-		ServerURL:  s.ingress.URL(host, instanceID),
+		HostID:     placed.Host.ID,
+		InstanceID: placed.InstanceID,
+		SessionID:  placed.SessionID,
+		ServerURL:  s.ingress.URL(placed.Host, placed),
 	})
 }
 

@@ -9,7 +9,7 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
 
-// deploy answers with the boxes the version reached. Fewer than the fleet is a staged rollout, and
+// deploy answers with the boxes a version is for. Fewer than the fleet is a staged rollout, and
 // none at all is a fleet with nothing healthy in the requested regions — both are the same answer.
 func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 	var req contract.DeploymentRequest

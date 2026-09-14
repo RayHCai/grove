@@ -10,15 +10,13 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 )
 
-// The port @grove/instance-manager listens on across the fleet. A game process binds an ephemeral
-// port, so the agent on the box is what resolves a placement to whatever port it actually got.
-const instanceManagerPort = 4004
-
-// Host is one EC2 box as the last heartbeat left it.
+// Host is one EC2 box as the last heartbeat left it, and what this service placed on it since.
 type Host struct {
-	ID       string
-	Region   string
-	Capacity contract.HostCapacity
+	ID     string
+	Region string
+	// Where this box's agent listens, as the box itself reported it, so nothing here is compiled in.
+	AgentPort int
+	Capacity  contract.HostCapacity
 	// Every instance the box reported, not a delta: a dropped beat costs nothing to recover from.
 	Instances []contract.InstanceReport
 	// Where the beat came from. Taken from the connection rather than a field, because a box that
@@ -27,11 +25,14 @@ type Host struct {
 	// When this service heard the beat, never when the box says it sent one — a skewed clock on one
 	// box must not make it look healthy here.
 	LastSeenAt time.Time
+	// Sessions placed here that the Capacity above cannot have counted yet, filled in when the box
+	// is offered as a candidate so that filtering and ranking read the same number of free slots.
+	Reserved int
 }
 
 // FreeSlots is how many more game processes the box will take.
 func (h Host) FreeSlots() int {
-	free := h.Capacity.MaxInstances - h.Capacity.RunningInstances
+	free := h.Capacity.MaxInstances - h.Capacity.RunningInstances - h.Reserved
 	if free < 0 {
 		return 0
 	}
@@ -69,13 +70,24 @@ func (h Host) Fresh(now time.Time, staleAfter time.Duration) bool {
 // A seam because reachability is a topology fact this service does not hold: a real fleet fronts a
 // box with a regional edge or a DNS name, where a single-region one is dialled at its address.
 type Ingress interface {
-	URL(h Host, instanceID string) string
+	URL(h Host, p Placement) string
 }
 
-// DirectIngress dials the box itself, at the agent that supervises the session's process.
-type DirectIngress struct{}
+// DirectIngress dials the session's own process, which is the socket a player speaks the game over.
+//
+// Scheme is a deliberate choice rather than a topology this service can read, so the zero value is
+// the secure spelling and a cleartext fleet has to be asked for by name.
+type DirectIngress struct{ Scheme string }
 
-func (DirectIngress) URL(h Host, instanceID string) string {
-	return fmt.Sprintf("wss://%s/v1/instances/%s",
-		net.JoinHostPort(h.Addr, strconv.Itoa(instanceManagerPort)), instanceID)
+// URL names the port the box bound for this session, never the agent's: the agent answers JSON
+// behind the fleet bearer, and the kernel picks the game's port afresh for every process.
+func (d DirectIngress) URL(h Host, p Placement) string {
+	return fmt.Sprintf("%s://%s/play", d.scheme(), net.JoinHostPort(h.Addr, strconv.Itoa(p.Port)))
+}
+
+func (d DirectIngress) scheme() string {
+	if d.Scheme == "" {
+		return "wss"
+	}
+	return d.Scheme
 }
