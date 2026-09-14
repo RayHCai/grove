@@ -32,8 +32,10 @@ impl Config {
             bail!("FLEET_SECRET must be at least {MIN_SECRET_LEN} characters");
         }
         Ok(Self {
+            // Binds loopback by default. This service is reachable from the fleet's own network and
+            // from nowhere else, and a default of 0.0.0.0 is how that stops being true by accident.
             bind: std::env::var("UPLOAD_SERVICE_BIND")
-                .unwrap_or_else(|_| "0.0.0.0:4005".to_owned()),
+                .unwrap_or_else(|_| "127.0.0.1:4005".to_owned()),
             root: PathBuf::from(required("UPLOAD_ROOT")?),
             fleet_secret,
             max_bytes: number("UPLOAD_MAX_BYTES", DEFAULT_MAX_BYTES)?,
