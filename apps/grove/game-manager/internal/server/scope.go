@@ -34,7 +34,7 @@ func verifyGameToken(secret []byte, l *slog.Logger) httpx.Middleware {
 				return
 			}
 
-			claims, err := token.Verify(presented, secret, time.Now().Unix())
+			claims, err := token.Verify(presented, secret, token.AudGameManager, time.Now().Unix())
 			if err != nil {
 				l.WarnContext(r.Context(), "token refused",
 					"reason", refusal(err), "requestId", httpx.RequestIDFrom(r.Context()))
@@ -67,6 +67,8 @@ func refusal(err error) string {
 		return "bad_signature"
 	case errors.Is(err, token.ErrExpired):
 		return "expired"
+	case errors.Is(err, token.ErrWrongAudience):
+		return "wrong_audience"
 	default:
 		return "malformed"
 	}

@@ -31,6 +31,7 @@ func New(st store.Store, secret []byte, l *slog.Logger) http.Handler {
 	scope := http.NewServeMux()
 	scope.HandleFunc("GET /v1/state/{key}", s.readState)
 	scope.HandleFunc("PUT /v1/state/{key}", s.writeState)
+	scope.HandleFunc("DELETE /v1/state/{key}", s.deleteState)
 	scope.HandleFunc("GET /v1/leaderboard", s.readLeaderboard)
 	scope.HandleFunc("GET /v1/bundles", s.readBundles)
 	// A wrong path under the scope answers only once the token has, so a caller without one cannot
@@ -57,6 +58,12 @@ func New(st store.Store, secret []byte, l *slog.Logger) http.Handler {
 
 func bad(w http.ResponseWriter, message string) {
 	httpx.WriteError(w, http.StatusBadRequest, httpx.CodeInvalidRequest, message)
+}
+
+// A 413 answers invalid_request because the contract's code set is closed, and a game past a bound
+// is a write this service will not take rather than a failure on this side.
+func atBound(w http.ResponseWriter, message string) {
+	httpx.WriteError(w, http.StatusRequestEntityTooLarge, httpx.CodeInvalidRequest, message)
 }
 
 // fail keeps what went wrong here and tells the caller only that something did.

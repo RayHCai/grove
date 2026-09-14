@@ -2,7 +2,7 @@
     "name": "@grove/game-manager",
     "version": "0.0.0",
     "private": true,
-    "description": "Game data for running sessions. The only thing between a game process and the database.",
+    "description": "Game data for running sessions. The only thing between a game process and its data.",
     "scripts": {
         "build": "node ../../../scripts/go.mjs build -o dist/game-manager .",
         "typecheck": "node ../../../scripts/go.mjs vet ./... && node ../../../scripts/staticcheck.mjs ./...",

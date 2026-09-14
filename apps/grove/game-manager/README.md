@@ -3,7 +3,7 @@
 Game data for running sessions: `@serverState`, leaderboards, and the bundles a session loads.
 Written in Go.
 
-The only thing between a game process and the database. It holds the credential a game process does
+The only thing between a game process and its data. It holds the credential a game process does
 not: a game presents a session-scoped token and reaches its own game's rows through here, and there
 is no other way in. Not publicly routable.
 
@@ -13,7 +13,9 @@ Every route under `/v1` sits behind one token-verifying middleware, and `gameId`
 verified claims onto the request context. No handler reads it from a URL, because there is no URL to
 read it from — a request cannot name a game its token was not issued for, so cross-game access is
 unrepresentable rather than merely rejected. A route added to the scope is authenticated because of
-where it is registered, not because someone remembered to check.
+where it is registered, not because someone remembered to check. The credential is the one minted
+for this service: a browser's join ticket is signed by the same secret and refused here on the
+audience its claims name.
 
 `/health` and `/ready` sit outside that scope: the local `@grove/instance-manager` polls them before
 any token exists.
@@ -23,20 +25,29 @@ any token exists.
 | `GET /health`                               | `{"ok":true}`                                         |
 | `GET /ready`                                | `{"ok":true}` once the store answers, or 503          |
 | `GET /v1/state/{key}`                       | the record, or 404                                    |
-| `PUT /v1/state/{key}`                       | the revision the write landed on, or 409              |
+| `PUT /v1/state/{key}`                       | the revision, 409 if stale, 413 past a bound          |
+| `DELETE /v1/state/{key}`                    | 204 once the key is released, or 404                  |
 | `GET /v1/leaderboard?board=&limit=&cursor=` | one page, `limit` defaulting to 25 and clamped to 100 |
 | `GET /v1/bundles`                           | the set this game's sessions load, or 404             |
 
 A write carrying `ifRevision` is a compare-and-set, and a stale one is a 409 that leaves the value
 where it was: two ticks racing on one key is a bug the caller has to see, not one to paper over. A
 key never written is at revision zero, which is what makes the first compare-and-set of a key
-expressible as `ifRevision: 0` rather than a special case a caller has to know about.
+expressible as `ifRevision: 0` rather than a special case a caller has to know about. A game holds
+at most 10,000 keys and 32 MiB across them, and a write past either bound is a 413 rather than an
+eviction or the 409 a caller retries: which row a game no longer needs is the game's to say, and
+`DELETE` is how it says so.
 
 ## The store
 
-`internal/store` is one interface — `Ping`, `Read`, `Write`, `Leaderboard`, `Bundles` — and every
-method that reaches a row takes the game as its first argument rather than reading one from a
-request. `main.go` chooses the implementation, which is the one place a real database lands.
+`internal/store` is one interface — `Ping`, `Read`, `Write`, `Delete`, `Leaderboard`, `Bundles` —
+and every method that reaches a row takes the game as its first argument rather than reading one
+from a request. `main.go` chooses the implementation, and what it chooses is `store.NewMemory()`:
+one process's maps, so a game's rows live as long as the process holding them and two replicas
+answer from two different sets.
+
+State is the only thing a caller writes here. A board's rows and a game's bundle set are read-only
+to every token this service accepts.
 
 The bundles themselves are fetched from the urls `GET /v1/bundles` returns, never through here: a
 service that proxied multi-megabyte chunks would be on the join path for every player of every game.
