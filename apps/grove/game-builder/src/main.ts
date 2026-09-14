@@ -1,13 +1,7 @@
-import { buildApp } from './app.js';
 import { readEnv } from './env.js';
 
-const env = readEnv();
-const app = await buildApp(env);
+readEnv();
 
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.once(signal, () => {
-        void app.close().then(() => process.exit(0));
-    });
-}
-
-await app.listen({ host: env.GAME_BUILDER_HOST, port: env.GAME_BUILDER_PORT });
+// A builder that accepts jobs it can only fail is worse than one that does not start, and no
+// `Compiler` exists for `buildApp`'s queue to run a build with.
+throw new Error('game-builder has no compiler attached; refusing to start');
