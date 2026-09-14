@@ -3,7 +3,7 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "The AWS deployment: the games bucket and its distribution, the tables behind game data, the build listener, and the EC2 fleet. Terraform.",
+    "description": "The AWS deployment: the games bucket and its distribution, the tables shaped for game data, and the EC2 fleet. Terraform.",
     "scripts": {
         "typecheck": "node ../../../scripts/terraform-validate.mjs",
         "format": "node ../../../scripts/terraform.mjs fmt -recursive",

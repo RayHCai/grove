@@ -24,7 +24,8 @@
         "GOPROXY",
         "GOTOOLCHAIN",
         "CARGO_HOME",
-        "RUSTUP_HOME"
+        "RUSTUP_HOME",
+        "TF_PLUGIN_CACHE_DIR"
     ],
     "tasks": {
         "build": {

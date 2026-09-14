@@ -18,11 +18,10 @@ module "grove" {
     aws.fleet_c = aws.fleet_c
   }
 
-  environment         = local.environment
-  bucket_name         = var.bucket_name
-  fleet               = var.fleet
-  server_manager_url  = var.server_manager_url
-  control_plane_cidrs = var.control_plane_cidrs
+  environment        = local.environment
+  bucket_name        = var.bucket_name
+  fleet              = var.fleet
+  server_manager_url = var.server_manager_url
 
   # No replicas: a staging tick may cross a region to reach the store, and the cost of a second copy
   # of three tables buys nothing a staging run needs to observe.
