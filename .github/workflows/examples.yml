@@ -12,6 +12,10 @@ concurrency:
     group: examples-${{ github.ref }}
     cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# Builds the samples and writes nothing back; stated rather than inherited, like ci.yml.
+permissions:
+    contents: read
+
 env:
     TURBO_TELEMETRY_DISABLED: 1
     DO_NOT_TRACK: 1

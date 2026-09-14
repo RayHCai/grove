@@ -90,8 +90,11 @@ means both files; widening one means widening its suite in the same commit.
 
 ## Build
 
-Requires Node 24 — pinned to 24.16.0 in `.node-version`, enforced by `engines` in `package.json`. If
-`node -v` disagrees, prefix commands with `mise exec --`; on an older Node, `pnpm` fails with a corepack
-error that never mentions the version.
+Requires Node 24 — pinned to 24.16.0 in `.node-version` and `mise.toml`; `engines` in `package.json`
+states only the `>=24` floor, which is why the Node-26 determinism leg runs the TypeScript suite
+without an engine warning. If `node -v` disagrees with the pin, prefix commands with `mise exec --`,
+which needs a mise nothing in the repo installs. Below the floor `pnpm` prints one `[WARN]
+Unsupported engine` line and carries on, so a mismatch surfaces as whatever the older runtime
+cannot do.
 
 `pnpm run lint | format:check | typecheck | build | test`
