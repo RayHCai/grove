@@ -1,0 +1,35 @@
+{
+    "secret": "grove-test-secret",
+    "ticket": {
+        "claims": {
+            "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
+            "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
+            "playerId": "f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b",
+            "aud": "game-instance",
+            "exp": 1893456000
+        },
+        "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"playerId\":\"f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b\",\"aud\":\"game-instance\",\"exp\":1893456000}",
+        "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjE4OTM0NTYwMDB9.SJzWQc5FT0UiLL0at3i19Mh8yYbKuHIowlt0gMu29bU"
+    },
+    "storeBearer": {
+        "claims": {
+            "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
+            "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
+            "aud": "game-manager",
+            "exp": 1893456000
+        },
+        "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"aud\":\"game-manager\",\"exp\":1893456000}",
+        "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4OTM0NTYwMDB9.pXwex0Dzh-gpuu5gnqoeIxz1BNqGVO7LlwRzwt5Wd9U"
+    },
+    "anotherTicketByTheSameSigner": {
+        "claims": {
+            "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
+            "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
+            "playerId": "f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b",
+            "aud": "game-instance",
+            "exp": 4102444800
+        },
+        "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"playerId\":\"f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b\",\"aud\":\"game-instance\",\"exp\":4102444800}",
+        "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjQxMDI0NDQ4MDB9.r6XWOaq7HBMTho1NVV0L_OJglleTPJirzxU4KhZV-18"
+    }
+}

@@ -8,12 +8,12 @@ export {
     LeaderboardEntry,
     LeaderboardPage,
     LeaderboardQuery,
+    LeaderboardWrite,
     StateKeyParams,
     StateRecord,
     StateValue,
     StateWrite,
 } from './game-data.js';
-export { ObjectHead, ObjectKind, ObjectRef } from './objects.js';
 export {
     Deployment,
     DeploymentRequest,
@@ -24,5 +24,11 @@ export {
     Placement,
     PlacementRequest,
 } from './placement.js';
-export { SessionTokenClaims, signSessionToken, verifySessionToken } from './session-token.js';
+export { REQUEST_ID_HEADER, REQUEST_ID_MAX_LENGTH, validRequestId } from './request-id.js';
+export {
+    SessionTokenClaims,
+    TokenAudience,
+    signSessionToken,
+    verifySessionToken,
+} from './session-token.js';
 export type { TokenFailure, TokenResult } from './session-token.js';

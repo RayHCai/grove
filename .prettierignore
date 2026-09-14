@@ -19,3 +19,6 @@ apps/grove/Cargo.lock
 
 # Terraform's provider plugins and module copies, fetched per root by `terraform init`.
 .terraform
+
+# Wire vectors compared byte for byte against `encoding/json`'s output, which has no whitespace.
+libs/api-contract/fixtures/wire

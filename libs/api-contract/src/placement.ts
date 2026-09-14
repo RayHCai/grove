@@ -39,6 +39,13 @@ export const InstanceReport = z.object({
     state: z.enum(['starting', 'healthy', 'draining', 'unhealthy']),
     players: z.int().nonnegative(),
     uptimeSeconds: z.int().nonnegative(),
+    /**
+     * The port the box bound for this process, which is the one a player dials.
+     *
+     * On the wire rather than assumed, because the kernel picks it: without it the router can only
+     * guess an address, and every guess is a port the security group does not open.
+     */
+    port: z.int().min(1).max(65535),
 });
 export type InstanceReport = z.infer<typeof InstanceReport>;
 
@@ -46,6 +53,8 @@ export type InstanceReport = z.infer<typeof InstanceReport>;
 export const HostHeartbeat = z.object({
     hostId: HostId,
     region: z.string(),
+    /** Where this box's agent listens, so the router reaches it without a compiled-in port. */
+    agentPort: z.int().min(1).max(65535),
     capacity: HostCapacity,
     /** Every instance every beat rather than a delta, so a dropped beat costs nothing to recover. */
     instances: z.array(InstanceReport),
@@ -65,7 +74,7 @@ export type HostView = z.infer<typeof HostView>;
 
 export const DeploymentRequest = z.object({
     gameId: GameId,
-    /** The whole set, so a host pulls the code from these urls without a second lookup. */
+    /** Both sides in one request, so the code a session runs is one decision rather than two. */
     bundles: BundleSet,
     /** Empty is the whole fleet; naming regions is what makes a rollout staged. */
     regions: z.array(z.string()),
@@ -75,7 +84,11 @@ export type DeploymentRequest = z.infer<typeof DeploymentRequest>;
 export const Deployment = z.object({
     gameId: GameId,
     bundles: BundleSet,
-    /** The hosts that took the version. Fewer than the fleet is a staged rollout, not a failure. */
+    /**
+     * The healthy boxes in the requested regions, which are the ones this version is for.
+     *
+     * Fewer than the fleet is a staged rollout, not a failure.
+     */
     hosts: z.array(HostId),
     deployedAt: z.iso.datetime(),
 });

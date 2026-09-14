@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -82,7 +83,14 @@ func Timestamp(t time.Time) string {
 }
 
 // ParseTimestamp reads one back, which is how a router decides `healthy` from a heartbeat's age.
+//
+// A trailing Z and no numeric offset, because that is the whole of what `z.iso.datetime()` admits
+// with no options — a box whose clock formats an offset must fail here rather than be taken by one
+// half of the fleet and refused by anything parsing the same beat with the declared schema.
 func ParseTimestamp(s string) (time.Time, error) {
+	if !strings.HasSuffix(s, "Z") {
+		return time.Time{}, fmt.Errorf("parse timestamp %q: must be UTC, ending in Z", s)
+	}
 	parsed, err := time.Parse(time.RFC3339, s)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parse timestamp %q: %w", s, err)
@@ -118,6 +126,17 @@ type LeaderboardEntry struct {
 	DisplayName string  `json:"displayName"`
 	Score       float64 `json:"score"`
 	Rank        int     `json:"rank"`
+}
+
+// LeaderboardWrite is one player's standing, as a game process submits it.
+//
+// No rank: a rank is a position in a board rather than a property of a player, so it is assigned
+// when a page is built and a writer that sent one would be sending a guess.
+type LeaderboardWrite struct {
+	Board       string  `json:"board"`
+	PlayerID    string  `json:"playerId"`
+	DisplayName string  `json:"displayName"`
+	Score       float64 `json:"score"`
 }
 
 type LeaderboardPage struct {
@@ -202,13 +221,18 @@ type InstanceReport struct {
 	State         InstanceState `json:"state"`
 	Players       int           `json:"players"`
 	UptimeSeconds int64         `json:"uptimeSeconds"`
+	// The port the box bound for this process, which is the one a player dials. On the wire rather
+	// than assumed, because the kernel picks it and every guess is a port the firewall does not open.
+	Port int `json:"port"`
 }
 
 // HostHeartbeat is what one @grove/instance-manager sends upward for the whole box at once.
 type HostHeartbeat struct {
-	HostID   string       `json:"hostId"`
-	Region   string       `json:"region"`
-	Capacity HostCapacity `json:"capacity"`
+	HostID string `json:"hostId"`
+	Region string `json:"region"`
+	// Where this box's agent listens, so the router reaches it without a port compiled into it.
+	AgentPort int          `json:"agentPort"`
+	Capacity  HostCapacity `json:"capacity"`
 	// Every instance every beat rather than a delta, so a dropped beat costs nothing to recover.
 	Instances  []InstanceReport `json:"instances"`
 	ReportedAt string           `json:"reportedAt"`
@@ -226,7 +250,7 @@ type HostView struct {
 
 type DeploymentRequest struct {
 	GameID string `json:"gameId"`
-	// The whole set, so a host pulls the code from these urls without a second lookup.
+	// Both sides in one request, so the code a session runs is one decision rather than two.
 	Bundles BundleSet `json:"bundles"`
 	// Empty is the whole fleet; naming regions is what makes a rollout staged.
 	Regions []string `json:"regions"`
@@ -235,7 +259,8 @@ type DeploymentRequest struct {
 type Deployment struct {
 	GameID  string    `json:"gameId"`
 	Bundles BundleSet `json:"bundles"`
-	// The hosts that took the version. Fewer than the fleet is a staged rollout, not a failure.
+	// The healthy boxes in the requested regions, which are the ones this version is for. Fewer than
+	// the fleet is a staged rollout, not a failure.
 	Hosts      []string `json:"hosts"`
 	DeployedAt string   `json:"deployedAt"`
 }
