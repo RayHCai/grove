@@ -1,8 +1,10 @@
 //! What one game process is told about itself, all of it from the environment.
 //!
-//! Nothing here is discovered and nothing is defaulted quietly: `@grove/instance-manager` spawns this
-//! process and every value below is a decision it already made, so a missing one is a wiring fault
-//! to fail on rather than a gap to paper over.
+//! Nothing here is discovered: `@grove/instance-manager` spawns this process and every value below
+//! is a decision it already made, so a missing one is a wiring fault to fail on rather than a gap to
+//! paper over. Three are defaulted instead — the bind address, the heap limit and the tick budget —
+//! to the same numbers the agent floors them at, so a hand-run process agrees with a supervised one;
+//! a value it cannot use is still refused rather than quietly replaced.
 
 use std::path::PathBuf;
 
@@ -14,6 +16,8 @@ const MIN_SECRET_LEN: usize = 32;
 pub struct Config {
     /// Which game this process serves. A ticket naming another is refused outright.
     pub game_id: String,
+    /// Which session this process IS. A ticket minted for another world is refused outright.
+    pub session_id: String,
     /// The address to bind. `instance-manager` picks the port and reports it upward.
     pub bind: String,
     /// The compiled sim bundle: `@platform/sim`, the engine it needs, and this game's own scripts.
@@ -39,6 +43,7 @@ impl Config {
         }
         Ok(Self {
             game_id: required("GROVE_GAME_ID")?,
+            session_id: required("GROVE_SESSION_ID")?,
             bind: std::env::var("GROVE_BIND").unwrap_or_else(|_| "0.0.0.0:0".to_owned()),
             bundle_path: PathBuf::from(required("GROVE_BUNDLE")?),
             sim_config_path: PathBuf::from(required("GROVE_SIM_CONFIG")?),
@@ -56,10 +61,32 @@ fn required(name: &str) -> Result<String> {
 }
 
 fn number(name: &str, fallback: usize) -> Result<usize> {
-    match std::env::var(name) {
-        Err(_) => Ok(fallback),
+    let value = match std::env::var(name) {
+        Err(_) => return Ok(fallback),
         Ok(raw) => raw
             .parse()
-            .with_context(|| format!("{name} must be a whole number")),
+            .with_context(|| format!("{name} must be a whole number"))?,
+    };
+    // Both of these are budgets: zero is not a smaller one but none at all, and the watchdog it
+    // disarms is what a session with no other way out depends on.
+    if value == 0 {
+        bail!("{name} must be greater than zero");
+    }
+    Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::number;
+
+    #[test]
+    fn refuses_a_budget_of_zero() {
+        std::env::set_var("GROVE_TEST_ZERO_BUDGET", "0");
+        assert!(number("GROVE_TEST_ZERO_BUDGET", 250).is_err());
+    }
+
+    #[test]
+    fn takes_the_fallback_only_where_nothing_is_set() {
+        assert_eq!(number("GROVE_TEST_UNSET_BUDGET", 250).unwrap(), 250);
     }
 }

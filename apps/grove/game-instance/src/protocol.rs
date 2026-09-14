@@ -1,5 +1,7 @@
 //! The seam, in Rust. Every type here mirrors one in `packages/sim/src/batch.ts` field for field,
-//! and the field names are the wire — a rename on either side is a silent mismatch, not an error.
+//! except `Send` and `OutputBatch`, which mirror the ENCODED variants in
+//! `packages/sim/src/isolate-entry.ts` — the two whose envelopes are already the codec's bytes. The
+//! field names are the wire: a rename on either side is a silent mismatch, not an error.
 //!
 //! Nothing here parses a payload. An inbound frame crosses as `RawValue` and an outbound envelope as
 //! the codec's own `String`: the host routes by `to` and `class` and reads nothing inside either, so
@@ -125,10 +127,23 @@ pub struct SimDiagnostics {
     pub stale: u64,
 }
 
+/// The rates the world is running at as of this batch.
+///
+/// On every batch rather than only on a change, because the seam is a value and not a stream: a
+/// host that learned a retune from one batch it happened to read would run the world at the old
+/// rate for as long as it missed one.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Rates {
+    pub sim_rate: f64,
+    pub send_rate: f64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutputBatch {
     pub tick: u64,
+    pub rates: Rates,
     pub sends: Vec<Send>,
     pub closes: Vec<CloseOrder>,
     pub loads: Vec<LoadOrder>,

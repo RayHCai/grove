@@ -71,6 +71,20 @@ impl Clock {
         }
     }
 
+    /// Retunes mid-session, for a world that changed its own rate.
+    ///
+    /// The accumulator and the send counter are left where they are: a retune is a change to what
+    /// happens next, and zeroing them would lose a partly-owed tick and restart the send interval
+    /// at a boundary no client was told about.
+    pub fn set_rates(&mut self, sim_rate: f64, send_rate: f64) {
+        if sim_rate.is_finite() && sim_rate > 0.0 {
+            self.sim_rate = sim_rate;
+        }
+        if send_rate.is_finite() && send_rate > 0.0 {
+            self.send_rate = send_rate;
+        }
+    }
+
     /// The clock the last wake reported — the host's only reading of time.
     pub fn now_seconds(&self) -> f64 {
         self.now_seconds

@@ -88,15 +88,6 @@ impl Death {
     }
 }
 
-pub struct IsolateOptions {
-    /// The compiled sim bundle: one classic script that assigns `globalThis.__grove`.
-    pub bundle: String,
-    /// What `Sim` is constructed with, already JSON.
-    pub config: String,
-    /// Bytes this session's heap may reach before it is torn down rather than left to thrash.
-    pub heap_limit_bytes: usize,
-}
-
 /// The session's isolate: booted once, ticked until it is closed or killed.
 pub struct Isolate {
     runtime: JsRuntime,
@@ -108,13 +99,16 @@ pub struct Isolate {
 }
 
 impl Isolate {
-    /// Builds the isolate, loads the bundle, and runs the sim's own boot to its first await.
-    pub fn boot(opts: IsolateOptions) -> Result<Self> {
+    /// Builds the isolate and arms its heap limit, evaluating nothing.
+    ///
+    /// Separate from `boot` because a terminator can only be taken from a built runtime, and the
+    /// watchdog has to hold one before the first line of creator code runs rather than after it.
+    pub fn new(heap_limit_bytes: usize) -> Self {
         let mailbox = Rc::new(RefCell::new(Mailbox::default()));
         let mut runtime = JsRuntime::new(RuntimeOptions {
             extensions: vec![grove_host::init(mailbox.clone())],
             create_params: Some(
-                deno_core::v8::CreateParams::default().heap_limits(0, opts.heap_limit_bytes),
+                deno_core::v8::CreateParams::default().heap_limits(0, heap_limit_bytes),
             ),
             ..Default::default()
         });
@@ -133,19 +127,22 @@ impl Isolate {
             current * 2
         });
 
-        runtime
-            .execute_script(BUNDLE_URL, deno_core::FastString::from(opts.bundle))
-            .context("the sim bundle threw while it was being evaluated")?;
-
-        mailbox.borrow_mut().inbound = Some(opts.config);
-        let mut isolate = Self {
+        Self {
             runtime,
             mailbox,
             over_heap,
             dead: None,
-        };
-        isolate.run("[grove:boot]", BOOT_SOURCE)?;
-        Ok(isolate)
+        }
+    }
+
+    /// Loads the bundle and runs the sim's own boot to its first await.
+    pub fn boot(&mut self, bundle: String, config: String) -> Result<()> {
+        self.runtime
+            .execute_script(BUNDLE_URL, deno_core::FastString::from(bundle))
+            .context("the sim bundle threw while it was being evaluated")?;
+
+        self.mailbox.borrow_mut().inbound = Some(config);
+        self.run("[grove:boot]", BOOT_SOURCE)
     }
 
     /// Why this isolate stopped, or `None` while it is still live.
@@ -190,20 +187,26 @@ impl Isolate {
             scope.perform_microtask_checkpoint();
         }
 
-        match outcome {
-            Ok(_) => Ok(()),
-            Err(error) => {
-                let death = if self.over_heap.load(Ordering::SeqCst) {
-                    Death::OutOfMemory
-                } else if self.runtime.v8_isolate().is_execution_terminating() {
-                    Death::Runaway
-                } else {
-                    Death::Threw
-                };
-                self.dead = Some(death);
-                Err(anyhow!("{}: {error}", death.token()))
-            }
-        }
+        // Read after the checkpoint, because the checkpoint is creator code too and `outcome` was
+        // decided before it ran: a heap trip or a termination inside it belongs to this run.
+        let death = if self.over_heap.load(Ordering::SeqCst) {
+            Some(Death::OutOfMemory)
+        } else if self.runtime.v8_isolate().is_execution_terminating() {
+            Some(Death::Runaway)
+        } else if outcome.is_err() {
+            Some(Death::Threw)
+        } else {
+            None
+        };
+
+        let Some(death) = death else {
+            return Ok(());
+        };
+        self.dead = Some(death);
+        Err(match outcome {
+            Err(error) => anyhow!("{}: {error}", death.token()),
+            Ok(_) => anyhow!("{}: terminated draining the microtask queue", death.token()),
+        })
     }
 
     fn take_output(&mut self) -> Result<OutputBatch> {
