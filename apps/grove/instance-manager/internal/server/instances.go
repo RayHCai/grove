@@ -25,13 +25,13 @@ const stopWriteGrace = 10 * time.Second
 // startBody is one placement @grove/server-manager already decided. This agent carries it out; it
 // does not weigh it, because which box should hold a session is not a question one box can answer.
 type startBody struct {
+	// The id the placement was answered with, so the player and this box name the same process.
+	InstanceID    string `json:"instanceId"`
 	GameID        string `json:"gameId"`
 	SessionID     string `json:"sessionId"`
 	BundlePath    string `json:"bundlePath"`
 	SimConfigPath string `json:"simConfigPath"`
 	ManagerURL    string `json:"managerUrl"`
-	// The child's own bearer for @grove/game-manager, scoped to this session and minted upstream.
-	ManagerToken string `json:"managerToken"`
 }
 
 type logPage struct {
@@ -54,12 +54,12 @@ func (s *service) startInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	view, err := s.instances.Start(r.Context(), supervisor.Request{
+		InstanceID:    body.InstanceID,
 		GameID:        body.GameID,
 		SessionID:     body.SessionID,
 		BundlePath:    body.BundlePath,
 		SimConfigPath: body.SimConfigPath,
 		ManagerURL:    body.ManagerURL,
-		ManagerToken:  body.ManagerToken,
 	})
 	switch {
 	case errors.Is(err, supervisor.ErrAtCapacity):
@@ -140,14 +140,14 @@ func (b startBody) problem() string {
 		return "gameId must be a uuid"
 	case !contract.ValidUUID(b.SessionID):
 		return "sessionId must be a uuid"
+	case !contract.ValidUUID(b.InstanceID):
+		return "instanceId must be a uuid"
 	case b.BundlePath == "":
 		return "bundlePath is required"
 	case b.SimConfigPath == "":
 		return "simConfigPath is required"
 	case b.ManagerURL == "":
 		return "managerUrl is required"
-	case b.ManagerToken == "":
-		return "managerToken is required"
 	}
 	return ""
 }

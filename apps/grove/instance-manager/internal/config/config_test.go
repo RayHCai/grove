@@ -34,6 +34,11 @@ func TestReadFillsTheDefaults(t *testing.T) {
 	if cfg.HeartbeatInterval != 10*time.Second {
 		t.Errorf("heartbeat interval: got %s, want 10s", cfg.HeartbeatInterval)
 	}
+	// Defaulted rather than required, or every box provisioned before this agent kept any state
+	// would fail its next restart.
+	if cfg.StateDir != "/var/lib/grove" {
+		t.Errorf("state dir: got %q, want /var/lib/grove", cfg.StateDir)
+	}
 }
 
 func TestReadRefusesAnEnvironmentItCannotRunOn(t *testing.T) {
@@ -65,6 +70,11 @@ func TestReadRefusesAnEnvironmentItCannotRunOn(t *testing.T) {
 		{
 			name:    "a host id the fleet cannot address",
 			change:  func(m map[string]string) { m["HOST_ID"] = "box-7" },
+			mention: "HOST_ID",
+		},
+		{
+			name:    "the ec2 instance id a launch template used to write",
+			change:  func(m map[string]string) { m["HOST_ID"] = "i-0abc123def4567890" },
 			mention: "HOST_ID",
 		},
 		{
@@ -129,5 +139,54 @@ func TestAnErrorNeverQuotesASecret(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "too-short-to-be-a-secret") {
 		t.Errorf("the secret is in the error: %v", err)
+	}
+}
+
+// The fleet secret rides every beat as a bearer, so production refuses a cleartext control plane.
+func TestReadRefusesACleartextServerManagerInProduction(t *testing.T) {
+	cases := []struct {
+		name     string
+		vars     map[string]string
+		accepted bool
+	}{
+		{
+			name:     "http in production",
+			vars:     map[string]string{"GROVE_ENV": "production", "SERVER_MANAGER_URL": "http://server-manager:4003"},
+			accepted: false,
+		},
+		{
+			name:     "https in production",
+			vars:     map[string]string{"GROVE_ENV": "production", "SERVER_MANAGER_URL": "https://server-manager:4003"},
+			accepted: true,
+		},
+		// A box a person is watching talks to a control plane on their own machine.
+		{
+			name:     "http outside production",
+			vars:     map[string]string{"SERVER_MANAGER_URL": "http://server-manager:4003"},
+			accepted: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := complete()
+			for name, value := range tc.vars {
+				vars[name] = value
+			}
+
+			_, err := Read(env.FromMap(vars))
+			if tc.accepted {
+				if err != nil {
+					t.Fatalf("Read: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("the environment was accepted")
+			}
+			if !strings.Contains(err.Error(), "SERVER_MANAGER_URL") {
+				t.Errorf("the error never names SERVER_MANAGER_URL: %v", err)
+			}
+		})
 	}
 }

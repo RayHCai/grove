@@ -16,6 +16,9 @@ import (
 
 const hostID = "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70"
 
+// Not the default, so a beat that carried a compiled-in 4004 would read as right and is not.
+const agentPort = 4104
+
 type fakeSource struct {
 	live    []contract.InstanceReport
 	running int
@@ -43,6 +46,7 @@ func reports(n int) []contract.InstanceReport {
 			State:         contract.InstanceHealthy,
 			Players:       i,
 			UptimeSeconds: int64(i * 10),
+			Port:          41000 + i,
 		})
 	}
 	return out
@@ -109,6 +113,7 @@ func newBeater(t *testing.T, url string, source Source) *Beater {
 		FleetSecret:      []byte("a-fleet-secret-of-at-least-32-chars"),
 		HostID:           hostID,
 		Region:           "us-east-1",
+		AgentPort:        agentPort,
 		Interval:         time.Hour,
 		Source:           source,
 		Box:              fakeBox{cpu: 0.25, free: 3 << 30},
@@ -149,6 +154,12 @@ func TestABeatCarriesOneReportPerLiveChild(t *testing.T) {
 			if beat.body.HostID != hostID || beat.body.Region != "us-east-1" {
 				t.Errorf("the box named itself as %q in %q", beat.body.HostID, beat.body.Region)
 			}
+			// A report without a port is a session the router can name and no player can reach.
+			for i, report := range beat.body.Instances {
+				if report.Port != 41000+i {
+					t.Errorf("port for %s: got %d, want %d", report.InstanceID, report.Port, 41000+i)
+				}
+			}
 			// The router decides healthy from this timestamp, so it has to be one it can parse.
 			if _, err := contract.ParseTimestamp(beat.body.ReportedAt); err != nil {
 				t.Errorf("reportedAt %q: %v", beat.body.ReportedAt, err)
@@ -183,6 +194,10 @@ func TestABeatCarriesTheBoxItself(t *testing.T) {
 	}
 	if beat.body.Capacity.CPULoad != 0.25 || beat.body.Capacity.MemoryFreeBytes != 3<<30 {
 		t.Errorf("the machine's own numbers: got %+v", beat.body.Capacity)
+	}
+	// The router dials this box back on it, rather than on a port compiled into the router.
+	if beat.body.AgentPort != agentPort {
+		t.Errorf("agentPort: got %d, want %d", beat.body.AgentPort, agentPort)
 	}
 }
 
