@@ -190,6 +190,45 @@ describe('connectWebSocket — a Transport is only handed out once connected', (
         expect(createSocket).toHaveBeenCalledWith('wss://host:8443/game?x=1');
     });
 
+    it('offers the subprotocols the caller set', async () => {
+        const socket = new FakeSocket(CONNECTING);
+        const createSocket = vi.fn(() => socket);
+        const connecting = connectWebSocket('wss://host/game', {
+            createSocket,
+            protocols: ['ticket.abc'],
+        });
+        socket.emitOpen();
+        await connecting;
+
+        // Arity is load-bearing: the case above offers nothing and is called with the url alone,
+        // so a factory typed `(url) => socket` is never handed an argument it did not declare.
+        expect(createSocket).toHaveBeenCalledWith('wss://host/game', ['ticket.abc']);
+    });
+
+    it('carries them into the global constructor when no factory is injected', async () => {
+        const socket = new FakeSocket(CONNECTING);
+        const built: Array<[string, string[] | undefined]> = [];
+        const globals = globalThis as { WebSocket?: unknown };
+        const real = globals.WebSocket;
+        // An object returned from a constructor is what `new` hands back, so the dial is given a
+        // socket this case can drive while the global records what it was constructed with.
+        globals.WebSocket = function (url: string, protocols?: string[]): FakeSocket {
+            built.push([url, protocols]);
+            return socket;
+        };
+
+        try {
+            const connecting = connectWebSocket('wss://host/game', { protocols: ['ticket.abc'] });
+            socket.emitOpen();
+            const transport = await connecting;
+            transport.close();
+        } finally {
+            globals.WebSocket = real;
+        }
+
+        expect(built).toEqual([['wss://host/game', ['ticket.abc']]]);
+    });
+
     it('refuses connect-failed when the socket errors before opening', async () => {
         const socket = new FakeSocket(CONNECTING);
         const connecting = connectWebSocket('ws://host/game', { createSocket: () => socket });
