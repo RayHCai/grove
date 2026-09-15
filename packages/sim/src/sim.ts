@@ -42,7 +42,7 @@ import type {
 } from '@platform/protocol';
 import { PROTOCOL_VERSION } from '@platform/protocol';
 import type { Codec, JsonValue, Message } from '@platform/transport';
-import { jsonCodec } from '@platform/transport';
+import { RESERVED_KEYS, jsonCodec } from '@platform/transport';
 import type {
     CloseOrder,
     ConnectionId,
@@ -403,13 +403,14 @@ export class Sim {
         for (const session of this.#sessions.values()) {
             if (session.joined) to.push(session.connectionId);
         }
-        this.#send(to, { kind: 'rate-change', tick: this.#rt.tick, simRate }, 'reliable');
+        this.#send(to, { kind: 'rate-change', simRate }, 'reliable');
     }
 
     /** The whole of one tick's output, and the point every accumulator is emptied at. */
     #takeOutput(): OutputBatch {
         const out: OutputBatch = {
             tick: this.#rt.tick,
+            rates: { simRate: this.#rt.simRate, sendRate: this.#config.sendRate },
             sends: this.#sends,
             closes: this.#closes,
             loads: this.#loads,
@@ -744,7 +745,7 @@ export class Sim {
         // this is the whole of the shared subset and the only thing worth encoding once.
         this.#send(broadcasting, transformEnvelope(set), 'droppable');
 
-        // Answered after the drain, so a reply names the tick the world has actually reached.
+        // Answered at the drain, so the round trip the client measures is an ordinary frame's.
         for (const session of this.#sessions.values()) {
             const sync = session.pendingTimeSync;
             if (sync === null) continue;
@@ -755,7 +756,6 @@ export class Sim {
                     kind: 'time-sync-reply',
                     clientSentMs: sync.clientSentMs,
                     serverSentMs: nowMs,
-                    serverTick: this.#rt.tick,
                 },
                 'reliable',
             );
@@ -933,7 +933,7 @@ function isGameRequest(value: unknown): value is GameRequest {
     // Checked with `in` rather than by value, because an explicit `undefined` is a frame no codec
     // could have produced and the wire rule is absent-not-undefined.
     if (!('data' in r)) return true;
-    return isPlainObject(r['data']) && isBoundedPayload(r['data']);
+    return isPlainObject(r['data']) && isAdmissiblePayload(r['data']);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -941,21 +941,36 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Whether a payload's whole graph fits inside `MAX_REQUEST_PAYLOAD_NODES`.
+ * Whether a payload's whole graph fits inside `MAX_REQUEST_PAYLOAD_NODES`, carries no reserved key
+ * and holds no non-finite number.
+ *
+ * The last two are the codec's decode-side rules, restated here rather than relied on: a handler is
+ * handed this object whole and the ordinary thing to do with it is merge it, so a `__proto__` that
+ * reached one would poison the prototype every player in the session shares. An out-of-process host
+ * hands the sim bytes it only checked were JSON, so the guarantee has to hold on this side of the
+ * seam or it holds for one host and not the other.
  *
  * Iterative rather than recursive, for the reason the codec's own walk is: a frame nesting a few
  * thousand deep is well-formed and small, and would overflow the stack before any cap read it. The
  * node count is what bounds this walk, and depth can never exceed it — a peer-chosen graph the
  * handler is handed whole is the one place a cardinality cap alone would not.
  */
-function isBoundedPayload(payload: Record<string, unknown>): boolean {
+function isAdmissiblePayload(payload: Record<string, unknown>): boolean {
     const stack: unknown[] = [payload];
     let nodes = 0;
     while (stack.length > 0) {
         const node = stack.pop();
         if (node === null || typeof node !== 'object') continue;
-        for (const child of Object.values(node)) {
+        const isArray = Array.isArray(node);
+        // `Object.keys` rather than `Object.values`, because `JSON.parse` made `__proto__` an own
+        // data property and it is the key that is the attack.
+        for (const key of Object.keys(node)) {
+            if (!isArray && RESERVED_KEYS.has(key)) return false;
             if (++nodes > MAX_REQUEST_PAYLOAD_NODES) return false;
+            const child = (node as Record<string, unknown>)[key];
+            // `1e999` is well-formed JSON that parses to Infinity, which no encoder on this wire
+            // would ever have produced.
+            if (typeof child === 'number' && !Number.isFinite(child)) return false;
             stack.push(child);
         }
     }

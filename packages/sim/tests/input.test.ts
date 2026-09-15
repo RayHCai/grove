@@ -242,6 +242,22 @@ describe('ackSeq is the highest contiguous RESOLVED seq', () => {
         expect(peer.lastState?.ackSeq).toBe(seq);
     });
 
+    it('refuses a second copy of a seq still waiting to apply, and fires its edge once', () => {
+        const h = harness({ config: { gameScripts: [Rules] } });
+        const peer = h.joined('a');
+        const rec = recorderOn(h, 'c1');
+        h.settle([peer]);
+
+        // Both copies arrive before any send-tick can move the frontier, so the frontier is still
+        // behind the seq when the second one is admitted.
+        const seq = peer.input(h.tick + 4, [{ action: 'jump', on: 'press' }]);
+        peer.inputAt(seq, h.tick + 4, [{ action: 'jump', on: 'press' }]);
+        h.pumpTicks(8);
+
+        expect(rec.presses).toBe(1);
+        expect(peer.lastState?.ackSeq).toBe(seq);
+    });
+
     it('refuses a seq further ahead than the window could ever apply', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');

@@ -252,16 +252,18 @@ and `movement.fillIntent(moveX, moveY)`.
 
 ### 5.3 Admission
 
-In order, per frame: a **seq sanity bound** — above the frontier, and within `maxSeqGap` of `highestSeen`,
-refused before the gap-dating map can be made to cost O(seq). At or below the frontier the seq is already
-resolved, so no ack could report it and applying it would re-fire an edge the loop has walked past: a replay,
-or a late arrival `abandonStale` gave up on. Then the **tick window** `[tick − pastGrace, tick + futureHorizon]`,
-where inside-grace is buffered and merge-forwarded, up to `HORIZON_CLAMP_TICKS` past the horizon is **clamped**
-to the horizon, and further out is `too-far-future`; then the **token bucket** (`INPUT_BUCKET_FRAMES` deep, one
-token refilled per stepped tick — the wire's own one-frame-per-tick ceiling, with depth for a multi-tick catch-
-up's burst). Identity needs no check here: no frame field names a player. A refusal is reported by the ack
-advancing past it — there is no `InputNack`. `RATE_BREACH_CLOSE` cumulative rate refusals close that session
-alone.
+In order, per frame: a **seq sanity bound** — above the frontier, not already seen above it, and within
+`maxSeqGap` of `highestSeen`, refused before the gap-dating map can be made to cost O(seq). At or below the
+frontier the seq is already resolved, so no ack could report it and applying it would re-fire an edge the loop
+has walked past: a replay, or a late arrival `abandonStale` gave up on. Above the frontier a second copy of a
+seq is that same double-fire before any ack could carry the first, refused **unresolved** because the copy
+already filed may not have applied and acking it would let the client prune input it still needs. Then the
+**tick window** `[tick − pastGrace, tick + futureHorizon]`, where inside-grace is buffered and merge-forwarded,
+up to `HORIZON_CLAMP_TICKS` past the horizon is **clamped** to the horizon, and further out is
+`too-far-future`; then the **token bucket** (`INPUT_BUCKET_FRAMES` deep, one token refilled per stepped tick —
+the wire's own one-frame-per-tick ceiling, with depth for a multi-tick catch-up's burst). Identity needs no
+check here: no frame field names a player. A refusal is reported by the ack advancing past it — there is no
+`InputNack`. `RATE_BREACH_CLOSE` cumulative rate refusals close that session alone.
 
 Those three bound how **many** frames arrive; three more bound what **one** frame may contain, since none of
 the above sees a frame's shape — the host refuses a frame over `MAX_FRAME_BYTES` before parsing it, but byte
@@ -355,9 +357,10 @@ skipped, since the snapshot already gives it the whole manifest — so a joiner 
 cannot end up able to draw different things. Assets are defined on core's registry alongside, or `assets.get`
 answers `null` for a key the wire is already carrying.
 
-**`TimeSync` is answered at the drain**, not at arrival, so the tick a reply names is one the world has reached
-rather than whatever tick the batch found it at. `serverSentMs` is `batch.nowMs`; the client differences only
-its own two stamps, so no agreement between the two machines' clocks is needed.
+**`TimeSync` is answered at the drain**, not at arrival, so the reply queues behind that tick's state and
+transform sends and the round trip the client measures is the one an ordinary frame takes. `serverSentMs` is
+`batch.nowMs`; the client differences only its own two stamps, so no agreement between the two machines'
+clocks is needed.
 
 ### 6.2 Two envelopes, both tick-stamped
 

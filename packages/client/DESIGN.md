@@ -428,7 +428,7 @@ map keys on the **local `EntityId`**, so the render layer never learns there is 
 | `live`         | `Welcome` applied, clock seeded                                                       | yes   |
 | `stalled`      | no envelope for `STALL_SECONDS`, **or** `ackSeq` frozen                               | no    |
 | `resyncing`    | `localTick < depictedTick`, or a `RateChange`                                         | no    |
-| `disconnected` | `onClose` fired                                                                       | no    |
+| `disconnected` | `onClose` fired with no `Reject` queued behind it                                     | no    |
 | `failed`       | `Reject`, unusable `Welcome`, a bad bundle, an unanswered join, or a `TransportError` | no    |
 
 `failed` and `disconnected` are terminal and absorb later transitions, `failed` outranking a close that
@@ -485,4 +485,4 @@ Each of these is load-bearing and reads as removable.
 | `BindingTable.#down`         | clear it on resync: the release edge for every key held across it is then never sent                                                 |
 | `destroy()`'s `clearRuntime` | call it unconditionally: core keeps one module-global and a second client loses its own runtime                                      |
 | `Lifecycle.fail`             | route it through `to()`: the close a `Reject` causes is delivered with it, and the session would end terminal with no reason         |
-| `onClose`                    | drop the inbox with the rest: a `Reject` rides in ahead of the close it caused, and this frame's drain is what turns it into text    |
+| `onClose`                    | stop the loop without reading the inbox: a `Reject` rides in ahead of the close it caused, and no later drain turns it into text     |

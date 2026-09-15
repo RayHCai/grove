@@ -3,9 +3,15 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import type { KVStore } from '@platform/core';
-import { MemoryKVStore, PERSISTENCE_SCOPE, clearRuntime, playerKey } from '@platform/core';
+import {
+    GAME_KEY,
+    MemoryKVStore,
+    PERSISTENCE_SCOPE,
+    clearRuntime,
+    playerKey,
+} from '@platform/core';
 import type { Sim } from '../src/sim.js';
-import { Accounts, Squad, Wallet } from '../dist/testkit/fixtures.js';
+import { Accounts, Era, Squad, Wallet } from '../dist/testkit/fixtures.js';
 import { Harness, harness, kvStore } from './harness.js';
 
 afterEach(() => clearRuntime());
@@ -14,6 +20,12 @@ function walletOf(sim: Sim, id: string): Wallet {
     return [...sim.runtime.instances.forHost(playerKey(id))]
         .map((si) => si.instance)
         .find((i): i is Wallet => i instanceof Wallet)!;
+}
+
+function eraOf(sim: Sim): Era {
+    return [...sim.runtime.instances.forHost(GAME_KEY)]
+        .map((si) => si.instance)
+        .find((i): i is Era => i instanceof Era)!;
 }
 
 function squadOf(sim: Sim, id: string): Squad {
@@ -103,5 +115,41 @@ describe('a host-named player rejoins into what the last session saved', () => {
         expect(await backing.get(PERSISTENCE_SCOPE, playerKey('alice'))).toStrictEqual({
             credits: 99,
         });
+    });
+});
+
+describe('a game-hosted @serverState is replicated for the session and never checkpointed', () => {
+    it('is absent from the record the leave writes, and back at its initializer next session', async () => {
+        const kv = new MemoryKVStore();
+        const h = harness({ config: { gameScripts: [Accounts, Era] }, store: kvStore(kv) });
+
+        const peer = await h.joinedAs('alice');
+        walletOf(h.sim, 'alice').credits = 42;
+        eraOf(h.sim).epoch = 9;
+        h.pumpTicks(4);
+        peer.close();
+        h.pumpTicks(2);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(h.saves.map((s) => s.hostKey)).toStrictEqual([playerKey('alice')]);
+        expect(Object.keys(h.saves[0]!.fields)).toContain('credits');
+        expect(Object.keys(h.saves[0]!.fields)).not.toContain('epoch');
+        expect(await kv.get(PERSISTENCE_SCOPE, GAME_KEY)).toBeUndefined();
+        h.close();
+
+        const second = harness({ config: { gameScripts: [Accounts, Era] }, store: kvStore(kv) });
+        await second.joinedAs('alice');
+        expect(walletOf(second.sim, 'alice').credits).toBe(42);
+        expect(eraOf(second.sim).epoch).toBe(1);
+    });
+
+    it('is never named by a load order either', async () => {
+        const kv = new MemoryKVStore();
+        const h = harness({ config: { gameScripts: [Accounts, Era] }, store: kvStore(kv) });
+
+        await h.joinedAs('alice');
+        h.pumpTicks(4);
+
+        expect(h.loads.map((l) => l.hostKey)).toStrictEqual([playerKey('alice')]);
     });
 });

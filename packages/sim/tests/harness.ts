@@ -214,6 +214,8 @@ export interface HarnessOptions {
 export class Harness {
     readonly sim: Sim;
     readonly store: HarnessStore;
+    /** Every load the sim has ordered, in order — one output batch cannot show them all. */
+    readonly loads: Array<{ connectionId: ConnectionId; hostKey: string }> = [];
     /** Every save the sim has ordered, in order — the host's obligation, made observable. */
     readonly saves: Array<{ hostKey: string; fields: { [field: string]: unknown } }> = [];
     /** Every close the sim has ordered, in order. */
@@ -406,6 +408,7 @@ export class Harness {
         }
 
         for (const load of out.loads) {
+            this.loads.push({ connectionId: load.connectionId, hostKey: load.hostKey });
             void this.store.get(load.hostKey).then(
                 (fields) => {
                     // `{}` for a store that held nothing, so the leave still writes; `null` is
