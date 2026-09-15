@@ -43,14 +43,16 @@ has none, so a `ws` server belongs to the composition root. The socket itself is
 browser's `WebSocket`, Node's global and `ws` all fit with no `@types` anywhere. Delivery needs no pump
 here — the event loop is the pump — and there is no `latency` knob, but retention, FIFO order, one
 handler per end and a close that lands behind every frame ahead of it all hold exactly as they do in
-loopback. Two things a socket adds: a **heartbeat** that sends nothing and merely closes a connection
+loopback. Three things a socket adds: a **heartbeat** that sends nothing and merely closes a connection
 that has been silent for three 5 s windows, since a half-open socket is one no close event will ever
-report; and a **`maxBufferedBytes`** cap on the socket's own unsent bytes, because a peer that has
+report; a **`maxBufferedBytes`** cap on the socket's own unsent bytes, because a peer that has
 stopped draining for a whole frame's worth is dead and holding its backlog is memory that never comes
-back. Failures a socket produces and loopback cannot — a hostile frame, silence, a stalled peer, an
-abnormal close — arrive on socket events where a throw would land where nothing can catch it, so they
-are reported to an **`onError`** option and the connection closes behind them; `onClose` alone cannot
-tell a hostile peer from a clean quit.
+back; and **`protocols`**, the subprotocols a dial offers on the upgrade request, which is where an
+authority that admits or refuses before the socket exists reads its credential — a browser dial can
+set no header of its own. Failures a socket produces and loopback cannot — a hostile frame, silence,
+a stalled peer, an abnormal close — arrive on socket events where a throw would land where nothing
+can catch it, so they are reported to an **`onError`** option and the connection closes behind them;
+`onClose` alone cannot tell a hostile peer from a clean quit.
 
 Four rules a consumer meets immediately. **One handler per end:** `onMessage` / `onClose` take a single
 handler, and a second live registration throws — two consumers of one connection would silently split its

@@ -71,15 +71,19 @@ class TransportError extends Error {
 
 Options: `codec` (default `jsonCodec`), `maxRetainedBytes` (default 1 MiB, `DEFAULT_MAX_RETAINED_BYTES`,
 one constant because every factory defaults to it), `latency` (loopback only, default `1`), and
-`onError` / `maxBufferedBytes` / `timer` / `createSocket` (websocket only). A bad `latency` (non-integer
-or negative), `maxRetainedBytes` or `maxBufferedBytes` (≤ 0) throws `invalid-option` from the factory,
-as does a socket that is not OPEN — and the dial validates before it constructs a socket.
+`onError` / `maxBufferedBytes` / `timer` / `protocols` / `createSocket` (websocket only). A bad
+`latency` (non-integer or negative), `maxRetainedBytes` or `maxBufferedBytes` (≤ 0) throws
+`invalid-option` from the factory, as does a socket that is not OPEN — and the dial validates before
+it constructs a socket.
 
 `Connect` (`(url, opts?) => Promise<Transport>`) is the networked seam endpoints compile against, and
 `connectWebSocket` implements it. `ConnectOptions.token` reaches no wire: the reconnect token rides
 `JoinRequest.token`, which protocol owns, and one credential with two channels is a second thing to
-keep in agreement. Also exported: `RESERVED_KEYS` — the three object keys the codec
-refuses, shared so a layer that answers them differently holds no second copy of the set.
+keep in agreement. `ConnectWebSocketOptions.protocols` is not that second channel — it rides the
+upgrade request, so it is the only thing this layer carries for an authority that decides admission
+before a socket exists, and the strings are opaque here: they are formatted where the authority that
+reads them is defined. Also exported: `RESERVED_KEYS` — the three object keys the codec refuses,
+shared so a layer that answers them differently holds no second copy of the set.
 
 `EncodedFrame` is branded so `sendEncoded` accepts only a `Codec.encode` result — a hand-built or
 foreign-codec frame is a compile error at the call site instead of a decode failure at the peer.
