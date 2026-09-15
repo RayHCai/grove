@@ -102,13 +102,11 @@ export class Scoreboard extends StatefulWrapper {
 
 export class Leaderboard extends StatefulWrapper {
     readonly #order: 'high' | 'low';
-    readonly persist: boolean;
     readonly #scores = new Map<string, number>();
 
-    constructor(opts?: { order?: 'high' | 'low'; persist?: boolean }) {
+    constructor(opts?: { order?: 'high' | 'low' }) {
         super();
         this.#order = opts?.order ?? 'high';
-        this.persist = opts?.persist ?? true;
     }
 
     submit(score: number, player?: Player): void {
