@@ -26,6 +26,7 @@
     },
     "devDependencies": {
         "@types/react": "^19.2.18",
+        "jsdom": "^28.0.1",
         "react": "^19.2.8",
         "typescript": "^7.0.2",
         "vitest": "^4.1.10"

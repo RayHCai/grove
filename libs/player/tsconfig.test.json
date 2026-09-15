@@ -9,6 +9,6 @@
         "rootDir": ".",
         "types": ["node"]
     },
-    "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "*.config.ts"],
+    "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx", "*.config.ts"],
     "references": []
 }

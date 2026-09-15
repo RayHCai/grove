@@ -3,7 +3,7 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "The game surface: a client, its socket, and a renderer, mounted as one component.",
+    "description": "The game surface: the canvas a session mounts onto, addressed at the authority that runs it.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
@@ -21,12 +21,18 @@
         "test": "vitest run --passWithNoTests",
         "clean": "rm -rf dist .turbo"
     },
+    "dependencies": {
+        "@platform/protocol": "workspace:*"
+    },
     "peerDependencies": {
         "react": ">=19"
     },
     "devDependencies": {
         "@types/react": "^19.2.18",
+        "@types/react-dom": "^19.2.4",
+        "jsdom": "^28.0.1",
         "react": "^19.2.8",
+        "react-dom": "^19.2.8",
         "typescript": "^7.0.2",
         "vitest": "^4.1.10"
     }
