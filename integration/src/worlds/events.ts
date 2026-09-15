@@ -37,6 +37,10 @@ import type { World } from '../world.js';
 export const TEMPLATE_BEACON = 'beacon';
 export const TAG_BEACON = 'beacon';
 
+/** A custom event name, carried by `Entity.send` rather than by any binding or widget. */
+export const EVENT_PING = 'ping';
+export const PING_TIMES = 3;
+
 export const SCRIPT_DIRECTOR = 'director';
 export const SCRIPT_BODY = 'body';
 export const SCRIPT_BEACON = 'beacon';
@@ -73,6 +77,7 @@ export const W = {
     toHome: 'to-home',
     toBeacon: 'to-beacon',
     relay: 'relay',
+    ring: 'ring',
 } as const;
 
 /** Game-hosted readings — every peer is told these, so any tab may be asked. */
@@ -90,6 +95,8 @@ export const S = {
     asker: 'asker',
     ends: 'ends',
     presser: 'presser',
+    pings: 'pings',
+    pinged: 'pinged',
 } as const;
 
 /** Player-hosted readings — an action edge is dispatched at the player, so its tallies live there. */
@@ -129,6 +136,9 @@ export class Director extends ServerScript<Game> {
     @serverState asker = '';
     @serverState ends = 0;
     @serverState presser = '';
+    @serverState pings = 0;
+    /** What the payload carried, so a send that dropped its data is not mistaken for one that worked. */
+    @serverState pinged = 0;
 
     /** Counted rather than set to true, so a second joiner re-running it would be visible. */
     @onStart
@@ -168,6 +178,23 @@ export class Director extends ServerScript<Game> {
     @onPress(W.toBeacon)
     toBeacon(ctx: Ctx): void {
         ctx.player?.teleportTo(BEACON_AT.x, BEACON_AT.y);
+    }
+
+    /**
+     * Sends a custom event to an entity, which is the one dispatch a creator raises by hand.
+     *
+     * Not an input action and not a widget: no binding names it and no frame carries it, so the
+     * only thing that can put `@onEvent(EVENT_PING)` on the beacon into a run is this call.
+     */
+    @onPress(W.ring)
+    ring(): void {
+        const beacon = game.find({ tag: TAG_BEACON })[0];
+        if (beacon) void beacon.send(EVENT_PING, { times: PING_TIMES });
+    }
+
+    notePing(times: number): void {
+        this.pings = this.pings + 1;
+        this.pinged = times;
     }
 
     /**
@@ -251,6 +278,13 @@ export class Beacon extends ServerScript<Entity> {
     @onStart
     equip(): void {
         this.host.collider = bodyBox();
+    }
+
+    /** Raised by `Entity.send`, and by nothing else in this world. */
+    @onEvent(EVENT_PING)
+    heard(ctx: Ctx): void {
+        const times = ctx.data.times;
+        game.getScript(Director)?.notePing(typeof times === 'number' ? times : -1);
     }
 
     @onClick

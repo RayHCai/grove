@@ -982,7 +982,7 @@ declare module '@platform/engine' {
     // 'release' and 'hold' are a load-time error here.
     //
     //   class Target extends SyncedScript<Entity> {
-    //       @serverState durability = 3;
+    //       @serverState durability = 3; // Entity-hosted, so replicated but session-only
     //
     //       @onEvent('drain')
     //       reduce(ctx: Ctx) {
@@ -1035,9 +1035,11 @@ declare module '@platform/engine' {
     //   <HUDScreen> -> not permitted; use a plain field (ClientScript is client state)
     //
     // The name is the whole contract: the property lives on the SERVER, which owns,
-    // replicates and PERSISTS it — every value is checkpointed against its host record and
-    // restored next session. There is no @persist, since authoritative and durable are the
-    // same set of values; session-only server data is a plain field.
+    // replicates and — on a <Player> host — PERSISTS it: a player-hosted value is checkpointed
+    // against that player's record and restored the next time they join. A <Game>- or
+    // <Entity>-hosted value is authoritative and replicated for the session it lives in, and is
+    // not carried into the next one. There is no @persist, since on a player host authoritative
+    // and durable are the same set of values.
     //
     // HOISTED onto the host, so declaration and access sites agree: `@serverState credits =
     // 0` on a Player-hosted script reads as `player.credits` anywhere, and `this.credits`
@@ -1050,7 +1052,7 @@ declare module '@platform/engine' {
     // `Player` reference today. Same question as the Movement cast above.
     // A standard field decorator: its returned initializer is what captures the authored
     // value per instance, which the wire step then moves onto the host record.
-    const serverState: StateDecorator; // replicated AND persisted
+    const serverState: StateDecorator; // replicated; persisted on a <Player> host
 
     // ─── data wrappers ─────────────────────────────────────────────
 
@@ -1110,7 +1112,7 @@ declare module '@platform/engine' {
     }
 
     class Leaderboard extends StatefulWrapper {
-        constructor(opts?: { order?: 'high' | 'low'; persist?: boolean });
+        constructor(opts?: { order?: 'high' | 'low' });
         submit(score: number, player?: Player): void; // (B)
         of(player: Player): number; // (B)
         top(n: number): Array<{ player: Player; score: number }>; // (B)

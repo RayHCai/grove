@@ -1046,7 +1046,7 @@ A corollary: a server-only decision _about_ an entity now has a home whether or 
 
 **One decorator. Scope is the host of the script you declare it on** — there is no `@playerState`, no scope argument, nothing to choose. The location decides trust; the host decides scope.
 
-**The name says where the value lives: on the server.** `@serverState` declares a property the server owns, replicates, _and_ persists — a decorated value is checkpointed by the platform and comes back on the next session without the creator asking. There is no second decorator for durability, because "authoritative" and "survives the session" turned out to be the same set of values in every game we wrote.
+**The name says where the value lives: on the server.** `@serverState` declares a property the server owns, replicates, _and_ — on a player-hosted script — persists: a player-hosted value is checkpointed by the platform and comes back the next time that player joins, without the creator asking. There is no second decorator for durability, because on a player host "authoritative" and "survives the session" turned out to be the same set of values in every game we wrote.
 
 ```ts
 class Rules extends ServerScript<Game> {
@@ -1066,13 +1066,13 @@ class PlatformerMovement extends BaseMovement {
 }
 ```
 
-| Host          | Scope                         | Replicated to                                                                          | Persisted as           |
-| ------------- | ----------------------------- | -------------------------------------------------------------------------------------- | ---------------------- |
-| `<Game>`      | one value for the whole game  | everyone                                                                               | one game record        |
-| `<Player>`    | one value per player          | that player                                                                            | that player's record   |
-| `<Entity>`    | one value per entity instance | everyone (scoped entities: their owner); also readable by the panel's animation config | that instance's record |
-| `<Camera>`    | **not permitted**             | camera is client-owned presentation — use a plain field                                | —                      |
-| `<HUDScreen>` | **not permitted**             | — use a plain field; see §12.2                                                         | —                      |
+| Host          | Scope                         | Replicated to                                                                          | Persisted as         |
+| ------------- | ----------------------------- | -------------------------------------------------------------------------------------- | -------------------- |
+| `<Game>`      | one value for the whole game  | everyone                                                                               | session-only         |
+| `<Player>`    | one value per player          | that player                                                                            | that player's record |
+| `<Entity>`    | one value per entity instance | everyone (scoped entities: their owner); also readable by the panel's animation config | session-only         |
+| `<Camera>`    | **not permitted**             | camera is client-owned presentation — use a plain field                                | —                    |
+| `<HUDScreen>` | **not permitted**             | — use a plain field; see §12.2                                                         | —                    |
 
 Two changes from the previous table, both consequences of splitting host from location:
 
@@ -1086,7 +1086,7 @@ Hoisting is load-bearing rather than cosmetic. `ctx.player.coins += 1` inside a 
 Two rules follow, both load-time:
 
 - **Names are unique per host.** Two scripts on one player both declaring `coins` is an error, not a merge and not a shadow. This is the cost of hoisting, and it is the right trade: the alternative is `player.scripts.wallet.coins`, which is nesting the block tier cannot express and a lookup every read pays for.
-- **Persistence is not opt-in.** Every `@serverState` property is checkpointed on the host it hoisted onto; there is no `@persist` to remember, and no way to declare authoritative state that silently evaporates. A value that genuinely should not outlive the session is a plain field on the server script — which is also the value that did not need replicating.
+- **Persistence is not opt-in.** Every `@serverState` property that hoisted onto a player is checkpointed there; there is no `@persist` to remember. On a game or an entity it is authoritative and replicated for the life of the session, so a value that has to outlive one belongs on a player. A value that genuinely should not outlive the session is a plain field on the server script — which is also the value that did not need replicating.
 
 **Typing the hoisted property is unresolved**, and it is the same open question as the movement cast in §4.1: only the panel knows which scripts are attached to which host, so `player.coins` is well-typed inside `Wallet` and untyped through a plain `Player` reference. The candidate answers are the same three — make `Player`/`Entity` generic over what they host, have the panel emit typed accessors per template, or accept the cast. Whichever we pick should cover both cases; they are one problem wearing two hats. The block tier is unaffected, since a block reads "player's ⟨coins⟩" off a dropdown the panel populates.
 
@@ -1095,7 +1095,7 @@ Two rules follow, both load-time:
 Each wrapper hides a data structure **and** its platform plumbing. MVP set is capped at six; more go to an advanced drawer.
 
 ```ts
-new Leaderboard({ order, persist }); // sorted, persistent across sessions
+new Leaderboard({ order }); // sorted; as durable as the host it sits on
 new Storage(player); // key/value, persistent
 new Countdown(seconds, onZero?); // server-ticked, replicated; onZero fires at 0
 new Team(name); // player grouping; scores, spawns
@@ -1115,7 +1115,7 @@ scores.reset();
 
 ### 6.3 Persistence
 
-Declarative and automatic, with nothing to declare: **`@serverState` _is_ the persistence mechanism.** The decorator that makes a value authoritative is the same one that makes it durable, so the platform checkpoints every server-owned property against its host — game, player, or entity instance — and restores it on the next session. `persist: true` on `Leaderboard` remains, because a leaderboard is a wrapper rather than a decorated property.
+Declarative and automatic, with nothing to declare: **`@serverState` _is_ the persistence mechanism.** The decorator that makes a value authoritative is the same one that makes it durable, so the platform checkpoints every server-owned property on a **player** host and restores it the next time that player joins. Game- and entity-hosted properties are authoritative and replicated for the life of the session. A wrapper field is checkpointed with its host record like any other field, so a `Leaderboard` is exactly as durable as the host it sits on.
 
 `Storage` is the explicit escape hatch, for values that want a key rather than a property: blobs, large records, anything read on demand instead of replicated continuously. Leave handlers are never the primary save path.
 

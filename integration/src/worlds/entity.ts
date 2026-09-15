@@ -71,6 +71,7 @@ export const S = {
     inert: 'inert',
     alive: 'alive',
     effects: 'effects',
+    animated: 'animated',
 } as const;
 
 /** Seconds every tween below runs for, short enough that a test settles it in a few dozen ticks. */
@@ -108,6 +109,8 @@ export class Director extends ServerScript<Game> {
     @serverState inert = 0;
     @serverState alive = true;
     @serverState effects = 0;
+    /** Whether playing a clip left an `Animation` on the entity. Nothing mints one. */
+    @serverState animated = false;
 
     @onPlayerJoin
     join(ctx: Ctx): void {
@@ -253,8 +256,12 @@ export class Director extends ServerScript<Game> {
 
     @onPress(W.playClip)
     doPlayClip(ctx: Ctx): void {
-        void this.#avatar(ctx)?.play('walk');
+        const avatar = this.#avatar(ctx);
+        void avatar?.play('walk');
         this.effects = this.effects + 1;
+        // Read after the call: the slot is specified as template-configured and no animator exists,
+        // so playing a clip reaches the effect sink and leaves nothing behind to read back.
+        this.animated = avatar?.animation !== undefined;
     }
 
     @onPress(W.playEffect)

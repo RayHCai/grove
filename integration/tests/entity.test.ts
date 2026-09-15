@@ -273,6 +273,8 @@ describe('the entity verbs that hold no state', () => {
         await press(session, tab, W.playClip);
         await press(session, tab, W.playEffect);
         expect(reading<number>(tab, S.effects)).toBe(2);
+        // No animator exists, so a clip reaches the sink and mints no `Animation` to read back.
+        expect(reading<boolean>(tab, S.animated)).toBe(false);
         expect(session.trips).toEqual([]);
     });
 });

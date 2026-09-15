@@ -19,6 +19,7 @@ import {
     ASSET_MARCH,
     ASSET_SPARKLE,
     ASSET_THEME,
+    EVERY_KIND,
     HANDLE_VOLUME,
     MUSIC_FADE,
     R,
@@ -129,7 +130,15 @@ describe('the declared asset table', () => {
         const { session, tab } = await open();
         await press(session, tab, W.readKinds);
         expect(reading<string>(tab, S.audioKeys)).toBe('chime,theme');
-        expect(reading<string>(tab, S.everyKind)).toBe('audio,audio,clip,effect,font,texture');
+        expect(reading<string>(tab, S.everyKind)).toBe(
+            'atlas,audio,audio,clip,effect,font,texture',
+        );
+        // Every arm of `AssetKind` asked separately: a filter that ignored its argument would
+        // answer the whole table six times over.
+        expect(reading<string>(tab, S.kindCensus)).toBe(
+            'texture:1|atlas:1|audio:2|font:1|clip:1|effect:1',
+        );
+        expect(EVERY_KIND).toHaveLength(6);
     });
 
     it("drops each asset's url on the way in, so no script can ever read one", async () => {
