@@ -143,6 +143,25 @@ describe('the tween shortcuts', () => {
         run(loop, 1);
         expect(e.rotation).toBeCloseTo(270, 3);
     });
+
+    it('fadeTo walks to a value in between, which fadeIn and fadeOut only bracket', () => {
+        const rt = loadGame();
+        const loop = new Loop(rt);
+        const e = tweenable(rt);
+        void e.fadeTo(0.4, 1);
+        run(loop, 1);
+        expect(e.opacity).toBeCloseTo(0.4, 3);
+    });
+
+    it('growTo reaches the scale it names, from whatever scale it started at', () => {
+        const rt = loadGame();
+        const loop = new Loop(rt);
+        const e = tweenable(rt);
+        e.setScale(0.5);
+        void e.growTo(2.5, 1);
+        run(loop, 1);
+        expect(e.scale).toBeCloseTo(2.5, 3);
+    });
 });
 
 describe('isTouching', () => {
