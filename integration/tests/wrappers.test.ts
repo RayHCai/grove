@@ -135,6 +135,7 @@ describe('a leaderboard', () => {
             order: 'low',
             scores: [[idOf(tab), AWARD]],
         });
+        expect('persist' in (best as object)).toBe(false);
     });
 
     it('ranks a player against the room and lists the podium in that order', async () => {

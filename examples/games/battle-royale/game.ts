@@ -45,7 +45,7 @@ export class Match extends ServerScript<Game> {
     @serverState winner = ''; // '' while a round is live
     @serverState board: Array<{ name: string; wins: number }> = [];
 
-    readonly wins = new Leaderboard({ order: 'high', persist: true });
+    readonly wins = new Leaderboard({ order: 'high' });
     readonly clock = new Countdown(ROUND);
 
     // Must not assume a player exists: the roster arrives after the world.
