@@ -37,9 +37,9 @@ A message not in one of the two unions is not on the wire, and this table is tha
 | `state`           | `ServerToClient` | **reliable**: `structural[]`, `state[]`, `ackSeq`, `earliestHeadroom?`    |
 | `transform`       | `ServerToClient` | **droppable**: `transform[]`, joined to `state` by `tick`                 |
 | `time-sync`       | `ClientToServer` | `clientSentMs`                                                            |
-| `time-sync-reply` | `ServerToClient` | echoes the client stamp, adds `serverSentMs`, `serverTick`                |
+| `time-sync-reply` | `ServerToClient` | echoes the client stamp, adds `serverSentMs`                              |
 | `manifest`        | `ServerToClient` | render-manifest **additions**, ahead of the spawn that first needs one    |
-| `rate-change`     | `ServerToClient` | `tick`, `simRate`; the client resyncs rather than retunes                 |
+| `rate-change`     | `ServerToClient` | `simRate`; the client resyncs rather than retunes                         |
 | `input`           | `ClientToServer` | one frame per tick, `seq` + batched `actions[]`                           |
 | `interaction`     | `ClientToServer` | one frame per tick, `tick` + batched `events[]`; no `seq`, so no ack      |
 | `request`         | `ClientToServer` | one frame per tick, `tick` + batched `requests[]`; no `seq`, so no ack    |
