@@ -1,6 +1,6 @@
 # @grove/platform
 
-Browsing, social, and the page a game is played on.
+Browsing and social: one `index.html` and the React root it mounts.
 
-The game itself renders in a frame served from the player origin, so a creator's client code never
-evaluates here.
+One of the two origins `@grove/api` accepts credentials from. A game is played on the player
+origin, a separate registrable domain, because that is where creator code evaluates.

@@ -3,7 +3,7 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "The origin a game renders on: a ticket in, a canvas out.",
+    "description": "The origin a game renders on: one index.html, a React entry point, and the root it mounts.",
     "scripts": {
         "dev": "vite",
         "build": "vite build",
@@ -13,9 +13,7 @@
     },
     "dependencies": {
         "react": "^19.2.8",
-        "react-dom": "^19.2.8",
-        "@grove/player": "workspace:*",
-        "@grove/ui": "workspace:*"
+        "react-dom": "^19.2.8"
     },
     "devDependencies": {
         "@types/react": "^19.2.18",

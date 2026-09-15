@@ -1,5 +1,5 @@
 # @grove/editor
 
-The panel: visual editor for assets, templates, and HUD layout.
+The panel for assets, templates, and HUD layout: one `index.html` and the React root it mounts.
 
-Playtest mounts `@grove/player` directly, because the code under test is the editing user's own.
+Authoring is all it owns; a game runs on the player origin, against its own game process.
