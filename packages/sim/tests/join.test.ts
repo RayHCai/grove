@@ -486,7 +486,11 @@ describe('the clock-sync and rate frames', () => {
 
         const reply = peer.timeSyncReplies[0];
         expect(reply?.clientSentMs).toBe(4242);
-        expect(reply?.serverTick).toBeGreaterThan(0);
+        expect(Object.keys(reply ?? {}).toSorted()).toStrictEqual([
+            'clientSentMs',
+            'kind',
+            'serverSentMs',
+        ]);
         // A server stamp differenced against a client one is RTT plus an unknown offset, so it is
         // carried for diagnostics and never compared.
         expect(typeof reply?.serverSentMs).toBe('number');
@@ -501,6 +505,6 @@ describe('the clock-sync and rate frames', () => {
 
         const changes = peer.received.filter((e) => e.kind === 'rate-change');
         expect(changes).toHaveLength(1);
-        expect(changes[0]).toMatchObject({ simRate: 30 });
+        expect(changes[0]).toStrictEqual({ kind: 'rate-change', simRate: 30 });
     });
 });

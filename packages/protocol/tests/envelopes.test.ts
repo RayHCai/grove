@@ -191,10 +191,9 @@ const timeSyncReply: TimeSyncReply = {
     kind: 'time-sync-reply',
     clientSentMs: 1,
     serverSentMs: 2,
-    serverTick: 3,
 };
 
-const rateChange: RateChange = { kind: 'rate-change', tick: 4821, simRate: 30 };
+const rateChange: RateChange = { kind: 'rate-change', simRate: 30 };
 
 const joinRequest: JoinRequest = {
     kind: 'join-request',
@@ -328,7 +327,7 @@ function narrowServerToClient(frame: ServerToClient): string {
         case 'manifest':
             return `manifest+${frame.visuals.templates.length}`;
         case 'time-sync-reply':
-            return `sync@${frame.serverTick}`;
+            return `sync@${frame.serverSentMs}`;
         case 'rate-change':
             return `rate@${frame.simRate}`;
         default: {
@@ -366,7 +365,7 @@ describe('the discriminant narrows both unions exhaustively', () => {
             'state@4821/337',
             'transform@4821',
             'manifest+1',
-            'sync@3',
+            'sync@2',
             'rate@30',
         ]);
     });

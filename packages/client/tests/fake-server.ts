@@ -146,7 +146,6 @@ export class FakeServer {
                         kind: 'time-sync-reply',
                         clientSentMs: envelope.clientSentMs,
                         serverSentMs: this.#opts.serverSentMs ?? envelope.clientSentMs,
-                        serverTick: this.tick,
                     });
                 }
                 return;
@@ -289,8 +288,8 @@ export class FakeServer {
         this.sendState([], [], { ...opts, ackSeq: this.#ackSeq, headroom });
     }
 
-    sendRateChange(simRate: number, tick = this.tick): void {
-        this.#send({ kind: 'rate-change', tick, simRate });
+    sendRateChange(simRate: number): void {
+        this.#send({ kind: 'rate-change', simRate });
     }
 
     close(): void {

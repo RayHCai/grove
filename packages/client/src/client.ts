@@ -24,6 +24,7 @@ import type {
     Interaction,
     InteractionFrame,
     RateChange,
+    Reject,
     RequestFrame,
     ServerToClient,
     StateEnvelope,
@@ -372,6 +373,13 @@ export class GameClient {
         this.#disposers.push(transport.onMessage((message) => this.#receive(message)));
         this.#disposers.push(
             transport.onClose(() => {
+                // A `Reject` rides in ahead of the close it caused, and the loop this handler is about
+                // to stop is the only thing that would ever have drained it into a reason.
+                const refusal = this.#inbox.find((envelope) => envelope.kind === 'reject');
+                if (refusal !== undefined) {
+                    this.#onReject(refusal);
+                    return;
+                }
                 this.#lifecycle.to('disconnected');
                 // A fetch still in flight belongs to a session that no longer exists, and the bundle
                 // behind it would otherwise open one on a socket that is gone.
@@ -544,11 +552,7 @@ export class GameClient {
                 this.#chunks.offer(envelope, this.#welcome !== undefined);
                 return;
             case 'reject':
-                this.#fail({
-                    kind: 'rejected',
-                    reason: rejectMessage(envelope),
-                    serverProtocolVersion: envelope.serverProtocolVersion,
-                });
+                this.#onReject(envelope);
                 return;
             case 'state':
                 this.#onState(envelope);
@@ -577,6 +581,15 @@ export class GameClient {
                 return unreachable;
             }
         }
+    }
+
+    /** Ends the session with the refusal phrased for a person, from the drain or from the close behind it. */
+    #onReject(reject: Reject): void {
+        this.#fail({
+            kind: 'rejected',
+            reason: rejectMessage(reject),
+            serverProtocolVersion: reject.serverProtocolVersion,
+        });
     }
 
     /**

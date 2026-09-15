@@ -561,6 +561,17 @@ describe('a refusal is distinguishable from a drop', () => {
         expect(h.client.state).toBe('failed');
     });
 
+    it('phrases the refusal when the close that caused it lands between frames', async () => {
+        // Bare delivers, never a frame's pump: a real socket raises the message and the close as two
+        // events of its own, so nothing is guaranteed to drain the inbox between them.
+        const h = await harness({ reject: 'full' });
+        h.flush();
+        h.flush();
+        expect(h.client.state).toBe('failed');
+        const failure = h.client.lifecycle.failure;
+        expect(failure && 'reason' in failure && failure.reason).toBe('This game is full.');
+    });
+
     it('treats an undecodable Welcome as terminal, and distinctly from a Reject', async () => {
         const h = await harness({ malformedWelcome: true });
         h.run(3);
@@ -1063,7 +1074,7 @@ describe('an untrusted frame ends up as state, never as a throw', () => {
     it('drops a rate-change with a nonsense simRate rather than rebuilding the clock on it', async () => {
         const h = await harness();
         untilLive(h);
-        h.server.sendRaw({ kind: 'rate-change', tick: h.server.tick, simRate: 0 });
+        h.server.sendRaw({ kind: 'rate-change', simRate: 0 });
         h.run(2);
         expect(h.client.state).toBe('live');
         expect(h.server.joins).toHaveLength(1);

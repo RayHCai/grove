@@ -119,10 +119,24 @@ export interface SimDiagnostics {
     stale: number;
 }
 
+/**
+ * The rates the world is running at as of this batch.
+ *
+ * On every batch rather than only on a change, because the seam is a value and not a stream: a host
+ * that learned a retune from one batch it happened to read would keep driving at the old rate for
+ * as long as it missed one.
+ */
+export interface BatchRates {
+    simRate: number;
+    sendRate: number;
+}
+
 /** Everything one tick produced. Empty on a tick that neither drained nor answered anything. */
 export interface OutputBatch {
     /** The tick this batch describes — the sim's counter, not the host's. */
     tick: number;
+    /** What the host must drive at from here, which `setSimRate` is what moves. */
+    rates: BatchRates;
     sends: Send[];
     closes: CloseOrder[];
     loads: LoadOrder[];
