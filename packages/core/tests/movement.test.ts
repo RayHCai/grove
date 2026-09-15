@@ -236,6 +236,30 @@ describe('PlatformerMovement', () => {
         expect(move.velocity.x).toBeGreaterThan(first);
     });
 
+    it('ramps at exactly `acceleration` per second, which is the field a creator tunes', () => {
+        const { loop, move } = world(PlatformerMovement);
+        const p = move as PlatformerMovement;
+        p.acceleration = 600;
+        p.walkSpeed = 1000; // Far enough off that one tick cannot reach the target and clamp instead.
+        move.setIntent(1, 0);
+        loop.step(1);
+        // One tick of 1/60 s at 600 units/s/s, and the stage is `approach`, so it is exactly linear.
+        expect(move.velocity.x).toBeCloseTo(10, 9);
+
+        loop.step(2);
+        expect(move.velocity.x).toBeCloseTo(20, 9);
+    });
+
+    it('honours a slower acceleration as a slower ramp, not a different target', () => {
+        const { loop, move } = world(PlatformerMovement);
+        const p = move as PlatformerMovement;
+        p.acceleration = 60;
+        p.walkSpeed = 1000;
+        move.setIntent(1, 0);
+        loop.step(1);
+        expect(move.velocity.x).toBeCloseTo(1, 9);
+    });
+
     it('decelerates by friction when the intent goes neutral', () => {
         const { loop, move } = world(PlatformerMovement);
         move.setIntent(1, 0);
