@@ -87,12 +87,6 @@ importers:
 
   apps/grove/editor:
     dependencies:
-      '@grove/player':
-        specifier: workspace:*
-        version: link:../../../libs/player
-      '@grove/ui':
-        specifier: workspace:*
-        version: link:../../../libs/ui
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -178,9 +172,6 @@ importers:
 
   apps/grove/platform:
     dependencies:
-      '@grove/ui':
-        specifier: workspace:*
-        version: link:../../../libs/ui
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -212,12 +203,6 @@ importers:
 
   apps/grove/player:
     dependencies:
-      '@grove/player':
-        specifier: workspace:*
-        version: link:../../../libs/player
-      '@grove/ui':
-        specifier: workspace:*
-        version: link:../../../libs/ui
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -428,13 +413,26 @@ importers:
   libs/go-grove: {}
 
   libs/player:
+    dependencies:
+      '@platform/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
     devDependencies:
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
+      '@types/react-dom':
+        specifier: ^19.2.4
+        version: 19.2.4(@types/react@19.2.18)
+      jsdom:
+        specifier: ^28.0.1
+        version: 28.1.0
       react:
         specifier: ^19.2.8
         version: 19.2.8
+      react-dom:
+        specifier: ^19.2.8
+        version: 19.2.8(react@19.2.8)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -447,6 +445,9 @@ importers:
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
+      jsdom:
+        specifier: ^28.0.1
+        version: 28.1.0
       react:
         specifier: ^19.2.8
         version: 19.2.8
