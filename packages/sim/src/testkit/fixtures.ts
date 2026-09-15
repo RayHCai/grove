@@ -120,6 +120,11 @@ export class Wallet extends ServerScript<Player> {
     @serverState credits = 10;
 }
 
+/** Game-hosted `@serverState` — replicated to everyone, and never named by a load or a save. */
+export class Era extends ServerScript {
+    @serverState epoch = 1;
+}
+
 /**
  * Game-hosted wrapper state: authoritative with no `@serverState`, marked by the wrapper itself.
  *

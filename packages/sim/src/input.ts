@@ -20,7 +20,7 @@ export interface BufferedInput {
     readonly frame: InputFrame;
 }
 
-/** What admission decided. Every arm resolves the seq — refusals included. */
+/** What admission decided. Every arm from the tick window on resolves the seq — refusals included. */
 export type AdmitResult =
     | { kind: 'buffered'; at: number }
     /** Past the horizon but inside the clamp band, so applied at the horizon. */
@@ -40,7 +40,9 @@ export class InputBuffer {
 
     /** Runs the window and rate checks in order and, on success, files the frame under the tick it will be applied on. */
     admit(session: Session, frame: InputFrame, currentTick: number, simRate: number): AdmitResult {
-        if (frame.seq <= session.admission.ackSeq) {
+        // A duplicate the frontier has not reached yet is left unresolved: the copy already filed
+        // may not have applied, and acking it would let the client prune input it still needs.
+        if (frame.seq <= session.admission.ackSeq || session.admission.seen(frame.seq)) {
             session.admission.noteTraffic(currentTick);
             return { kind: 'refused', reason: 'too-old' };
         }

@@ -386,7 +386,7 @@ export type ManifestUpdate = { kind: 'manifest'; visuals: RenderManifest };
 export type TimeSync = { kind: 'time-sync'; clientSentMs: number };
 
 /**
- * Server → client. Echoes the client's stamp, adds its own, and names its tick.
+ * Server → client. Echoes the client's stamp and adds its own.
  *
  * Only the client's own two stamps are differenced, so no agreement between the two machines'
  * wall-clocks is needed; treating `serverSentMs` as comparable to a client stamp is the classic
@@ -396,7 +396,6 @@ export type TimeSyncReply = {
     kind: 'time-sync-reply';
     clientSentMs: number;
     serverSentMs: number;
-    serverTick: number;
 };
 
 /**
@@ -405,7 +404,7 @@ export type TimeSyncReply = {
  * `sendRate` needs no counterpart because nothing can change it at runtime; if that ever becomes
  * possible, WIDEN this to carry both rates rather than adding a second envelope.
  */
-export type RateChange = { kind: 'rate-change'; tick: number; simRate: number };
+export type RateChange = { kind: 'rate-change'; simRate: number };
 
 /** Client → server, at most one per tick. Tick-indexed input. */
 export type InputFrame = {

@@ -69,6 +69,11 @@ export class AdmissionState {
         return this.#resolved.size;
     }
 
+    /** Whether this seq already arrived or settled above the frontier, which the frontier itself cannot say. */
+    seen(seq: number): boolean {
+        return this.#headroom.has(seq) || this.#resolved.has(seq);
+    }
+
     /** The highest seq seen, which is what the arrival bound is measured from. */
     get highestSeen(): number {
         return this.#highestSeen;
