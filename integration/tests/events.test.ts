@@ -18,6 +18,7 @@ import {
     GATE_SECONDS,
     GRANT_AMOUNT,
     P,
+    PING_TIMES,
     S,
     SCREEN_KIOSK,
     TEMPLATE_BEACON,
@@ -339,6 +340,29 @@ describe('three handlers on one action, one per concurrency mode', () => {
         // so a restarted handler's `await sleep(...)` still resolves and its body still runs to the
         // end. Restart re-arms the slot; it does not unwind the call it took the slot from.
         expect(mineField<number>(tab, P.restartOut)).toBe(GATE_TAPS);
+        expect(session.trips).toEqual([]);
+    });
+});
+
+describe('an event a script sent by hand', () => {
+    it("reaches the receiving entity's own handler, carrying its payload", async () => {
+        const { session, tab } = await open();
+        expect(reading<number>(tab, S.pings)).toBe(0);
+
+        // No binding names this event and no frame carries it: `Entity.send` is the only thing that
+        // can raise it, so a count here is that call and nothing else.
+        await press(session, tab, W.ring);
+        expect(reading<number>(tab, S.pings)).toBe(1);
+        expect(reading<number>(tab, S.pinged)).toBe(PING_TIMES);
+    });
+
+    it('is one dispatch per call, not one per tick that followed it', async () => {
+        const { session, tab } = await open();
+        await press(session, tab, W.ring);
+        await press(session, tab, W.ring);
+        await session.step(SETTLE * 3);
+
+        expect(reading<number>(tab, S.pings)).toBe(2);
         expect(session.trips).toEqual([]);
     });
 });

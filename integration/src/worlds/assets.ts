@@ -7,7 +7,7 @@
 //
 // A `ClientScript` has no `@serverState`, so its readings go into HUD widgets instead.
 
-import type { AssetRecord } from '@platform/project';
+import type { AssetKind, AssetRecord } from '@platform/project';
 import { assetId, templateId } from '@platform/project';
 import type { Asset, Ctx, Entity, Game, HUDScreen } from '@platform/engine';
 import {
@@ -30,6 +30,17 @@ export const ASSET_THEME = 'theme';
 export const ASSET_MARCH = 'march';
 export const ASSET_SPARKLE = 'sparkle';
 export const ASSET_LABEL = 'label';
+export const ASSET_TILES = 'tiles';
+
+/** Every arm of `AssetKind`, so a per-kind census has one of each to find and none to invent. */
+export const EVERY_KIND: readonly AssetKind[] = [
+    'texture',
+    'atlas',
+    'audio',
+    'font',
+    'clip',
+    'effect',
+];
 /** Named by nothing in the manifest, so `assets.get` has an honest miss to answer with. */
 export const ASSET_ABSENT = 'nowhere';
 
@@ -46,7 +57,7 @@ export const SCRIPT_CURATOR = 'curator';
 export const SCRIPT_STAGE = 'stage';
 export const SCREEN_AUDIO = 'audio';
 
-/** Six assets over five kinds, so `all(kind)` has something to leave out. */
+/** Seven assets over all six kinds, so `all(kind)` has one of each to find and five to leave out. */
 export const DECLARED_ASSETS: readonly AssetRecord[] = [
     DISC_ASSET,
     {
@@ -69,6 +80,7 @@ export const DECLARED_ASSETS: readonly AssetRecord[] = [
     },
     { id: assetId(ASSET_SPARKLE), kind: 'effect', url: '/sparkle.json' },
     { id: assetId(ASSET_LABEL), kind: 'font', url: '/label.woff2' },
+    { id: assetId(ASSET_TILES), kind: 'atlas', url: '/tiles.png' },
 ];
 
 /** One widget per call, so a press names the verb and the name is what the test reads back. */
@@ -94,6 +106,7 @@ export const S = {
     chimeReading: 'chimeReading',
     audioKeys: 'audioKeys',
     everyKind: 'everyKind',
+    kindCensus: 'kindCensus',
     missing: 'missing',
     urlOnAsset: 'urlOnAsset',
 } as const;
@@ -119,6 +132,8 @@ export class Curator extends ServerScript<Game> {
     @serverState chimeReading = '';
     @serverState audioKeys = '';
     @serverState everyKind = '';
+    /** One `kind:count` per arm of `AssetKind`, so a filter that ignored its argument is visible. */
+    @serverState kindCensus = '';
     @serverState missing = 'unread';
     /** Starts true, so the reading below is a change rather than the initializer standing in for one. */
     @serverState urlOnAsset = true;
@@ -153,6 +168,9 @@ export class Curator extends ServerScript<Game> {
             .map((a) => a.kind)
             .toSorted()
             .join(',');
+        // Every arm asked separately: `all()` agreeing with the total says nothing about whether the
+        // filtered form reads its argument at all.
+        this.kindCensus = EVERY_KIND.map((kind) => kind + ':' + assets.all(kind).length).join('|');
     }
 }
 
