@@ -25,3 +25,9 @@ variable "server_manager_url" {
   description = "Where every box's heartbeat goes."
   type        = string
 }
+
+variable "build_alarm_actions" {
+  description = "SNS topics notified when a build dead-letters."
+  type        = list(string)
+  default     = []
+}

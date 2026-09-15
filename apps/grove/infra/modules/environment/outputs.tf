@@ -13,12 +13,21 @@ output "cdn_distribution_id" {
   value       = module.storage.distribution_id
 }
 
+output "build_queue_url" {
+  description = "URL a builder polls for queued builds."
+  value       = module.events.queue_url
+}
+
+output "build_dlq_url" {
+  description = "URL of the queue holding builds that never succeeded."
+  value       = module.events.dlq_url
+}
+
 output "tables" {
-  description = "The three tables `@grove/game-manager`'s store is keyed for."
+  description = "The two tables `@grove/game-manager`'s store is keyed for."
   value = {
-    state        = module.data.state_table_name
-    leaderboards = module.data.leaderboards_table_name
-    bundles      = module.data.bundles_table_name
+    state   = module.data.state_table_name
+    bundles = module.data.bundles_table_name
   }
 }
 
