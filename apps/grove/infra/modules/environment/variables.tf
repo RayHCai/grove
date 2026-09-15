@@ -80,3 +80,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "build_alarm_actions" {
+  description = "SNS topics notified when a build dead-letters."
+  type        = list(string)
+  default     = []
+}

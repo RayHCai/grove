@@ -24,7 +24,7 @@ module "grove" {
   server_manager_url = var.server_manager_url
 
   # No replicas: a staging tick may cross a region to reach the store, and the cost of a second copy
-  # of three tables buys nothing a staging run needs to observe.
+  # of both tables buys nothing a staging run needs to observe.
   dynamodb_replica_regions = []
   point_in_time_recovery   = false
 
