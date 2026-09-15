@@ -247,6 +247,13 @@ describe('reviveWrapper', () => {
         expect(revived.rankOf(player('y'))).toBe(1);
     });
 
+    it('gives a Leaderboard no durability switch of its own', () => {
+        const source = new Leaderboard({ order: 'high' });
+        source.bind(createHostRecord('game'), 'best');
+        expect('persist' in source).toBe(false);
+        expect('persist' in (reviveWrapper(source.serialize()) as object)).toBe(false);
+    });
+
     it('carries a Team’s name, which is its identity', () => {
         const source = new Team('red');
         source.bind(createHostRecord('game'), 'red');
