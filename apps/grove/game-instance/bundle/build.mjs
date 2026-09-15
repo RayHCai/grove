@@ -5,32 +5,27 @@
 // is what makes esbuild refuse a Node built-in here rather than shim one in — this bundle runs
 // somewhere that has none.
 
-import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// The API rather than the CLI, because `esbuild/bin/esbuild` is a launcher script only on Windows —
+// everywhere else it is the platform binary itself, which `node` cannot read.
+import { build } from 'esbuild';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = resolve(here, '../dist/sim.js');
 mkdirSync(dirname(out), { recursive: true });
 
-execFileSync(
-    process.execPath,
-    [
-        // Resolved rather than pathed: pnpm hoists nothing, so where the binary lands is its
-        // business and a relative walk out of this directory is a guess about it.
-        createRequire(import.meta.url).resolve('esbuild/bin/esbuild'),
-        resolve(here, 'entry.ts'),
-        '--bundle',
-        // An IIFE, so the whole thing is one classic script with no exports to resolve and no
-        // top-level await for a host with no event loop to drive.
-        '--format=iife',
-        '--platform=neutral',
-        '--target=es2022',
-        `--outfile=${out}`,
-    ],
-    { stdio: 'inherit' },
-);
+await build({
+    entryPoints: [resolve(here, 'entry.ts')],
+    bundle: true,
+    // An IIFE, so the whole thing is one classic script with no exports to resolve and no
+    // top-level await for a host with no event loop to drive.
+    format: 'iife',
+    platform: 'neutral',
+    target: 'es2022',
+    outfile: out,
+});
 
 process.stdout.write(`sim bundle: ${out}\n`);
