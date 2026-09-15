@@ -4,6 +4,7 @@
 // than inside it, so the instance itself stays reachable over a loopback pair with no socket.
 
 import { connectWebSocket } from '@platform/transport/websocket';
+import type { ConnectWebSocketOptions } from '@platform/transport/websocket';
 import type { TransportError } from '@platform/transport';
 import { ClientInstance } from './instance.js';
 import type { ClientInstanceOptions } from './instance.js';
@@ -21,6 +22,13 @@ export interface ConnectOptions extends Omit<ClientInstanceOptions, 'transport'>
     signal?: AbortSignal;
     /** Diagnostics from the socket itself. Absent, a broken connection is silent. */
     onError?: (error: TransportError) => void;
+    /**
+     * Offered at the upgrade, for an authority that authenticates before it.
+     *
+     * A browser dial can set no header, so a credential the socket has to present ahead of the
+     * connection has nowhere else to ride.
+     */
+    protocols?: string[];
 }
 
 /**
@@ -31,10 +39,14 @@ export interface ConnectOptions extends Omit<ClientInstanceOptions, 'transport'>
  * built-but-unjoined session builds `ClientInstance` itself and calls `start()` when it is ready.
  */
 export async function connectTo(opts: ConnectOptions): Promise<ClientInstance> {
-    const { url, signal, onError, ...forwarded } = opts;
+    const { url, signal, onError, protocols, ...forwarded } = opts;
     signal?.throwIfAborted();
 
-    const transport = await connectWebSocket(url, onError === undefined ? {} : { onError });
+    // Built key by key, since an explicit undefined is not the same as an absent option here.
+    const dialOpts: ConnectWebSocketOptions = {};
+    if (onError !== undefined) dialOpts.onError = onError;
+    if (protocols !== undefined) dialOpts.protocols = protocols;
+    const transport = await connectWebSocket(url, dialOpts);
     // Resolved into a host that has since given up: close the socket rather than leaving it open
     // behind a session nobody holds.
     if (signal?.aborted === true) {

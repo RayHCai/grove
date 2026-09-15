@@ -133,6 +133,43 @@ describe('a client instance', () => {
     });
 });
 
+/**
+ * The socket the dial reaches for when no factory is injected, recording what it was constructed
+ * with — which is the only place a subprotocol is observable, since it rides the upgrade and not a
+ * frame.
+ */
+class SpySocket {
+    static last: SpySocket | undefined;
+
+    readyState = 1;
+    bufferedAmount = 0;
+    binaryType?: unknown;
+    readonly #listeners = new Map<string, Array<(event: unknown) => void>>();
+
+    constructor(
+        readonly url: string,
+        readonly protocols?: string[],
+    ) {
+        SpySocket.last = this;
+    }
+
+    send(): void {}
+
+    close(): void {
+        this.readyState = 3;
+    }
+
+    addEventListener(type: string, listener: (event: unknown) => void): void {
+        const listeners = this.#listeners.get(type) ?? [];
+        listeners.push(listener);
+        this.#listeners.set(type, listeners);
+    }
+
+    open(): void {
+        for (const listener of this.#listeners.get('open') ?? []) listener({});
+    }
+}
+
 describe('connectTo', () => {
     it('dials nothing for a host that has already given up', async () => {
         const renderer = await createReadyNullRenderer({ design: { width: 100, height: 100 } });
@@ -154,5 +191,34 @@ describe('connectTo', () => {
         ).rejects.toThrow();
 
         renderer.destroy();
+    });
+
+    it('offers the subprotocols it was given at the upgrade', async () => {
+        const renderer = await createReadyNullRenderer({ design: { width: 100, height: 100 } });
+        const globals = globalThis as Record<string, unknown>;
+        const real = globals.WebSocket;
+        globals.WebSocket = SpySocket;
+
+        try {
+            const dialing = connectTo({
+                url: 'wss://host/game',
+                protocols: ['grove.ticket.abc'],
+                renderer,
+                frames: new ManualFrameSource(),
+                device: new ScriptedInputDevice(),
+                clock: { nowSeconds: () => 0 },
+                name: 'tester',
+                ownsRenderer: true,
+            });
+            const socket = SpySocket.last;
+            socket?.open();
+            const session = await dialing;
+
+            expect(socket?.url).toBe('wss://host/game');
+            expect(socket?.protocols).toEqual(['grove.ticket.abc']);
+            session.close();
+        } finally {
+            globals.WebSocket = real;
+        }
     });
 });

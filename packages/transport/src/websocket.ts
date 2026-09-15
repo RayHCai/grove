@@ -21,7 +21,7 @@ import type {
  * Declared rather than imported, since `src/` pulls in neither `node` nor `DOM` types — and only the
  * members named here are ever touched, so one file compiles against all three implementations.
  */
-declare const WebSocket: { new (url: string): WebSocketLike };
+declare const WebSocket: { new (url: string, protocols?: string[]): WebSocketLike };
 declare const setInterval: (fn: () => void, ms: number) => unknown;
 declare const clearInterval: (handle: unknown) => void;
 
@@ -79,12 +79,19 @@ export interface WebSocketOptions extends TransportOptions {
 /** Options for the dial. */
 export interface ConnectWebSocketOptions extends ConnectOptions, WebSocketOptions {
     /**
+     * Subprotocols offered at the upgrade.
+     *
+     * A browser dial can set no header, so a host that authenticates before the upgrade has
+     * nowhere else to read a credential from.
+     */
+    protocols?: string[];
+    /**
      * The socket constructor, defaulting to the global `WebSocket`.
      *
      * A seam rather than a hard reference to the global: a Node client older than the global's
      * arrival passes `ws`'s constructor here, which is also how the backend is driven under test.
      */
-    createSocket?: (url: string) => WebSocketLike;
+    createSocket?: (url: string, protocols?: string[]) => WebSocketLike;
 }
 
 /** `readyState` values, named here so a socket the composition root supplied need carry no statics. */
@@ -395,12 +402,18 @@ class WebSocketEnd implements Transport {
 export function connectWebSocket(url: string, opts?: ConnectWebSocketOptions): Promise<Transport> {
     // Resolved before the socket is created, so a bad option rejects nothing and opens nothing.
     const resolved = resolve(opts);
-    const createSocket = opts?.createSocket ?? ((target: string) => new WebSocket(target));
+    const createSocket =
+        opts?.createSocket ??
+        ((target: string, protocols?: string[]) => new WebSocket(target, protocols));
 
     return new Promise<Transport>((fulfil, refuse) => {
         let socket: WebSocketLike;
         try {
-            socket = createSocket(url);
+            // One argument when nothing is offered, so a factory declaring only a url sees only one.
+            socket =
+                opts?.protocols === undefined
+                    ? createSocket(url)
+                    : createSocket(url, opts.protocols);
         } catch (cause) {
             // A malformed URL and a missing global both land here, and both are this caller's to see.
             refuse(
