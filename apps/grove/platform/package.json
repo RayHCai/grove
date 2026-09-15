@@ -3,7 +3,7 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Browsing, social, and the page a game is played on.",
+    "description": "Browsing and social: one index.html and the React root it mounts.",
     "scripts": {
         "dev": "vite",
         "build": "vite build",
@@ -13,8 +13,7 @@
     },
     "dependencies": {
         "react": "^19.2.8",
-        "react-dom": "^19.2.8",
-        "@grove/ui": "workspace:*"
+        "react-dom": "^19.2.8"
     },
     "devDependencies": {
         "@types/react": "^19.2.18",

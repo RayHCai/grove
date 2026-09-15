@@ -1,6 +1,6 @@
 # @grove/player-app
 
-The origin a game renders on: a ticket in, a canvas out.
+The origin a game renders on: one `index.html`, a React entry point, and the root it mounts.
 
-A separate registrable domain from the platform, because creator `ClientScript` code evaluates in
-this page and same-origin hosting would put it beside a visitor's session.
+A separate registrable domain from the platform, because creator `ClientScript` code may only
+evaluate on an origin that carries no visitor's platform session.

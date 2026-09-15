@@ -1,7 +1,13 @@
+import type { RejectReason } from '@platform/protocol';
 import { useRef } from 'react';
 
-/** Why an authority turned a join away. */
-export type RefusalReason = 'identity' | 'version' | 'ticket' | 'full';
+/**
+ * Why an authority turned a join away.
+ *
+ * Wider than the wire's own `RejectReason`: a ticket is checked before the upgrade, so its refusal
+ * is an HTTP status that never becomes a reject envelope.
+ */
+export type RefusalReason = RejectReason | 'ticket';
 
 export interface GamePlayerProps {
     /** Where the authority for this session listens. */
@@ -13,10 +19,10 @@ export interface GamePlayerProps {
 }
 
 /**
- * Mounts one game session onto a canvas.
+ * The canvas a game session mounts onto, addressed at the authority it was given.
  *
- * It holds no authority and checks nothing: the ticket is handed to the transport as given, and
- * every boundary that matters is the authority's.
+ * It holds no authority and checks nothing: every boundary that matters — admission, request
+ * checking, ticket verification — is the authority's.
  */
 export function GamePlayer({ serverUrl }: GamePlayerProps): React.JSX.Element {
     const canvas = useRef<HTMLCanvasElement>(null);
