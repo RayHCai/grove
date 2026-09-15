@@ -69,6 +69,25 @@ data "aws_iam_policy_document" "fleet" {
     }
   }
 
+  # The fleet role is the queue consumer because these boxes are the only compute this
+  # configuration creates. Receive and delete, never send: what puts a build on the queue is the
+  # rule watching the bucket, and a box that could enqueue one could enqueue a build for a source
+  # nobody uploaded.
+  dynamic "statement" {
+    for_each = var.build_queue_arn == "" ? [] : [1]
+
+    content {
+      sid = "ClaimBuilds"
+      actions = [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:ChangeMessageVisibility",
+        "sqs:GetQueueAttributes",
+      ]
+      resources = [var.build_queue_arn]
+    }
+  }
+
   # The two secrets a box needs, read at boot and never written from here.
   statement {
     sid     = "ReadFleetSecrets"

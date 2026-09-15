@@ -1,7 +1,8 @@
 # @grove/infra
 
 The AWS deployment: the bucket a game's artifacts are served out of, the distribution in front of
-it, the tables shaped for game data, and the EC2 fleet the sessions run on. Terraform.
+it, the listener that turns an upload into a build, the tables shaped for game data, and the EC2
+fleet the sessions run on. Terraform.
 
 Two deployments, `staging` and `production`, built from one composing module. What differs between
 them is the values each root passes — durability, replication, edge reach and the size of a box —
@@ -13,9 +14,10 @@ the other.
 | Path                      | Owns                                                                             |
 | ------------------------- | -------------------------------------------------------------------------------- |
 | `modules/game-storage`    | the games bucket, the origin access control, and the distribution in front of it |
-| `modules/game-data`       | the three tables `@grove/game-manager`'s store is keyed for                      |
+| `modules/upload-events`   | the rule that matches a source upload, and the queue a build is claimed from     |
+| `modules/game-data`       | the two tables `@grove/game-manager`'s store is keyed for                        |
 | `modules/fleet-region`    | one region's network, role, launch template and group                            |
-| `modules/environment`     | one whole deployment, composing the three above                                  |
+| `modules/environment`     | one whole deployment, composing the four above                                   |
 | `environments/staging`    | the state key, the four providers, and staging's values                          |
 | `environments/production` | the same three things, and production's                                          |
 
@@ -50,27 +52,46 @@ Cached under the managed `CachingOptimized` policy with CORS request and respons
 a bundle is fetched cross-origin by the player, and an object is named by the hash of its own bytes,
 so a name can never come to mean different bytes and a long cache is never wrong.
 
+## The listener
+
+Object events go to the default event bus, and one rule matches `Object Created` under `sources/`
+and puts it on a queue. That rule is the only thing that queues a build, so a build is never waiting
+on the uploading client to ask for one — a client that uploaded and then failed would otherwise
+leave a game published and never compiled.
+
+The queue's visibility timeout is fifteen minutes because a compile is minutes of CPU across a child
+`tsc` and a bundler, and a build reclaimed at thirty seconds is a build running twice. Three failed
+deliveries move it to the dead-letter queue, where one message is one game that was published and
+never built — which is what the alarm on that queue's depth reports.
+
+The fleet role is the queue's consumer, because these boxes are the only compute this configuration
+creates. It may receive and delete, never send: what puts a build on the queue is the rule watching
+the bucket, and a principal that could enqueue one could enqueue a build for a source nobody
+uploaded.
+
 ## The tables
 
-Three tables, keyed for the questions `@grove/game-manager` asks a datastore. `gameId` partitions
-`state` and `bundles`, which puts the guarantee that service's scope makes at the datastore too: a
-row belonging to another game is not in a partition a handler's token lets it name. `leaderboards`
-partitions by `boardId`, which carries no `gameId` of its own, so that guarantee holds there only
-for an id the store mints from the game and the board.
+Two tables, keyed for the questions `@grove/game-manager` asks a datastore. `gameId` partitions both,
+which puts the guarantee that service's scope makes at the datastore too: a row belonging to another
+game is not in a partition a handler's token lets it name.
 
-| Table          | Keys                   | Shaped for                                                   |
-| -------------- | ---------------------- | ------------------------------------------------------------ |
-| `state`        | `gameId` / `key`       | `Read` and `Write`; `revision` is the compare-and-set column |
-| `leaderboards` | `boardId` / `playerId` | `Leaderboard`, ordered by the `by-score` local index         |
-| `bundles`      | `gameId`               | `Bundles`                                                    |
+| Table     | Keys             | Shaped for                                                                  |
+| --------- | ---------------- | --------------------------------------------------------------------------- |
+| `state`   | `gameId` / `key` | `Read`, `Write` and `Leaderboard`; `revision` is the compare-and-set column |
+| `bundles` | `gameId`         | `Bundles`                                                                   |
 
-A board's ranking is read only within its own partition, so the score index is local rather than
-global: a global one would be a second, eventually-consistent copy of a page that has to be ordered
-correctly the first time. A page is one descending query, and its `LastEvaluatedKey` is the cursor
-the store mints.
+A board is a value under a key in `state` rather than a table of its own. Ordering it is then the
+store's work and not the datastore's, and that is what the key schema buys: an index keyed on score
+has to be partitioned by the board, a board id carries no `gameId`, and the isolation every other
+row gets from the partition key would have held for a leaderboard only by convention.
 
-Production replicates all three into every fleet region. A `@serverState` write sits inside a tick,
-and a tick that crossed the continent to reach the store would spend its whole budget waiting.
+What it costs is the item ceiling. A board is read and written whole, so it is bounded by DynamoDB's
+400 KB item — a few thousand entries — and a score update rewrites all of them. The compare-and-set
+on `revision` is what makes that safe rather than lossy: two ticks updating one board race on the
+key like any other pair of writers, and the loser is told.
+
+Production replicates both into every fleet region. A `@serverState` write sits inside a tick, and a
+tick that crossed the continent to reach the store would spend its whole budget waiting.
 
 ## The fleet
 
