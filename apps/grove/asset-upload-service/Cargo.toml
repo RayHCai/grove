@@ -1,5 +1,5 @@
 [package]
-name = "grove-upload-service"
+name = "grove-asset-upload-service"
 description = "Content-addressed object storage: the bundles a session loads and the assets a game draws with."
 version.workspace = true
 edition.workspace = true
@@ -7,7 +7,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "grove-upload-service"
+name = "grove-asset-upload-service"
 path = "src/main.rs"
 
 [dependencies]
@@ -32,6 +32,11 @@ bytes = "1"
 async-trait = "0.1"
 
 serde = { workspace = true }
+serde_json = { workspace = true }
+
+# The asset stream a save queues work on, and the one call this service makes back to @grove/api.
+redis = { workspace = true }
+reqwest = { workspace = true }
 
 # The hash is the name, so it is the hot loop rather than a checksum on the side.
 sha2 = { workspace = true }

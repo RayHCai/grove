@@ -39,7 +39,7 @@
             "path": "./packages/glue"
         },
         {
-            "path": "./libs/ui"
+            "path": "./apps/grove/ui"
         },
         {
             "path": "./libs/api-contract"

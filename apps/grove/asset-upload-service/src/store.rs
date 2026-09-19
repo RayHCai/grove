@@ -1,9 +1,6 @@
 //! The object store: bytes named by their own SHA-256, and the seam a backing store answers.
-//!
-//! An object is never resident, so the trait is written in terms of a boxed byte stream rather than
-//! a buffer — the cost of one upload is a chunk plus a hasher, whatever the object weighs. The
-//! filesystem implementation writes to a temp file and renames into place: a partial object must
-//! never be readable under its final name, and a rename is the only atomic step a filesystem gives.
+//! An object is never resident, so the trait is written in boxed byte streams. The filesystem
+//! implementation writes to a temp file and renames: a partial object must never be readable.
 
 use std::path::{Path, PathBuf};
 use std::pin::Pin;

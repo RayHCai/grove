@@ -1,14 +1,13 @@
-//! Content-addressed object storage for the fleet, in one process.
-//!
-//! The composition root and nothing else: read the environment, open the object root, build the
-//! router the store sits behind, and drain on a signal. An object is multi-megabyte and arrives and
-//! leaves as a stream, so the only state this process holds between a request and its answer is a
-//! chunk and a hasher.
+//! Content-addressed object storage for the fleet, in one process — the composition root only.
+//! An object arrives and leaves as a stream, so the state held between a request and its answer
+//! is a chunk and a hasher.
 
 mod auth;
 mod config;
+mod consumer;
 mod routes;
 mod store;
+mod tasks;
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -18,11 +17,12 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use axum::Router;
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 
 use crate::config::Config;
 use crate::routes::AppState;
 use crate::store::FileStore;
+use crate::tasks::HttpTasks;
 
 /// How long a drain may run before whatever is still open is dropped, which is the ceiling
 /// `libs/go-grove/httpx` gives the Go half of the fleet so a rolling deploy is one deadline.
@@ -47,17 +47,42 @@ async fn main() -> Result<()> {
             store: Arc::new(store),
             max_bytes: config.max_bytes,
         },
-        Arc::new(config.fleet_secret),
+        Arc::new(config.fleet_secret.clone()),
     );
 
     let bind: SocketAddr = config
         .bind
         .parse()
-        .context("UPLOAD_SERVICE_BIND is not an address")?;
+        .context("ASSET_UPLOAD_SERVICE_BIND is not an address")?;
     let socket = TcpListener::bind(bind)
         .await
         .with_context(|| format!("binding {bind}"))?;
     tracing::info!(addr = %bind, root = %config.root.display(), "listening");
+
+    // The object routes come up either way. A deploy with no stream behind it serves bundles and
+    // claims nothing — a wiring fault to see in the logs rather than a process that will not start,
+    // which no host agent could tell from a box that is gone.
+    let (stopping, stop) = watch::channel(false);
+    let consuming = match config.redis_url.as_deref() {
+        None => {
+            tracing::error!("no asset stream is attached; nothing will be claimed");
+            None
+        }
+        Some(url) => {
+            let settling = Arc::new(HttpTasks::new(
+                config.api_url.clone(),
+                config.fleet_secret.clone(),
+            )?);
+            let client = redis::Client::open(url).context("REDIS_URL is not a Redis address")?;
+            let name = config.worker_name.clone();
+            tracing::info!(worker = %name, "claiming asset uploads");
+            Some(tokio::spawn(async move {
+                if let Err(err) = consumer::consume(client, settling, name, stop).await {
+                    tracing::error!(error = ?err, "asset consumer stopped");
+                }
+            }))
+        }
+    };
 
     let signal = async {
         tokio::select! {
@@ -65,13 +90,20 @@ async fn main() -> Result<()> {
             () = terminate() => {}
         }
     };
-    serve(socket, router, signal, DRAIN_TIMEOUT).await
+    let served = serve(socket, router, signal, DRAIN_TIMEOUT).await;
+
+    // After the drain, so an asset claimed on the way out is settled rather than left pending for
+    // the reclaim window to hand back.
+    let _ = stopping.send(true);
+    if let Some(handle) = consuming {
+        let _ = handle.await;
+    }
+    served
 }
 
-/// Serves until `shutdown` resolves, then until what is still in flight finishes or `drain` elapses.
-///
-/// A deploy is a drain rather than a kill: an upload in flight holds a temp file that only its own
-/// rename publishes, so a kill mid-stream is an object the caller was never told it lost.
+/// Serves until `shutdown` resolves, then until what is in flight finishes or `drain` elapses.
+/// A deploy is a drain rather than a kill: an upload holds a temp file only its own rename
+/// publishes, so a kill mid-stream loses an object the caller was never told about.
 async fn serve(
     socket: TcpListener,
     router: Router,

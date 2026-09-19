@@ -1,10 +1,6 @@
-//! The fleet bearer every `/v1` route sits behind.
-//!
-//! One shared secret rather than a credential per caller: this service is not publicly routable and
-//! its callers are three services rather than a population, so a per-caller identity would be a key
-//! rotation problem bought with nothing. Compared in constant time, exactly as `grove-game-instance`
-//! compares a signature — the length is compared first and is not secret, being a deploy-wide fact
-//! rather than a per-request one.
+//! The fleet bearer every `/v1` route sits behind. One shared secret rather than a credential per
+//! caller: the callers are three services, not a population, so per-caller identity would buy only
+//! a rotation problem. Compared in constant time; the length is a deploy-wide fact, not a secret.
 
 use std::sync::Arc;
 

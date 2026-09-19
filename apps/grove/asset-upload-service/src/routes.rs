@@ -1,8 +1,6 @@
-//! The four object routes, the health probe, and the shape of a refusal.
-//!
-//! Nothing here holds an object. A body is turned into a stream and handed to the store, and a read
-//! is the store's stream handed to the socket — the handler owns the checks a stream cannot make
-//! for itself: the name is a SHA-256, the declared length is under the ceiling, the type is bounded.
+//! The four object routes, the health probe, and the shape of a refusal. Nothing here holds an
+//! object: the handler owns only the checks a stream cannot make for itself — the name is a
+//! SHA-256, the declared length is under the ceiling, the type is bounded.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -59,8 +57,8 @@ pub fn router(state: AppState, fleet_secret: Arc<String>) -> Router {
         // Declared before the bearer layer so the bearer wraps it too: a peer without the secret
         // has no business learning that this address answers some other verb.
         .method_not_allowed_fallback(method_not_allowed)
-        // One semaphore rather than `ConcurrencyLimitLayer`'s: `Router::layer` clones the layer into
-        // each method and the fallback, and a per-service limit would be this cap five times over.
+        // One semaphore rather than `ConcurrencyLimitLayer`'s: `Router::layer` clones the layer
+        // into each method and the fallback, so a per-service limit would be this cap five times.
         .layer(GlobalConcurrencyLimitLayer::new(MAX_OBJECTS_IN_FLIGHT))
         .layer(middleware::from_fn(deadline_between_chunks))
         .layer(middleware::from_fn_with_state(
@@ -96,10 +94,8 @@ const REQUEST_ID_HEADER: &str = "x-request-id";
 const REQUEST_ID_MAX_LEN: usize = 64;
 
 /// Joins one request to the caller that made it: the id it presented when that is one token this
-/// service can log unchanged, and a fresh one when it is not.
-///
-/// Put back on the request as well as on the answer, so a handler reaching for the id reads the one
-/// the caller will quote rather than the one it sent.
+/// service can log unchanged, and a fresh one when it is not. Put back on the request as well as
+/// the answer, so a handler reads the id the caller will quote.
 async fn correlate(mut request: Request, next: middleware::Next) -> Response {
     let id = request
         .headers()

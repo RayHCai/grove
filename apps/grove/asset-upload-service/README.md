@@ -1,7 +1,7 @@
-# @grove/upload-service
+# @grove/asset-upload-service
 
-Content-addressed object storage: the bundles a session loads, the assets a game draws with, and the
-source archives `@grove/game-builder` compiles. Written in Rust. Not publicly routable.
+Content-addressed object storage for the bundles a session loads, and the worker that claims every
+asset a creator uploads. Written in Rust. Not publicly routable.
 
 An object is named by the SHA-256 of its own bytes, so the name is the integrity check rather than a
 label beside one. A `PUT` whose body hashes to something else is refused and nothing is stored.
@@ -49,6 +49,28 @@ Everything above sits behind `ObjectStore`, a four-method trait the handlers hol
 `Arc<dyn ObjectStore>`. The trait speaks in byte streams rather than buffers, which is what keeps the
 per-upload cost a chunk.
 
+## The asset stream
+
+A save that lands an asset writes a `Task` row in `@grove/api` and pushes its id onto
+`grove:tasks:asset-upload`, and this process is what reads it. A consumer group rather than a list,
+because a worker that dies mid-asset has to hand its claim back instead of taking the asset with it;
+two workers sharing a name share their claims, which is why `UPLOAD_WORKER_NAME` falls back to the
+hostname.
+
+What happens to a claimed asset is the seam: the task is moved to `IN_PROGRESS` and then settled, and
+nothing is processed yet. Thumbnailing, transcoding and format validation land behind it without the
+seam moving, and a worker that settles honestly is what lets a creator's editor stop watching.
+
+A message is acknowledged once the outcome is written down. A claim that was refused is work
+somebody already settled — acknowledged, or it comes back forever. A claim or an outcome that could
+not be written at all is left claimed for another worker to take back. Settling is the one call this
+service makes out, behind the same fleet bearer its own routes compare, and the transitions are
+checked at `@grove/api`: a worker that comes back from the dead cannot overwrite an outcome another
+already wrote.
+
+The bytes of those assets are not here. They go straight from the browser to the games bucket through
+a presigned PUT, and what reaches this service is the task naming one.
+
 ## The bearer
 
 Every `/v1` route is behind one shared fleet secret, compared in constant time. One secret rather
@@ -61,13 +83,15 @@ What an object means. A bundle set, a manifest, which build produced which hash 
 `@grove/game-manager`'s and `@grove/game-builder`'s. This service is told a name and given bytes, and
 its whole judgement is whether the two agree.
 
-| File        | Holds                                                             |
-| ----------- | ----------------------------------------------------------------- |
-| `main.rs`   | the composition root: config, the router, the listener, the drain |
-| `config.rs` | the environment this process is deployed with                     |
-| `auth.rs`   | the fleet bearer layer                                            |
-| `routes.rs` | the handlers and the shape of a refusal                           |
-| `store.rs`  | the object store and the seam a backing store answers             |
+| File          | Holds                                                                           |
+| ------------- | ------------------------------------------------------------------------------- |
+| `main.rs`     | the composition root: config, the router, the listener, the consumer, the drain |
+| `config.rs`   | the environment this process is deployed with                                   |
+| `auth.rs`     | the fleet bearer layer                                                          |
+| `routes.rs`   | the handlers and the shape of a refusal                                         |
+| `store.rs`    | the object store and the seam a backing store answers                           |
+| `consumer.rs` | the asset stream, and what one claimed task does                                |
+| `tasks.rs`    | the status route a claimed task is settled through                              |
 
 ## Running it
 
@@ -75,12 +99,15 @@ its whole judgement is whether the two agree.
 cargo run --release
 ```
 
-| Variable              | What                                          |
-| --------------------- | --------------------------------------------- |
-| `UPLOAD_SERVICE_BIND` | address to bind, `127.0.0.1:4005` by default  |
-| `UPLOAD_ROOT`         | the directory objects live under              |
-| `FLEET_SECRET`        | the shared bearer every `/v1` caller presents |
-| `UPLOAD_MAX_BYTES`    | bytes one object may reach, 64 MiB by default |
+| Variable                    | What                                                                             |
+| --------------------------- | -------------------------------------------------------------------------------- |
+| `ASSET_UPLOAD_SERVICE_BIND` | address to bind, `127.0.0.1:4005` by default                                     |
+| `UPLOAD_ROOT`               | the directory objects live under                                                 |
+| `FLEET_SECRET`              | the shared bearer every `/v1` caller presents, and the one this process presents |
+| `UPLOAD_MAX_BYTES`          | bytes one object may reach, 64 MiB by default                                    |
+| `API_URL`                   | where a claimed asset upload is settled                                          |
+| `REDIS_URL`                 | the asset stream; absent, this process serves objects and claims nothing         |
+| `UPLOAD_WORKER_NAME`        | this process's name in the consumer group; the hostname when it is not set       |
 
 `pnpm run build | test | typecheck` at the repo root reach this crate through `package.json`, whose
 scripts shell to cargo — `typecheck` is `clippy -D warnings`. With no Rust toolchain on `PATH` they
