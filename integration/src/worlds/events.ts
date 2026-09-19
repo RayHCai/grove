@@ -1,10 +1,5 @@
-// A world whose whole game is the handler table: every lifecycle and event decorator, on the host
-// the engine actually dispatches that kind at.
-//
-// Which host is the load-bearing part. An action edge reaches the player and their avatar, a pointer
-// edge reaches the entity it landed on, a region crossing reaches the entity that crossed — so a
-// suite that hung all of them on the Game would prove only that the decorators exist. Each handler
-// here records that it fired into a `@serverState` field, so every claim is made against a CLIENT.
+// Each handler sits on the host the engine dispatches that kind at — hanging them all on the Game
+// would prove only that the decorators exist.
 
 import type { Collider, Ctx, Entity, Game, HUDScreen, Player } from '@platform/engine';
 import {
@@ -57,14 +52,14 @@ export const ACTION_GATE = 'gate';
 export const CODE_PULSE = 'KeyP';
 export const CODE_GATE = 'KeyG';
 
-/** Long enough that several taps land inside one invocation, which is what the three modes differ on. */
+/** Long enough that several taps land inside one invocation — what the three modes differ on. */
 export const GATE_SECONDS = 1;
 
 export const REGION_PIT = 'pit';
 export const PIT_BOUNDS = { left: 80, right: 200, top: 160, bottom: 60 };
 
 export const BODY_HALF = 12;
-/** Where a joining avatar stands: inside no region, and clear of the beacon by more than both halves. */
+/** Where a joining avatar stands: inside no region, and clear of the beacon by both halves. */
 export const HOME_AT = { x: 0, y: -120 };
 export const PIT_AT = { x: 140, y: 110 };
 /** Near enough the middle that the pick resolves against drawn art at any sane camera. */
@@ -99,7 +94,7 @@ export const S = {
     pinged: 'pinged',
 } as const;
 
-/** Player-hosted readings — an action edge is dispatched at the player, so its tallies live there. */
+/** Player-hosted readings — an action edge dispatches at the player, so its tallies live there. */
 export const P = {
     presses: 'presses',
     releases: 'releases',
@@ -112,7 +107,7 @@ export const P = {
     manyOut: 'manyOut',
 } as const;
 
-/** Nothing in the engine or the manifest writes a collider, so a body without this touches nothing. */
+/** Nothing in the engine or manifest writes a collider, so a body without this touches nothing. */
 function bodyBox(): Collider {
     return {
         enabled: true,
@@ -137,7 +132,7 @@ export class Director extends ServerScript<Game> {
     @serverState ends = 0;
     @serverState presser = '';
     @serverState pings = 0;
-    /** What the payload carried, so a send that dropped its data is not mistaken for one that worked. */
+    /** What the payload carried, so a send that dropped its data is not read as one that worked. */
     @serverState pinged = 0;
 
     /** Counted rather than set to true, so a second joiner re-running it would be visible. */
@@ -181,10 +176,8 @@ export class Director extends ServerScript<Game> {
     }
 
     /**
-     * Sends a custom event to an entity, which is the one dispatch a creator raises by hand.
-     *
-     * Not an input action and not a widget: no binding names it and no frame carries it, so the
-     * only thing that can put `@onEvent(EVENT_PING)` on the beacon into a run is this call.
+     * Sends a custom event to an entity — the one dispatch a creator raises by hand.
+     * No binding names it and no frame carries it, so only this call puts `@onEvent` into a run.
      */
     @onPress(W.ring)
     ring(): void {
@@ -199,9 +192,7 @@ export class Director extends ServerScript<Game> {
 
     /**
      * Raises the same ask from inside the authority, where the sink is already local.
-     *
-     * The same handler with no wire beneath it, so a suite that fails on the `Kiosk` route and
-     * passes here has localised the fault to the channel rather than to the handler.
+     * A suite failing on the `Kiosk` route and passing here has localised the fault to the channel.
      */
     @onPress(W.relay)
     relay(): void {
@@ -249,7 +240,7 @@ export class Director extends ServerScript<Game> {
     }
 }
 
-/** On every avatar, from the template: the entity half of what an input edge and a crossing reach. */
+/** On every avatar: the entity half of what an input edge and a region crossing reach. */
 export class Body extends ServerScript<Entity> {
     @onStart
     equip(): void {
@@ -304,10 +295,8 @@ export class Beacon extends ServerScript<Entity> {
 }
 
 /**
- * Attached at the join, because the input pass dispatches an action edge at the player's own host.
- *
- * A Game-hosted `@onEvent` is never reached by a key at all, which is why none of these live on
- * `Director` — and being player-hosted also scopes every tally below to the tab that earned it.
+ * Attached at the join: the input pass dispatches an action edge at the player's own host, and a
+ * Game-hosted `@onEvent` is never reached by a key. Player-hosting also scopes every tally.
  */
 export class Seat extends ServerScript<Player> {
     @serverState presses = 0;
@@ -335,7 +324,7 @@ export class Seat extends ServerScript<Player> {
         this.holds = this.holds + 1;
     }
 
-    /** Each mode counts entries and completions apart, since that is the whole difference between them. */
+    /** Each mode counts entries and completions apart — the whole difference between them. */
     @onEvent(ACTION_GATE, { concurrency: 'ignore' })
     async once(): Promise<void> {
         this.ignoreIn = this.ignoreIn + 1;
@@ -357,7 +346,7 @@ export class Seat extends ServerScript<Player> {
         this.manyOut = this.manyOut + 1;
     }
 
-    /** The roster still holds this player here, so the Game can be told before the seat is cleared. */
+    /** The roster still holds this player, so the Game can be told before the seat is cleared. */
     @onEnd
     stand(): void {
         game.getScript(Director)?.noteEnd();
@@ -366,9 +355,7 @@ export class Seat extends ServerScript<Player> {
 
 /**
  * The only client-located script here, and the only way to raise a `request()` from a browser.
- *
- * `request` resolves the ambient runtime's sink, and a mirror's sends a request frame — so this ask
- * is answered on the authority rather than on the machine that made it.
+ * `request` resolves the ambient runtime's sink, and a mirror's sends a request frame.
  */
 export class Kiosk extends ClientScript<HUDScreen> {
     @onPress(WIDGET_ASK)

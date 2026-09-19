@@ -1,12 +1,5 @@
-// A world whose whole game is one entity doing what the `Entity` API says it can do.
-//
-// Every verb is reached by pressing a widget, so each call arrives on a real interaction frame with
-// an engine-supplied `ctx.player` — the same path a button in a real game takes. Nothing here calls
-// into the runtime from the test side, because a call made outside a handler proves only that the
-// method exists.
-//
-// The readings are `@serverState` on the Game rather than return values, so every assertion is made
-// against what a CLIENT was told, one replication interval behind the call that caused it.
+// Every verb is reached by pressing a widget, so each call arrives on a real interaction frame.
+// Readings are `@serverState`, so assertions are made against what a CLIENT was told.
 
 import type { Ctx, Entity, Game } from '@platform/engine';
 import { ServerScript, game, onPlayerJoin, onPress, onStart, serverState } from '@platform/engine';
@@ -18,7 +11,7 @@ export const TEMPLATE_MARK = 'mark';
 export const TAG_MARK = 'mark';
 export const TAG_SAID = 'said';
 
-/** Where the placed mark sits — a fixed point, so an expected distance is arithmetic, not a reading. */
+/** Where the placed mark sits — fixed, so an expected distance is arithmetic, not a reading. */
 export const MARK_AT = { x: 120, y: 0 };
 /** Where a joining avatar is put, so every distance and bearing below is known before the run. */
 export const AVATAR_AT = { x: 0, y: 0 };

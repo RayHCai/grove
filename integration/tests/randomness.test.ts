@@ -1,9 +1,4 @@
-// The seeded stream, driven through a game and read off a client.
-//
-// Determinism is the whole claim, so nearly every case compares a digest of many draws rather than
-// one number — one number agrees by luck often enough to pass a broken stream. The readings are the
-// raw values a client was told, so the range, the membership and the spread are all checked HERE
-// rather than by the world that drew them.
+// Nearly every case compares a digest of many draws: one number agrees by luck often enough.
 
 import { describe, expect, it } from 'vitest';
 import type { Session, Tab } from './harness.js';

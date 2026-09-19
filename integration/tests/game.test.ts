@@ -1,9 +1,4 @@
-// The `Game` facade — the session, the world, and the four ways a world is queried — driven
-// through a game and read back off a client.
-//
-// Every case presses a widget and settles, so the call runs in a handler on the authority and the
-// answer reaches this tab a replication interval later. Three of these members do not do what they
-// are specified to; those cases pin what the code DOES, with a comment saying exactly why.
+// Three of these members do not do what they are specified to; those cases pin what the code DOES.
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
@@ -211,16 +206,14 @@ describe('reaching a script by its class', () => {
         await press(first.session, first.tab, W.gameScript);
         expect(reading<boolean>(first.tab, S.ledgerWasThere)).toBe(false);
         expect(reading<boolean>(first.tab, S.ledgerIsThere)).toBe(true);
-        // The starts pass drains a runtime attach on a later tick, so this value is the script's own
-        // `@onStart` writing rather than its initializer being hoisted by the attach.
+        // The starts pass drains a runtime attach on a later tick, so this value is the script's
+        // own `@onStart` writing rather than its initializer being hoisted by the attach.
         expect(reading<number>(first.tab, S.tally)).toBe(LEDGER_START);
         first.session.dispose();
 
-        // The hoist defined `tally` on the `game` const, which is a Proxy with no defineProperty
-        // trap over ONE module-level target: the accessor lands on that target and outlives the
-        // world it was hoisted for. So the next world refuses the same class as a name the Game
-        // already answers to, the handler dies at the call, and one throw is under the breaker's
-        // threshold — nothing anywhere is told.
+        // The hoist defined `tally` on the `game` const — a Proxy with no defineProperty trap over
+        // ONE module-level target — so the accessor outlives its world. The next world refuses the
+        // class, the handler dies at the call, and one throw is under the breaker's threshold.
         const second = await open();
         await press(second.session, second.tab, W.gameScript);
         expect(reading<boolean>(second.tab, S.ledgerWasThere)).toBe(false);

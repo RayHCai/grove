@@ -1,11 +1,5 @@
-// A world whose whole game is the declared asset table and the two audio consts.
-//
-// The two halves are hosted where an honest answer exists. The manifest's assets are something the
-// AUTHORITY was handed, so a Game script queries them and replicates each reading; playback is one
-// tab's, so `sound`, `music` and the two `Entity` effect verbs are called from a screen script and
-// land in that tab's own effect sink — which is where a browser's audio layer would have heard them.
-//
-// A `ClientScript` has no `@serverState`, so its readings go into HUD widgets instead.
+// The manifest's assets are the AUTHORITY's, so a Game script reads them; playback is one tab's,
+// so the effect verbs are called from a screen script and land in that tab's own sink.
 
 import type { AssetKind, AssetRecord } from '@platform/project';
 import { assetId, templateId } from '@platform/project';
@@ -57,7 +51,7 @@ export const SCRIPT_CURATOR = 'curator';
 export const SCRIPT_STAGE = 'stage';
 export const SCREEN_AUDIO = 'audio';
 
-/** Seven assets over all six kinds, so `all(kind)` has one of each to find and five to leave out. */
+/** Seven assets over six kinds, so `all(kind)` has one of each to find and five to skip. */
 export const DECLARED_ASSETS: readonly AssetRecord[] = [
     DISC_ASSET,
     {
@@ -132,10 +126,10 @@ export class Curator extends ServerScript<Game> {
     @serverState chimeReading = '';
     @serverState audioKeys = '';
     @serverState everyKind = '';
-    /** One `kind:count` per arm of `AssetKind`, so a filter that ignored its argument is visible. */
+    /** One `kind:count` per arm of `AssetKind`, so a filter ignoring its argument shows up. */
     @serverState kindCensus = '';
     @serverState missing = 'unread';
-    /** Starts true, so the reading below is a change rather than the initializer standing in for one. */
+    /** Starts true, so the reading below is a change rather than the initializer standing in. */
     @serverState urlOnAsset = true;
 
     @onPlayerJoin
@@ -168,17 +162,15 @@ export class Curator extends ServerScript<Game> {
             .map((a) => a.kind)
             .toSorted()
             .join(',');
-        // Every arm asked separately: `all()` agreeing with the total says nothing about whether the
-        // filtered form reads its argument at all.
+        // Every arm asked separately: `all()` agreeing with the total says nothing about whether
+        // the filtered form reads its argument at all.
         this.kindCensus = EVERY_KIND.map((kind) => kind + ':' + assets.all(kind).length).join('|');
     }
 }
 
 /**
- * The audio half, on the one host that can honestly own it.
- *
- * Nothing here reads playback back, because there is none to read: every verb below pushes into the
- * runtime's effect sink and the handle it answers with holds no state.
+ * The audio half, on the one host that can honestly own it. Nothing reads playback back: every
+ * verb pushes into the effect sink, and the handle it answers with holds no state.
  */
 export class Stage extends ClientScript<HUDScreen> {
     @onPress(W.playSound)

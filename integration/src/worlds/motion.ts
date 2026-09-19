@@ -1,10 +1,5 @@
-// A world of props that move themselves, so the three motion helpers can be watched rather than
-// called.
-//
-// Each helper is started from an `@onPress` on the Game host, because `oscillate` and `orbit` are a
-// per-tick timer around a curve and a timer needs the ambient runtime an interaction frame supplies.
-// Only the plain-object tween reports through `@serverState`: a property on a private object reaches
-// no wire on its own, while a body's position is already replicated and is read off the mirror.
+// Each helper starts from an `@onPress`: `oscillate` and `orbit` are per-tick timers, and a timer
+// needs the ambient runtime an interaction frame supplies.
 
 import type { Ctx, Entity, Game } from '@platform/engine';
 import {

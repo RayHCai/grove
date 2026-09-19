@@ -1,12 +1,5 @@
-// The HUD, driven through the only kind of script that can reach one.
-//
-// `hud` resolves the CURRENT runtime's local player, so every call under test runs on the tab
-// rather than the authority — and every assertion is made against `client.hud`, the sink a browser's
-// UI layer actually draws from, rather than the state core holds behind it.
-//
-// `addScript` registers a class for the NEXT open, because `open` wires what the screen already
-// holds and then returns on the visible flag forever after. The two cases at the foot of this file
-// are what that rule costs a game that moves the flag itself.
+// `addScript` registers a class for the NEXT open: `open` wires what the screen already holds,
+// and returns on the visible flag forever after.
 
 import { describe, expect, it } from 'vitest';
 import type { HUDWidgetState } from '@platform/core';
@@ -103,7 +96,8 @@ describe('a HUD widget', () => {
         expect(drawn(tab, V.label)?.visible).toBe(false);
         await press(session, tab, B.disable);
         expect(drawn(tab, V.label)?.enabled).toBe(false);
-        // One record patched rather than replaced: the text outlived four writes never mentioning it.
+        // One record patched rather than replaced: the text outlived four writes never mentioning
+        // it.
         expect(says(tab, V.label)).toBe(LABEL_READY);
 
         await press(session, tab, B.show);
@@ -151,7 +145,8 @@ describe('a HUD screen', () => {
 
         await press(session, tab, B.closeBag);
         expect(tab.client.hud.openScreens).toEqual([SCREEN_DECK]);
-        // `@onEnd` ran ahead of the teardown, so a screen says goodbye with its host still standing.
+        // `@onEnd` ran ahead of the teardown, so a screen says goodbye with its host still
+        // standing.
         expect(says(tab, V.greeting)).toBe(`${BAG_SHUT}:${SCREEN_BAG}`);
 
         // The same two transitions asked for from the screen instead of from the HUD.

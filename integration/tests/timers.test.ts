@@ -1,9 +1,5 @@
-// The timer API, driven through a game and read back off a client.
-//
-// Each case presses a widget, the handler behind it registers a duration on the authority, and the
-// count of firings reaches this tab a replication interval later. Asserting on the MIRROR is the
-// point: a timer that fired on the server without marking the state it wrote would pass a unit test
-// and leave a HUD frozen here.
+// Asserting on the MIRROR is the point: a timer that fired on the server without marking the
+// state it wrote would pass a unit test and leave a HUD frozen here.
 
 import { describe, expect, it } from 'vitest';
 import type { Session, Tab } from './harness.js';

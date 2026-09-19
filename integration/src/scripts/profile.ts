@@ -1,8 +1,5 @@
-// What survives the body, and what survives the session.
-//
-// Player-hosted, so every field here is scoped to its own player: another tab is never told these.
-// `@serverState` is also the persistence channel, which is what makes `collected` a running total
-// across rejoins rather than a per-session score.
+// Player-hosted, so every field is scoped to its own player. `@serverState` is also the
+// persistence channel, which makes `collected` a total across rejoins.
 
 import type { Player } from '@platform/engine';
 import { ServerScript, serverState } from '@platform/engine';

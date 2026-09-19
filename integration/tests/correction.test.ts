@@ -1,13 +1,5 @@
-// What a tab does when the authority disagrees with what it already drew.
-//
-// Every other suite here asserts that a mirror AGREES with the server. That is the easy half: a
-// well-behaved game never disagrees, so the branch that reconciles a disagreement is never entered
-// and the ease/snap decision goes untested against a real authority.
-//
-// These cases make the server disagree on purpose, either side of the client's snap threshold, and
-// read the decision off the prediction counters. The drawn-pose lag that distinguishes an ease
-// frame-by-frame is not reachable from here — the render bridge is private on the client — so what
-// is pinned is the decision and the convergence, not the interpolation curve.
+// The drawn-pose lag is not reachable from here — the render bridge is private on the client —
+// so what is pinned is the ease/snap decision and the convergence, not the interpolation curve.
 
 import { describe, expect, it } from 'vitest';
 import type { Session, Tab } from './harness.js';
@@ -46,11 +38,8 @@ async function predicting(session: Session, tab: Tab): Promise<void> {
 }
 
 /**
- * Stops the input and lets the tab settle onto the authority.
- *
- * A predicting tab is deliberately AHEAD of the server by its input lead, so the two agree only
- * once there is no unacknowledged input left to replay — comparing them mid-hold would be asserting
- * that prediction does not happen.
+ * Stops the input and lets the tab settle onto the authority. A predicting tab is deliberately
+ * AHEAD by its input lead, so the two agree only once no unacknowledged input is left to replay.
  */
 async function rest(session: Session, tab: Tab): Promise<void> {
     session.releaseAll();
@@ -127,7 +116,8 @@ describe('a corrected tab', () => {
         await session.step(SETTLE * 2);
 
         const after = xIn(session, tab, true);
-        // Still holding the key, so a tab that stopped replaying its own input would sit still here.
+        // Still holding the key, so a tab that stopped replaying its own input would sit still
+        // here.
         await session.step(SETTLE);
         expect(xIn(session, tab, true)).toBeGreaterThan(after);
 

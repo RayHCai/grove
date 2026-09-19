@@ -1,7 +1,4 @@
-// The avatar's movement, and the one script both ends run.
-//
-// `SyncedScript` runs on a server AND on a client, which is what makes it the only kind prediction
-// can replay — a `ServerScript` is filtered out of a client tick and never dispatched to.
+// `SyncedScript` runs on a server AND a client, which makes it the only kind prediction replays.
 
 import type { Entity } from '@platform/engine';
 import { SyncedScript, clamp, onEventHold } from '@platform/engine';

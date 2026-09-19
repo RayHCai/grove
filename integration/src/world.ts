@@ -1,12 +1,5 @@
-// One authored game, reduced to the few things that differ between suites.
-//
-// Every component suite needs its own world — a camera test and a movement test want different
-// templates, different scripts and different bounds — but they all need the same eleven fields of
-// boilerplate around them. `defineWorld` takes the differences and derives the rest.
-//
-// The derivation is the point, not the brevity: `scriptModules` and the two registries all restate
-// the same script list, and a world that declared a script in one and forgot it in another would
-// fail at load with a message about the manifest rather than about the mistake.
+// `defineWorld` derives `scriptModules` and both registries from one script list: declaring a
+// script in one and forgetting it in another fails at load, naming the manifest and not the slip.
 
 import { PROJECT_FORMAT_VERSION, assetId, scriptId, templateId } from '@platform/project';
 import type {
@@ -30,10 +23,8 @@ import type { ScriptClass } from '@platform/scripting';
 export type StageBinding = { kind: 'button'; code: string; action: string };
 
 /**
- * One script, declared once.
- *
- * `location` and `host` are what the manifest validator checks an attachment against; `ctor` is what
- * a registry hands the loader. Declaring them together is what stops the two from disagreeing.
+ * One script, declared once. `location` and `host` are what the manifest validator checks an
+ * attachment against; `ctor` is what a registry hands the loader. Together, they cannot disagree.
  */
 export interface WorldScript {
     readonly id: string;
@@ -51,7 +42,7 @@ export interface ScreenSpec {
 }
 
 export interface WorldSpec {
-    /** Becomes both the project id and the content hash, so two worlds never pass each other's handshake. */
+    /** Becomes both the project id and the content hash, so two worlds never pass each other. */
     readonly id: string;
     readonly scripts?: readonly WorldScript[];
     readonly templates?: readonly TemplateRecord[];
@@ -84,7 +75,7 @@ export interface World {
 export const SIM_RATE = 60;
 export const SEND_RATE = 20;
 
-/** The extent every world gets unless it asks for another. Wide enough for four lanes of avatars. */
+/** The extent every world gets unless it asks for another; four lanes of avatars wide. */
 export const WORLD_BOUNDS: ProjectBounds = { left: -320, right: 320, top: 180, bottom: -180 };
 
 /** The key core's roster spawns an avatar from. Named by core, not by any project. */
@@ -93,10 +84,8 @@ export const TEMPLATE_AVATAR = 'player';
 export const ASSET_DISC = 'disc';
 
 /**
- * The one asset every world gets.
- *
- * A sprite template needs a declared texture, and a click needs something DRAWN to land on — so a
- * world with no art of its own still cannot use a group visual for anything it intends to hit.
+ * The one asset every world gets: a sprite template needs a declared texture, and a click needs
+ * something DRAWN to land on.
  */
 export const DISC_ASSET: AssetRecord = {
     id: assetId(ASSET_DISC),

@@ -1,7 +1,4 @@
-// The one script in this game that runs ONLY in a browser.
-//
-// A screen host is a `ClientScript` by necessity — `ServerScript<HUDScreen>` is a load-time error,
-// because a screen exists on one machine.
+// A screen host must be a `ClientScript`: `ServerScript<HUDScreen>` is a load-time error.
 
 import type { HUDScreen } from '@platform/engine';
 import { ClientScript, game, hud, onPress, onStart, onUpdate } from '@platform/engine';
@@ -12,11 +9,8 @@ export const SWEEP_LABEL = 'sweep';
 export const ASKED_LABEL = 'asked';
 
 /**
- * Reading a `@serverState` field by name, on a client.
- *
- * The value lives on the host RECORD and the mirror hoists an accessor onto the facade as each diff
- * lands. What neither end can do is TYPE it: `Player` and `Game` declare no such member, and the
- * script that does never attached here.
+ * Reading a `@serverState` field by name, on a client: the value lives on the host RECORD and the
+ * mirror hoists an accessor as each diff lands. Neither end can TYPE it — no such member exists.
  */
 function readState<T>(host: object | null | undefined, field: string): T | undefined {
     if (host === null || host === undefined) return undefined;
@@ -27,7 +21,7 @@ export class Panel extends ClientScript<HUDScreen> {
     /** The count this screen has already drawn, so the authority's answer is told from a redraw. */
     #shownSweeps = -1;
 
-    /** Runs inside `hud.open` rather than a tick later: a screen that did nothing reads as a dropped frame. */
+    /** Runs inside `hud.open`, not a tick later: a screen doing nothing reads as a dropped frame */
     @onStart
     show(): void {
         hud.text(WIDGET_SWEEP, SWEEP_LABEL);

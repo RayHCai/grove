@@ -1,13 +1,5 @@
-// A world whose whole game is the stateful wrappers: a scoreboard, two leaderboards ordered against
-// each other, a team, one inventory per player, a countdown and the store behind `player.storage`.
-//
-// Every verb is reached by pressing a widget, so each call runs inside a handler with an
-// engine-supplied `ctx.player` — which is the only place `Scoreboard.add`'s acting-player default
-// exists at all. The readings are `@serverState`, so a test asserts on what a CLIENT was told rather
-// than on a return value taken from the authority.
-//
-// The wrappers ride the wire as their own serialized form beside those readings, so a tab ends up
-// holding real `Scoreboard` and `Team` objects and not only the numbers a handler copied out.
+// Every verb runs inside a handler with an engine-supplied `ctx.player` — the only place
+// `Scoreboard.add`'s acting-player default exists at all.
 
 import type { Ctx, Game, Player } from '@platform/engine';
 import {
@@ -97,11 +89,8 @@ export const F = {
 } as const;
 
 /**
- * The player the next `Pack` is built for.
- *
- * `Inventory` takes a `Player`, wiring binds only the wrappers a field initializer has already
- * built, and that initializer runs before `this.host` is assigned — so a slot the join handler fills
- * is the one way to name the owner from inside one.
+ * The player the next `Pack` is built for. `Inventory` takes a `Player`, wiring binds only what a
+ * field initializer built, and that runs before `this.host` — so a join-filled slot is the way.
  */
 let joining: Player | null = null;
 
@@ -141,7 +130,7 @@ export class Vault extends ServerScript<Game> {
     @serverState podium = '';
     @serverState squad = '';
     @serverState onTeam = false;
-    /** A countdown replicates nothing of itself, so these three are all a tab is ever told of one. */
+    /** A countdown replicates nothing of itself, so these three are all a tab is told of one. */
     @serverState remains = 0;
     @serverState ticking = false;
     @serverState rang = 0;
@@ -256,7 +245,7 @@ export class Vault extends ServerScript<Game> {
         this.#clock?.pause();
     }
 
-    /** `Storage` is a promise-returning seam, so the reading is written once the write has landed. */
+    /** `Storage` is a promise-returning seam, so the reading is written once the write lands. */
     @onPress(W.keep)
     async keep(ctx: Ctx): Promise<void> {
         const player = ctx.player;
@@ -287,7 +276,7 @@ export class Vault extends ServerScript<Game> {
         if (pack) pack.stored = typeof held === 'number' ? held : UNREAD;
     }
 
-    /** One write per change: `remaining` moves every tick and a mark per tick is a wire nobody profiled. */
+    /** One write per change: `remaining` moves every tick, and a mark per tick is unprofiled. */
     @onUpdate
     watch(): void {
         const clock = this.#clock;
