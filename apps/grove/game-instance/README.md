@@ -112,7 +112,7 @@ scripts shell to cargo — `build` bundles the sim first, `typecheck` is `clippy
 Rust toolchain on `PATH` they print one `skipped:` line and succeed, so working on the TypeScript
 half does not require installing Rust.
 
-This crate and `@grove/upload-service` are one cargo workspace rooted at `apps/grove`, which is
+This crate and `@grove/asset-upload-service` are one cargo workspace rooted at `apps/grove`, which is
 where the lock, the pinned toolchain and the release profile live — `cargo` finds all three by
 walking up from here. On Windows the crate links against the **static** CRT, because V8 ships
 prebuilt that way and a process with two CRTs has two allocators in it.

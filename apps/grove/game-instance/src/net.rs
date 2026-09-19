@@ -1,8 +1,6 @@
-//! The sockets: one listener, one task per peer, and the ticket check that happens before either.
-//!
-//! Nothing here knows what an entity is. A frame is decoded to JSON and handed on; an envelope is
-//! encoded and written. The narrowing, and every bound on what one frame may contain, is the sim's —
-//! this half only refuses what it can judge without a world: the bytes, and the bearer.
+//! The sockets: one listener, one task per peer, and the ticket check before either.
+//! Nothing here knows what an entity is. The narrowing, and every bound on what one frame may
+//! contain, is the sim's — this half refuses only what it can judge: the bytes, and the bearer.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -24,28 +22,22 @@ use crate::request_id;
 use crate::session::HostEvent;
 use crate::ticket;
 
-/// 4 MiB, the same ceiling `@platform/transport`'s codec refuses a frame at.
-///
-/// Restated rather than derived, because the two run in different languages and the cap has to hold
-/// on this side BEFORE a parse: `serde_json` allocates a graph several times the wire bytes, so an
-/// unbounded frame is an unbounded allocation no check downstream can undo.
+/// 4 MiB, the same ceiling `@platform/transport`'s codec refuses a frame at. Restated rather than
+/// derived, because the cap has to hold on this side BEFORE a parse: `serde_json` allocates a
+/// graph several times the wire bytes, which no downstream check can undo.
 pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 
 /// Frames one peer may fall behind by before its droppable ones start being discarded.
 const WRITE_QUEUE_DEPTH: usize = 64;
 
-/// How long a joined peer may send nothing before its socket is closed.
-///
-/// `@platform/transport` fails a socket after three missed five-second heartbeats and the client
-/// refreshes its `time-sync` every two, so silence this long is a peer that stopped running — which
-/// includes a tab the browser has throttled to a stop, and closing that one is the point.
+/// How long a joined peer may send nothing before its socket is closed. The client refreshes
+/// `time-sync` every two seconds, so silence this long is a peer that stopped running —
+/// including a tab the browser throttled to a stop, which is the point.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Frames one peer may send inside `INBOUND_WINDOW` before it is closed as a flood.
-///
-/// The sim admits one input frame per tick and refuses the rest, but a tick later — so this is the
-/// only bound on how fast one socket can feed the event queue, and it sits an order of magnitude
-/// above the frame-per-tick a client at 60 Hz sends.
+/// The sim refuses extra input a tick later, so this is the only bound on how fast one socket
+/// can feed the event queue — an order of magnitude above what a 60 Hz client sends.
 const INBOUND_BUDGET_FRAMES: usize = 600;
 const INBOUND_WINDOW: Duration = Duration::from_secs(1);
 
@@ -65,8 +57,8 @@ pub enum Outgoing {
         text: Arc<String>,
         class: SendClass,
     },
-    /// What the session died of. Written as a close frame because the alternative the peer sees is a
-    /// bare 1006, which is indistinguishable from a link that dropped.
+    /// What the session died of, written as a close frame: the alternative the peer sees is a bare
+    /// 1006, indistinguishable from a link that dropped.
     Death(&'static str),
 }
 
@@ -143,10 +135,8 @@ impl Listener {
 }
 
 /// Joins one request to the caller that made it: the id it presented when that is one token this
-/// process can log unchanged, and a fresh one when it is not.
-///
-/// Put back on the request as well as on the answer, so a handler reaching for the id reads the one
-/// the caller will quote rather than the one it sent.
+/// process can log unchanged, and a fresh one when it is not. Put back on the request too, so a
+/// handler reads the id the caller will quote.
 async fn correlate(mut request: Request, next: middleware::Next) -> Response {
     let id = request
         .headers()
@@ -165,12 +155,9 @@ async fn correlate(mut request: Request, next: middleware::Next) -> Response {
     response
 }
 
-/// The ticket rides the WebSocket SUBPROTOCOL, not the query string.
-///
-/// A browser cannot set a header on `new WebSocket(url)` but it can name a subprotocol, and a URL
-/// ends up in access logs, proxy traces and `Referer` while a subprotocol does not. The value is
-/// `grove.ticket.<token>`; the token's own alphabet is base64url plus one dot, all of which are
-/// legal in a subprotocol name.
+/// The ticket rides the WebSocket SUBPROTOCOL, not the query string: a browser cannot set a
+/// header on `new WebSocket(url)` but can name a subprotocol, and a URL ends up in access logs.
+/// The value is `grove.ticket.<token>`, whose alphabet is legal in a subprotocol name.
 const TICKET_PREFIX: &str = "grove.ticket.";
 
 async fn upgrade(
@@ -191,8 +178,8 @@ async fn upgrade(
 
     let now = unix_seconds();
     if now < EARLIEST_PLAUSIBLE_SECONDS {
-        // A clock this process cannot trust is a check it cannot make, and `exp` is the only bound a
-        // stolen ticket has — so the box refuses rather than admits.
+        // A clock this process cannot trust is a check it cannot make, and `exp` is the only bound
+        // a stolen ticket has — so the box refuses rather than admits.
         tracing::error!(%peer, "accept-refused reason=no-clock");
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
@@ -222,8 +209,8 @@ async fn upgrade(
     };
 
     let connection_id = format!("c{}", listener.next_id.fetch_add(1, Ordering::Relaxed));
-    // The session id is logged and never used again: it is what correlates this process's lines with
-    // the allocator's that minted the ticket and the manager's that answers its reads.
+    // The session id is logged and never used again: it correlates this process's lines with the
+    // allocator's that minted the ticket and the manager's that answers its reads.
     tracing::info!(
         conn = %connection_id,
         session = %claims.session_id,
@@ -296,7 +283,7 @@ async fn serve(
     let mut inbound = Inbound::new(Instant::now());
     loop {
         let frame = tokio::select! {
-            // The session thread hung this peer up: its `HangUp` was dropped, so this arm completes.
+            // The session thread hung this peer up: its `HangUp` was dropped, so this arm completes
             _ = hung_up.recv() => {
                 hung_up_by_session = true;
                 break;

@@ -1,11 +1,7 @@
 //! One V8 isolate per session, holding the compiled `@platform/sim` bundle and the creator's code.
-//!
-//! The isolate is the containment: its own heap limit, its own `terminate_execution` handle, and no
-//! ambient capability at all — the bundle reaches the outside world only through the two ops
-//! declared here, which carry one JSON message in each direction and nothing else.
-//!
-//! A `JsRuntime` is neither `Send` nor re-entrant, so everything here runs on the one session thread
-//! and never inside a `tokio` task.
+//! The isolate is the containment: its own heap limit, its own `terminate_execution` handle, and
+//! no ambient capability — the bundle reaches out only through the two ops declared here.
+//! A `JsRuntime` is neither `Send` nor re-entrant, so this runs on the one session thread.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -65,8 +61,8 @@ extension!(
     },
 );
 
-/// Why an isolate stopped. Terminal in every arm: `Sim.tick` mutates the world in place and there is
-/// no transaction, so a half-run tick leaves a world no later delta repairs.
+/// Why an isolate stopped. Terminal in every arm: `Sim.tick` mutates in place with no
+/// transaction, so a half-run tick leaves a world no later delta repairs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Death {
     /// The session reached its heap limit.
@@ -92,7 +88,7 @@ impl Death {
 pub struct Isolate {
     runtime: JsRuntime,
     mailbox: Rc<RefCell<Mailbox>>,
-    /// Set by the near-heap-limit callback, which V8 calls on ITS thread and which may not allocate.
+    /// Set by the near-heap-limit callback, which V8 calls on ITS thread and may not allocate.
     over_heap: Arc<AtomicBool>,
     /// Once set, every later call fails fast rather than re-entering a world that is already wrong.
     dead: Option<Death>,
@@ -120,10 +116,8 @@ impl Isolate {
             flag.store(true, Ordering::SeqCst);
             terminator.terminate_execution();
             // The grant is REQUIRED, not a concession: `terminate_execution` is not instantaneous —
-            // V8 keeps allocating while it unwinds — and a callback that returned the limit
-            // unchanged would hit it again and reach `FatalProcessOutOfMemory`, aborting the whole
-            // process and every other session in it. The isolate is discarded either way, so the
-            // headroom is never actually spent.
+            // V8 keeps allocating as it unwinds — so an unchanged limit reaches
+            // `FatalProcessOutOfMemory` and aborts every other session here.
             current * 2
         });
 

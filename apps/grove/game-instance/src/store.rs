@@ -1,9 +1,6 @@
-//! `@serverState` that outlives a session, over `@grove/game-manager`.
-//!
-//! This process holds no database credential — it presents a session-scoped bearer, and the manager
-//! decides which keys that token can reach. So a load and a save are HTTP calls, which is exactly
-//! why neither can happen inside a tick: the sim asks in one output batch and is answered in a later
-//! input batch, and the round trip costs a joiner one turn rather than blocking the world.
+//! `@serverState` that outlives a session, over `@grove/game-manager`. This process holds no
+//! database credential — it presents a session-scoped bearer — so a load and a save are HTTP
+//! calls, which is why neither can happen inside a tick.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -70,10 +67,8 @@ impl Store {
         }
     }
 
-    /// Reads one host's persisted fields.
-    ///
-    /// `Ok(Some(fields))` for a record, `Ok(None)` for a key the store holds nothing under, and an
-    /// `Err` for a read that FAILED — three answers, not two, because the sim writes back over the
+    /// Reads one host's persisted fields. `Ok(Some)` for a record, `Ok(None)` for a key holding
+    /// nothing, `Err` for a read that FAILED — three answers, because the sim writes back over the
     /// second and must never write back over the third.
     pub async fn load(&self, host_key: &str) -> Result<Option<Box<RawValue>>> {
         // Minted rather than inherited: a load is the sim's errand and sits inside no request of
@@ -106,11 +101,9 @@ impl Store {
         Ok(Some(record.value))
     }
 
-    /// Writes one host's fields, against the revision this process last read.
-    ///
-    /// A refused compare-and-set is re-read and retried ONCE: another session holding the same
-    /// record is a real race, and one re-read is the difference between a save that lands and a
-    /// player who silently lost a session.
+    /// Writes one host's fields, against the revision this process last read. A refused
+    /// compare-and-set is re-read and retried ONCE: another session holding the record is a real
+    /// race, and one re-read is the difference between a save landing and a session silently lost.
     pub async fn save(&self, host_key: &str, fields: &RawValue) -> Result<()> {
         if self.put(host_key, fields).await? {
             return Ok(());
@@ -172,7 +165,7 @@ impl Store {
     }
 }
 
-/// A host key is `player:<id>`, so the colon has to survive as a path SEGMENT rather than a separator.
+/// A host key is `player:<id>`, so the colon must survive as a path SEGMENT, not a separator.
 fn urlencode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {

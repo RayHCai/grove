@@ -1,9 +1,6 @@
-//! The id that joins one request across the services it passes through.
-//!
-//! The same token `libs/go-grove/httpx` puts on every hop of the Go half and `libs/api-contract`
-//! bounds on the TypeScript one, restated here because this process sits between them: it answers
-//! the agent's probe and calls `@grove/game-manager`, and a chain is only as long as its quietest
-//! link.
+//! The id that joins one request across the services it passes through — the same token the Go
+//! half puts on every hop, restated because this process sits between them: it answers the agent's
+//! probe and calls `@grove/game-manager`, and a chain is only as long as its quietest link.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
