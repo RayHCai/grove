@@ -22,7 +22,9 @@ describe('the entry point', () => {
             await import('../src/main');
         });
 
-        expect(host.querySelector('main')?.textContent).toBe('Grove');
+        // The real client is in play here, so what is on screen is the first load rather than a
+        // page; that it mounted at all is the whole of what this pins.
+        expect(host.querySelector('main')).not.toBeNull();
     });
 
     it('refuses to mount when the document carries no #root', async () => {

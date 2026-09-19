@@ -3,15 +3,17 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Browsing and social: one index.html and the React root it mounts.",
+    "description": "Browsing and social: the landing page, the whole sign-in flow, and a creator's own games.",
     "scripts": {
-        "dev": "vite",
+        "dev": "pnpm --filter @grove/ui build && vite",
         "build": "vite build",
         "typecheck": "tsc -p tsconfig.test.json",
         "test": "vitest run --passWithNoTests",
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
+        "@grove/api-contract": "workspace:*",
+        "@grove/ui": "workspace:*",
         "react": "^19.2.8",
         "react-dom": "^19.2.8"
     },
