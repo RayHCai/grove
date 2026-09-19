@@ -1,9 +1,5 @@
-// A world whose whole game is drawing numbers, so nothing but the stream behind `random` is under
-// test here.
-//
-// Every draw happens on the authority inside a press handler and is folded into a replicated string
-// of the RAW values: the claim is that two hosts built from one project draw the same numbers in
-// the same order, and a digest of many draws is what makes one misplaced draw visible.
+// Draws are folded into a replicated string of the RAW values: a digest of many is what makes one
+// misplaced draw visible.
 
 import type { Ctx, Game } from '@platform/engine';
 import { ServerScript, game, onPlayerJoin, onPress, random, serverState } from '@platform/engine';
@@ -45,10 +41,8 @@ export const W = {
 } as const;
 
 /**
- * Readings that carry the draws themselves rather than a verdict about them.
- *
- * A field saying "every point was inside the region" would be the world grading its own homework;
- * these let the test do the arithmetic on exactly what a client was told.
+ * Readings that carry the draws themselves rather than a verdict about them: a field saying
+ * "every point was inside" would be the world grading its own homework.
  */
 export const S = {
     digest: 'digest',

@@ -1,10 +1,4 @@
-// The `Camera` API, driven through a game and read off the thing that draws it.
-//
-// A camera reaches no wire: its state is not in the transform store, no snapshot carries it and no
-// write marks a channel. So the reading that matters here is the `CameraState` the tab pushes at
-// its renderer every frame, and the second reading is a HUD widget the camera's own script wrote —
-// both on the machine the camera belongs to. Half of this surface turns out to reach nothing at
-// all, and each case that pins one says which sink swallowed it.
+// A camera reaches no wire, so the reading is the `CameraState` the tab pushes at its renderer.
 
 import { describe, expect, it } from 'vitest';
 import type { Camera, Runtime } from '@platform/core';
@@ -168,7 +162,8 @@ describe("a camera's zoom", () => {
 
         await press(session, tab, W.read);
         expect(counted(tab, WIDGET.zoom)).toBe(ZOOM_TO);
-        // The same reading off the renderer's text node: a widget a camera script wrote reaches art.
+        // The same reading off the renderer's text node: a widget a camera script wrote reaches
+        // art.
         expect(tab.score?.drawn).toBe(String(ZOOM_TO));
     });
 });

@@ -1,13 +1,5 @@
-// A world whose whole game is one player's camera, driven from the machine that draws it.
-//
-// A camera is client-local: core keeps its state off the transform store, no snapshot captures it
-// and no write marks a channel. So the verbs are reached from a `ClientScript<Camera>` and the
-// readings leave as HUD widgets rather than `@serverState`, which would be a claim about a wire
-// this host never touches — what a test asserts on is the camera the tab hands its renderer.
-//
-// The lens is added by a `SyncedScript` on a placed console, because that is the only kind of
-// script a manifest can put in a browser: a client-located class named by a template resolves to
-// nothing in the server's registry, so no attach op is journaled and no tab is ever told of it.
+// A camera is client-local — no snapshot captures it and no write marks a channel — so the verbs
+// are reached from a `ClientScript<Camera>` and readings leave as HUD widgets.
 
 import type { Bounds, Camera, Ctx, Game, Player } from '@platform/engine';
 import {
@@ -45,7 +37,7 @@ export const SHAKE_STRENGTH = 8;
 /** A box `PAN_TO` sits far outside of, since nothing clamps a camera to the bounds it is given. */
 export const FENCE: Bounds = { left: -10, right: 10, top: 10, bottom: -10 };
 
-/** The half-extents core's `Camera.viewport` hardcodes, whatever stage or zoom it is standing in. */
+/** The half-extents core's `Camera.viewport` hardcodes, whatever stage or zoom it stands in. */
 export const VIEW_HALF = { w: 400, h: 300 };
 
 /** One widget per verb: a press names the call, and the name is what the test reads back. */
@@ -87,10 +79,8 @@ export class Stage extends ServerScript<Game> {
 }
 
 /**
- * Every camera verb that holds state, on the host that owns it.
- *
- * Nothing here is replicated and nothing here is asked for by the authority: each handler runs on
- * the one client whose player pressed the widget, against that client's own copy of the camera.
+ * Every camera verb that holds state, on the host that owns it. Nothing is replicated and nothing
+ * is asked of the authority: each handler runs on the client whose player pressed.
  */
 export class Lens extends ClientScript<Camera> {
     /** Shakes that answered with the camera itself — the only trace the call leaves anywhere. */
@@ -154,9 +144,7 @@ export class Lens extends ClientScript<Camera> {
 
 /**
  * The one script both ends run, and the only way this game reaches a camera at all.
- *
- * `moveTo` is here rather than on the lens deliberately: a synced handler runs on the authority and
- * on the pressing client alike, which is what lets a test see the two copies drift apart.
+ * `moveTo` is here rather than on the lens, so a test can watch the two copies drift apart.
  */
 export class Rig extends SyncedScript<Entity> {
     @onPress(W.mount)

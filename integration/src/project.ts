@@ -1,12 +1,5 @@
-// The authored project: one file describing the whole game, as an editor would save it.
-//
-// This is the input BOTH ends take. The server validates it, narrows it to the world a runtime is
-// built from and to the manifest a renderer draws, and derives the identity the handshake compares;
-// `createClient` derives the same identity from the same object, which is what makes a mismatch a
-// refused join rather than two ends quietly running different games.
-//
-// It holds ids and no classes, so it is safe in both halves' bundles — and it carries no decorator,
-// which is what lets a runner that does not lower them read it from source.
+// Ids and no classes, so it is safe in both halves' bundles; and no decorator, so a runner that
+// does not lower them can read it from source.
 
 import { PROJECT_FORMAT_VERSION, assetId, scriptId, templateId } from '@platform/project';
 import type { ProjectManifest } from '@platform/project';
@@ -65,7 +58,8 @@ export const PROJECT: ProjectManifest = {
             ],
         },
         // Player-hosted, and named in no attachment list below: a player is not a tray row, so
-        // `Rules` attaches it at the join. Declaring it is what makes this file the whole inventory.
+        // `Rules` attaches it at the join. Declaring it is what makes this file the whole
+        // inventory.
         {
             path: 'src/scripts/ledger.ts',
             scripts: [

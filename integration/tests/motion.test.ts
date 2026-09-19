@@ -1,9 +1,4 @@
-// The three motion helpers, started from a game and watched on a client.
-//
-// Two of them are per-tick timers on the authority, so what a tab holds is a SAMPLE of a body that
-// never stops moving — and every claim below is one that survives sampling: an invariant true at
-// every tick, an envelope, or a reading that repeats exactly one period later. Reading the authority
-// instead would prove the arithmetic and nothing about what a player is shown.
+// A tab holds a SAMPLE of a body that never stops moving, so every claim survives sampling.
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';

@@ -1,9 +1,5 @@
-// Every event and lifecycle decorator, fired the way a player fires one and read back off a client.
-//
-// Each case reaches its handler through the edge that really raises it — a key through the binding
-// table and an input frame, a pointer through the pick path, a crossing through the region pass —
-// because a decorator only earns its place if the engine dispatches at the host it was declared on.
-// The counters are replicated, so a handler that ran and marked nothing fails here.
+// Each case reaches its handler through the edge that really raises it, because a decorator only
+// earns its place if the engine dispatches at the host it was declared on.
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
@@ -28,17 +24,15 @@ import {
 
 /** Ticks that comfortably outlast one send interval, so a press has been answered. */
 const SETTLE = 12;
-/** Ticks between broadcasts, which is what bounds how stale a tab's reading of a live counter is. */
+/** Ticks between broadcasts, which bounds how stale a tab's reading of a live counter is. */
 const SEND_INTERVAL = SIM_RATE / SEND_RATE;
 /** Ticks that outlast the parked gate handlers, whatever the send rate rounds them to. */
 const GATE_TICKS = Math.ceil(GATE_SECONDS * SIM_RATE) + SETTLE * 3;
 /** Taps in the burst the three concurrency modes are told apart by. */
 const GATE_TAPS = 3;
 /**
- * Ticks between those taps.
- *
- * More than one, because a frame that advanced no tick holds its edges back — and the next flush
- * coalesces one entry per (action, phase), which would turn two taps into one press.
+ * Ticks between those taps. More than one, because a frame that advanced no tick holds its edges
+ * back, and the next flush coalesces one entry per (action, phase).
  */
 const GATE_GAP = 3;
 
@@ -60,7 +54,7 @@ function reading<T>(tab: Tab, field: string): T | undefined {
     return gameField<T>(runtimeOf(tab), field);
 }
 
-/** The beacon where this tab draws it, so a pick runs against art rather than against the simulation. */
+/** The beacon where this tab draws it, so a pick runs against art, not the simulation. */
 function beaconPoint(tab: Tab): { x: number; y: number } {
     const rt = runtimeOf(tab);
     const beacon = ofTemplate(rt, TEMPLATE_BEACON)[0];
@@ -199,8 +193,8 @@ describe('a bound key', () => {
 
         expect(mineField<number>(tab, P.presses)).toBe(1);
         expect(mineField<number>(tab, P.releases)).toBe(1);
-        // A hold is synthesized from the authority's own fold, and the action left it on the tick it
-        // entered — so there was never a tick on which it was down.
+        // A hold is synthesized from the authority's own fold, and the action left it on the tick
+        // it entered — so there was never a tick on which it was down.
         expect(mineField<number>(tab, P.holds)).toBe(0);
     });
 });
@@ -241,7 +235,8 @@ describe('two bodies and a named rectangle', () => {
         await press(session, tab, W.toBeacon);
         expect(reading<number>(tab, S.bumps)).toBe(1);
 
-        // Still standing on it: `@onCollide` is the moment two bodies touch, not a per-tick predicate.
+        // Still standing on it: `@onCollide` is the moment two bodies touch, not a per-tick
+        // predicate.
         await session.step(SETTLE * 3);
         expect(reading<number>(tab, S.bumps)).toBe(1);
     });

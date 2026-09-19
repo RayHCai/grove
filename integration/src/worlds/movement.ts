@@ -1,12 +1,5 @@
-// The built-in movement types, installed on a real avatar and driven by real keys.
-//
-// A movement class is named in no attachment list here: the roster installs one when `setMovement`
-// names it, and the `attach` op that produces is what tells a tab to build its own copy. Every
-// widget below therefore acts on `player.movement` — the instance the roster made — and never on
-// anything this file constructs.
-//
-// The readings are Player-hosted `@serverState`, republished every tick, so each assertion is made
-// against what one tab was told about its OWN body rather than against the authority's field.
+// A movement class is named in no attachment list: the roster installs one when `setMovement`
+// names it, so every widget acts on `player.movement` and never on anything built here.
 
 import type { Ctx, Game, Movement, Player, Vec3 } from '@platform/engine';
 import {
@@ -52,12 +45,12 @@ export const FORCE_X = 600;
 export const GRIP = 120;
 
 export const WALK_SPEED = 120;
-/** Above what a diagonal reaches, so a two-key press is never the clamp that is tested elsewhere. */
+/** Above what a diagonal reaches, so a two-key press is never the clamp tested elsewhere. */
 export const WALK_CAP = 300;
 
 export const RUN_SPEED = 120;
 export const RUN_ACCEL = 1200;
-/** Far below the acceleration, so a body that coasts to a stop cannot be mistaken for one that snapped. */
+/** Far below the acceleration, so a body that coasts to a stop is not read as one that snapped. */
 export const RUN_FRICTION = 60;
 export const GRAVITY = 600;
 export const JUMP_STRENGTH = 120;
@@ -110,9 +103,7 @@ export const S = {
 
 /**
  * A body with momentum: the one stage every subclass must supply, supplying nothing.
- *
- * `accelerate` is what would otherwise overwrite a velocity a handler set, so leaving it alone is
- * what makes `setVelocity`, `impulse` and `addForce` observable for longer than the tick they ran on.
+ * `accelerate` would overwrite a handler's velocity, keeping the force verbs observable.
  */
 export class Drifter extends BaseMovement {
     override maxSpeed = DRIFT_CAP;
@@ -165,7 +156,7 @@ export class Runner extends PlatformerMovement {
     override jumpStrength = JUMP_STRENGTH;
 }
 
-/** Throws in the one stage a subclass must supply, so the movement pass has something to contain. */
+/** Throws in the one stage a subclass must supply, so the pass has something to contain. */
 export class Faulty extends TopDownMovement {
     protected override accelerate(): void {
         throw new Error('accelerate refused');
@@ -181,10 +172,8 @@ function nameOf(movement: Movement): string {
 }
 
 /**
- * One player's body, as that player's own tab is told about it.
- *
- * Player-hosted rather than Game-hosted because a velocity belongs to one body: a Game field would
- * carry whichever player wrote last, and this suite is about what a tab knows of ITSELF.
+ * One player's body, as that player's own tab is told about it. Player-hosted because a velocity
+ * belongs to one body: a Game field would carry whichever player wrote last.
  */
 export class Telemetry extends ServerScript<Player> {
     @serverState mover = MOVER_NONE;
@@ -196,7 +185,7 @@ export class Telemetry extends ServerScript<Player> {
     @serverState cap = 0;
     @serverState floor = false;
     @serverState stages = '';
-    /** Latched, because a jump is one tick wide and the wire samples at a third of the tick rate. */
+    /** Latched: a jump is one tick wide and the wire samples at a third of the tick rate. */
     @serverState lift = 0;
     /** The first non-zero horizontal speed, which is one acceleration step and nothing more. */
     @serverState first = 0;
@@ -303,7 +292,7 @@ export class Director extends ServerScript<Game> {
     }
 }
 
-/** A button bound to a move axis reads as full deflection while it is held, and zero once it is not. */
+/** A button bound to a move axis reads as full deflection while held, zero once it is not. */
 export const BINDINGS: StageBinding[] = [
     { kind: 'button', code: CODE_RIGHT, action: ACTION_MOVE_X },
     { kind: 'button', code: CODE_UP, action: ACTION_MOVE_Y },

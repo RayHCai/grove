@@ -1,9 +1,5 @@
-// A world whose whole game is timers: every duration is registered from inside a handler on a real
-// host, and every firing is counted into a `@serverState` a client is told about.
-//
-// Nothing here reads a clock. Drift is measured in TICKS against the sim's own update pass, because
-// a repeat that reloaded from the tick it fired on rather than from its due tick would still look
-// right in seconds while slipping a tick per firing.
+// Nothing here reads a clock: drift is measured in TICKS, since a repeat reloading from the tick
+// it fired on would look right in seconds while slipping a tick per firing.
 
 import type { Entity, Game } from '@platform/engine';
 import {

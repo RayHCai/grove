@@ -1,9 +1,5 @@
-// The world the `Game` facade is asked about: a roster, a fixed extent, an authored region, two
-// rocks, a sentinel that hops and one body that drifts under its own tick.
-//
-// Every answer is a `@serverState` field rather than a return value, so a test reads what a CLIENT
-// was told, and the geometry is chosen so every count below is arithmetic — including the hop,
-// which is the only way to catch `asSeen` disagreeing with the live world it was asked about.
+// Every answer is a `@serverState` field rather than a return value, so a test reads what a
+// CLIENT was told.
 
 import type { Ctx, Entity, Game, Player, Vec3 } from '@platform/engine';
 import {
@@ -240,10 +236,8 @@ export class Director extends ServerScript<Game> {
     }
 
     /**
-     * One hop, read four ways, inside one handler.
-     *
-     * The lag ring captures at the END of a tick, so a press on the following tick would find the
-     * hop already in the latest capture and every reading here would agree with every other.
+     * One hop, read four ways, inside one handler. The lag ring captures at the END of a tick, so a
+     * press on the next tick would find the hop already captured and every reading would agree.
      */
     @onPress(W.hop)
     doHop(ctx: Ctx): void {

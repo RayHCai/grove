@@ -1,8 +1,4 @@
-// What an orb IS: how it is spawned, how it drifts, what it is worth, and what the bonus region
-// does to it.
-//
-// Server-located and entity-hosted, so a client holds no copy of this class and never simulates
-// one — an orb reaches a tab as replicated transforms and replicated fields and nothing else.
+// Server-located, so a client holds no copy: an orb reaches a tab as replicated state only.
 
 import type { Ctx, Entity, Game } from '@platform/engine';
 import {
@@ -29,10 +25,8 @@ import {
 import { Ledger } from './ledger.js';
 
 /**
- * Spawns one orb drifting at `drift` world units a second.
- *
- * Left unowned deliberately: the server destroys every entity whose `ownerId` matches a departing
- * player, and an orb belongs to the world rather than to a person.
+ * Spawns one orb drifting at `drift` world units a second. Left unowned deliberately: the server
+ * destroys every entity whose `ownerId` matches a departing player.
  */
 export function spawnOrb(world: Game, y: number, drift: number): Entity {
     const orb = world.spawn(TEMPLATE_ORB, WORLD.left + ORB_HALF, y);
@@ -96,11 +90,7 @@ export class Orb extends ServerScript<Entity> {
         this.host.setPosition(x, at.y);
     }
 
-    /**
-     * A pointer hit the browser resolved against its own camera, which no authority can recompute.
-     *
-     * Worth what walking into it is worth: the reach is the difference, not the payout.
-     */
+    /** A pointer hit the browser resolved against its own camera; no authority can recompute it. */
     @onClick
     pop(ctx: Ctx): void {
         const player = ctx.player;

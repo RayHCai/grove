@@ -1,8 +1,5 @@
-// The two halves of the script registry, in one file because one process here is both ends.
-//
-// The split is real even so: `CLIENT_SCRIPTS` holds the synced class and nothing else, because a
-// `ServerScript` linked into a page would be authoritative code on the untrusted end. An `attach`
-// op naming one of those resolves to nothing there and is counted as a dropped attachment.
+// `CLIENT_SCRIPTS` holds the synced class and nothing else: a `ServerScript` linked into a page
+// would be authoritative code on the untrusted end.
 
 import type { ScriptId } from '@platform/project';
 import { scriptId } from '@platform/project';

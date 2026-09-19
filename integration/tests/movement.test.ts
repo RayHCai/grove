@@ -1,10 +1,5 @@
-// The built-in movement types, driven by held keys and read back off a client.
-//
-// Movement is the one pass both endpoints are supposed to replay, so every case here installs a
-// movement type through `setMovement`, drives it from a bound key, and asserts on what the TAB was
-// told about its own body. Two claims below are the opposite of the design: a client builds the
-// movement instance the wire names and never ticks it, and a platformer on the shipped physics sink
-// neither lands nor jumps.
+// Two claims below are the opposite of the design: a client builds the movement instance the wire
+// names and never ticks it, and a platformer on the shipped physics sink neither lands nor jumps.
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
@@ -63,10 +58,8 @@ async function installed(widget: string): Promise<{ session: Session; tab: Tab }
 }
 
 /**
- * A floor under everything the movement pass moves.
- *
- * The seam ships a sink that integrates and reports nothing blocked, so this is the smallest thing
- * a host filling it with real physics would provide — and the only way `blocked` is ever true.
+ * A floor under everything the movement pass moves. The shipped sink integrates and reports
+ * nothing blocked, so this is the smallest real physics a host would provide.
  */
 function floorAt(session: Session, y: number): void {
     const rt = session.sim.runtime;

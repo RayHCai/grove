@@ -1,8 +1,5 @@
-// What the world is worth so far: the score, and the two routes it arrived by.
-//
-// Game-hosted like `Rules`, and separate from it so that the scripts which SCORE — the collector on
-// every avatar, the orb that was clicked — can reach a ledger without reaching the rules that spawn
-// them. One import each way is a cycle; this is the shared end of it.
+// Separate from `Rules` so the scripts that SCORE can reach a ledger without reaching what spawns
+// them — one import each way would be a cycle.
 
 import type { Game, Player } from '@platform/engine';
 import { Scoreboard, ServerScript, serverState } from '@platform/engine';
