@@ -1,9 +1,5 @@
-// The canvas pane: one connection to the authority, and the chrome around it.
-//
-// NOTHING HERE SIMULATES ANYTHING. A click becomes an input frame; the server decides whether a
-// leaf exists and where it is; the reply becomes renderer nodes through the client's own bridge.
-// This component owns no entities, no node ids and no clock — which is the whole difference from
-// a single-player harness, and why the click handler is a binding rather than a spawn call.
+// NOTHING HERE SIMULATES ANYTHING: a click becomes an input frame and the server decides.
+// This component owns no entities, no node ids and no clock.
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { CameraState, IRenderer } from '@platform/renderer';
@@ -16,12 +12,8 @@ import { defaultGameUrl } from './hosting';
 import { DESIGN, LEAF_ASSET, LEAF_URL, MARKER_ASSET, MARKER_URL } from './scripts/globals';
 
 /**
- * Zoom levels the UI offers.
- *
- * Zooming in shrinks the world viewport, which is what makes culling observable: a leaf still
- * travelling between the old edges is now outside the new ones, so the inspector's `cull` flag
- * lights up. At zoom 1 nothing culls — the server's stage is the design stage, so a leaf is only
- * ever just outside it.
+ * Zoom levels the UI offers. Zooming in shrinks the world viewport, which makes culling
+ * observable; at zoom 1 nothing culls, the server's stage being the design stage.
  */
 const ZOOMS = [1, 2, 4] as const;
 

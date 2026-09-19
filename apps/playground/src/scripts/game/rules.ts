@@ -1,7 +1,4 @@
-// The Game's own script: the roster, the match clock, the drift pass and the scores.
-//
-// Every `@serverState` field is REASSIGNED wherever it changes — only the setter marks the
-// replication channel, so a value mutated in place would replicate nothing.
+// Every `@serverState` field is REASSIGNED where it changes: only the setter marks the channel.
 
 import type { Ctx, Game, Player } from '@platform/engine';
 import {
@@ -39,7 +36,7 @@ import { freeSlot, heldSlots, placeAvatar, slotOf } from './slots.js';
 const CROWN_TAG = 'crown';
 
 export class Rules extends ServerScript<Game> {
-    /** Inspector values, written by the engine between construction and the `@serverState` hoist. */
+    /** Inspector values, written by the engine between construction and the `@serverState` hoist */
     roundSeconds = ROUND_SECONDS;
     resultsSeconds = RESULTS_SECONDS;
     leafInterval = LEAF_INTERVAL;
@@ -77,7 +74,7 @@ export class Rules extends ServerScript<Game> {
         this.#stopRound();
     }
 
-    /** `spawn()` owns the avatar to this player, which is what puts it in that client's predicted scope. */
+    /** `spawn()` owns the avatar to this player, putting it in that client's predicted scope. */
     @onPlayerJoin
     join(ctx: Ctx): void {
         const player = ctx.player;
@@ -96,7 +93,7 @@ export class Rules extends ServerScript<Game> {
         this.#recount();
     }
 
-    /** The roster still holds the leaver here, which is why the recount is told who to leave out. */
+    /** The roster still holds the leaver here, which is why the recount is told who to skip. */
     @onPlayerLeave
     leave(ctx: Ctx): void {
         this.#recount(ctx.player?.id);
@@ -107,7 +104,7 @@ export class Rules extends ServerScript<Game> {
         else this.#startIfEveryoneReady();
     }
 
-    /** A press rides the interaction frame, so `ctx.player` is engine-supplied rather than claimed. */
+    /** A press rides the interaction frame, so `ctx.player` is engine-supplied, not claimed. */
     @onPress(WIDGET_READY)
     ready(ctx: Ctx): void {
         const player = ctx.player;
@@ -151,10 +148,8 @@ export class Rules extends ServerScript<Game> {
     }
 
     /**
-     * Everyone connected, and at least one of them.
-     *
-     * A solo tab can still start a round, which is what makes this runnable without a second browser
-     * open — and a joiner who has not readied holds the round up.
+     * Everyone connected, and at least one of them. A solo tab can still start a round, and a
+     * joiner who has not readied holds it up.
      */
     #startIfEveryoneReady(): void {
         if (this.phase !== 'lobby') return;
@@ -179,7 +174,7 @@ export class Rules extends ServerScript<Game> {
         this.#dropping = every(this.leafInterval, () => this.#drop());
     }
 
-    /** `game.random`, never `Math.random`: the snapshot store captures every draw, so a replay agrees. */
+    /** `game.random`, never `Math.random`: the snapshot captures every draw, so a replay agrees. */
     #drop(): void {
         const game = this.host;
         if (this.phase !== 'playing') return;
@@ -219,10 +214,8 @@ export class Rules extends ServerScript<Game> {
     }
 
     /**
-     * The winner's crown, whose art is declared the first time one is needed.
-     *
-     * Declared before the spawn, and so before the send that journals it — a node created against a
-     * table that does not hold its template draws the placeholder and keeps it.
+     * The winner's crown, whose art is declared the first time one is needed — before the spawn,
+     * and so before the send that journals it, or the node keeps the placeholder.
      */
     #crown(winner: Player): void {
         if (!this.#crowned && declareCrown()) this.#crowned = true;
@@ -239,7 +232,8 @@ export class Rules extends ServerScript<Game> {
         for (const crown of game.find({ tag: CROWN_TAG })) crown.destroy();
         for (const player of game.players) {
             // `respawn`, never `spawn`: a tab that joined DURING the results already has an avatar,
-            // and spawning a second would leave the first alive and owned with nothing referring to it.
+            // and spawning a second would leave the first alive and owned with nothing referring to
+            // it.
             player.respawn();
             placeAvatar(player);
         }
@@ -257,11 +251,8 @@ export class Rules extends ServerScript<Game> {
     }
 
     /**
-     * The one-second tick: it publishes the round clock, and it times the results dwell.
-     *
-     * The dwell is counted here rather than off a second timer because this callback already belongs
-     * to the Game's scope — a timer registered inside a countdown's `onZero` would be scoped to
-     * whatever invocation happened to be ambient there.
+     * The one-second tick: it publishes the round clock and times the results dwell. Counted here
+     * because this callback already belongs to the Game's scope, unlike one inside `onZero`.
      */
     #second(): void {
         if (this.phase === 'playing') {

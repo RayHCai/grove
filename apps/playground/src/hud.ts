@@ -1,11 +1,5 @@
-// What the HOST owes the HUD, now that the HUD itself is a script.
-//
-// Two things, and they are the two a script cannot do. It cannot open the first screen — a panel
-// would, and this app has none, so the session start stands in. And it cannot touch the renderer:
-// `hud.*` writes widgets, and a node on the `ui` surface is drawing, which is the host's.
-//
-// Everything that used to be here — reading replicated state, diffing it, formatting it, choosing
-// which menu is up — is `scripts/screens/hud.ts`, where the authored model puts it.
+// The two things a script cannot do: open the first screen — a panel would, and this app has
+// none — and touch the renderer, since a node on the `ui` surface is drawing.
 
 import type { GameClient } from '@platform/glue/client';
 import { hud, withRuntime } from '@platform/core';
@@ -27,11 +21,8 @@ const CLOCK_STYLE = {
 };
 
 /**
- * Registers the game's screens and opens the always-on one.
- *
- * A screen is minted on first mention and `hud.screen` answers null until then, so the open-and-
- * close pair below is the only way to reach one before the open that runs it. In a hosted platform
- * the panel does this from the project file; here the session start is the panel.
+ * Registers the game's screens and opens the always-on one. A screen is minted on first mention
+ * and `hud.screen` is null until then, so the open-and-close pair is the only way to reach one.
  */
 export function openHud(client: GameClient): void {
     const rt = client.mirror?.runtime;
@@ -55,10 +46,8 @@ export function openHud(client: GameClient): void {
 }
 
 /**
- * Presses a widget with this client's own runtime made current.
- *
- * `pressWidget` establishes the ambient runtime itself now, but the press below is raised from a
- * DOM handler rather than from a frame — so this is where the local player's world is named.
+ * Presses a widget with this client's own runtime made current: the press is raised from a DOM
+ * handler rather than a frame, so this is where the local player's world is named.
  */
 export function pressWidget(client: GameClient, widget: string, screen?: string): void {
     const rt = client.mirror?.runtime;
@@ -67,12 +56,8 @@ export function pressWidget(client: GameClient, widget: string, screen?: string)
 }
 
 /**
- * The round clock, drawn on the renderer's `ui` surface.
- *
- * Screen space, so it neither scrolls with the camera nor culls — and text is legal only there: a
- * text node on a camera-transformed surface throws, and world text is an asset instead. It reads
- * the same replicated fields the screen script does, because a node is not a widget and no `hud`
- * verb can reach one.
+ * The round clock, drawn on the renderer's `ui` surface: screen space, so it neither scrolls nor
+ * culls, and text is legal only there. It reads the same fields the screen script does.
  */
 export class ClockNode {
     readonly #renderer: IRenderer;

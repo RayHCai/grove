@@ -150,12 +150,8 @@ async function point(
 }
 
 /**
- * One session per measurement, never one shared by both.
- *
- * `pumpOnly` advances the clock without letting a tab draw, so the clients it leaves behind have
- * stopped acking and the authority is holding a send set for peers that are not reading. Measuring
- * `withFrames` on that session describes a session recovering from a stall — which is a real thing
- * to measure, and not the thing this scenario claims to be measuring.
+ * One session per measurement, never one shared by both. `pumpOnly` leaves clients that have
+ * stopped acking, so measuring `withFrames` on that session describes a stall recovery instead.
  */
 export async function stackScenarios(
     meter: Meter,

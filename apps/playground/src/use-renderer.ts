@@ -1,12 +1,5 @@
-// The React <-> IRenderer seam: mount, init, asset load, teardown.
-//
-// THE RENDERER LIVES IN A REF, NEVER IN STATE. It is a mutable GPU-backed object whose identity
-// never changes; putting it in state would re-render every consumer for nothing, and — worse —
-// invite React to treat it as a value to be copied. State here carries only what the UI actually
-// draws: the load phase and any error.
-//
-// There is no frame loop here any more. `GameClient` owns the frame and calls `render()` itself, so
-// a loop here would present every frame twice; `use-game.ts` is the seam that drives it.
+// THE RENDERER LIVES IN A REF, NEVER IN STATE: it is a mutable GPU-backed object whose identity
+// never changes, and state would re-render every consumer and invite React to copy it.
 
 import { useEffect, useRef, useState } from 'react';
 import type { IRenderer, RendererInitOptions } from '@platform/renderer';
@@ -58,11 +51,9 @@ export function useRenderer(options: UseRendererOptions): UseRendererResult {
         // container the second pass already owns.
         let cancelled = false;
 
-        // Whether `init()` has settled. Cleanup CANNOT safely destroy before it has: `init()`
-        // appends its canvas after an internal `await`, and a `destroy()` arriving in that window
-        // finds nothing built yet, no-ops, and then init appends anyway — leaking a live WebGL
-        // context into the container. StrictMode's double-mount hits that window every time. So a
-        // cancelled-mid-init renderer is destroyed by the init path itself, once it can be.
+        // Whether `init()` has settled. Cleanup CANNOT destroy before it has: `init()` appends its
+        // canvas after an internal `await`, so a `destroy()` in that window no-ops and init appends
+        // anyway, leaking a live WebGL context. StrictMode's double-mount hits it every time.
         let settled = false;
 
         setPhase('initializing');

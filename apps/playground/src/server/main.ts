@@ -1,10 +1,5 @@
-// The composition root, which is now three lines of policy and one call.
-//
-// Everything this file used to do — parse a port, stand up a listener, build a transport per socket
-// in the right order, accept it under a resolved identity, drive `pump` rather than `start`, close
-// the world before the socket — belongs to `@platform/glue/server`. What is left is the three things
-// that are genuinely this deployment's: where it listens, where it saves, and who it believes a
-// socket is.
+// What is left is this deployment's own: where it listens, where it saves, and who it believes a
+// socket is. Everything else belongs to `@platform/glue/server`.
 
 import type { IncomingMessage } from 'node:http';
 import { fileKVStore, listenOn } from '@platform/glue/server';
@@ -20,12 +15,8 @@ const port = raw === undefined ? DEFAULT_GAME_PORT : Number(raw);
 const log = (line: string): void => void console.log(`[game] ${line}`);
 
 /**
- * Who the server should think this socket is — a toy's answer, taken from the peer's own query.
- *
- * A real host reads a cookie or an auth header here. This one believes the claim, so anyone may
- * name themselves anyone; the server keys persisted `@serverState` by it, so on a real deployment
- * that is a read-and-overwrite of another player's save. Kept visible here rather than on the wire,
- * which is the whole reason identity is the host's to resolve and never a frame's to carry.
+ * Who the server should think this socket is — a toy's answer, from the peer's own query.
+ * This one believes the claim, and the server keys persisted `@serverState` by it.
  */
 function playerIdentity(request: IncomingMessage): string {
     const claimed = new URL(request.url ?? '/', 'ws://placeholder').searchParams.get('player');

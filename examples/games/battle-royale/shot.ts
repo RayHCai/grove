@@ -1,9 +1,4 @@
-// The `shot` template — one pellet: travel, hit, self-destruct.
-//
-//   Shot  SyncedScript<Entity>  the whole pellet
-//
-// Added by `Gunplay` at spawn rather than panel-attached, since this template is
-// spawned by code (fighter.ts).
+// Added by `Gunplay` at spawn rather than panel-attached, since this template is spawned by code.
 
 import { SyncedScript, cos, onCollide, onEvent, sin } from '@platform/engine';
 import type { Ctx, Entity } from '@platform/engine';

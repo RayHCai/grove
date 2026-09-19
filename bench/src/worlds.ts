@@ -18,18 +18,13 @@ export interface WorldSpec {
     scriptKind: ScriptKind;
     isServer: boolean;
     /**
-     * Grid pitch in world units.
-     *
-     * Load-bearing, not decoration. Half-extents of zero compare equal, so colliderless bodies at
-     * one point register as overlapping pairs — a world stacked at the origin measures the pair
-     * DISPATCH and reads as if the walk itself had got slower.
+     * Grid pitch in world units. Load-bearing: half-extents of zero compare equal, so bodies at
+     * one point register as pairs and a stacked world prices DISPATCH, not the walk.
      */
     spacing: number;
     /**
      * Cells per grid row, or 0 to derive one that squares off this world's entity count.
-     *
-     * A scenario that keeps spawning must set it: a derived width changes as the world grows, so
-     * one index maps to two different points and, worse, two indexes map to one.
+     * A scenario that keeps spawning must set it, or two indexes eventually map to one point.
      */
     gridSide: number;
 }
@@ -58,7 +53,7 @@ export function sideOf(spec: Pick<WorldSpec, 'entities' | 'gridSide'>): number {
     return spec.gridSide > 0 ? spec.gridSide : Math.max(1, Math.ceil(Math.sqrt(spec.entities)));
 }
 
-/** How far a world reaches: enough to hold its grid, with a row spare for whatever it spawns next. */
+/** How far a world reaches: its grid, plus a row spare for whatever it spawns next. */
 function extent(spec: WorldSpec): number {
     const side = sideOf(spec);
     const rows = Math.ceil(spec.entities / side) + 1;
@@ -74,8 +69,8 @@ export function buildWorld(partial: Partial<WorldSpec> = {}): Runtime {
     const spec = { ...DEFAULT_SPEC, ...partial };
     const half = extent(spec);
     const rt = loadGame({ bounds: bounds(-half, half, half, -half), role: 'server' });
-    // After `loadGame`, which reads `role` off the manifest: this is the dial the pass table and the
-    // lag-ring capture branch on, and the two roles are meant to be comparable in one process.
+    // After `loadGame`, which reads `role` off the manifest: this is the dial the pass table and
+    // the lag-ring capture branch on, and the two roles are meant to be comparable in one process.
     rt.isServer = spec.isServer;
 
     const side = sideOf(spec);
@@ -97,10 +92,8 @@ export function buildWorld(partial: Partial<WorldSpec> = {}): Runtime {
 }
 
 /**
- * How many pairs this world's contact walk reports.
- *
- * Recorded beside every scenario, because a pair count is an input to the measurement and not a
- * result of it: two worlds of equal size and different overlap are not comparable.
+ * How many pairs this world's contact walk reports. Recorded beside every scenario, because a
+ * pair count is an input to the measurement: equal sizes with different overlap do not compare.
  */
 export function overlappingPairs(rt: Runtime): number {
     const out: Array<[EntityId, EntityId]> = [];

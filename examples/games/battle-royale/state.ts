@@ -1,11 +1,5 @@
-// The read-side view of this game's replicated state, named once.
-//
-// `@serverState` hoists onto its host, so `health` declared on Vitals reads as
-// `player.health` anywhere — but only the panel knows what is attached, so a plain
-// `Player` is untyped today. These accessors are the cast, in one deletable place.
-//
-// Not the declaration site: `@serverState` is ServerScript-only, so declarations
-// live with their hosts — per-player in player.ts, global in game.ts.
+// `@serverState` hoists onto its host, so `health` on `Vitals` reads as `player.health` — but only
+// the panel knows what is attached, so a plain `Player` is untyped. These accessors are the cast.
 
 import { game } from '@platform/engine';
 import type { Game, Player, TopDownMovement } from '@platform/engine';

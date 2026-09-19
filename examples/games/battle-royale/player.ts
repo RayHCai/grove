@@ -1,10 +1,4 @@
-// The Player template — identity, which outlives the avatar.
-//
-//   Vitals   ServerScript<Player>   health, kills, ready
-//   Loadout  ServerScript<Player>   equipped weapon and ammo
-//   Feel     ClientScript<Player>   camera and cursor
-//
-// The respawn test decides what belongs here; the body is in fighter.ts.
+// Identity, which outlives the avatar: the respawn test decides what belongs here.
 
 import { ClientScript, ServerScript, onRequest, onStart, serverState } from '@platform/engine';
 import type { Ctx, Player } from '@platform/engine';

@@ -1,8 +1,4 @@
-// The `leaf` template's script, and the arithmetic every other script asks it for.
-//
-// What a leaf IS lives here: how it is spawned, how it drifts, what it is worth, and what the two
-// regions do to it. `Rules` drives the drift and `Harvester` scores a catch, but neither restates
-// any of those numbers — they call in.
+// What a leaf IS lives here; `Rules` and `Harvester` call in rather than restating the numbers.
 
 import type { Ctx, Entity, Game } from '@platform/engine';
 import { ServerScript, game, onClick, onEnter, onExit, serverState } from '@platform/engine';
@@ -55,10 +51,8 @@ export function clampToWorld(y: number, bounds: Rect): number {
 }
 
 /**
- * The band a dropped leaf may enter at.
- *
- * Inset by the harvest half-box: an avatar cannot reach above the world's top edge, so a leaf
- * spawned there would be uncatchable rather than merely hard.
+ * The band a dropped leaf may enter at, inset by the harvest half-box: an avatar cannot reach
+ * above the world's top edge, so a leaf spawned there would be uncatchable rather than hard.
  */
 export function dropBand(bounds: Rect): { low: number; high: number } {
     return { low: bounds.bottom + LEAF_HALF, high: bounds.top - LEAF_HALF };
@@ -80,10 +74,8 @@ export function hasExited(x: number, bounds: Rect): boolean {
 }
 
 /**
- * What one harvest is worth.
- *
- * Ripening multiplies and the badge adds, in that order: multiplying the badge too would make one
- * lucky leaf decide a round.
+ * What one harvest is worth. Ripening multiplies and the badge adds, in that order: multiplying
+ * the badge too would let one lucky leaf decide a round.
  */
 export function harvestValue(opts: { ripe: boolean; badgedForHarvester: boolean }): number {
     const base = opts.ripe ? HARVEST_POINTS * RIPE_MULTIPLIER : HARVEST_POINTS;
@@ -95,10 +87,8 @@ export function popValue(): number {
 }
 
 /**
- * Spawns one leaf, plus the badge parented above it in the seat it is ripe for.
- *
- * Left unowned deliberately: the server destroys every entity whose `ownerId` matches a departing
- * player, and a leaf belongs to the round rather than to a person.
+ * Spawns one leaf, plus the badge parented above it in the seat it is ripe for. Left unowned:
+ * the server destroys every entity whose `ownerId` matches a departing player.
  */
 export function spawnLeaf(world: Game, worldY: number, badgeSlot: number): Entity {
     const bounds = world.bounds;
@@ -136,9 +126,7 @@ export function liveLeaves(world: Game): Entity[] {
 
 /**
  * On every leaf: what the two regions do to it, and what a click does.
- *
- * `@onEnter` / `@onExit` dispatch to ENTITY hosts only, so a region handler on a Game-hosted script
- * would never fire.
+ * `@onEnter` / `@onExit` dispatch to ENTITY hosts only, so a Game-hosted one never fires.
  */
 export class Leaf extends ServerScript<Entity> {
     /** Entity-hosted, so it replicates: the browser reads it to explain why a leaf draws large. */
@@ -157,7 +145,7 @@ export class Leaf extends ServerScript<Entity> {
         this.host.setScale(LEAF_SCALE);
     }
 
-    /** Destroyed HERE rather than at the world's edge, which makes the drift pass's reap a backstop. */
+    /** Destroyed HERE rather than at the world's edge, making the drift pass's reap a backstop. */
     @onEnter(REGION_COMPOST)
     compost(): void {
         game.getScript(Rules)?.noteWasted();
@@ -165,10 +153,8 @@ export class Leaf extends ServerScript<Entity> {
     }
 
     /**
-     * A pointer hit the browser resolved against its own camera, which no authority can recompute.
-     *
-     * Whether the clicking player could plausibly reach it is deliberately not checked — popping is
-     * the long-range steal, and it is worth a point rather than a harvest.
+     * A pointer hit the browser resolved against its own camera, which no authority recomputes.
+     * Reach is unchecked on purpose: popping is the long-range steal, worth a point not a harvest.
      */
     @onClick
     pop(ctx: Ctx): void {

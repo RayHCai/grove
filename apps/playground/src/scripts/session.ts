@@ -1,8 +1,5 @@
-// The one capability the game asks its host for.
-//
-// `declareVisuals` belongs to the server that booted the world and nothing a script can name reaches
-// it, so the host grants the one call by name. Everything else a script needs from another script is
-// `host.getScript(Class)`, which is per-WORLD rather than per-process.
+// `declareVisuals` belongs to the server that booted the world and nothing a script can name
+// reaches it, so the host grants that one call by name. Everything else is `host.getScript()`.
 
 let declareCrownArt: (() => void) | null = null;
 
