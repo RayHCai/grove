@@ -1,10 +1,3 @@
-// Containment beyond the dispatcher: the paths that run creator code without a dispatch — the
-// movement pass, a timer callback, a tween's write and a countdown's completion — keep the tick
-// alive and charge the throw to the script instance that owns the code.
-//
-// Each case drives a real `Loop.step`, because what these guards prevent is an exception unwinding
-// through the pass into the frame source, and a direct call to the guarded function would not.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { Faulty, FaultyMovement, Nester } from '../dist/testkit/fixtures.js';
 import { joinPlayer, loadGame } from '../src/runtime/load-game.js';

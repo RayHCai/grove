@@ -1,9 +1,3 @@
-// The Entity verbs that aim at a target, the tween shortcuts written in terms of another tween, and
-// the two that hold no state at all.
-//
-// Each one is a thin wrapper over something already covered, which is exactly why it needs its own
-// case: a shortcut that passed the wrong argument through would be invisible everywhere else.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { bounds, vec3 } from '@platform/math';
 import { Loop } from '../src/loop/loop.js';
@@ -81,7 +75,8 @@ describe('faceToward', () => {
         e.setRotation(123);
         e.faceToward(vec3(0, 10, 0));
         expect(e.rotation).toBeCloseTo(90, 6);
-        // Twice from a different start: an implementation that added would drift on the second call.
+        // Twice from a different start: an implementation that added would drift on the second
+        // call.
         e.faceToward(vec3(0, 10, 0));
         expect(e.rotation).toBeCloseTo(90, 6);
     });
@@ -169,7 +164,8 @@ describe('isTouching', () => {
         const rt = loadGame({ bounds: bounds(-100, 100, 100, -100) });
         const a = rt.wired.gameInstance.spawn('crate', 0, 0);
         const b = rt.wired.gameInstance.spawn('crate', 0, 0).tag('enemy');
-        // Nothing in the template pipeline writes a collider, so an untouched entity touches nothing.
+        // Nothing in the template pipeline writes a collider, so an untouched entity touches
+        // nothing.
         expect(a.isTouching()).toBe(false);
 
         a.collider = { enabled: true, isTrigger: false, bounds: bounds(-10, 10, 10, -10) };

@@ -1,5 +1,3 @@
-// Templates: what a spawn key means, and the one journal group an instantiation produces.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ScriptId, TemplateId } from '@platform/project';
 import { Target, Wallet } from '../dist/testkit/fixtures.js';

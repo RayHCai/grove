@@ -1,10 +1,3 @@
-// `every` and `after` are specified to auto-cancel with the host that registered them, and the only
-// thing that knows which host that is, is the ambient invocation. These pin that the ambient
-// survives the two places it used to be lost: past an `await`, and inside a guarded callback.
-//
-// What both faults produce is a callback still writing through a facade whose host is gone — or, the
-// other way round, one host's teardown taking a live timer belonging to somebody else.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';

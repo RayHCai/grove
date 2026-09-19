@@ -1,5 +1,4 @@
-// What a spawn key means: the scripts every instance of it carries, and the entities minted beneath
-// it. Instantiating one is journaled as a single group, because a subtree whose ops crossed the wire
+// Instantiating a template is journaled as a single group: a subtree whose ops crossed the wire
 // in pieces would be applied against a world missing its own parents.
 
 import type {
@@ -18,39 +17,21 @@ import type { Runtime } from '../runtime/runtime.js';
 
 export type { EntityTransform, PlacedEntity, ScriptProps };
 
-/**
- * A template as the runtime holds it.
- *
- * `@platform/project`'s resolved narrowing rather than a parallel declaration: a template is an
- * authored thing, and a second shape here would be a guess at the one the editor saves. It carries
- * no visual, because core draws nothing — the art is keyed by the same `TemplateId` in the render
- * manifest, which is the client's to hold.
- */
+/** A template as the runtime holds it: project's resolved narrowing, carrying no visual. */
 export type TemplateDef = ResolvedTemplate;
 
-/** One script a template attaches, with the class its id resolved to and the props it configured. */
+/** One script a template attaches, with the class its id resolved to and its configured props. */
 export type TemplateAttachment = ResolvedAttachment;
 
 /** A script class, as an attach site takes it. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- attach accepts any host-typed class
 export type AnyScriptClass = new (props?: ScriptProps) => any;
 
-/**
- * Levels one instantiation may nest, and entities it may mint.
- *
- * A child names a template, so a subtree is a reference graph: a per-record child count bounds
- * nothing, and the depth bound is a stack bound on the walk below. `validate` refuses both faults in
- * a saved file; these hold for a registry assembled any other way.
- */
+/** Levels one instantiation may nest, and entities it may mint; a child names a template. */
 export const MAX_TEMPLATE_DEPTH = 8;
 export const MAX_TEMPLATE_NODES = 256;
 
-/**
- * The templates a world can spawn, by the key `game.spawn` names.
- *
- * A key with no entry is not an error: `spawn` mints one bare entity under it, which is what an
- * ad-hoc key has always done and what keeps a template a configuration rather than a requirement.
- */
+/** The templates a world can spawn, by the key `game.spawn` names; a miss is not an error. */
 export class TemplateRegistry {
     readonly #byId: ReadonlyMap<string, TemplateDef>;
 
@@ -89,7 +70,7 @@ export class TemplateRegistry {
 export interface InstantiateOptions {
     x?: number;
     y?: number;
-    /** The owning player's id, inherited by the whole subtree — a badge belongs to its leaf's owner. */
+    /** The owning player's id, inherited by the whole subtree. */
     ownerId?: string;
     /** Extra tags on the root alone, applied before any `@onStart` could read them. */
     tags?: readonly string[];
@@ -99,20 +80,14 @@ export interface InstantiateOptions {
     transform?: EntityTransform;
 }
 
-/**
- * Mints a template's whole subtree and returns its root.
- *
- * Logical-now and journaled-as-one: every entity exists the moment it is minted, exactly as a bare
- * `spawn` does, and the group bounds only what crosses the wire — the ops of one instantiation are
- * applied together, in order, or not at all. That is the mirror of `destroy`, which is logical-now
- * and torn down at the end of the tick.
- */
+/** Mints a template's whole subtree and returns its root; logical-now and journaled as one. */
 export function instantiate(rt: Runtime, template: string, opts: InstantiateOptions = {}): Entity {
     const def = rt.wired.templates.get(template);
     const extra = opts.scripts ?? [];
     if (def === undefined && extra.length === 0 && (opts.tags ?? []).length === 0) {
         // A key the registry does not hold is one bare entity, which is what an ad-hoc spawn has
-        // always been — and grouping a single op would put a boundary on the wire that bounds nothing.
+        // always been — and grouping a single op would put a boundary on the wire that bounds
+        // nothing.
         return spawnNode(rt, template, opts);
     }
 
@@ -130,12 +105,7 @@ export function instantiate(rt: Runtime, template: string, opts: InstantiateOpti
     }
 }
 
-/**
- * Builds the placed world a manifest declares, parents before children.
- *
- * One pass, because `validate` orders the records: a parent's row comes before its children's, so
- * the id map always holds the parent by the time a child names it.
- */
+/** Builds the placed world a manifest declares, parents before children, in one pass. */
 export function instantiatePlaced(rt: Runtime, entities: readonly PlacedEntity[]): void {
     const minted = new Map<string, Entity>();
     for (const record of entities) {

@@ -10,16 +10,10 @@ export type SingleStructuralOp =
     | { kind: 'destroy'; id: EntityId }
     | { kind: 'reparent'; id: EntityId; parent: EntityId }
     | { kind: 'tag'; id: EntityId; tag: string; added: boolean }
-    /** The id the bundle stamped, never the class name — a minifier rewrites one and not the other. */
+    /** The id the bundle stamped, never the class name — a minifier rewrites one, not the other. */
     | { kind: 'attach'; id: EntityId; script: ScriptId; props?: ScriptProps };
 
-/**
- * Every op one template instantiation produced, applied as one.
- *
- * Flat rather than nested: a subtree is emitted depth-first with parents ahead of children, so one
- * level of boundary is all a consumer needs — and a nesting shape would have to be bounded by depth
- * as well as by cardinality before anything could walk it.
- */
+/** Every op one template instantiation produced, applied as one. Flat, parents before children. */
 export type StructuralGroup = { kind: 'group'; ops: SingleStructuralOp[] };
 
 /** One entry in the ordered structural journal. */
@@ -35,14 +29,7 @@ export interface StateMark {
 export class ReplicationChannels {
     /** Append-only; order is meaning. */
     readonly #structural: StructuralOp[] = [];
-    /**
-     * Keyed so a field written twice before a drain replicates once.
-     *
-     * Record-major, by object identity, rather than one flat map under a `record field` string:
-     * `markState` runs on every assignment to a decorated field, and building the key and the mark
-     * before the deduplicating write meant both were garbage for every write after the first.
-     * The marks are shaped at drain instead, once per send tick.
-     */
+    /** Keyed so a field written twice before a drain replicates once; marks are shaped at drain. */
     readonly #state = new Map<object, Set<string>>();
     /** Distinct (record, field) pairs held, since the map above counts records, not marks. */
     #markCount = 0;
@@ -56,13 +43,7 @@ export class ReplicationChannels {
         else this.#structural.push(op);
     }
 
-    /**
-     * Opens a boundary: every op marked until the matching `endGroup` is applied as one.
-     *
-     * Re-entrant and flattening — a template whose child is itself a template opens a second one,
-     * and only the outermost produces an op, because the inner subtree is part of the same
-     * instantiation and a receiver gains nothing from being told where it started.
-     */
+    /** Opens a boundary: ops until the matching `endGroup` apply as one. Re-entrant. */
     beginGroup(): void {
         this.#groupDepth += 1;
         if (this.#groupDepth === 1) this.#group = [];

@@ -1,9 +1,3 @@
-// The input fold both endpoints run.
-//
-// It is pure on purpose: the server folds a connection's edges and the client folds its own, and a
-// second implementation of the one-tick-wide rule would read as a prediction mismatch rather than
-// as the bug it is. Every rule below is one the two ends have to agree on edge for edge.
-
 import { describe, it, expect } from 'vitest';
 import { createActionStates } from '../src/runtime/action-states.js';
 

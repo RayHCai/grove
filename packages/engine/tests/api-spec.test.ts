@@ -1,11 +1,5 @@
-// `docs/api_spec.ts` is the authoritative creator surface, and this package's barrel is the path
-// that surface actually resolves through. That claim is written down in two places and was checked
-// in neither: the spec is a `declare module` block nothing imports, and the barrel is a file nobody
-// diffs against it. This test is the diff.
-//
-// It reads the spec as TEXT rather than importing it, because the block declares a module that does
-// not exist at runtime — `declare module '@platform/engine'` names this package, and importing the
-// file to check it would be the package checking its own re-export of itself.
+// Reads the spec as TEXT rather than importing it: the block declares a module that does not exist
+// at runtime, so importing it would be the package checking its own re-export of itself.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -58,12 +52,7 @@ function engineBlock(source: string): string {
     throw new Error('api_spec.ts has an unterminated @platform/engine block');
 }
 
-/**
- * Names the spec declares as VALUES, at the block's own indent level only.
- *
- * One indent depth rather than any: an interface's members are indented further, and a `function`
- * inside one is a method signature rather than a module export.
- */
+/** Names the spec declares as VALUES, at the block's own indent only — members sit deeper. */
 function specValues(block: string): string[] {
     const names = new Set<string>();
     for (const line of block.split('\n')) {

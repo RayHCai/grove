@@ -1,5 +1,4 @@
-// `@serverState` that outlives a session: the synchronous cache, the write-through, and the seed
-// wiring reads. Fixtures are compiled by the build; this file carries no decorator syntax.
+// Fixtures are compiled by the build; this file carries no decorator syntax.
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { PERSISTENCE_SCOPE, PersistedState } from '../src/runtime/persistence.js';

@@ -1,8 +1,3 @@
-// The dispatcher's acting-player ambient: what `scores.add(1)` credits with no player argument,
-// and that the ambient is a strict save/restore around one handler call. The instances here are
-// hand-built rather than decorated fixtures, so the dispatcher and the ambient it writes are the
-// same module copies the wrappers read.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { Leaderboard, Scoreboard } from '../src/runtime/wrappers.js';
 import { createHostRecord } from '../src/state/host-record.js';

@@ -1,6 +1,5 @@
-// Query order is ascending entity id because the contact set it feeds must be deterministic.
-// The transform source is a constructor argument so a historical query can run over a ring
-// buffer instead of the live store.
+// Query order is ascending entity id, because the contact set it feeds must be deterministic.
+// The transform source is a constructor argument so a historical query can run over a ring.
 
 import type { EntityId } from '../ids.js';
 

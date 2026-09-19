@@ -5,26 +5,18 @@ import type { AssetId, ScriptId, TemplateId } from './ids.js';
 import type { ScriptProps } from './props.js';
 
 /**
- * The format this build reads and writes.
- *
- * A file below it is moved forward by `migrate`; a file above it is refused. That is the opposite of
- * `PROTOCOL_VERSION`, which refuses a mismatch in either direction — a peer can be told to update,
- * and a file on disk cannot.
+ * The format this build reads and writes. A file below it is moved forward by `migrate`; one
+ * above is refused — the opposite of `PROTOCOL_VERSION`, since a file on disk cannot update.
  */
 export const PROJECT_FORMAT_VERSION = 1;
 
-/**
- * An axis-aligned rectangle, named by its edges.
- *
- * Restated rather than imported from math: this package's only dependency is a type-only `JsonValue`,
- * so that every consumer can take the authoring types without taking a module graph with them.
- */
+/** An axis-aligned rectangle. Restated, not imported: the only dependency here is type-only. */
 export type ProjectBounds = { left: number; right: number; top: number; bottom: number };
 
-/** One named rectangle inside the world's extent — what `find({ in })` and `camera.bounds` resolve. */
+/** One named rectangle inside the world's extent — what `find({ in })` and `camera.bounds` use. */
 export type RegionRecord = { name: string; bounds: ProjectBounds };
 
-/** The authoring vocabulary for assets. The renderer's four kinds are a draw-time narrowing of these. */
+/** The authoring vocabulary for assets; the renderer's four kinds narrow these at draw time. */
 export type AssetKind = 'texture' | 'atlas' | 'audio' | 'font' | 'clip' | 'effect';
 
 /** What is known about an asset before it is fetched. An absent member is unknown, not zero. */
@@ -46,11 +38,8 @@ export type ScriptLocation = 'server' | 'client' | 'synced';
 export type ScriptHost = 'entity' | 'player' | 'game' | 'camera' | 'screen';
 
 /**
- * One script class an authored module exports.
- *
- * `location` and `host` are restated from the source they came from, so the editor can reject an
- * illegal attachment — a synced script on a camera, a server script on a screen — from the manifest
- * alone, without loading the module or running the world.
+ * One script class an authored module exports. `location` and `host` are restated, so the editor
+ * can reject an illegal attachment from the manifest alone, without loading the module.
  */
 export type ScriptDecl = {
     id: ScriptId;
@@ -81,21 +70,12 @@ export type SpriteVisual = {
 /** A template whose entities are positional pivots with no art of their own. */
 export type GroupVisual = { kind: 'group' };
 
-/**
- * How the entities of one template draw.
- *
- * It carries no transform: those fields are per-entity and authoritative from the simulation, so
- * carrying them here too would give two sources for one value.
- */
+/** How the entities of one template draw. No transform: those are per-entity and authoritative. */
 export type TemplateVisual = SpriteVisual | GroupVisual;
 
 /**
  * One entity minted beneath a template's root, naming the template it instances.
- *
- * A child names a TEMPLATE rather than restating art, tags and scripts of its own: a subtree is
- * therefore a reference graph, one record per node however many places it appears, and the only
- * thing local to this appearance is where it sits. `validate` closes the graph — every child names
- * a declared template, and no template reaches itself.
+ * A child names a TEMPLATE, so a subtree is a reference graph; only its position is local.
  */
 export type TemplateChildRecord = {
     template: TemplateId;
@@ -111,20 +91,14 @@ export type TemplateRecord = {
     scripts: ScriptAttachment[];
     /**
      * Entities minted beneath every instance, parented to it in this order.
-     *
-     * ABSENT for a template that is one entity, which is the ordinary case. Present, spawning the
-     * template mints the whole subtree — so a turret and its barrel are one spawn key, not two the
-     * creator has to parent by hand every time.
+     * ABSENT for a one-entity template; present, a spawn mints the whole subtree.
      */
     children?: TemplateChildRecord[];
 };
 
 /**
- * Where a placed entity sits.
- *
- * Every field defaults — position and rotation to 0, `scale` and `opacity` to 1, `layer` to 0 — so a
- * record carries only what the creator changed. The wire's transform defaults nothing, because it is
- * a whole-value diff target rather than an authored placement.
+ * Where a placed entity sits. Every field defaults, so a record carries only what changed.
+ * The wire's transform defaults nothing, being a whole-value diff target.
  */
 export type EntityTransform = {
     x?: number;
@@ -138,7 +112,7 @@ export type EntityTransform = {
     layer?: number;
 };
 
-/** Names one row of `ProjectManifest.entities`. Unbranded: it addresses this file and nothing else. */
+/** Names one row of `ProjectManifest.entities`. Unbranded: it addresses this file only. */
 export type EntityRecordId = string;
 
 /** One entity as the editor placed it — enough to REBUILD it, in ids that survive a reload. */
@@ -165,16 +139,10 @@ export type ProjectSettings = {
     regions: RegionRecord[];
 };
 
-/**
- * A whole game, as one file.
- *
- * `entities` holds the placed world directly. There is no `scenes` field and no container between
- * the game and its entities, because Game IS the world — it owns the entities, holds the build-time
- * bounds and scopes spawn and find.
- */
+/** A whole game, as one file. No `scenes` field: Game IS the world, owning the placed entities. */
 export type ProjectManifest = {
     formatVersion: number;
-    /** Stable across saves and across renames — what a build, a share link and a save file agree on. */
+    /** Stable across saves and renames — what a build, a share link and a save file agree on. */
     projectId: string;
     /** A digest of the authored content, stamped by whatever wrote the file. */
     contentHash: string;
@@ -183,6 +151,6 @@ export type ProjectManifest = {
     templates: TemplateRecord[];
     assets: AssetRecord[];
     scriptModules: ScriptModule[];
-    /** Attached to the one Game object, which has an inspector of its own rather than a tray row. */
+    /** Attached to the one Game object, which has an inspector rather than a tray row. */
     gameScripts: ScriptAttachment[];
 };

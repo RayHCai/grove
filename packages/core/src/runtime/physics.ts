@@ -1,6 +1,3 @@
-// Integrates position and reports nothing blocked: a platformer runs and falls, but does not
-// land until Rapier fills this seam.
-
 import type { EntityId } from '../ids.js';
 import { noBlocked } from './seams.js';
 import type { Blocked, PhysicsSink } from './seams.js';

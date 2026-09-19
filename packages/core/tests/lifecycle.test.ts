@@ -1,5 +1,3 @@
-// Load order, lifecycle, request path, and wire-time rejections.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { Roll, RosterProbe, Rules, SyncedWithRequest } from '../dist/testkit/fixtures.js';
 import { loadGame, startGame, joinPlayer, leavePlayer } from '../src/runtime/load-game.js';
@@ -43,8 +41,8 @@ describe('@onRequest loopback', () => {
     });
 
     it('is the FALLBACK: an installed uplink takes the call and nothing dispatches here', async () => {
-        // What a networked client holds. Dispatching here as well would run the authority's check on
-        // the machine that made the ask — and a mirror is not where the answer is authoritative.
+        // What a networked client holds. Dispatching here as well would run the authority's check
+        // on the machine that made the ask — and a mirror is not where the answer is authoritative.
         const rt = loadGame({ gameScripts: [Rules as never] });
         await startGame(rt);
         joinPlayer(rt, 'p1', 'Ada');
@@ -85,7 +83,7 @@ describe('roster dispatch under its own runtime', () => {
         probeOn(rtA).onJoin = (): void => {
             every(1, () => {});
         };
-        const rtB = loadGame(); // a client mirror in the same process, as a soak or a browser tab has
+        const rtB = loadGame(); // a client mirror in the same process
         joinPlayer(rtA, 'p1', 'Ada');
         await tick();
 

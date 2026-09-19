@@ -1,7 +1,5 @@
-// The @serverState immutability constraint is type-level: mutable
-// declarations must fail to compile, readonly ones must not. This suite is a COMPILE-TIME
-// check — the assertions live in the `Immutable<T>` conditional types below, and the file
-// failing to typecheck IS the failure. The one runtime `expect` keeps vitest happy.
+// A COMPILE-TIME check: the assertions live in the `Immutable<T>` conditional types below, and
+// the file failing to typecheck IS the failure.
 
 import { describe, it, expect } from 'vitest';
 import type { Immutable, MutableStateRejected } from '../src/state/immutable.js';

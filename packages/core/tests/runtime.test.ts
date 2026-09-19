@@ -1,5 +1,4 @@
-// End-to-end runtime: loadGame → spawn → tag → find → addScript → send → destroy, with
-// @serverState hoisted onto the entity host record. Fixtures compiled by the build.
+// Fixtures compiled by the build.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Menu, OtherMenu, Rules, Shopper, Target } from '../dist/testkit/fixtures.js';
@@ -23,12 +22,7 @@ beforeEach(() => {
 });
 afterEach(() => clearRuntime());
 
-/**
- * A client world, which is the only kind that has a HUD.
- *
- * `role` is the location filter, so a `ClientScript<HUDScreen>` is inert on a server runtime — and
- * the whole HUD surface is client-side by construction.
- */
+/** A client world, which is the only kind that has a HUD; `role` is the location filter. */
 function clientWorld(): Runtime {
     const rt = loadGame({ role: 'client', bounds: BOUNDS });
     rt.localPlayer = joinPlayer(rt, 'p1', 'Ada');
@@ -138,7 +132,8 @@ describe('hud widgets', () => {
         expect(hud.widget('lives')?.number).toBe(3);
         expect(hud.widget('health')?.fraction).toBe(0.5);
         expect(hud.widget('badge')).toEqual({ icon: 'gold-star', visible: false, enabled: true });
-        // The Countdown itself, not a sampled number: a bound timer counts down with no further call.
+        // The Countdown itself, not a sampled number: a bound timer counts down with no further
+        // call.
         expect(hud.widget('clock')?.countdown).toBe(clock);
         expect(pushed).toStrictEqual([
             'score',
@@ -162,7 +157,8 @@ describe('hud widgets', () => {
 describe('hud.player', () => {
     it('throws on a runtime with no local player rather than reading undefined off a field', () => {
         // The defect the declared `readonly player!: Player` hid: a server runtime has no local
-        // player, and reaching `hud` from there is the load-time error the wiring rules already name.
+        // player, and reaching `hud` from there is the load-time error the wiring rules already
+        // name.
         expect(() => hud.player).toThrow(/no player/);
     });
 
@@ -221,7 +217,8 @@ describe('hud screens', () => {
 
         hud.close('shop');
         expect(menu.ends).toBe(1);
-        // Closing DISCARDS client state, so the reopen builds a fresh instance rather than this one.
+        // Closing DISCARDS client state, so the reopen builds a fresh instance rather than this
+        // one.
         expect([...rt.instances.forHost('screen:shop')]).toHaveLength(0);
         hud.open('shop');
         expect([...rt.instances.forHost('screen:shop')][0]!.instance).not.toBe(menu);

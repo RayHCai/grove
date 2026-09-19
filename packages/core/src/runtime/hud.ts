@@ -1,6 +1,5 @@
-// One player's interface. The widget verbs write authored state and push it at the HUD seam; the
-// screens are the hosts a ClientScript<HUDScreen> attaches to. Client-side by construction — `hud`
-// resolves the current runtime's state, and a server runtime simply has no local player.
+// Client-side by construction: `hud` resolves the current runtime's state, and a server runtime
+// has no local player.
 
 import type { ScriptProps } from '@platform/project';
 import { defined } from '@platform/math';
@@ -80,13 +79,7 @@ export class HUDState {
 }
 
 export class HUD {
-    /**
-     * The local player, whose interface this is.
-     *
-     * Throws rather than reading undefined off a declared field: `hud` is a client-side const, and a
-     * runtime with no local player is a server one, where reaching it is the load-time error the
-     * wiring rules already name.
-     */
+    /** The local player, whose interface this is; throws on a server runtime, which has none. */
     get player(): Player {
         const player = runtime()?.localPlayer;
         if (!player) {
@@ -149,12 +142,7 @@ export class HUD {
         this.enable(widget, false);
     }
 
-    /**
-     * Opens a screen, attaching its scripts and running their `@onStart`. Idempotent.
-     *
-     * The screen is minted on first mention: with no panel, naming one in code is how it comes to
-     * exist, and the declared return type is non-null.
-     */
+    /** Opens a screen, attaching its scripts and running their `@onStart`. Idempotent. */
     open(screen: string): HUDScreen {
         const rt = runtime();
         const found = this.#ensure(screen);
@@ -223,12 +211,7 @@ export class HUD {
             .filter((s): s is HUDScreen => s !== undefined);
     }
 
-    /**
-     * @internal — the live state of one widget, or null until a verb has written it.
-     *
-     * Not creator surface: the widget verbs are the write side and the `HUDSink` is the read side,
-     * so a creator reading a widget back would be asking the engine what it just told it.
-     */
+    /** @internal — the live state of one widget, or null until a verb has written it. */
     widget(name: string): Readonly<HUDWidgetState> | null {
         return hudState()?.widgets.get(name) ?? null;
     }
@@ -280,8 +263,8 @@ function dispatchScreen(
         event,
         key,
         { data: {}, dt: 1 / rt.simRate, alive: kind === 'onStart' },
-        // A screen is one machine's, so only client-located handlers can be on it anyway; naming the
-        // set explicitly keeps a screen from depending on which role built the runtime.
+        // A screen is one machine's, so only client-located handlers can be on it anyway; naming
+        // the set explicitly keeps a screen from depending on which role built the runtime.
         { activeLocations: CLIENT_ONLY, tick: rt.tick },
     );
 }

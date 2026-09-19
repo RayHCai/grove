@@ -1,5 +1,4 @@
-// Game is the session and the world. `abstract` so `new Game()` is a compile error while the
-// engine still builds the one instance.
+// `abstract` so `new Game()` is a compile error while the engine still builds the one instance.
 
 import type { Bounds, Vec3 } from '@platform/math';
 import { bounds as makeBounds } from '@platform/math';
@@ -69,13 +68,7 @@ export abstract class Game {
         return this;
     }
 
-    /**
-     * The Game's instance of `script`, or `null` when none is attached.
-     *
-     * This is how a script on any other host reaches the session's rules — `game.getScript(Rules)`
-     * rather than a module-level slot the Game publishes itself into, which is per-process and so
-     * belongs to whichever world loaded last.
-     */
+    /** The Game's instance of `script`, or `null` — how another host reaches the rules. */
     getScript<T extends BaseScript<Game>>(script: ScriptQuery<T>): T | null {
         return scriptOnHost(this.rt, GAME_KEY, script);
     }

@@ -15,13 +15,7 @@ export interface RegionCrossing {
 
 export class RegionIndex {
     readonly #regions = new Map<string, Bounds>();
-    /**
-     * Last tick's membership, per region.
-     *
-     * An edge is a diff, so the previous set is the whole state — and it lives on the index that
-     * owns the geometry rather than on the runtime, because it is rebuilt with the world and is
-     * deliberately not a snapshot store: a rewind leaves it describing the tick it was last folded on.
-     */
+    /** Last tick's membership, per region; an edge is a diff. Not a snapshot store. */
     readonly #occupants = new Map<string, Set<EntityId>>();
     readonly #crossings: RegionCrossing[] = [];
     readonly #present = new Set<EntityId>();
@@ -41,13 +35,7 @@ export class RegionIndex {
         return this.#regions.get(name);
     }
 
-    /**
-     * Folds this tick's membership and reports every crossing since the last call.
-     *
-     * The returned array is reused, so a caller that keeps it past the next call reads the next
-     * tick's edges: this runs over every live entity every tick, and a fresh array per region would
-     * put one allocation per region per tick on the GC.
-     */
+    /** Folds this tick's membership and reports crossings; the returned array is reused. */
     crossings(
         ids: readonly EntityId[],
         posX: (id: EntityId) => number,

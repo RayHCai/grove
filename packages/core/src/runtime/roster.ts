@@ -1,6 +1,3 @@
-// Spawning an avatar instantiates the Player template, owned by the player, and attaches the
-// movement class over whatever that template already carries.
-
 import { instantiate } from '../world/templates.js';
 import type { Runtime } from './runtime.js';
 import type { Player } from './player.js';
@@ -64,7 +61,7 @@ export class Roster {
         this.#checkpoints.set(player.id, { x, y });
     }
 
-    /** @internal — a departed player's checkpoint, which nothing but a rejoin under that id reads. */
+    /** @internal — a departed player's checkpoint, read only by a rejoin under that id. */
     forgetCheckpoint(playerId: string): void {
         this.#checkpoints.delete(playerId);
     }

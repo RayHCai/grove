@@ -1,5 +1,4 @@
-// The Runtime is the swappable world the ambient consts (game, random, assets) are facades
-// over, which is what makes that module-const surface testable and multi-instance-per-process.
+// The Runtime is the swappable world the ambient consts are facades over, so they stay per-world.
 
 import { DEFAULT_SIM_RATE, MAX_LOG_RECORDS } from '../config.js';
 import { ScopeTree } from '../dispatch/scope-tree.js';
@@ -47,27 +46,18 @@ import type { HUDState } from './hud.js';
 
 /** The per-tick passes the loop drives, in tick order. */
 export interface TickPasses {
-    /**
-     * `@onStart` for everything attached since the last tick — first, so a script is running before
-     * anything can dispatch to it, and after the previous tick's destroy drain, so one attached to
-     * an entity that then died never starts at all.
-     */
+    /** `@onStart` for everything attached since the last tick, after the previous destroy drain. */
     starts(dispatch: DispatchOptions): void;
     input(dispatch: DispatchOptions): void;
     movement(dt: number, scope: ReadonlySet<EntityId> | undefined): void;
     contacts(dispatch: DispatchOptions): void;
     regions(dispatch: DispatchOptions): void;
-    /** Takes the dispatch options for `replay` alone: a re-run tick must not spend a countdown twice. */
+    /** Takes dispatch options for `replay` alone: a re-run must not spend a countdown twice. */
     countdowns(dispatch: DispatchOptions): void;
     update(dispatch: DispatchOptions, dt: number, scope: ReadonlySet<EntityId> | undefined): void;
 }
 
-/**
- * The collaborators `loadGame` builds, installed as one object so no facade can see half a world.
- *
- * Separate from the stores the constructor makes because a store-level test builds a `Runtime` with
- * no world behind it, and reaching one of these there is a mistake worth a message.
- */
+/** The collaborators `loadGame` builds, installed as one object so no facade sees half a world. */
 export interface Wired {
     readonly playerManager: PlayerManager;
     readonly contacts: ContactSource;
@@ -82,7 +72,7 @@ export interface Wired {
     /** Injected so the player facade need not import Camera and Storage. */
     readonly makeCamera: (player: Player) => Camera;
     readonly makeStorage: (player: Player) => Storage;
-    /** The single-process FALLBACK for `request()`: it dispatches here when no uplink is installed. */
+    /** The single-process FALLBACK for `request()`: it dispatches here when no uplink exists. */
     readonly requestSink: (name: string, payload?: Record<string, unknown>) => void;
     readonly random: Random;
     /** The manifest's asset table; the `assets` const resolves through here. */
@@ -106,12 +96,7 @@ export interface EngineLog extends DispatchLog {
     readonly records: ReadonlyArray<HandlerErrorRecord & { phase?: string; disabled?: boolean }>;
 }
 
-/**
- * Where the engine's diagnostics leave core, installed through `LoadOptions.log`.
- *
- * Core writes to a console nowhere and holds no transport, so a warning has nowhere to go without
- * one of these: everything the host is meant to see about a misbehaving world arrives here.
- */
+/** Where the engine's diagnostics leave core, installed through `LoadOptions.log`. */
 export interface LogSink extends DispatchLog {
     warn(message: string): void;
 }
@@ -156,7 +141,7 @@ export class Runtime {
     readonly breaker = new BreakerCounters();
     readonly timers = new TimerHeap();
     readonly tweens = new TweenEngine();
-    /** The running countdowns the countdowns pass advances; a Countdown enrols itself on `start`. */
+    /** The running countdowns the pass advances; a Countdown enrols itself on `start`. */
     readonly countdowns = new Set<Countdown>();
 
     readonly scopes = new ScopeTree();
@@ -189,20 +174,9 @@ export class Runtime {
     localPlayer?: Player | null;
     /** Persisted @serverState from a previous session, keyed by (hostId, field). */
     persisted?: PersistedSource;
-    /**
-     * Where `request()` goes when the authority is another process.
-     *
-     * Installed by an endpoint that holds a socket. Without one the loopback sink runs the handlers
-     * here, which is only right when this world IS the authority — a client that dispatched locally
-     * would be validating an untrusted ask on the untrusted machine.
-     */
+    /** Where `request()` goes when the authority is another process; installed by a socket. */
     requestUplink?: (name: string, payload?: Record<string, unknown>) => void;
-    /**
-     * The id the bundle stamped on a class, for the `attach` op that names it on the wire.
-     *
-     * A function rather than the registry itself: core mints no ids and must not import the package
-     * that builds one, which imports core.
-     */
+    /** The id the bundle stamped on a class, for the `attach` op. A function: core mints no ids. */
     scriptIdOf?: (klass: abstract new (...args: never[]) => object) => ScriptId | undefined;
     worldBounds?: Bounds;
     /** For the host's accumulator to honour; `step` runs a tick regardless. */
@@ -214,7 +188,7 @@ export class Runtime {
         return this.#wired;
     }
 
-    /** The same set, or null — for the facades whose contract is to no-op outside a loaded world. */
+    /** The same set, or null — for facades whose contract is to no-op outside a loaded world. */
     get wiredOrNull(): Wired | null {
         return this.#wired;
     }
@@ -278,7 +252,7 @@ export class Runtime {
         this.#collecting.setSink(sink);
     }
 
-    /** Runs a creator callback that reaches the engine outside a handler under that same boundary. */
+    /** Runs a creator callback reaching the engine outside a handler, under that same boundary. */
     guardCallback(owner: GuardOwner | null, method: string, event: string, fn: () => void): void {
         const hostId = owner === null ? '' : (this.hosts.keyForScope(owner.hostScopeId) ?? '');
         this.dispatcher.guard(owner, { method, hostId, tick: this.tick, event }, fn);

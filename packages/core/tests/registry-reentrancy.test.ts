@@ -1,11 +1,3 @@
-// A whole-world dispatch walks the instance registry, and attaching is something a handler is
-// allowed to do from inside one. These pin that the pass runs against the registry as it stood when
-// the pass began: a script attached mid-pass takes its `@onStart` before anything else, and a
-// handler that attaches to its own host cannot extend the loop that is dispatching to it.
-//
-// Both faults are reachable from an untrusted client — `pressWidget` carries a frame's widget name —
-// and the second one was a tick that never returned.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame, pressWidget } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';

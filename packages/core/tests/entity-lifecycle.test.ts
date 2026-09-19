@@ -1,5 +1,3 @@
-// Entity destroy cascade and getTouching semantics.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';

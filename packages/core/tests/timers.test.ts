@@ -1,10 +1,3 @@
-// The timer heap: ownership, cancellation, the tick↔seconds conversion, and the ordering rule.
-//
-// Time is counted in ticks internally and in seconds at the API, so every assertion below drives
-// `advance()` a tick at a time rather than trusting a duration. Firing order is asserted explicitly
-// because it is a determinism requirement, not a convenience: two peers replaying one tick must run
-// the same callbacks in the same sequence or their worlds diverge from that tick on.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { TimerHeap } from '../src/loop/timers.js';
 import { NO_SCOPE } from '../src/dispatch/scope-tree.js';

@@ -1,7 +1,3 @@
-// The world's PRNG is one stream both ends of the wire have to agree about, so what it starts from
-// cannot be a literal inside core: a seed only the constructor knows is a seed no server can tell a
-// client, and every session then replays the same numbers.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { DEFAULT_PRNG_SEED } from '../src/config.js';
 import { loadGame } from '../src/runtime/load-game.js';

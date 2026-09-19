@@ -9,12 +9,7 @@ import type { Scope, ScopeMode, SnapshotStore } from './store-registry.js';
 
 export type TimerKind = 'sleep' | 'every' | 'after';
 
-/**
- * Runs a due timer's callback under the dispatcher's error boundary.
- *
- * A seam rather than a `Dispatcher` reference, so the heap stays a store: the runtime installs the
- * one that reaches the real boundary, and a bare heap still fires.
- */
+/** Runs a due timer's callback under the dispatcher's error boundary. A seam, not a reference. */
 export type GuardedCall = (owner: GuardOwner | null, method: string, fn: () => void) => void;
 
 interface Timer {
@@ -35,7 +30,7 @@ export interface TimerBuffer {
     /** No `owner`, for the same reason as `fn`: a buffer holds timing, never a live object. */
     timers: Array<Omit<Timer, 'fn' | 'resolve' | 'owner'>>;
     nextId: number;
-    /** Host scopes this buffer covers, or null for every timer; a scoped `apply` replaces only these. */
+    /** Host scopes this buffer covers, or null for every timer; a scoped `apply` replaces these. */
     scopes: Set<ScopeId> | null;
 }
 
@@ -102,7 +97,8 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
     sleep(seconds: number, hostScopeId: ScopeId): Promise<void> {
         // Converted before the id is minted and before the executor runs, so a bad duration throws
         // where `after` and `every` do. Inside the executor it became a rejected promise instead —
-        // and an unawaited `sleep` then raised an unhandled rejection rather than a call-site error.
+        // and an unawaited `sleep` then raised an unhandled rejection rather than a call-site
+        // error.
         const remaining = this.#toTicks(seconds);
         const id = this.#nextId++;
         // Wrapped, because the code past the await is the handler's: unwrapped, `every` after a
@@ -261,12 +257,7 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
     }
 }
 
-/**
- * The instance registering a callback, read off the ambient rather than taken as a parameter.
- *
- * `hostScopeId` is a parameter because callers override it — `oscillate` charges the animated
- * entity, not whoever called it — while the owner is never anything but whoever is running.
- */
+/** The instance registering a callback, read off the ambient rather than passed in. */
 function registeringOwner(): GuardOwner | null {
     return currentInvocation()?.owner ?? null;
 }
