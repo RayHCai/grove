@@ -7,5 +7,6 @@ export default defineConfig({
         include: ['tests/**/*.test.{ts,tsx}'],
         // vitest defaults to node, where `document` does not exist and mounting anything throws.
         environment: 'jsdom',
+        setupFiles: ['./tests/setup.ts'],
     },
 });

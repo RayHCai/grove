@@ -3,15 +3,18 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "The panel for assets, templates, and HUD layout: one index.html and the React root it mounts.",
+    "description": "The game editor: signs a creator in, opens their game out of object storage, saves and publishes it, and runs it locally in a sandboxed frame.",
     "scripts": {
-        "dev": "vite",
+        "dev": "pnpm --filter @grove/ui build && vite",
         "build": "vite build",
         "typecheck": "tsc -p tsconfig.test.json",
         "test": "vitest run --passWithNoTests",
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
+        "@grove/api-contract": "workspace:*",
+        "@grove/ui": "workspace:*",
+        "monaco-editor": "^0.56.0",
         "react": "^19.2.8",
         "react-dom": "^19.2.8"
     },

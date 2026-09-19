@@ -1,0 +1,38 @@
+.pane--console {
+    min-height: 202px;
+}
+.pane--console .pane__header {
+    color: var(--pg-ink-muted);
+}
+.console-icon {
+    display: inline-flex;
+    flex: none;
+}
+.pane--console .pane__title {
+    font: 700 12px/1 var(--pg-font-ui);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--pg-ink-muted);
+}
+.console-body {
+    flex: 1;
+    min-height: 0;
+    padding: 8px 12px;
+    overflow-y: auto;
+    font: 13px/1.5 var(--pg-font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.console-clear {
+    margin-left: auto;
+}
+.console-line {
+    color: var(--pg-ink);
+}
+.console-line--warn {
+    color: var(--pg-sun);
+}
+.console-line--error {
+    color: var(--pg-warm-ink);
+}
