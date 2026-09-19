@@ -1,0 +1,549 @@
+/*
+ * The platform's own layout, over @grove/ui's tokens and components.
+ *
+ * One measure and one rhythm: every page is a column of at most --shell-measure, and every gap and
+ * padding here is a --pg-sp-* step. Nothing names a colour that is not a --pg-* token, and nothing
+ * draws an edge or a shadow that is not --pg-bw and --pg-lift — the kit owns how a surface is
+ * built, and this sheet only says where the surfaces go.
+ */
+
+:root {
+    --shell-measure: 1120px;
+    --shell-narrow: 440px;
+    --shell-gutter: clamp(16px, 4vw, 40px);
+    --header-height: 64px;
+}
+
+body {
+    display: flex;
+    min-height: 100vh;
+    /* dvh second, so a mobile browser's collapsing toolbar does not make a fitted page scroll;
+       a browser that does not know the unit keeps the line above. */
+    min-height: 100dvh;
+    flex-direction: column;
+    overflow-x: hidden;
+}
+
+/*
+ * The mount point is the column, not the body: everything React renders is inside it, so without
+ * this the chrome would stack at the top of a page short enough to leave slack under it.
+ */
+#root {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+}
+
+/* The tilestrip and the footer sit at the ends; the page between them takes the slack. */
+.pg-tilestrip {
+    flex: none;
+}
+
+/* ---- header ---- */
+
+.siteheader {
+    flex: none;
+    /* Not sticky: the nav is a panel dropping a solid block, and a sticky one would drag that
+       block down the page as it scrolled. */
+    padding: var(--pg-sp-5) var(--shell-gutter) 0;
+}
+
+.siteheader__inner {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--pg-sp-4) var(--pg-sp-5);
+    width: 100%;
+    max-width: var(--shell-measure);
+    min-height: var(--header-height);
+    margin: 0 auto;
+    padding: var(--pg-sp-4) var(--pg-sp-5);
+}
+
+.sitenav {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--pg-sp-2);
+}
+
+/* A menu line rather than a chip: it inverts on hover the way a selected row does. */
+.sitenav__link {
+    padding: 2px 10px;
+    color: var(--pg-ink);
+    font-size: 22px;
+    text-decoration: none;
+}
+
+.sitenav__link:hover {
+    background: var(--pg-plate);
+    color: var(--pg-plate-ink);
+}
+
+.sitenav__link:active {
+    transform: translate(2px, 2px);
+}
+
+.sitenav__link[aria-current='page'] {
+    background: var(--pg-accent);
+    color: var(--pg-accent-ink);
+}
+
+.siteheader__end {
+    display: flex;
+    align-items: center;
+    gap: var(--pg-sp-3);
+    /* Pushed to the far edge, which is also what keeps the nav beside the wordmark. */
+    margin-left: auto;
+}
+
+.siteheader__who {
+    color: var(--pg-ink-muted);
+    font-size: 21px;
+}
+
+/* ---- footer ---- */
+
+.sitefooter {
+    flex: none;
+    /* Modest: the front page and the sign-in flow are each meant to fit one screen. */
+    padding: var(--pg-sp-5) var(--shell-gutter) var(--pg-sp-6);
+}
+
+.sitefooter__inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--pg-sp-4);
+    max-width: var(--shell-measure);
+    margin: 0 auto;
+    padding: var(--pg-sp-4) var(--pg-sp-5);
+}
+
+/* Sand, not the muted ink: this line sits on the olive face, where the page's ink is the ground. */
+.sitefooter__note {
+    color: var(--pg-sand);
+    font-size: 21px;
+}
+
+/* ---- the landing page ---- */
+
+/* One screenful and no more: the hero is centred in whatever the header and footer leave. */
+.landing {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    width: 100%;
+    max-width: var(--shell-measure);
+    margin: 0 auto;
+    padding: var(--pg-sp-6) var(--shell-gutter);
+}
+
+/* The two ways in stand beside the words rather than under them. */
+.hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 240px);
+    align-items: center;
+    gap: var(--pg-sp-6);
+    width: 100%;
+}
+
+/*
+ * The headline sits on a sand copy of itself, offset by the same step every surface drops, so the
+ * type is built the way the panels are.
+ */
+.hero__title {
+    color: var(--pg-ink);
+    font-family: var(--pg-font-brand);
+    /* Sized to hold the line rather than to fill the column: the headline never wraps. */
+    font-size: clamp(19px, 2.6vw, 32px);
+    font-weight: normal;
+    line-height: 1.5;
+    letter-spacing: 2px;
+    text-shadow: var(--pg-lift) var(--pg-lift) 0 var(--pg-surface-2);
+}
+
+.hero__lede {
+    margin-top: var(--pg-sp-5);
+    max-width: 46ch;
+    /* Two even lines rather than a long one and a stub; ignored where it is not understood. */
+    text-wrap: balance;
+    color: var(--pg-ink-muted);
+    font-size: 25px;
+    line-height: 1.45;
+}
+
+.hero__side {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-5);
+}
+
+/* Stacked, so the pair reads as one column against the block of text beside it. */
+.hero__actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-5);
+}
+
+/* A column of one, so the button inside fills the width the pair shares. */
+.hero__float {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Out of step with the first, so the pair drifts rather than marches. */
+.hero__float + .hero__float {
+    animation-delay: 1.8s;
+}
+
+/*
+ * The way in is rust rather than moss: the front page has one thing to press, and the header
+ * already spends the green. The ink is the one a filled accent face carries — both faces are
+ * light enough to take it.
+ */
+.hero__cta.pg-btn {
+    --pg-face: var(--pg-warm);
+    color: var(--pg-accent-ink);
+}
+
+.hero__cta.pg-btn:hover {
+    --pg-face: var(--pg-warm-hover);
+}
+
+/* Busy goes grey like any other button: rust on one that swallows its clicks says press me. */
+.hero__cta.pg-btn[aria-disabled='true'],
+.hero__cta.pg-btn[disabled] {
+    --pg-face: var(--pg-surface-2);
+    color: var(--pg-ink-faint);
+}
+
+.hero__refusal {
+    max-width: 32ch;
+    color: var(--pg-warm-ink);
+    font-size: 21px;
+}
+
+/* ---- the sign-in flow ---- */
+
+.authpage {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--pg-sp-4);
+    padding: var(--pg-sp-5) var(--shell-gutter);
+}
+
+.authcard {
+    width: 100%;
+    max-width: var(--shell-narrow);
+    padding: var(--pg-sp-6);
+}
+
+/* The heading is a plate as wide as its words, so centring the plate is what centres it. */
+.authcard .pg-sectitle {
+    margin-inline: auto;
+    text-align: center;
+}
+
+.authcard__fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-4);
+    margin-top: var(--pg-sp-5);
+}
+
+/* A refusal is a dialog line: inked border, warm face, no rounding. */
+.authcard__refusal {
+    margin-top: var(--pg-sp-4);
+    padding: var(--pg-sp-3) var(--pg-sp-4);
+    border: var(--pg-bw) solid var(--pg-warm);
+    background: var(--pg-warm-soft);
+    color: var(--pg-warm-ink);
+    font-size: 21px;
+    line-height: 1.35;
+}
+
+.authcard__note {
+    color: var(--pg-ink-muted);
+    font-size: 22px;
+    line-height: 1.45;
+}
+
+.authcard__aside {
+    font-size: 21px;
+}
+
+.authpage__footer {
+    color: var(--pg-ink-muted);
+    font-size: 21px;
+}
+
+.authpage__footer a,
+.authcard__aside a {
+    color: var(--pg-accent-strong);
+    text-decoration: none;
+    box-shadow: inset 0 -3px 0 var(--pg-accent);
+}
+
+.authpage__footer a:hover,
+.authcard__aside a:hover {
+    background: var(--pg-plate);
+    color: var(--pg-plate-ink);
+    box-shadow: none;
+}
+
+/* ---- the signed-in zone ---- */
+
+.zone {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--pg-sp-6);
+    width: 100%;
+    max-width: var(--shell-measure);
+    margin: 0 auto;
+    padding: var(--pg-sp-7) var(--shell-gutter) 0;
+}
+
+.zone__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--pg-sp-5);
+}
+
+.zone__head .pg-sectitle {
+    margin-top: var(--pg-sp-4);
+}
+
+.zone__note {
+    color: var(--pg-ink-muted);
+    font-size: 22px;
+}
+
+.zone__refusal {
+    padding: var(--pg-sp-3) var(--pg-sp-4);
+    border: var(--pg-bw) solid var(--pg-warm);
+    background: var(--pg-warm-soft);
+    color: var(--pg-warm-ink);
+    font-size: 21px;
+}
+
+.zone__empty,
+.zone__failure {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--pg-sp-5);
+    padding: var(--pg-sp-6);
+    color: var(--pg-ink-muted);
+    font-size: 22px;
+    line-height: 1.45;
+}
+
+.newgame {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-5);
+    padding: var(--pg-sp-5);
+}
+
+.newgame__actions,
+.card__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--pg-sp-5);
+}
+
+/* ---- a creator's games ---- */
+
+.gamelist {
+    display: flex;
+    flex-direction: column;
+    /* Wide enough for the block each card drops, so one card's shadow never lands on the next. */
+    gap: var(--pg-sp-5);
+    list-style: none;
+}
+
+.gamecard {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--pg-sp-5);
+    padding: var(--pg-sp-5);
+}
+
+.gamecard:hover {
+    transform: translate(-2px, -2px);
+}
+
+.gamecard:hover::before {
+    transform: translate(6px, 6px);
+}
+
+.gamecard__body {
+    /* Lets a long title wrap instead of pushing the button off the card. */
+    min-width: 0;
+}
+
+.gamecard__title {
+    color: var(--pg-ink);
+    font-family: var(--pg-font-brand);
+    font-size: 13px;
+    font-weight: normal;
+    line-height: 1.6;
+    letter-spacing: 1px;
+    overflow-wrap: anywhere;
+}
+
+.gamecard__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--pg-sp-3);
+    margin-top: var(--pg-sp-4);
+}
+
+/* ---- the profile cards ---- */
+
+.card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-5);
+    padding: var(--pg-sp-6);
+}
+
+/* A field is as wide as what goes in it, not as wide as the card: these cards sit on the full
+   measure, and a name stretched across it reads as a paragraph. */
+.card .pg-field,
+.newgame .pg-field {
+    max-width: var(--shell-narrow);
+}
+
+.card__refusal {
+    color: var(--pg-warm-ink);
+    font-size: 21px;
+}
+
+.card__saved {
+    color: var(--pg-accent-strong);
+    font-size: 21px;
+}
+
+/* ---- the first load, and a gate acting ---- */
+
+.waiting {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    padding: var(--pg-sp-8) var(--shell-gutter);
+}
+
+.waiting__card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--pg-sp-4);
+    padding: var(--pg-sp-6);
+}
+
+.waiting__note {
+    color: var(--pg-ink-muted);
+    font-size: 21px;
+}
+
+/* ---- short windows ---- */
+
+/*
+ * The sign-in flow owes a short window one screenful too, and a form cannot be made shorter by
+ * wrapping, so the card steps its rhythm down rather than the page growing a scrollbar.
+ */
+@media (max-height: 820px) {
+    .sitefooter {
+        padding-block: var(--pg-sp-4);
+    }
+
+    .authpage {
+        padding-block: var(--pg-sp-4);
+    }
+
+    .authcard {
+        padding: var(--pg-sp-5);
+    }
+
+    .authcard__fields {
+        gap: var(--pg-sp-3);
+        margin-top: var(--pg-sp-4);
+    }
+
+    .authcard__refusal {
+        margin-top: var(--pg-sp-3);
+        padding: var(--pg-sp-2) var(--pg-sp-3);
+    }
+}
+
+/* ---- windows too narrow for the hero's two columns ---- */
+
+/*
+ * The headline owes its one line more than the buttons owe their place beside it, so the pair
+ * drops under the words as soon as holding both would wrap it.
+ */
+@media (max-width: 960px) {
+    .hero {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--pg-sp-5);
+    }
+
+    .hero__side {
+        align-items: stretch;
+    }
+}
+
+/* ---- narrow windows ---- */
+
+@media (max-width: 640px) {
+    .landing {
+        padding-block: var(--pg-sp-4);
+    }
+
+    .zone {
+        padding-top: var(--pg-sp-6);
+    }
+
+    .siteheader__inner {
+        justify-content: center;
+        text-align: center;
+    }
+
+    .sitenav {
+        order: 1;
+        width: 100%;
+        justify-content: center;
+    }
+
+    .siteheader__end {
+        margin-left: 0;
+    }
+
+    .hero__title {
+        text-shadow: 3px 3px 0 var(--pg-surface-2);
+    }
+
+    /* A narrow window is also a short one, and the hero still owes it one screenful. */
+    .hero__lede {
+        margin-top: var(--pg-sp-4);
+        font-size: 22px;
+    }
+
+    .hero__actions {
+        gap: var(--pg-sp-4);
+    }
+}
