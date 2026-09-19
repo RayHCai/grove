@@ -45,12 +45,7 @@ export const LeaderboardEntry = z.object({
 });
 export type LeaderboardEntry = z.infer<typeof LeaderboardEntry>;
 
-/**
- * One player's standing, as a game process submits it.
- *
- * No rank: a rank is a position in a board rather than a property of a player, so it is assigned
- * when a page is built and a writer that sent one would be sending a guess.
- */
+/** One player's standing, as a game process submits it. No rank: that is a position in a board. */
 export const LeaderboardWrite = z.object({
     board: z.string().min(1).max(64),
     playerId: PlayerId,
@@ -75,9 +70,21 @@ export const BundleRef = z.object({
 });
 export type BundleRef = z.infer<typeof BundleRef>;
 
+/**
+ * Where a session fetches the `SimConfig` its world boots with — beside the code, never configured
+ * on a box: a box supplying its own would step one game's world at another's rate.
+ */
+export const ConfigRef = z.object({
+    hash: ContentHash,
+    url: z.url(),
+    byteLength: z.int().positive(),
+});
+export type ConfigRef = z.infer<typeof ConfigRef>;
+
 export const BundleSet = z.object({
     server: BundleRef,
     client: BundleRef,
+    simConfig: ConfigRef,
     /** Compared at the handshake: prediction is unsound exactly when the two ends differ here. */
     syncedHash: ContentHash,
 });

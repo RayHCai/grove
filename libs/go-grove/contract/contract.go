@@ -69,8 +69,8 @@ func NewUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// ValidURL reports whether s is what `z.url()` accepts, so a value this service stores and re-serves
-// cannot be one the TypeScript half fails to parse. A scheme and a host, both required.
+// ValidURL reports whether s is what `z.url()` accepts, so a value this service stores and
+// re-serves cannot be one the TypeScript half fails to parse. A scheme and a host, both required.
 func ValidURL(s string) bool {
 	parsed, err := url.Parse(s)
 	return err == nil && parsed.Scheme != "" && parsed.Host != ""
@@ -83,10 +83,8 @@ func Timestamp(t time.Time) string {
 }
 
 // ParseTimestamp reads one back, which is how a router decides `healthy` from a heartbeat's age.
-//
-// A trailing Z and no numeric offset, because that is the whole of what `z.iso.datetime()` admits
-// with no options — a box whose clock formats an offset must fail here rather than be taken by one
-// half of the fleet and refused by anything parsing the same beat with the declared schema.
+// A trailing Z and no numeric offset, because that is all `z.iso.datetime()` admits with no
+// options — a box whose clock formats an offset must fail here rather than split the fleet.
 func ParseTimestamp(s string) (time.Time, error) {
 	if !strings.HasSuffix(s, "Z") {
 		return time.Time{}, fmt.Errorf("parse timestamp %q: must be UTC, ending in Z", s)
@@ -166,9 +164,18 @@ type BundleRef struct {
 	ByteLength int64      `json:"byteLength"`
 }
 
+// ConfigRef is where a session fetches the SimConfig its world boots with. Beside the code rather
+// than configured on a box: a box supplying its own would step one game's world at another's rate.
+type ConfigRef struct {
+	Hash       string `json:"hash"`
+	URL        string `json:"url"`
+	ByteLength int64  `json:"byteLength"`
+}
+
 type BundleSet struct {
-	Server BundleRef `json:"server"`
-	Client BundleRef `json:"client"`
+	Server    BundleRef `json:"server"`
+	Client    BundleRef `json:"client"`
+	SimConfig ConfigRef `json:"simConfig"`
 	// Compared at the handshake: prediction is unsound exactly when the two ends differ here.
 	SyncedHash string `json:"syncedHash"`
 }
@@ -176,6 +183,13 @@ type BundleSet struct {
 type PlacementRequest struct {
 	GameID   string `json:"gameId"`
 	PlayerID string `json:"playerId"`
+	// The version this join is for, which the caller decides and the fleet never guesses: @grove/api
+	// reads it from the newest build that succeeded, so one service answers "newest" for the whole
+	// fleet. A router ranking over what its boxes happen to run has no answer at all for the first
+	// player into a game nobody is playing.
+	Revision int `json:"revision"`
+	// The code a box starts this session on, carried because the box may have to start one.
+	Bundles BundleSet `json:"bundles"`
 	// Empty when the caller has no preference, and the fleet then chooses on load alone.
 	Region string `json:"region,omitempty"`
 }
@@ -187,6 +201,22 @@ type Placement struct {
 	InstanceID string `json:"instanceId"`
 	SessionID  string `json:"sessionId"`
 	ServerURL  string `json:"serverUrl"`
+	// The version the session actually placed is running, echoed rather than assumed to be the one
+	// asked for: a rollout leaves older worlds draining, and a browser that fetched a version its
+	// session is not on is refused at the handshake.
+	Revision int `json:"revision"`
+}
+
+// InstanceStart is what this service asks a box to start, once its ranking has chosen that box.
+//
+// The bundles cross as refs rather than bytes: the router holds no build output, and a box that
+// fetches them itself caches by content hash across every session of one version.
+type InstanceStart struct {
+	InstanceID string    `json:"instanceId"`
+	GameID     string    `json:"gameId"`
+	SessionID  string    `json:"sessionId"`
+	Revision   int       `json:"revision"`
+	Bundles    BundleSet `json:"bundles"`
 }
 
 type HostCapacity struct {
@@ -221,6 +251,10 @@ type InstanceReport struct {
 	State         InstanceState `json:"state"`
 	Players       int           `json:"players"`
 	UptimeSeconds int64         `json:"uptimeSeconds"`
+	// The version this world is running, which is what makes a session joinable or not. Reported by
+	// the box rather than remembered by the router: a box that restarted its agent is the only thing
+	// that still knows what each of its processes was started on.
+	Revision int `json:"revision"`
 	// The port the box bound for this process, which is the one a player dials. On the wire rather
 	// than assumed, because the kernel picks it and every guess is a port the firewall does not open.
 	Port int `json:"port"`
@@ -234,18 +268,92 @@ type HostHeartbeat struct {
 	AgentPort int          `json:"agentPort"`
 	Capacity  HostCapacity `json:"capacity"`
 	// Every instance every beat rather than a delta, so a dropped beat costs nothing to recover.
-	Instances  []InstanceReport `json:"instances"`
-	ReportedAt string           `json:"reportedAt"`
+	Instances []InstanceReport `json:"instances"`
+	// Minted when the agent starts and fixed for as long as it runs: a box that died and came back
+	// inside the staleness window is otherwise a restart nothing upward can see.
+	Incarnation string `json:"incarnation"`
+	// The last beat of a deliberate shutdown, which is the whole of what separates a deploy from a
+	// crash — both go silent, and only one of them is an incident.
+	Leaving    bool   `json:"leaving,omitempty"`
+	ReportedAt string `json:"reportedAt"`
 }
 
-// HostView is one row of the fleet as the router sees it — `healthy` follows `lastSeenAt`, never a
+// HostLiveness is what became of a box, as the router concluded rather than as the box claimed.
+//
+// Left and failed are both silence; the difference is whether the box said goodbye first, and it is
+// the difference between a deploy and a page.
+type HostLiveness string
+
+const (
+	HostHealthy   HostLiveness = "healthy"
+	HostSuspected HostLiveness = "suspected"
+	HostLeft      HostLiveness = "left"
+	HostFailed    HostLiveness = "failed"
+)
+
+func (l HostLiveness) Valid() bool {
+	switch l {
+	case HostHealthy, HostSuspected, HostLeft, HostFailed:
+		return true
+	}
+	return false
+}
+
+// HostView is one row of the fleet as the router sees it — liveness follows `lastSeenAt`, never a
 // claim a box made about itself.
 type HostView struct {
-	HostID     string       `json:"hostId"`
-	Region     string       `json:"region"`
-	Capacity   HostCapacity `json:"capacity"`
-	LastSeenAt string       `json:"lastSeenAt"`
-	Healthy    bool         `json:"healthy"`
+	HostID      string       `json:"hostId"`
+	Region      string       `json:"region"`
+	Capacity    HostCapacity `json:"capacity"`
+	LastSeenAt  string       `json:"lastSeenAt"`
+	Liveness    HostLiveness `json:"liveness"`
+	Incarnation string       `json:"incarnation"`
+}
+
+// FleetEventKind is the transition one row of fleet history records.
+type FleetEventKind string
+
+const (
+	FleetRegistered FleetEventKind = "registered"
+	FleetRestarted  FleetEventKind = "restarted"
+	FleetSuspected  FleetEventKind = "suspected"
+	FleetLeft       FleetEventKind = "left"
+	FleetFailed     FleetEventKind = "failed"
+	FleetReturned   FleetEventKind = "returned"
+)
+
+func (k FleetEventKind) Valid() bool {
+	switch k {
+	case FleetRegistered, FleetRestarted, FleetSuspected, FleetLeft, FleetFailed, FleetReturned:
+		return true
+	}
+	return false
+}
+
+// FleetEvent is one transition a box made, which is the only thing about a box worth keeping: the
+// state it is in now is on its next beat, and the state it was in is on no beat at all.
+type FleetEvent struct {
+	// Minted by the router, so a report retried after a failed write lands on the row it already
+	// wrote rather than a second copy of it.
+	EventID string         `json:"eventId"`
+	HostID  string         `json:"hostId"`
+	Region  string         `json:"region"`
+	Kind    FleetEventKind `json:"kind"`
+	// The incarnation the box was running when this happened, so a restart's events do not read as
+	// the previous life's.
+	Incarnation string `json:"incarnation"`
+	At          string `json:"at"`
+	// Why, where a kind alone does not say it — the signal a suspicion came from, say.
+	Detail string `json:"detail,omitempty"`
+}
+
+// FleetReport is what @grove/server-manager tells @grove/api about the fleet: the whole fleet
+// every report rather than a delta, so a receiver that missed one still describes it correctly.
+type FleetReport struct {
+	Hosts []HostView `json:"hosts"`
+	// Transitions since the last report this service got an answer for, retried until one lands.
+	Events     []FleetEvent `json:"events"`
+	ReportedAt string       `json:"reportedAt"`
 }
 
 type DeploymentRequest struct {
@@ -256,11 +364,46 @@ type DeploymentRequest struct {
 	Regions []string `json:"regions"`
 }
 
+// HostDeploymentStatus is what became of one box's worlds.
+type HostDeploymentStatus string
+
+const (
+	// DeployDraining is the box's own answer: these instances end when their last player leaves.
+	DeployDraining HostDeploymentStatus = "draining"
+	// DeploySkipped is the box's own answer too — it holds no world of this game to end.
+	DeploySkipped HostDeploymentStatus = "skipped"
+	// DeployFailed is the only verdict the fleet router writes itself, for a box that never
+	// answered: a box cannot report that it was unreachable.
+	DeployFailed HostDeploymentStatus = "failed"
+)
+
+func (s HostDeploymentStatus) Valid() bool {
+	switch s {
+	case DeployDraining, DeploySkipped, DeployFailed:
+		return true
+	}
+	return false
+}
+
+// HostDeployment is one box's answer, and one row of the report the fan-out returns.
+//
+// The same shape on both sides of the relay, because @grove/server-manager forwards a redeploy and
+// decides nothing about it: a second shape here would be the router restating what a box said.
+type HostDeployment struct {
+	HostID string `json:"hostId"`
+	// The worlds the version reached, as the box named them. Never empty on DeployDraining.
+	InstanceIDs []string             `json:"instanceIds"`
+	Status      HostDeploymentStatus `json:"status"`
+	// Carried verbatim rather than mapped to a code: an operator acting on this needs to read
+	// "connection refused" apart from "the agent answered 404", and a code collapses the two.
+	Error string `json:"error,omitempty"`
+}
+
 type Deployment struct {
 	GameID  string    `json:"gameId"`
 	Bundles BundleSet `json:"bundles"`
-	// The healthy boxes in the requested regions, which are the ones this version is for. Fewer than
-	// the fleet is a staged rollout, not a failure.
-	Hosts      []string `json:"hosts"`
-	DeployedAt string   `json:"deployedAt"`
+	// One row per box the version was forwarded to, ordered by hostId so two identical pushes
+	// produce the same report. A box holding no world of this game is not dialled and has no row.
+	Hosts      []HostDeployment `json:"hosts"`
+	DeployedAt string           `json:"deployedAt"`
 }

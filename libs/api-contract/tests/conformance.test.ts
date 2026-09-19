@@ -1,8 +1,5 @@
-// The fixtures every copy of these shapes is checked against.
-//
-// The Go suite in libs/go-grove decodes and re-encodes the same files byte for byte, and the Rust
-// crates verify the same token, so a member renamed on any one side fails on all of them rather
-// than at a join.
+// The Go suite and the Rust crates check these same fixtures, so a member renamed on any one side
+// fails on all of them rather than at a join.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -19,10 +16,14 @@ import {
 import {
     Deployment,
     DeploymentRequest,
+    FleetEvent,
+    FleetReport,
     HostCapacity,
+    HostDeployment,
     HostHeartbeat,
     HostView,
     InstanceReport,
+    InstanceStart,
     Placement,
     PlacementRequest,
 } from '../src/placement.js';
@@ -44,9 +45,13 @@ const shapes: Array<[string, z.ZodType]> = [
     ['placement.json', Placement],
     ['host-capacity.json', HostCapacity],
     ['instance-report.json', InstanceReport],
+    ['instance-start.json', InstanceStart],
     ['host-heartbeat.json', HostHeartbeat],
     ['host-view.json', HostView],
+    ['fleet-event.json', FleetEvent],
+    ['fleet-report.json', FleetReport],
     ['deployment-request.json', DeploymentRequest],
+    ['host-deployment.json', HostDeployment],
     ['deployment.json', Deployment],
 ];
 

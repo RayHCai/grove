@@ -13,11 +13,9 @@ type ctxKey int
 
 const requestIDKey ctxKey = 0
 
-// RequestID puts a correlation id on every request: the caller's when it is one token this service
-// can log unchanged, and a fresh one when it is not.
-//
-// Mounted outermost, so the panic net's line carries the id too and the echo header is set before
-// any handler beneath has written a status.
+// RequestID puts a correlation id on every request: the caller's when it is one token this
+// service can log unchanged, and a fresh one when it is not. Mounted outermost, so the panic
+// net's line carries it and the echo header is set before any handler writes a status.
 func RequestID() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,11 +39,8 @@ func RequestIDFrom(ctx context.Context) string {
 	return id
 }
 
-// Forward carries the id onto an outbound request, so the service it reaches logs under the
-// same one.
-//
-// A call with no inbound request behind it — a ticker, a probe — mints rather than sends none,
-// since a beat that failed is still one line to find.
+// Forward carries the id onto an outbound request, so the service it reaches logs under the same
+// one. A call with no inbound request behind it mints rather than sending none.
 func Forward(req *http.Request) string {
 	id := RequestIDFrom(req.Context())
 	if id == "" {

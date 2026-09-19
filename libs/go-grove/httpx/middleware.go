@@ -87,10 +87,8 @@ func RequestLog(l *slog.Logger) Middleware {
 }
 
 // RateLimit caps how many requests one key may make in a window, and answers 429 past that.
-//
-// The window is fixed rather than sliding because a fixed one costs a counter per key, where a
-// sliding one costs a timestamp per request — the memory a limiter exists to protect. The price is
-// a burst across a boundary, which is what max is chosen against.
+// The window is fixed rather than sliding: a fixed one costs a counter per key where a sliding
+// one costs a timestamp per request — the memory a limiter exists to protect.
 func RateLimit(max int, window time.Duration, key func(*http.Request) string) Middleware {
 	limit := newLimiter(max, window)
 	go limit.sweep()
