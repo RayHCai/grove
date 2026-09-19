@@ -1,0 +1,11 @@
+/* A genre label: outline only, no body, so it never competes with a badge beside it. */
+.pg-tag {
+    display: inline-block;
+    padding: 6px 8px;
+    border: var(--pg-bw) solid var(--pg-ink-muted);
+    color: var(--pg-ink-muted);
+    font: normal 9px/1 var(--pg-font-brand);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}

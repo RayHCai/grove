@@ -1,0 +1,42 @@
+/* The tileset strip across the very top, inked along its bottom edge like everything else. */
+.pg-tilestrip {
+    height: 8px;
+    border-bottom: var(--pg-bw) solid var(--pg-edge);
+    background: repeating-linear-gradient(
+        90deg,
+        var(--pg-moss) 0 8px,
+        var(--pg-olive) 8px 16px,
+        var(--pg-rust) 16px 24px,
+        var(--pg-sun) 24px 32px
+    );
+}
+
+.pg-wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--pg-sp-3);
+    color: inherit;
+    font: normal 16px/1 var(--pg-font-brand);
+    letter-spacing: 2px;
+    text-decoration: none;
+}
+/* The leaf is the menu cursor turned upright, so the mark is drawn from the same one sprite. */
+.pg-wordmark__leaf {
+    display: inline-flex;
+    flex: none;
+    width: 12px;
+    height: 20px;
+    background: var(--pg-accent);
+    clip-path: var(--pg-arrow);
+    transform: rotate(-90deg);
+}
+/* The kit ships a leaf glyph for this slot; the clip above is the shape, so the svg is not drawn. */
+.pg-wordmark__leaf > svg {
+    display: none;
+}
+.pg-wordmark[href]:hover {
+    color: var(--pg-accent);
+}
+.pg-wordmark[href]:active {
+    transform: translate(2px, 2px);
+}

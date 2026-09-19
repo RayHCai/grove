@@ -1,0 +1,47 @@
+.pg-progress__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--pg-sp-2);
+    margin-bottom: var(--pg-sp-3);
+    font: normal 11px/1.4 var(--pg-font-brand);
+    letter-spacing: 1px;
+}
+.pg-progress__value {
+    color: var(--pg-ink-muted);
+    font-family: var(--pg-font-ui);
+    font-size: 21px;
+}
+
+/*
+ * An XP bar: a bordered well with the fill inside it, cut into cells.
+ *
+ * The cells are ruled over the fill by the track rather than drawn into it, because the fill is
+ * scaled horizontally and a gradient inside it would stretch its own gaps along with the value.
+ */
+.pg-progress__bar {
+    position: relative;
+    height: 26px;
+    padding: var(--pg-sp-1);
+    border: var(--pg-bw) solid var(--pg-edge);
+    box-shadow: var(--pg-shadow-md);
+    background: var(--pg-surface);
+}
+.pg-progress__bar::after {
+    content: '';
+    position: absolute;
+    inset: var(--pg-sp-1);
+    pointer-events: none;
+    background: repeating-linear-gradient(
+        90deg,
+        transparent 0 calc(6.25% - 3px),
+        var(--pg-surface) calc(6.25% - 3px) 6.25%
+    );
+}
+.pg-progress__fill {
+    width: 100%;
+    height: 100%;
+    background: var(--pg-accent);
+    transform-origin: left;
+    transition: transform 400ms var(--pg-ease);
+}

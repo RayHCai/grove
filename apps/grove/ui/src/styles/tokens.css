@@ -1,0 +1,200 @@
+:root {
+    color-scheme: light;
+
+    --pg-parchment: #f4ead2;
+    --pg-cream: #fbf4e1;
+    --pg-sand: #e4d5ae;
+    --pg-moss: #7d9c50;
+    --pg-moss-lite: #93b164;
+    --pg-olive: #4c5b3c;
+    --pg-olive-deep: #3e4a31;
+    --pg-rust: #c96f43;
+    --pg-rust-lite: #d98457;
+    --pg-rust-deep: #8f4a28;
+    --pg-char: #2e2a24;
+    --pg-sun: #e8b865;
+
+    --pg-bg: #f4ead2;
+    --pg-surface: #fbf4e1;
+    --pg-surface-2: #e4d5ae;
+    --pg-surface-3: #fdf9ec;
+    --pg-ink: #2e2a24;
+    --pg-ink-muted: #4c5b3c;
+    --pg-ink-faint: #6e6858;
+    --pg-placeholder: #756d5b;
+    --pg-border: #e2d6b6;
+    --pg-border-strong: #8f8158;
+    --pg-accent: #7d9c50;
+    --pg-accent-hover: #93b164;
+    --pg-accent-ink: #2e2a24;
+    --pg-accent-soft: #e5ecd2;
+    --pg-accent-strong: #4f6b30;
+    --pg-warm: #c96f43;
+    --pg-warm-hover: #d98457;
+    --pg-warm-soft: #f6e1d3;
+    --pg-warm-ink: #8f4a28;
+    --pg-focus: #c96f43;
+    --pg-selection-bg: #7d9c50;
+    --pg-selection-ink: #fbf4e1;
+
+    /* The 3px outline every surface is drawn with, and the solid block it drops. */
+    --pg-edge: #2e2a24;
+    --pg-lift-ink: #2e2a24;
+
+    /* The inked plate a section heading sits on, and the block it drops. */
+    --pg-plate: #2e2a24;
+    --pg-plate-ink: #e8b865;
+    --pg-plate-lift: #4c5b3c;
+
+    --pg-code-keyword: #8f4a28;
+    --pg-code-string: #4f6b30;
+    --pg-code-number: #7a5a14;
+    --pg-code-type: #3e4a31;
+    --pg-code-comment: #6e6858;
+    --pg-code-selection: #7d9c5033;
+    --pg-code-line: #2e2a240d;
+
+    --pg-shadow-sm: 3px 3px 0 var(--pg-lift-ink);
+    --pg-shadow-md: var(--pg-lift) var(--pg-lift) 0 var(--pg-lift-ink);
+
+    --pg-sp-1: 4px;
+    --pg-sp-2: 8px;
+    --pg-sp-3: 12px;
+    --pg-sp-4: 16px;
+    --pg-sp-5: 24px;
+    --pg-sp-6: 32px;
+    --pg-sp-7: 48px;
+    --pg-sp-8: 80px;
+
+    --pg-font-ui: 'VT323', 'Courier New', monospace;
+    --pg-font-brand: 'Press Start 2P', 'Courier New', monospace;
+    --pg-font-mono:
+        ui-monospace, 'Cascadia Code', 'Cascadia Mono', Consolas, 'JetBrains Mono', 'Fira Code',
+        Menlo, 'DejaVu Sans Mono', 'Liberation Mono', monospace;
+
+    /* Everything steps and nothing eases: a sprite has no in-between frames to show. */
+    --pg-ease: steps(4, end);
+    --pg-step-1: steps(1, end);
+
+    /* ---- Pixel Grove construction ---- */
+
+    /* The chunky outline, and how far the solid block behind a surface is dropped. */
+    --pg-bw: 3px;
+    --pg-lift: 4px;
+
+    /*
+     * The two-step corner every panel is clipped to, and the one-step corner a control takes.
+     * A polygon rather than a radius: a curve has no pixel size, and these corners are meant to
+     * read as two and one 6px steps at any scale.
+     */
+    --pg-notch: polygon(
+        0 12px,
+        6px 12px,
+        6px 6px,
+        12px 6px,
+        12px 0,
+        calc(100% - 12px) 0,
+        calc(100% - 12px) 6px,
+        calc(100% - 6px) 6px,
+        calc(100% - 6px) 12px,
+        100% 12px,
+        100% calc(100% - 12px),
+        calc(100% - 6px) calc(100% - 12px),
+        calc(100% - 6px) calc(100% - 6px),
+        calc(100% - 12px) calc(100% - 6px),
+        calc(100% - 12px) 100%,
+        12px 100%,
+        12px calc(100% - 6px),
+        6px calc(100% - 6px),
+        6px calc(100% - 12px),
+        0 calc(100% - 12px)
+    );
+    --pg-notch-sm: polygon(
+        0 6px,
+        3px 6px,
+        3px 3px,
+        6px 3px,
+        6px 0,
+        calc(100% - 6px) 0,
+        calc(100% - 6px) 3px,
+        calc(100% - 3px) 3px,
+        calc(100% - 3px) 6px,
+        100% 6px,
+        100% calc(100% - 6px),
+        calc(100% - 3px) calc(100% - 6px),
+        calc(100% - 3px) calc(100% - 3px),
+        calc(100% - 6px) calc(100% - 3px),
+        calc(100% - 6px) 100%,
+        6px 100%,
+        6px calc(100% - 3px),
+        3px calc(100% - 3px),
+        3px calc(100% - 6px),
+        0 calc(100% - 6px)
+    );
+
+    /* The stepped menu cursor, used as a clip on a 12x20 block. */
+    --pg-arrow: polygon(
+        0 0,
+        4px 0,
+        4px 4px,
+        8px 4px,
+        8px 8px,
+        12px 8px,
+        12px 12px,
+        8px 12px,
+        8px 16px,
+        4px 16px,
+        4px 20px,
+        0 20px
+    );
+
+    --pg-dur-fast: 120ms;
+    --pg-dur: 180ms;
+    --pg-dur-slow: 260ms;
+}
+
+:root[data-theme='dark'] {
+    color-scheme: dark;
+
+    --pg-bg: #1a1714;
+    --pg-surface: #2e2a24;
+    --pg-surface-2: #3a342c;
+    --pg-surface-3: #46403a;
+    --pg-ink: #f4ead2;
+    --pg-ink-muted: #b4bf96;
+    --pg-ink-faint: #a39b88;
+    --pg-placeholder: #a8a08c;
+    --pg-border: #3d362e;
+    --pg-border-strong: #857968;
+    --pg-accent: #93b164;
+    --pg-accent-hover: #a5c278;
+    --pg-accent-ink: #2e2a24;
+    --pg-accent-soft: #3a4630;
+    --pg-accent-strong: #93b164;
+    --pg-warm: #d98457;
+    --pg-warm-hover: #e6976c;
+    --pg-warm-soft: #3f2b21;
+    --pg-warm-ink: #d98457;
+    --pg-focus: #e8b865;
+    --pg-selection-bg: #7d9c50;
+    --pg-selection-ink: #fbf4e1;
+
+    --pg-edge: #857968;
+    --pg-lift-ink: #0d0b09;
+
+    /* Olive rather than char: a char plate on this ground is the same value as the panels on it. */
+    --pg-plate: #3e4a31;
+    --pg-plate-ink: #e8b865;
+    --pg-plate-lift: #0d0b09;
+
+    --pg-code-keyword: #d98457;
+    --pg-code-string: #93b164;
+    --pg-code-number: #e8b865;
+    --pg-code-type: #b4bf96;
+    --pg-code-comment: #a39b88;
+    --pg-code-selection: #7d9c504d;
+    --pg-code-line: #f4ead208;
+
+    --pg-shadow-sm: 3px 3px 0 var(--pg-lift-ink);
+    --pg-shadow-md: var(--pg-lift) var(--pg-lift) 0 var(--pg-lift-ink);
+}
