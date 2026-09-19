@@ -1,16 +1,26 @@
-// Where a new version of a game goes: which boxes take it.
+// Where a new version of a game goes: every box holding a world of it, asked at once.
 
 package api
 
 import (
+	"context"
 	"net/http"
+	"sync"
+	"time"
 
+	"github.com/RayHCai/grove/apps/grove/server-manager/internal/fleet"
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
 
-// deploy answers with the boxes a version is for. Fewer than the fleet is a staged rollout, and
-// none at all is a fleet with nothing healthy in the requested regions — both are the same answer.
+// The fan-out outlasts the listener's own write deadline on a fleet of any size, and losing the
+// connection here loses the account of what drained rather than the drain.
+const deployWriteGrace = 5 * time.Second
+
+// deploy forwards the redeploy to every box running the game and answers what each one did.
+//
+// This service deploys nothing: what a box runs is decided at start, from the paths its start
+// request carries, so the whole of this is a relay with a report attached.
 func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 	var req contract.DeploymentRequest
 	if !httpx.DecodeJSON(w, r, &req, maxBodyBytes) {
@@ -21,7 +31,65 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpx.WriteJSON(w, http.StatusOK, s.registry.Deploy(req, s.now()))
+	// Past httpx's own writeTimeout, which is sized for a request and not for a fleet.
+	budget := s.deployTimeout + deployWriteGrace
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(budget))
+
+	ctx, cancel := context.WithTimeout(r.Context(), s.deployTimeout)
+	defer cancel()
+
+	rows := s.fanOut(ctx, s.registry.Targets(req, s.now()), req.GameID)
+
+	// 200 even when every row failed: httpx.WriteError scrubs the body of any 5xx, and a 502 here
+	// would erase the report this route exists to deliver.
+	httpx.WriteJSON(w, http.StatusOK, contract.Deployment{
+		GameID:     req.GameID,
+		Bundles:    req.Bundles,
+		Hosts:      rows,
+		DeployedAt: contract.Timestamp(s.now()),
+	})
+}
+
+// fanOut asks every target at once and keeps each answer in its target's place.
+//
+// One goroutine per box and no bound on how many run: each is one short-lived connection, and
+// bounding them would make the wall clock a function of fleet size while a rollout waits.
+func (s *Server) fanOut(ctx context.Context, targets []fleet.Host, gameID string) []contract.HostDeployment {
+	rows := make([]contract.HostDeployment, len(targets))
+
+	var asking sync.WaitGroup
+	for i, host := range targets {
+		asking.Add(1)
+		go func() {
+			defer asking.Done()
+
+			// Its own budget inside the whole fan-out's, so a handful of wedged boxes cannot spend
+			// the deadline every other box is still waiting on and turn healthy ones into failures.
+			hostCtx, cancel := context.WithTimeout(ctx, s.hostTimeout)
+			defer cancel()
+
+			rows[i] = s.agent.Redeploy(hostCtx, host, gameID)
+		}()
+	}
+	asking.Wait()
+
+	for _, row := range rows {
+		if row.Status == contract.DeployFailed {
+			// The one thing this fan-out learns that no beat carries: a box that did not answer.
+			// Marked here rather than waited for, because the staleness window is the slow path to
+			// the same conclusion and this box just refused work in front of us.
+			s.registry.Suspect(row.HostID, "redeploy unanswered", s.now())
+			continue
+		}
+		if row.Status != contract.DeployDraining {
+			continue
+		}
+		// Recorded from the answer rather than waited for: the next beat from that box is the
+		// authority and overwrites this, but it is a whole heartbeat away, and every joiner placed
+		// in between would be sent into a world that is already ending.
+		s.registry.Draining(row.HostID, row.InstanceIDs)
+	}
+	return rows
 }
 
 func checkDeployment(req contract.DeploymentRequest) (string, bool) {

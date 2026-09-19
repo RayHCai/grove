@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/RayHCai/grove/apps/grove/server-manager/internal/fleet"
+	"github.com/RayHCai/grove/apps/grove/server-manager/internal/joins"
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 	"github.com/RayHCai/grove/libs/go-grove/token"
 )
@@ -22,10 +23,15 @@ const maxBodyBytes = 64 << 10
 // Options is what main composes a Server from, and what a test substitutes into.
 type Options struct {
 	Registry *fleet.Registry
-	Balancer fleet.Balancer
-	Ingress  fleet.Ingress
-	Secret   []byte
-	Log      *slog.Logger
+	// The line every join waits in, which holds the placement decision behind it.
+	Joins *joins.Line
+	// What this service says to a box, and the only thing it ever says.
+	Agent  fleet.Agent
+	Secret []byte
+	Log    *slog.Logger
+	// How long a whole fan-out may take, and how long any one box in it may hold its own answer.
+	DeployTimeout time.Duration
+	HostTimeout   time.Duration
 	// The clock the staleness window is measured against, so a test can age a host without waiting.
 	Now func() time.Time
 	// The probe GET /ready answers from, so a test can substitute one that fails where this
@@ -35,13 +41,15 @@ type Options struct {
 
 // Server holds what a handler needs and nothing else.
 type Server struct {
-	registry *fleet.Registry
-	balancer fleet.Balancer
-	ingress  fleet.Ingress
-	secret   []byte
-	log      *slog.Logger
-	now      func() time.Time
-	ready    func(context.Context) error
+	registry      *fleet.Registry
+	joins         *joins.Line
+	agent         fleet.Agent
+	secret        []byte
+	log           *slog.Logger
+	deployTimeout time.Duration
+	hostTimeout   time.Duration
+	now           func() time.Time
+	ready         func(context.Context) error
 }
 
 func New(o Options) *Server {
@@ -52,13 +60,15 @@ func New(o Options) *Server {
 		o.Ready = nothingToWaitFor
 	}
 	return &Server{
-		registry: o.Registry,
-		balancer: o.Balancer,
-		ingress:  o.Ingress,
-		secret:   o.Secret,
-		log:      o.Log,
-		now:      o.Now,
-		ready:    o.Ready,
+		registry:      o.Registry,
+		joins:         o.Joins,
+		agent:         o.Agent,
+		secret:        o.Secret,
+		log:           o.Log,
+		deployTimeout: o.DeployTimeout,
+		hostTimeout:   o.HostTimeout,
+		now:           o.Now,
+		ready:         o.Ready,
 	}
 }
 
@@ -100,11 +110,9 @@ func requireFleet(secret []byte) httpx.Middleware {
 	}
 }
 
-// nothingToWaitFor is this service's readiness probe, and it never fails.
-//
-// An empty registry answers a placement with the same 409 a full fleet does, so holding no boxes is
-// a correct answer and not a fault — and a caller that pulled this process out of rotation for it
-// would cut off the beats that are the only way the registry ever fills.
+// nothingToWaitFor is this service's readiness probe, and it never fails. An empty registry
+// answers a placement with the same 409 a full fleet does, and a caller that pulled this process
+// from rotation would cut off the beats that are the only way the registry fills.
 func nothingToWaitFor(context.Context) error { return nil }
 
 // remoteIP is where a beat came from, without the connection's ephemeral source port.

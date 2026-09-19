@@ -11,11 +11,9 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 )
 
-// Balancer orders the boxes that already qualify — the caller has filtered for freshness, capacity
-// and region, so an implementation only ranks.
-//
-// An interface because ranking is what a real fleet changes: spot-interruption risk, price per
-// region, whether a box has already pulled the game's bundles.
+// Balancer orders the boxes that already qualify — the caller filtered for freshness, capacity
+// and region, so an implementation only ranks. An interface because ranking is what a real fleet
+// changes: interruption risk, price per region, whether a box already pulled the bundles.
 type Balancer interface {
 	// The whole order rather than one winner, because the box ranked first may have filled between
 	// the ranking and the placement, and that join takes the next box rather than failing.

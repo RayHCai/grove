@@ -24,15 +24,7 @@ const stopWriteGrace = 10 * time.Second
 
 // startBody is one placement @grove/server-manager already decided. This agent carries it out; it
 // does not weigh it, because which box should hold a session is not a question one box can answer.
-type startBody struct {
-	// The id the placement was answered with, so the player and this box name the same process.
-	InstanceID    string `json:"instanceId"`
-	GameID        string `json:"gameId"`
-	SessionID     string `json:"sessionId"`
-	BundlePath    string `json:"bundlePath"`
-	SimConfigPath string `json:"simConfigPath"`
-	ManagerURL    string `json:"managerUrl"`
-}
+type startBody struct{ contract.InstanceStart }
 
 type logPage struct {
 	InstanceID string   `json:"instanceId"`
@@ -54,12 +46,14 @@ func (s *service) startInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	view, err := s.instances.Start(r.Context(), supervisor.Request{
-		InstanceID:    body.InstanceID,
-		GameID:        body.GameID,
-		SessionID:     body.SessionID,
-		BundlePath:    body.BundlePath,
-		SimConfigPath: body.SimConfigPath,
-		ManagerURL:    body.ManagerURL,
+		InstanceID: body.InstanceID,
+		GameID:     body.GameID,
+		SessionID:  body.SessionID,
+		Revision:   body.Revision,
+		Bundles:    body.Bundles,
+		// This box's own, never the placement's: where the data plane is, is a fleet address, and
+		// @grove/server-manager holds no game data to be restating one.
+		ManagerURL: s.managerURL,
 	})
 	switch {
 	case errors.Is(err, supervisor.ErrAtCapacity):
@@ -142,12 +136,18 @@ func (b startBody) problem() string {
 		return "sessionId must be a uuid"
 	case !contract.ValidUUID(b.InstanceID):
 		return "instanceId must be a uuid"
-	case b.BundlePath == "":
-		return "bundlePath is required"
-	case b.SimConfigPath == "":
-		return "simConfigPath is required"
-	case b.ManagerURL == "":
-		return "managerUrl is required"
+	case b.Revision < 1:
+		return "revision must be positive"
+	// The hashes are checked here because they become filenames under this box's cache directory,
+	// and they are the only part of a start that reaches its filesystem at all.
+	case !contract.ValidContentHash(b.Bundles.Server.Hash):
+		return "bundles.server.hash must be a sha-256"
+	case !contract.ValidContentHash(b.Bundles.SimConfig.Hash):
+		return "bundles.simConfig.hash must be a sha-256"
+	case !contract.ValidURL(b.Bundles.Server.URL):
+		return "bundles.server.url must be a url"
+	case !contract.ValidURL(b.Bundles.SimConfig.URL):
+		return "bundles.simConfig.url must be a url"
 	}
 	return ""
 }
