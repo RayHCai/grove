@@ -1,9 +1,5 @@
-// Contract tests for the easing curves.
-//
-// Every timed motion verb in the engine runs through `ease`, and a tween's final frame writes
-// `lerp(from, to, ease(1, curve))` — so a curve that does not return exactly 1 at t=1 leaves the
-// property short of its target forever, and one that returns undefined writes NaN and keeps
-// writing it. Both endpoints are therefore asserted exactly rather than approximately.
+// A curve that does not return exactly 1 at t=1 leaves a tween short of its target forever, so
+// both endpoints are asserted exactly rather than approximately.
 
 import { describe, it, expect } from 'vitest';
 import type { Easing } from '../src/easing.js';

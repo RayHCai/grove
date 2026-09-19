@@ -1,10 +1,5 @@
-// Contract tests for the scalar helpers.
-//
-// These are on the creator surface, so the edge behaviour is part of
-// the public promise rather than an implementation detail: `clamp` normalizes a reversed
-// range instead of returning NaN, and `lerp` is deliberately UNCLAMPED so tween code can
-// extrapolate. Both `lerp` endpoints are asserted with exact equality rather than a
-// tolerance, because a tween that lands at 0.6999999 on its final frame is a real bug.
+// Edge behaviour is public promise: `clamp` normalizes a reversed range, and `lerp` is
+// deliberately UNCLAMPED so tween code can extrapolate. Endpoints asserted exactly.
 
 import { describe, it, expect } from 'vitest';
 import { DEG2RAD, RAD2DEG, clamp, lerp } from '../src/scalar.js';

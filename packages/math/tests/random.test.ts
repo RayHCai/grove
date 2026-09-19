@@ -1,10 +1,5 @@
-// Contract tests for the seeded PRNG.
-//
-// What breaks silently here is not randomness quality but reproducibility: a client predicting a
-// tick draws from its own copy of this stream and reconciles against the authority's, so the
-// contract is that one seed plus one call count determines the value exactly. `capture`/`restore`
-// carry the same weight — they are what a rewind puts back, and a partial restore desynchronises a
-// peer several ticks later, nowhere near the line that caused it.
+// The contract is reproducibility, not quality: one seed plus one call count fixes the value.
+// `capture`/`restore` carry the same weight — a partial restore desyncs a peer ticks later.
 
 import { describe, it, expect } from 'vitest';
 import { SeededRandom } from '../src/random.js';

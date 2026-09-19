@@ -1,12 +1,6 @@
-// Deterministic replacements for the ECMA-262 implementation-approximated functions: two machines
-// must produce identical results from identical inputs, which the built-in transcendentals do not
-// guarantee, so these use polynomial/range-reduction over exact IEEE-754 operations only.
-//
-// Only sin, cos, atan, exp and log carry their own approximation; everything below them is
-// derived by identity, so a precision fix belongs in one of those five.
-//
-// Not replaced, because they are already exact IEEE-754 and agree bit-for-bit on every target:
-// abs, sign, min, max, floor, ceil, round, trunc, fround, sqrt.
+// Two machines must produce identical results from identical inputs, which the built-in
+// transcendentals do not guarantee — so these use polynomial range-reduction over exact IEEE-754
+// operations only. Only sin, cos, atan, exp and log approximate; the rest derive by identity.
 
 const PI = 3.141592653589793;
 const HALF_PI = 1.5707963267948966;
@@ -20,11 +14,8 @@ const PIO2_2 = 6.077100506303966e-11;
 const PIO2_2T = 2.0222662487959506e-21;
 
 /**
- * `x` as a quadrant count and a remainder in [−π/4, π/4], which is where both kernels are accurate.
- *
- * Reducing to [−π/2, π/2] and running one kernel over it instead costs ~5e-8 at the ends of that
- * range — worst exactly at the quadrant boundaries, which is where `cos(0)` lands when cosine is
- * spelled `sin(x + π/2)`.
+ * `x` as a quadrant count and a remainder in [−π/4, π/4], where both kernels are accurate.
+ * Reducing to [−π/2, π/2] instead costs ~5e-8 exactly at the quadrant boundaries.
  */
 function reduceQuadrant(x: number): { q: number; r: number } {
     const n = Math.round(x * INV_HALF_PI);
@@ -76,7 +67,8 @@ function cosKernel(x: number): number {
 export function sin(x: number): number {
     if (x !== x) return NaN;
     if (!isFinite(x)) return NaN;
-    // -0 in, -0 out: the kernel would return +0 and a caller mirroring a position would lose the sign.
+    // -0 in, -0 out: the kernel would return +0 and a caller mirroring a position would lose the
+    // sign.
     if (x === 0) return x;
 
     const { q, r } = reduceQuadrant(x);

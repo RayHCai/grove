@@ -1,13 +1,5 @@
-// Property tests for the slot table, driven by a random operation sequence.
-//
-// Every other test of this class pins a sequence someone thought to write down, and the sequences
-// that break an allocator are the ones nobody did: a release folded into a clear folded into a
-// reuse, a snapshot applied over a table that has since moved on. The model here is a plain map of
-// handle to record and a set of handles the caller has let go — it reimplements no freelist, so
-// agreeing with it is evidence rather than a restatement of the same algorithm twice.
-//
-// The sequence is seeded from a constant rather than `Math.random`, so a failure is a fixed input
-// that replays. A bug in `SeededRandom` would change which sequence runs, never make one pass.
+// A random operation sequence against a plain map-plus-set model, which reimplements no freelist,
+// so agreeing with it is evidence rather than the same algorithm twice. Seeded from a constant.
 
 import { describe, it, expect } from 'vitest';
 import { handleIndex } from '../src/handle.js';

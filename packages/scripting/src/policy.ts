@@ -42,12 +42,7 @@ const COMPILED = 'a string compiled at run time is source this lexical pass neve
 const UNNAMED = 'reaching a global without naming it is how this list is evaded';
 const COLLECTOR = "collection timing is the engine's own, and no two runs agree on it";
 
-/**
- * `Math` members denied inside a `SyncedScript`, keyed by member name.
- *
- * The rest of `Math` stays legal: `floor`, `abs`, `min`, `max`, `round`, `sqrt` and their kin are
- * exactly specified, so they already agree everywhere.
- */
+/** `Math` members denied inside a `SyncedScript`; the exactly-specified rest stay legal. */
 export const DENIED_MATH: ReadonlyMap<string, Redirect> = new Map([
     ...TRANSCENDENTALS.map((name): [string, Redirect] => [
         name,
@@ -63,11 +58,8 @@ export const DENIED_MATH: ReadonlyMap<string, Redirect> = new Map([
 ]);
 
 /**
- * Globals denied inside a `SyncedScript`, keyed by binding name.
- *
- * Not every entry is a clock. `globalThis`, `Reflect` and `Proxy` are how the rest would be reached
- * without naming one; `eval` and `Function` run source this pass never read; `WeakRef` and
- * `FinalizationRegistry` expose the collector; and `process` is absent in the browser half outright.
+ * Globals denied inside a `SyncedScript`. Not every entry is a clock: `globalThis`, `Reflect`
+ * and `Proxy` reach the rest without naming one, and `eval` runs source this pass never read.
  */
 export const DENIED_GLOBALS: ReadonlyMap<string, Redirect> = new Map<string, Redirect>([
     [
@@ -166,7 +158,7 @@ export const CONSTRUCTOR_READ: Redirect = {
     because: `every constructor chain ends at Function, and ${COMPILED}`,
 };
 
-/** Denied for `import(expr)`, which reaches a module after the chunk both ends agreed on was built. */
+/** Denied for `import(expr)`, which reaches a module after the agreed chunk was built. */
 export const DYNAMIC_IMPORT: Redirect = {
     use: 'a static import at the top of the module',
     because: 'a module pulled in at run time is outside the bytes the handshake compared',

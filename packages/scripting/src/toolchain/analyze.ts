@@ -8,7 +8,7 @@ import { BundleError } from '../errors.js';
 import { asNodes, isNode, lineStarts, nodeName, parseModule } from './ast.js';
 import type { Node } from './ast.js';
 
-/** Modules whose `SyncedScript` / `ServerScript` / `ClientScript` are the roots of the hierarchy. */
+/** Modules whose `SyncedScript` / `ServerScript` / `ClientScript` root the hierarchy. */
 export const DEFAULT_BASE_MODULES: readonly string[] = ['@platform/engine', '@platform/core'];
 
 export interface AnalyzeOptions {
@@ -38,7 +38,7 @@ export interface SyncedClass {
     readonly local: string;
     /** The class declaration or expression itself. */
     readonly node: Node;
-    /** Offsets of each line start in the module, for turning a node position into line and column. */
+    /** Offsets of each line start, for turning a node position into line and column. */
     readonly lines: readonly number[];
     /** The module's top-level names; one shadows the denied global it shares a name with. */
     readonly bindings: readonly string[];
@@ -82,7 +82,7 @@ export type ExportTarget =
     | { readonly kind: 'local'; readonly name: string }
     | { readonly kind: 'reexport'; readonly source: string; readonly imported: string };
 
-/** Reads every `.ts` under `srcDir`, resolves the class hierarchy, and locates each script class. */
+/** Reads every `.ts` under `srcDir`, resolves the hierarchy, and locates each script class. */
 export function analyzeScripts(options: AnalyzeOptions): Analysis {
     const root = path.resolve(options.srcDir);
     const baseModules = new Set(options.baseModules ?? DEFAULT_BASE_MODULES);

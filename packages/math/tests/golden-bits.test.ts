@@ -1,18 +1,6 @@
-// Golden bit vectors for the deterministic kernels and the seeded stream.
-//
-// These exist because the rest of this package's determinism coverage cannot fail. `f(x) === f(x)`
-// inside one process holds for `Math.sin` too, and comparing a replacement against the built-in it
-// replaces measures accuracy against the very thing ECMA-262 lets each engine approximate its own
-// way. What actually desynchronises two peers is a coefficient edit that is accuracy-neutral and
-// bit-visible, so the reference here is the exact float64 the shipped kernel produces, recorded as
-// the 64 bits rather than a decimal that cannot carry the last ulp.
-//
-// The table is what this package computes, not what is mathematically right: an accuracy fix is
-// meant to show up here as a deliberate diff, and the accuracy bounds in the sibling file are what
-// judge whether that diff is an improvement.
-//
-// Inputs cover each function's argument-reduction branches and their one-ulp neighbours, the domain
-// edges, and 0, -0, NaN, the infinities, the smallest subnormal and the largest finite.
+// The reference is the exact float64 the shipped kernel produces, recorded as 64 bits: what
+// desynchronises two peers is an accuracy-neutral, bit-visible coefficient edit. The table is
+// what this package computes, so an accuracy fix shows up here as a deliberate diff.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -47,12 +35,7 @@ type StreamRow = readonly [number, readonly string[], readonly number[]];
 
 const view = new DataView(new ArrayBuffer(8));
 
-/**
- * A float64 as its 64 bits in hex, big-endian.
- *
- * NaN collapses to a token rather than a pattern: the payload of a NaN an arithmetic operation
- * produces is engine-chosen, and it is NaN-ness rather than the payload that a peer observes.
- */
+/** A float64 as its 64 bits in hex; NaN collapses to a token, its payload being engine-chosen. */
 function bits(x: number): string {
     if (x !== x) return 'NaN';
     view.setFloat64(0, x);
