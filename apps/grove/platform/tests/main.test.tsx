@@ -13,6 +13,7 @@ afterEach(() => {
 });
 
 describe('the entry point', () => {
+    // Cold-imports the whole app, which outruns the 5 s default when the suites run in parallel.
     it('mounts the shell into #root', async () => {
         const host = document.createElement('div');
         host.id = 'root';
@@ -25,7 +26,7 @@ describe('the entry point', () => {
         // The real client is in play here, so what is on screen is the first load rather than a
         // page; that it mounted at all is the whole of what this pins.
         expect(host.querySelector('main')).not.toBeNull();
-    });
+    }, 30_000);
 
     it('refuses to mount when the document carries no #root', async () => {
         await expect(import('../src/main')).rejects.toThrow('#root is missing from index.html');
