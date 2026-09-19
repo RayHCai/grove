@@ -1,13 +1,5 @@
-// One server, N tabs, one hand-turned clock — the arrangement a browser host produces, minus the
-// socket and the wall clock.
-//
-// The order inside `step` is the load-bearing part: the authority pumps first and delivers every
-// pair itself, then each tab runs its display frame and the host's own after-frame work. A suite
-// that sequenced delivery against a step by hand would be reproducing the bug that giving the
-// driver `deliver` removes.
-//
-// Every verb here takes the world it drives as an argument rather than reading one module's, so a
-// suite about one API component can stand up a world shaped for that component alone.
+// The order inside `step` is load-bearing: the authority pumps first and delivers every pair, then
+// each tab runs its display frame. Every verb takes the world it drives as an argument.
 
 import { afterEach, expect } from 'vitest';
 import { ClientInstance, ManualFrameSource, ScriptedInputDevice } from '@platform/glue/client';
@@ -46,11 +38,8 @@ export interface Tab {
 }
 
 /**
- * One numeric widget, drawn on the renderer's `ui` surface.
- *
- * Screen space, so it neither scrolls with the camera nor culls — and text is legal only there. It
- * reads the same replicated field a screen script does, because a node is not a widget and no
- * `hud` verb can reach one.
+ * One numeric widget, drawn on the renderer's `ui` surface: screen space, so it neither scrolls
+ * nor culls, and text is legal only there. It reads the same field a screen script does.
  */
 export class ScoreNode {
     readonly #renderer: IRenderer;
@@ -153,11 +142,8 @@ export class Session {
     }
 
     /**
-     * One more tab, admitted under the identity the HOST resolved.
-     *
-     * Identified, as a socket host's join is: the server reads that player's persisted record
-     * before it allocates a `Player`, and that read is a promise — which is why every step yields
-     * to the microtask queue rather than assuming the join completed inside the pump.
+     * One more tab, admitted under the identity the HOST resolved. The server reads that player's
+     * persisted record first, and that read is a promise — hence the microtask yield per step.
      */
     async join(name: string, identity = name): Promise<Tab> {
         const pair = loopbackPair();
@@ -242,7 +228,7 @@ export class Session {
         await this.stepUntil(() => tabs.every((tab) => tab.client.state === 'live'));
     }
 
-    /** The tab closes. Its transport goes with it, and the authority notices on the next deliver. */
+    /** The tab closes. Its transport goes with it; the authority notices on the next deliver. */
     leave(tab: Tab): void {
         if (tab.gone) return;
         tab.gone = true;
@@ -277,7 +263,7 @@ export class Session {
         this.release(tab, code);
     }
 
-    /** A widget press, raised from a DOM handler rather than from a frame — so the runtime is named here. */
+    /** A widget press raised from a DOM handler, not a frame, so the runtime is named here. */
     press(tab: Tab, widget: string, screen?: string): void {
         if (tab.gone) return;
         const rt = tab.client.mirror?.runtime;
@@ -286,10 +272,8 @@ export class Session {
     }
 
     /**
-     * A click, resolved the way a canvas does it: world point to screen point, screen point to
-     * whatever is DRAWN there, and only then to the entity behind it.
-     *
-     * Answers what it hit, so a caller can tell a click that landed from one that found empty space.
+     * A click, resolved the way a canvas does it: world point to screen point, screen point to what
+     * is DRAWN there, then to the entity behind it. Answers what it hit, so a miss is visible.
      */
     click(tab: Tab, worldPoint: { x: number; y: number }): EntityId | undefined {
         if (tab.gone) return undefined;
@@ -332,11 +316,8 @@ export class Session {
 }
 
 /**
- * Registers this tab's screens and opens them.
- *
- * A screen is minted on first mention and `hud.screen` answers null until then, so the open below
- * is what brings it into being. In a hosted platform the panel does this from the project file;
- * here the session start is the panel.
+ * Registers this tab's screens and opens them. A screen is minted on first mention and
+ * `hud.screen` answers null until then, so the open is what brings it into being.
  */
 export function openScreens(client: GameClient, world: World): void {
     const rt = client.mirror?.runtime;
@@ -348,7 +329,8 @@ export function openScreens(client: GameClient, world: World): void {
             // class has to be registered while the screen is closed: mint it, close it to discard
             // the empty instance set the first open made, register, and open it for real.
             const screen = hud.open(spec.name);
-            // Registered once per runtime; a resync builds a fresh one where the list is empty again.
+            // Registered once per runtime; a resync builds a fresh one where the list is empty
+            // again.
             if (screen.scripts.length > 0) continue;
             hud.close(spec.name);
             screen.addScript(spec.script as never);
@@ -357,11 +339,7 @@ export function openScreens(client: GameClient, world: World): void {
     });
 }
 
-/**
- * Turns the microtask queue six times, enough for the admission's promise chain.
- *
- * Not a macrotask flush: nothing on a timer or in I/O runs here.
- */
+/** Turns the microtask queue six times, enough for the admission's promise chain. */
 export async function flushMicrotasks(): Promise<void> {
     for (let i = 0; i < 6; i++) await Promise.resolve();
 }
@@ -398,7 +376,7 @@ export function ofTemplate(rt: Runtime, template: string): EntityId[] {
     return [...rt.entities.liveIds()].filter((id) => rt.entities.record(id)?.template === template);
 }
 
-/** The avatar the given player owns, in whichever world is asked — a mirror's or the authority's. */
+/** The avatar the given player owns, in whichever world is asked — mirror or authority. */
 export function avatarIn(rt: Runtime, playerId: string): EntityId | undefined {
     return [...rt.entities.liveIds()].find((id) => {
         const record = rt.entities.record(id);

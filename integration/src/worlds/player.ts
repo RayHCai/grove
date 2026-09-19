@@ -1,11 +1,4 @@
-// A world whose whole game is the `Player` facade: the roster verbs, the two input surfaces a
-// player carries, and the per-player store behind them.
-//
-// Nobody spawns at the join, because a body here is something the game HANDS OUT — which is what
-// leaves `spawn`, `spectate` and `respawn` each reachable on its own. Every verb is reached by
-// pressing a widget, so each call arrives on a real interaction frame with an engine-supplied
-// `ctx.player`, and every reading is `@serverState` rather than a return value, so a test asserts
-// on what a CLIENT was told rather than on the authority that made the call.
+// Nobody spawns at the join, which leaves `spawn`, `spectate` and `respawn` each reachable alone.
 
 import type { Ctx, Entity, Game, InputBindings, Player } from '@platform/engine';
 import { ServerScript, onEvent, onPlayerJoin, onPress, serverState } from '@platform/engine';
@@ -96,7 +89,7 @@ export class Warden extends ServerScript<Game> {
     @serverState keys = '';
     @serverState copies = false;
 
-    /** The body a `setAvatar(null)` parted from its player, which nothing else in this world holds. */
+    /** The body a `setAvatar(null)` parted from its player, which nothing else here holds. */
     #loose: Entity | null = null;
 
     /** No spawn: a body is handed out by a press, so each roster verb is reachable on its own. */
@@ -105,7 +98,7 @@ export class Warden extends ServerScript<Game> {
         ctx.player?.addScript(Seat);
     }
 
-    /** Every reading of the body at once, for a test that wants the picture before it changes it. */
+    /** Every reading of the body at once, for a test wanting the picture before it changes it. */
     @onPress(W.look)
     doLook(ctx: Ctx): void {
         const player = ctx.player;
@@ -268,7 +261,7 @@ export class Warden extends ServerScript<Game> {
         this.bodiless = !this.#reachable(player);
     }
 
-    /** `avatar` throws where `hasAvatar` answers false, so the question has to be asked in a try. */
+    /** `avatar` throws where `hasAvatar` answers false, so the question is asked in a try. */
     #reachable(player: Player): boolean {
         try {
             return player.avatar.alive;

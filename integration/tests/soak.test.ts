@@ -1,10 +1,5 @@
-// Every package, composed the way an application composes them, driven by a pseudo-random sequence
-// of the things a person does: open a tab, hold a key, click something, press a button, close the
-// tab.
-//
-// The sequence is seeded, so the run is a REPLAY rather than a lottery — a failure here reproduces
-// on the next run of the same seed, and the same-seed digest comparison below is what pins that.
-// What the driver chooses is arbitrary; what it asserts is not.
+// The sequence is seeded, so a run is a REPLAY rather than a lottery: a failure reproduces on the
+// next run of the same seed, which the same-seed digest comparison below pins.
 
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { EntityId, Runtime } from '@platform/core';
@@ -66,9 +61,7 @@ type Action = 'join' | 'leave' | 'hold' | 'release' | 'click' | 'sweep' | 'idle'
 
 /**
  * What each action is worth in the draw, before the ones nothing can do are struck out.
- *
- * A sweep clears the stage, so it is rare on purpose: at anything like the weight of the others it
- * keeps the world empty and the click and collision paths never get anything to act on.
+ * A sweep clears the stage, so it is rare on purpose: otherwise the world stays empty.
  */
 const WEIGHTS: Array<[Action, number]> = [
     ['hold', 20],
@@ -122,10 +115,8 @@ interface Report {
 }
 
 /**
- * Drives one seeded session and reports what happened.
- *
- * Health is COLLECTED rather than thrown: a soak that stopped at the first fault would hide every
- * later one, and the beat number in the line is what makes a failure reproducible from the seed.
+ * Drives one seeded session and reports what happened. Health is COLLECTED rather than thrown:
+ * stopping at the first fault would hide every later one, and the beat number replays it.
  */
 async function soak(seed: number, beats: number): Promise<Report> {
     const rng = new SeededRandom(seed);
@@ -259,7 +250,7 @@ function draw(rng: SeededRandom, session: Session): Action {
     return rng.pick(bag);
 }
 
-/** A world point on some orb this tab can see, for the render layer to resolve back to an entity. */
+/** A world point on some orb this tab can see, for the render layer to resolve to an entity. */
 function pickOrb(tab: Tab, rng: SeededRandom): { x: number; y: number } | undefined {
     if (tab.client.state !== 'live') return undefined;
     const rt = tab.client.mirror?.runtime;
@@ -271,9 +262,8 @@ function pickOrb(tab: Tab, rng: SeededRandom): { x: number; y: number } | undefi
 }
 
 /**
- * What has already been reported, so a fault is named on the beat it happens and not on every beat
- * after it. The counters are cumulative and the logs only grow, so without this one throw at beat 5
- * would be six hundred lines.
+ * What has already been reported, so a fault is named on the beat it happens rather than on
+ * every beat after it — one throw at beat 5 would otherwise be six hundred lines.
  */
 interface Watch {
     counters: Map<string, number>;
@@ -295,10 +285,8 @@ function since<T>(watch: Watch, log: { records: ReadonlyArray<T> }): T[] {
 }
 
 /**
- * Everything that must be true of every tab on every beat.
- *
- * Each line names the beat and the tab, so one failure out of six hundred beats is still a place to
- * start rather than a boolean.
+ * Everything that must be true of every tab on every beat. Each line names the beat and the tab,
+ * so one failure out of six hundred is still a place to start rather than a boolean.
  */
 function health(session: Session, beat: number, watch: Watch): string[] {
     const faults: string[] = [];
@@ -442,10 +430,8 @@ function replicated(rt: Runtime): Record<string, unknown> {
 }
 
 /**
- * The authority's whole world as one string.
- *
- * Sorted by entity id rather than taken in table order, so the comparison is over what the world IS
- * and not over the order a particular run happened to allocate it in.
+ * The authority's whole world as one string, sorted by entity id rather than table order, so the
+ * comparison is over what the world IS and not the order one run allocated it in.
  */
 function digestOf(sim: Sim): string {
     const rt = sim.runtime;
@@ -557,7 +543,8 @@ describe('one seeded run of the whole platform', () => {
         expect(report.emptied.players).toBe(0);
         expect(report.emptied.orbs).toBe(0);
         expect(report.emptied.phase).toBe('idle');
-        // Every avatar, every shadow and every orb is gone; what the project placed is what is left.
+        // Every avatar, every shadow and every orb is gone; what the project placed is what is
+        // left.
         expect(report.emptied.entities).toEqual([TEMPLATE_SHADOW]);
     });
 });

@@ -1,7 +1,4 @@
-// The Game's own script: the roster, the seats, the drop timer and the scores.
-//
-// Every `@serverState` field is REASSIGNED wherever it changes — only the setter marks the
-// replication channel, so a value mutated in place would replicate nothing.
+// Every `@serverState` field is REASSIGNED where it changes: only the setter marks the channel.
 
 import type { Ctx, Game, Player } from '@platform/engine';
 import {
@@ -27,14 +24,12 @@ import { liveOrbs, spawnOrb } from './orb.js';
 import { Profile } from './profile.js';
 
 export class Rules extends ServerScript<Game> {
-    /** Inspector values, written by the engine between construction and the `@serverState` hoist. */
+    /** Inspector values, written by the engine between construction and the `@serverState` hoist */
     orbInterval = ORB_INTERVAL;
 
     /**
      * Game-hosted, so every peer sees these — a player-hosted field reaches only its owner.
-     *
-     * They land on the same host record `Ledger`'s do, since both scripts are attached to the Game:
-     * two scripts declaring one name there is a load-time error, and these five are the roster's.
+     * They land on the same record `Ledger`'s do: two scripts declaring one name there is an error.
      */
     @serverState phase: MatchPhase = 'idle';
     @serverState seated = 0;
@@ -42,18 +37,15 @@ export class Rules extends ServerScript<Game> {
     @serverState sweeps = 0;
 
     /**
-     * The drop runs for the world's whole life and declines to drop while the stage is empty.
-     *
-     * One timer for the session rather than one started and cancelled per join: the phase check
-     * below is what makes an empty stage cost nothing, and a per-join timer would have to be
-     * cancelled on exactly the leave that removed the last player.
+     * The drop runs for the world's whole life and declines while the stage is empty.
+     * One timer for the session: a per-join one would need cancelling on exactly the last leave.
      */
     @onStart
     begin(): void {
         every(this.orbInterval, () => this.#drop());
     }
 
-    /** `spawn()` owns the avatar to this player, which is what puts it in that client's predicted scope. */
+    /** `spawn()` owns the avatar to this player, which puts it in that client's predicted scope. */
     @onPlayerJoin
     join(ctx: Ctx): void {
         const player = ctx.player;
@@ -71,13 +63,13 @@ export class Rules extends ServerScript<Game> {
         this.#recount();
     }
 
-    /** The roster still holds the leaver here, which is why the recount is told who to leave out. */
+    /** The roster still holds the leaver here, which is why the recount is told who to skip. */
     @onPlayerLeave
     leave(ctx: Ctx): void {
         this.#recount(ctx.player?.id);
     }
 
-    /** A press rides the interaction frame, so `ctx.player` is engine-supplied rather than claimed. */
+    /** A press rides the interaction frame, so `ctx.player` is engine-supplied, not claimed. */
     @onPress(WIDGET_SWEEP)
     sweep(ctx: Ctx): void {
         if (!ctx.player) return;
@@ -86,7 +78,7 @@ export class Rules extends ServerScript<Game> {
         this.orbs = 0;
     }
 
-    /** One write per change: the count is an integer, and marking the channel per tick is a wire nobody profiled. */
+    /** One write per change: a mark per tick is a wire nobody profiled. */
     @onUpdate
     census(): void {
         const live = liveOrbs(this.host).length;
@@ -95,9 +87,7 @@ export class Rules extends ServerScript<Game> {
 
     /**
      * The stage runs while anyone is on it and empties when the last of them goes.
-     *
-     * A world dropping orbs into an empty stage would grow the wire and the entity table for
-     * nobody, and it is the transition a soak's join/leave churn crosses most often.
+     * Dropping orbs into an empty stage would grow the wire and the entity table for nobody.
      */
     #recount(excluding?: string): void {
         const roster = this.host.players.filter((player) => player.id !== excluding);
@@ -111,7 +101,7 @@ export class Rules extends ServerScript<Game> {
         this.orbs = 0;
     }
 
-    /** `game.random`, never `Math.random`: the snapshot store captures every draw, so a replay agrees. */
+    /** `game.random`, never `Math.random`: the snapshot captures every draw, so a replay agrees. */
     #drop(): void {
         if (this.phase !== 'running') return;
         const world = this.host;

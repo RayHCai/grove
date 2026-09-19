@@ -1,8 +1,5 @@
-// The stochastic world, as a `World`.
-//
-// Written out longhand under `src/` rather than through `defineWorld`, because it is also the
-// suite's worked example of an authored project: a reader following the manifest to a script wants
-// the file an editor would have written, not a builder call that produces one.
+// Written longhand rather than through `defineWorld`: it is also the suite's worked example of an
+// authored project, so a reader gets the file an editor would have written.
 
 import { BINDINGS, SCREEN_PANEL, SIM_RATE, WIDGET_SCORE } from '../globals.js';
 import { PROJECT } from '../project.js';

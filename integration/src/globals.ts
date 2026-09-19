@@ -1,7 +1,4 @@
-// What both ends agree on: ids, the world's extent, the action names, and the numbers the scripts
-// tune themselves by.
-//
-// It imports nothing from the platform and nothing from `scripts/`, so the project file, the two
+// Imports nothing from the platform and nothing from `scripts/`, so the project file, the two
 // registries and every script can read it without either half pulling in the other's.
 
 /** What this project IS, on the handshake. Both composition roots derive their claim from these. */
@@ -17,10 +14,8 @@ export const WORLD = { left: -320, right: 320, top: 180, bottom: -180 };
 
 export const REGION_BONUS = 'bonus';
 /**
- * The band an orb is worth more inside.
- *
- * Placed across the left of the world, where orbs enter: a region an orb only reaches at the end of
- * its life is one no test can rely on it reaching at all, since anything may take the orb first.
+ * The band an orb is worth more inside. Placed where orbs enter: a region an orb reaches only at
+ * the end of its life is one no test can rely on it reaching.
  */
 export const BONUS_BOUNDS = { left: -280, right: -60, top: 70, bottom: -70 };
 
@@ -30,7 +25,7 @@ export const TEMPLATE_SHADOW = 'shadow';
 export const TEMPLATE_ORB = 'orb';
 
 export const ASSET_DISC = 'disc';
-/** Relative, because the client admits only `http:`, `https:` and paths — and nothing fetches it here. */
+/** Relative: the client admits only `http:`, `https:` and paths, and nothing fetches it here. */
 export const ASSET_DISC_URL = '/disc.png';
 export const ASSET_DISC_PIXELS = { width: 24, height: 24 };
 
@@ -54,7 +49,7 @@ export const CODE_RIGHT = 'KeyD';
 export const CODE_UP = 'KeyW';
 export const CODE_DOWN = 'KeyS';
 
-/** Structurally assignable to `@platform/client`'s `Binding`, which is what keeps this file free of it. */
+/** Structurally assignable to client's `Binding`, which keeps this file free of that import. */
 export type StageBinding = { kind: 'button'; code: string; action: string };
 
 export const BINDINGS: StageBinding[] = [
@@ -81,10 +76,8 @@ export const ORB_HALF = 10;
 /** World units an orb drifts per second. */
 export const ORB_SPEED = 60;
 /**
- * How far above and below the middle an orb may enter.
- *
- * Narrower than the world: an orb entering at the very top crosses at a height no avatar spends
- * time at, and the collision path is then a thing the driver can only reach by luck.
+ * How far above and below the middle an orb may enter. Narrower than the world: one entering at
+ * the very top crosses where no avatar spends time, so the collision path needs luck.
  */
 export const ORB_BAND = 110;
 
@@ -112,9 +105,7 @@ export type MatchPhase = 'idle' | 'running';
 
 /**
  * Where a player's avatar stands at a spawn, by the palette seat the rules gave them.
- *
- * A pure function of the seat so both a spawn and a respawn land on the same spot, and so a test
- * can say where an avatar should be without reading the world it is asserting on.
+ * Pure in the seat, so spawn and respawn agree and a test can say where an avatar should be.
  */
 export function avatarStart(seat: number): { x: number; y: number } {
     const lane = (WORLD.right - WORLD.left) / (MAX_PLAYERS + 1);

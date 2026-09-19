@@ -1,9 +1,5 @@
-// The `Entity` API, driven through a game and read back off a client.
-//
-// Every case presses a widget and then settles: a press rides an interaction frame to the
-// authority, the call runs inside a handler there, and the result reaches this tab one replication
-// interval later. Asserting on the MIRROR rather than the server is the point — a method that moved
-// an entity on the authority and never marked a channel would pass a unit test and fail here.
+// Asserting on the MIRROR rather than the server is the point: a method that moved an entity and
+// never marked a channel would pass a unit test and fail here.
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
@@ -71,7 +67,8 @@ describe("an entity's transform", () => {
         await press(session, tab, W.rotateBy);
         expect(drawn(tab).rotation).toBe(45);
 
-        // Twice, because a delta that was quietly an assignment would still read 45 after one press.
+        // Twice, because a delta that was quietly an assignment would still read 45 after one
+        // press.
         await press(session, tab, W.rotateBy);
         expect(drawn(tab).rotation).toBe(90);
 

@@ -1,10 +1,4 @@
-// The `Player` facade, driven through a game and read back off a client.
-//
-// A body is handed out by a press rather than by the join, so every roster verb is reached on its
-// own and the tab is watched across each transition. The cursor and the binding table a player
-// carries are stubs on both ends, so what those cases pin is how far a write to one travels — and
-// the answer, asserted on the wire rather than argued from the source, is no further than the
-// object written to.
+// The cursor and binding table are stubs on both ends, so those cases pin how far a write travels.
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';

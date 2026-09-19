@@ -1,12 +1,5 @@
-// A world whose whole game is one player's interface: an always-on deck, a bag opened over it, and
-// a button for every verb the HUD owns.
-//
-// The calls under test run on the TAB rather than the authority — `hud` resolves the current
-// runtime's local player and a server runtime has none — so the hosts here are screens, the scripts
-// are client-located, and the readings are widgets instead of replicated fields.
-//
-// Every reading is written back out through `hud` itself, which is what lets a test read
-// `hud.screens` or `hud.player` off the same sink a browser's UI layer draws from.
+// `hud` resolves the current runtime's local player and a server runtime has none, so the hosts
+// here are screens and the scripts client-located.
 
 import type { HUD, HUDScreen } from '@platform/engine';
 import { ClientScript, Countdown, hud, onEnd, onPress, onStart } from '@platform/engine';
@@ -90,7 +83,7 @@ function describeWidget(widget: WidgetState): string {
 }
 
 export class Bag extends ClientScript<HUDScreen> {
-    /** Client state, which is the whole reason a screen holds a script — and must not outlive it. */
+    /** Client state, which is why a screen holds a script — and must not outlive it. */
     #pressed = 0;
 
     @onStart
@@ -119,7 +112,7 @@ export class Bag extends ClientScript<HUDScreen> {
 
 export class Deck extends ClientScript<HUDScreen> {
     #count = 0;
-    /** The countdown handed to `hud.timer`, kept so a later press can prove the sink holds it live. */
+    /** The countdown handed to `hud.timer`, kept so a later press proves the sink holds it live. */
     #clock: Countdown | null = null;
 
     @onStart
@@ -164,7 +157,7 @@ export class Deck extends ClientScript<HUDScreen> {
         hud.timer(V.clock, clock);
     }
 
-    /** Touches the countdown and never the HUD, so what the sink reports next can only be the object. */
+    /** Touches the countdown and never the HUD, so what the sink reports can only be the object. */
     @onPress(B.retime)
     rewind(): void {
         this.#clock?.reset(RETIMED_SECONDS);
@@ -290,6 +283,7 @@ export const HUD_WORLD: World = defineWorld({
         },
     ],
     screens: [{ name: SCREEN_DECK, script: Deck as never }],
-    // A numeric widget on the renderer's own `ui` surface, which is the only proof `hud` reaches art.
+    // A numeric widget on the renderer's own `ui` surface, which is the only proof `hud` reaches
+    // art.
     mirrorWidget: V.count,
 });

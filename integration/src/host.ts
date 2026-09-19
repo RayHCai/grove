@@ -1,16 +1,10 @@
-// This game's world, built but not listening.
-//
-// A socket host would put a listener in front of what this returns; the suite drives it directly
-// over loopback pairs. Both need the same thing built the same way, and this is the only place
-// that knows how.
-
 import type { BreakerTrip, KVStore } from '@platform/core';
 import { GameInstance } from '@platform/glue/server';
 import { defined } from '@platform/math';
 import type { World } from './world.js';
 
 export interface HostOptions {
-    /** Where `@serverState` outlives a session. Omitted, core's memory store dies with the process. */
+    /** Where `@serverState` outlives a session. Omitted, core's memory store dies with it. */
     kv?: KVStore;
     /** The loopback pairs' `deliver`; omitted networked, where each socket delivers itself. */
     deliver?: () => void;

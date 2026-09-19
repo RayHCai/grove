@@ -1,12 +1,5 @@
-// The stateful wrappers, driven through a game and read back off a client.
-//
-// A wrapper marks its own replication channel from inside its mutating methods and travels as its
-// own serialized form, so every case here presses a widget and then asserts on the MIRROR: a method
-// that changed the authority's copy without marking, or a constructor argument that never rode the
-// wire, would pass a unit test and fail here.
-//
-// The last describe is the claim only an integration suite can make — a wrapper written to a store
-// by one session and handed back to the same identity by the next.
+// A wrapper marks its own channel from inside its mutating methods and travels as its serialized
+// form, so a method that changed the authority's copy without marking would pass a unit test.
 
 import { describe, expect, it } from 'vitest';
 import { Inventory, Leaderboard, MemoryKVStore, Scoreboard, Team } from '@platform/core';
@@ -111,8 +104,8 @@ describe('a leaderboard', () => {
         expect(reading<number>(tab, S.banked)).toBe(AWARD);
         expect(reading<number>(tab, S.floor)).toBe(AWARD);
 
-        // One worse score submitted to both boards: the high one must refuse it and the low one take
-        // it, which is the only reading that tells the two orders apart.
+        // One worse score submitted to both boards: the high one must refuse it and the low one
+        // take it, which is the only reading that tells the two orders apart.
         await press(session, tab, W.setScore);
         await press(session, tab, W.bank);
         expect(reading<number>(tab, S.banked)).toBe(AWARD);

@@ -1,12 +1,4 @@
-// The asset table and the audio surface, driven through a game and read back off a client.
-//
-// Audio here is write-only: `sound` and `music` push a named effect into the runtime's sink and
-// answer with a handle that holds nothing, so the sink is the only place playback is observable at
-// all. Each case installs a recording one on the tab's own mirror — the seat a browser's audio layer
-// occupies — and asserts on what arrived there rather than on state no call ever leaves behind.
-//
-// The asset readings come the other way, off `@serverState`: the declared table exists on the end
-// that was handed a manifest, and that is the authority alone.
+// Audio is write-only: the runtime's effect sink is the only place playback is observable.
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
@@ -55,10 +47,8 @@ function payload(effect: Effect | undefined): Record<string, unknown> {
 }
 
 /**
- * Re-opens the screen, which is what puts the registered class on it.
- *
- * `hud.open` wires whatever is registered at the moment it runs and the harness registers after its
- * own open, so the first open leaves the screen empty and this second one is what attaches `Stage`.
+ * Re-opens the screen, which is what puts the registered class on it: `hud.open` wires whatever
+ * is registered when it runs, and the harness registers after its own open.
  */
 function wireScreen(tab: Tab): void {
     withRuntime(runtimeOf(tab), () => {
@@ -88,7 +78,7 @@ async function openPair(): Promise<{ session: Session; one: Tab; two: Tab }> {
     return { session, one, two };
 }
 
-/** Every press names the screen: a screen-hosted handler hears no other kind, and the Game hears both. */
+/** Every press names the screen: a screen-hosted handler hears no other, the Game hears both. */
 async function press(session: Session, tab: Tab, widget: string): Promise<void> {
     session.press(tab, widget, SCREEN_AUDIO);
     await session.step(SETTLE);
@@ -144,9 +134,9 @@ describe('the declared asset table', () => {
     it("drops each asset's url on the way in, so no script can ever read one", async () => {
         const { session, tab } = await open();
         await press(session, tab, W.readAsset);
-        // The url is declared, travels to the client and is what the renderer fetches from — but the
-        // runtime narrowing drops it and `Asset` is built from key, kind and meta, so the object a
-        // creator holds has no such member at all.
+        // The url is declared, travels to the client and is what the renderer fetches from — but
+        // the runtime narrowing drops it and `Asset` is built from key, kind and meta, so the
+        // object a creator holds has no such member at all.
         expect(reading<boolean>(tab, S.urlOnAsset)).toBe(false);
     });
 
@@ -209,8 +199,8 @@ describe('the handle a play hands back', () => {
     it('is one object every play in the process shares, and stopping it emits nothing', async () => {
         const { session, tab, played } = await open();
         await press(session, tab, W.readHandle);
-        // A sound handle and a music handle compared: the same object, and the volume written on one
-        // is read straight back off the other.
+        // A sound handle and a music handle compared: the same object, and the volume written on
+        // one is read straight back off the other.
         expect(shown(tab, R.handle)).toBe(`true|${HANDLE_VOLUME}`);
         expect(played.map((e) => e.name)).toEqual(['sound.play', 'music.play']);
     });
