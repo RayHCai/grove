@@ -16,8 +16,8 @@ import type {
 } from './transport.js';
 
 /**
- * How many drain passes a `latency: 0` `deliver()` makes before calling the exchange non-quiescent —
- * well above any real request/response depth, and low enough that a cycle is a prompt error.
+ * Drain passes a `latency: 0` `deliver()` makes before calling the exchange non-quiescent —
+ * above any real request/response depth, low enough that a cycle is a prompt error.
  */
 const MAX_QUIESCENCE_PASSES = 1000;
 
@@ -34,10 +34,7 @@ class LoopbackEnd implements Transport {
     #closed = false;
     /**
      * Latched at the overflowing `receive`, thrown from the next `drain`.
-     *
-     * Deferred because `receive` runs on the SENDER's stack, and a throw there would abort a
-     * server's fan-out over its other connections; the next `deliver()` is the host loop that owns
-     * the wiring bug.
+     * `receive` runs on the SENDER's stack, where a throw would abort a fan-out over other peers.
      */
     #overflow: string | undefined;
 
@@ -92,52 +89,39 @@ class LoopbackEnd implements Transport {
     close(): void {
         if (this.#closed) return;
         this.#closed = true;
-        // Both ends learn on their next drain, never synchronously inside close(), which would
-        // re-enter the caller's stack mid-fan-out. The local end queues its own marker so teardown
-        // has ONE code path on both ends.
-        //
-        // `due: 0`, unlike the peer's copy: `latency` models time on the WIRE, and this end learning
-        // that it itself closed crosses no wire. It still rides FIFO behind this end's own
-        // undelivered frames, so only the delay changes, not the ordering.
+        // Both ends learn on their next drain, never inside close(), which would re-enter the
+        // caller's stack mid-fan-out. The local end queues its own marker, so teardown has ONE
+        // path. `due: 0` unlike the peer's: `latency` models the WIRE, and this crosses none.
         this.#inbox.queueClose(0);
         const peer = this.#peer;
         if (peer !== undefined) peer.#receiveClose();
     }
 
     /**
-     * Peer→this enqueue, sealed after close: the peer does not learn of the close until it drains its
-     * marker, and in that window its sends would otherwise land in an inbox nothing will ever drain.
-     *
-     * A `#` member, not a TypeScript `private`: the latter is erased, leaving a way to enqueue a
-     * frame that never passed `encode` onto an object handed out as a `Transport`.
+     * Peer→this enqueue, sealed after close: until the peer drains its marker, its sends would
+     * land in an inbox nothing will drain. A `#` member, since a `private` is erased.
      */
     #receive(frame: Frame): void {
         if (this.#closed) return;
         this.#inbox.enqueue(frame, this.#latency);
     }
 
-    /** Exempt from the seal, unlike a frame: a marker is how the peer learns the connection ended. */
+    /** Exempt from the seal, unlike a frame: a marker is how the peer learns the link ended. */
     #receiveClose(): void {
         this.#inbox.queueClose(this.#latency);
     }
 
     /**
-     * Ages this end's queue by one `deliver()` pass.
-     *
-     * Separate from `drain` because BOTH ends must age before EITHER delivers: ageing inside `drain`
-     * would let a frame the client's handler sends be aged by the server's own `drain` later in the
-     * same `deliver()`, making the delay direction-dependent.
+     * Ages this end's queue by one `deliver()` pass. Separate from `drain` because BOTH ends must
+     * age before EITHER delivers, or the delay becomes direction-dependent.
      */
     age(): void {
         this.#inbox.age();
     }
 
     /**
-     * Drains this end's inbox into its handlers, and reports a retention overflow.
-     *
-     * The overflow surfaces HERE and not in the drain a registration runs, so the throw lands on the
-     * host loop that owns the wiring bug rather than inside a handler call — registering a handler
-     * must not fail because of a frame that predates it.
+     * Drains this end's inbox into its handlers, and reports a retention overflow. It surfaces here
+     * so the throw lands on the host loop: registering a handler must not fail on an older frame.
      */
     drain(): void {
         const overflow = this.#overflow;
@@ -150,16 +134,15 @@ class LoopbackEnd implements Transport {
         this.#inbox.drain();
     }
 
-    /** True while anything is eligible and a handler exists to take it — the `latency: 0` loop's test. */
+    /** True while anything is eligible and a handler exists — the `latency: 0` loop's test. */
     get deliverable(): boolean {
         return this.#inbox.deliverable;
     }
 }
 
 /**
- * Hands out only the `Transport` surface, so `link` / `age` / `drain` cannot be reached from a
- * consumer holding one end — a TypeScript `private` would not have stopped that, and `link` in
- * particular can re-point a live pair at a third end.
+ * Hands out only the `Transport` surface, so `link` / `age` / `drain` stay unreachable from a
+ * consumer — `link` in particular can re-point a live pair at a third end.
  */
 function transportFacade(end: LoopbackEnd): Transport {
     return {
@@ -172,8 +155,8 @@ function transportFacade(end: LoopbackEnd): Transport {
 }
 
 /**
- * Loopback: a pair, connected at construction, because a socket has a connecting phase and loopback
- * does not — so a `Transport` is only ever handed out once connected. The host app owns `deliver()`.
+ * Loopback: a pair connected at construction, because a socket has a connecting phase and this
+ * does not — so a `Transport` is only handed out connected. The host app owns `deliver()`.
  */
 export function loopbackPair(opts?: LoopbackOptions): LoopbackPair {
     const codec = opts?.codec ?? jsonCodec;
@@ -200,9 +183,9 @@ export function loopbackPair(opts?: LoopbackOptions): LoopbackPair {
         server: transportFacade(server),
         deliver(): void {
             // A handler that reaches the pump would age both queues a second time inside one tick,
-            // so a frame would arrive a tick early and `latency` would stop counting deliver() calls.
-            // Named rather than ignored: the host loop owns the tick, and a handler calling it is a
-            // wiring bug, not a flush.
+            // so a frame would arrive a tick early and `latency` would stop counting deliver()
+            // calls. Named rather than ignored: the host loop owns the tick, and a handler calling
+            // it is a wiring bug, not a flush.
             if (pumping) {
                 transportError(
                     'delivery-reentered',

@@ -40,7 +40,7 @@ export type JoinRequest = {
     projectId: ProjectId;
     /** Which build of it: different bytes diverge silently, and the drift reads as jitter. */
     projectHash: string;
-    /** The script bundle this client already holds, or `''` for none — a joiner has fetched none. */
+    /** The bundle this client already holds, or `''`; a joiner has fetched none. */
     bundleHash: string;
 
     /** Reconnect rebind; a reconnect path must OMIT the key rather than pass `undefined`. */
@@ -54,10 +54,10 @@ export type Welcome = {
     yourPlayerId: PlayerId;
     yourPlayerIndex: number;
 
-    /** What the authority is running. A joiner disagreeing with these never reaches this envelope. */
+    /** What the authority is running. A joiner disagreeing never reaches this envelope. */
     projectId: ProjectId;
     projectHash: string;
-    /** Lowercase-hex SHA-256 of the bytes at {@link Welcome.bundleUrl}, or `''` when there is none. */
+    /** Lowercase-hex SHA-256 of the bytes at {@link Welcome.bundleUrl}, or `''` for none. */
     bundleHash: string;
     /** Fetched over HTTP, never this socket, which carries no bytes a client executes. */
     bundleUrl: string;
@@ -81,26 +81,21 @@ export type Welcome = {
     /** What the renderer needs to draw a netId at all. */
     visuals: RenderManifest;
 
-    /** Opaque; presented on a later connect() to rebind. Unused in MVP — omitted, not `undefined`. */
+    /** Opaque; presented on a later connect() to rebind. Omitted, never `undefined`. */
     reconnectToken?: string;
 };
 
 /** Server → client, ahead of a `Welcome` whose world does not fit in one frame. */
 export type SnapshotChunk = {
     kind: 'snapshot-chunk';
-    /** Position in the sequence, from zero. The receiver applies them in this order and no other. */
+    /** Position in the sequence, from zero; the receiver applies them in this order only. */
     index: number;
     /** Entities in the same parents-before-children order the whole snapshot would have carried. */
     entities: EntitySnapshot[];
     state: StateDiff[];
 };
 
-/**
- * Server → client instead of a `Welcome`, immediately before `close()`.
- *
- * A refusal with no envelope arrives as a bare close, indistinguishable from a dropped connection —
- * and the correct responses invert: a drop should retry, a version mismatch must never.
- */
+/** Server → client instead of a `Welcome`, just before `close()`; a bare close cannot say why. */
 export type Reject = {
     kind: 'reject';
     reason: RejectReason;
@@ -117,24 +112,15 @@ export type StateEnvelope = {
     tick: number;
     /** Highest contiguous RESOLVED seq for THIS connection. */
     ackSeq: number;
-    /**
-     * Spare ticks the EARLIEST input this ack resolved had on arrival
-     * (`frame.tick - serverTickOnArrival`) — the earliest rather than the mean, because a lead
-     * sized to the mean drops the tail, which a player feels as occasional unresponsiveness.
-     */
+    /** Spare ticks the EARLIEST input this ack resolved had on arrival; a mean drops the tail. */
     earliestHeadroom?: number;
-    /** Ordered journal, applied verbatim — the ops do not commute, and a dropped op is unrecoverable. */
+    /** Ordered journal, applied verbatim — the ops do not commute, and a drop is unrecoverable. */
     structural: WireStructuralOp[];
     /** One entry per host with writes this tick, scoped to this connection's player. */
     state: StateDiff[];
 };
 
-/**
- * Server → client, every send-tick. DROPPABLE — superseded by the next by construction.
- *
- * Split from `StateEnvelope` because a bundle can only ever be sent reliably, and it is the split
- * that makes the server's backpressure policy expressible as "drop this envelope".
- */
+/** Server → client, every send-tick. DROPPABLE — superseded by the next by construction. */
 export type TransformEnvelope = {
     kind: 'transform';
     /** The tick of the `StateEnvelope` it accompanies — an equality, and the join key. */
@@ -148,7 +134,7 @@ export type WireSingleStructuralOp =
     | { kind: 'destroy'; netId: NetId }
     | { kind: 'reparent'; netId: NetId; parent: NetId | null }
     | { kind: 'tag'; netId: NetId; tag: string; added: boolean }
-    /** Distinct from spawn/destroy: an entity leaving a client's view is still alive on the server. */
+    /** Distinct from spawn/destroy: an entity leaving a view is still alive server-side. */
     | { kind: 'enter-interest'; snapshot: EntitySnapshot }
     | { kind: 'leave-interest'; netId: NetId }
     /** Carries the roster because nothing else on the wire names a player. */
@@ -176,28 +162,15 @@ export type WireScriptAttachment = { script: ScriptId; props?: ScriptProps };
 export type StateHostAddr =
     { kind: 'game' } | { kind: 'player'; id: PlayerId } | { kind: 'entity'; netId: NetId };
 
-/**
- * One host's `@serverState` writes for this tick, as a field → value map.
- *
- * Grouped under the host because the address is the larger half of a per-field entry, and scoping
- * rides the discriminant: a `player` diff reaches only its owner where a `game` diff reaches all.
- */
+/** One host's `@serverState` writes this tick, field → value; scoping rides the discriminant. */
 export type StateDiff = { host: StateHostAddr; fields: { [field: string]: JsonValue } };
 
-/**
- * The data wrappers whose state replicates, named by the tag their payload carries.
- *
- * Restated rather than imported from core, as `InputPhase` is, because importing would put the
- * simulation in a client's module graph. Parity-locked to core's `WrapperKind`.
- */
+/** The data wrappers whose state replicates, by payload tag. Parity-locked to `WrapperKind`. */
 export type WireWrapperKind = 'Scoreboard' | 'Leaderboard' | 'Inventory' | 'Team';
 
 /**
- * A wrapper's state as one `StateDiff` field value: the tag, plus every constructor argument, since
- * a receiver holding no scripts rebuilds the class from this alone.
- *
- * Maps travel as entry PAIRS rather than as objects, so a creator-chosen item name or player id can
- * never land in key position, where the codec's reserved-key check would refuse the whole frame.
+ * A wrapper's state as one `StateDiff` value: the tag plus every constructor argument.
+ * Maps travel as entry PAIRS, so a creator-chosen name never lands in key position.
  */
 export type WireWrapperState =
     | { kind: 'Scoreboard'; scores: Array<[string, number]> }
@@ -205,12 +178,7 @@ export type WireWrapperState =
     | { kind: 'Inventory'; player: PlayerId; items: Array<[string, number]> }
     | { kind: 'Team'; name: string; members: string[] };
 
-/**
- * The seven fields core's transform store holds per entity, in its own order.
- *
- * Whole-value rather than per-field-optional: core's transform channel is a dense per-entity dirty
- * set naming WHICH entities moved, not which fields.
- */
+/** The seven fields core's transform store holds per entity, in its own order. Whole-value. */
 export type WireTransform = {
     posX: number;
     posY: number;
@@ -257,13 +225,7 @@ export type EntityOverrides = {
 /** One player as a joiner must receive it. Shared with `player-join`. */
 export type PlayerSnapshot = { id: PlayerId; index: number; name: string };
 
-/**
- * The whole world this player may see, at one tick.
- *
- * For every channel the steady-state path can modify, the snapshot supplies a baseline — the
- * invariant most easily broken one channel at a time, since each omission looks local and the
- * failure appears only on a mid-session join.
- */
+/** The whole world this player may see, at one tick; every channel supplies a baseline. */
 export type WorldSnapshot = {
     /** Authoritative — the client's tick counter seeds from this, and `Welcome` carries no tick. */
     tick: number;
@@ -289,7 +251,7 @@ export type WireRegion = { name: string; bounds: WireBounds };
 export type WireAssetRef = {
     key: AssetId;
     kind: WireAssetKind;
-    /** Core loads nothing — the panel does — so a client handed a key with no source cannot fetch it. */
+    /** Core loads nothing — the panel does — so a key with no source cannot be fetched. */
     url: string;
     meta?: { width?: number; height?: number; duration?: number };
 };
@@ -297,12 +259,7 @@ export type WireAssetRef = {
 /** Core's `AssetKind` restated. These are core's kinds, not the renderer's. */
 export type WireAssetKind = 'texture' | 'atlas' | 'audio' | 'font' | 'clip' | 'effect';
 
-/**
- * How to draw the entities of one template.
- *
- * It carries NO transform: those fields are per-entity and authoritative from the simulation, so
- * carrying them here too would give the client two sources for one value.
- */
+/** How to draw the entities of one template. Carries NO transform: those are per-entity. */
 export type TemplateVisual = SpriteTemplateVisual | GroupTemplateVisual;
 
 /** A template whose entities draw a sprite. `texture` keys into {@link WireAssetRef}. */
@@ -318,7 +275,7 @@ export type SpriteTemplateVisual = {
     neverCull?: boolean;
 };
 
-/** A template whose entities are positional pivots, drawing whatever `children` hangs beneath them. */
+/** A template whose entities are positional pivots, drawing whatever `children` hangs below. */
 export type GroupTemplateVisual = {
     template: TemplateId;
     kind: 'group';
@@ -328,14 +285,11 @@ export type GroupTemplateVisual = {
 
 /**
  * One node inside a group template's subtree: art the TEMPLATE owns, not an entity.
- *
- * The one place a visual carries a transform, because nothing simulates a child and no
- * `WireTransform` will ever name it. Only the offset reaches descendants: the renderer composes
- * position and visibility and nothing else.
+ * The one place a visual carries a transform; only the offset reaches descendants.
  */
 export type TemplateChild = SpriteTemplateChild | GroupTemplateChild;
 
-/** Art under a template's root. `texture` keys into {@link WireAssetRef}, as a sprite visual's does. */
+/** Art under a template's root. `texture` keys into {@link WireAssetRef}, as a sprite does. */
 export type SpriteTemplateChild = {
     kind: 'sprite';
     texture: AssetId;
@@ -358,12 +312,7 @@ export type SpriteTemplateChild = {
     neverCull?: boolean;
 };
 
-/**
- * A pivot under a template's root, and the arm that nests.
- *
- * It carries the offset and `layer` and nothing else: a group has no art, so rotation, scale and
- * alpha would be inert, and omitting them stops an author reading one as "rotates its children".
- */
+/** A pivot under a template's root, carrying offset and `layer` only: a group has no art. */
 export type GroupTemplateChild = {
     kind: 'group';
     offsetX?: number;
@@ -385,25 +334,14 @@ export type ManifestUpdate = { kind: 'manifest'; visuals: RenderManifest };
 /** Client → server, on the refresh interval. The join's sample rides `JoinRequest.clientSentMs`. */
 export type TimeSync = { kind: 'time-sync'; clientSentMs: number };
 
-/**
- * Server → client. Echoes the client's stamp and adds its own.
- *
- * Only the client's own two stamps are differenced, so no agreement between the two machines'
- * wall-clocks is needed; treating `serverSentMs` as comparable to a client stamp is the classic
- * error.
- */
+/** Server → client, echoing the client's stamp; only the client's own two are differenced. */
 export type TimeSyncReply = {
     kind: 'time-sync-reply';
     clientSentMs: number;
     serverSentMs: number;
 };
 
-/**
- * Server → client: the timestep changed, and the client resyncs rather than retunes it live.
- *
- * `sendRate` needs no counterpart because nothing can change it at runtime; if that ever becomes
- * possible, WIDEN this to carry both rates rather than adding a second envelope.
- */
+/** Server → client: the timestep changed, and the client resyncs rather than retuning live. */
 export type RateChange = { kind: 'rate-change'; simRate: number };
 
 /** Client → server, at most one per tick. Tick-indexed input. */
@@ -416,12 +354,7 @@ export type InputFrame = {
     actions: InputAction[];
 };
 
-/**
- * One action's edge on one tick.
- *
- * Every edge is sent, because edges are not idempotent and a dropped `release` leaves a key held
- * forever; held and axis state is sampled once per tick instead, which is.
- */
+/** One action's edge on one tick. Every edge is sent: a dropped `release` holds a key forever. */
 export type InputAction = {
     action: string;
     on: InputPhase;
@@ -460,9 +393,6 @@ export type RequestFrame = {
 
 /**
  * One `request()` call: the handler name, and the payload that handler must validate.
- *
- * `data` carries its fields as KEYS, which is what puts a creator-chosen field name under the codec's
- * reserved-key check — so a sender drops a field named `__proto__` / `constructor` / `prototype`
- * rather than emit it, and a receiver never sees one. ABSENT for a call carrying no payload.
+ * `data` carries its fields as KEYS, so a sender drops a reserved name rather than emit it.
  */
 export type GameRequest = { name: string; data?: { [field: string]: JsonValue } };

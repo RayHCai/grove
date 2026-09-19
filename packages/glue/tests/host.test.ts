@@ -1,9 +1,3 @@
-// What the host owes the sim: the sockets it writes to, the store its loads and saves go through,
-// and the isolation that keeps one broken peer from taking the broadcast down.
-//
-// The sim decides all of it and can prove none of it — an output batch names a send, a close, a load
-// and a save, and whether any of them happens is this half's alone.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import type { KVStore } from '@platform/core';
 import { MemoryKVStore, PERSISTENCE_SCOPE, clearRuntime, playerKey } from '@platform/core';
@@ -200,8 +194,8 @@ describe('the host writes what the batch told it to', () => {
 describe('one peer’s failure is that peer’s alone', () => {
     it('closes the connection whose send threw and finishes the broadcast', async () => {
         const h = hosted();
-        // Taken first, so it is ahead of the healthy peer in the registry — behind it, an unisolated
-        // throw would prove nothing.
+        // Taken first, so it is ahead of the healthy peer in the registry — behind it, an
+        // unisolated throw would prove nothing.
         const flaky = new FlakyTransport();
         h.instance.accept(flaky, 'flaky');
         flaky.receive(JOIN);

@@ -1,8 +1,5 @@
-// The `@serverState` cache the sim reads, filled by the host rather than by a store.
-//
-// Core's `PersistedSource` is synchronous because the hoist that reads it is, and the sim has no
-// store to be asynchronous against: a load is asked for in one output batch and answered in a later
-// input batch, so what is left here is the cache the two halves meet in.
+// Core's `PersistedSource` is synchronous and the sim has no store: a load is asked for in one
+// output batch and answered in a later input batch, so this is the cache they meet in.
 
 import type { HostRecord } from '@platform/core';
 import { serializeHostField } from '@platform/core';
@@ -11,10 +8,8 @@ import type { SaveOrder } from './batch.js';
 import { encodeStateValue } from './replicate.js';
 
 /**
- * Host records the sim has been handed, keyed by host id — what `rt.persisted` answers from.
- *
- * Core's `PersistedSource` is satisfied structurally rather than implemented by name: the barrel
- * exports the class over that seam and not the interface, and this is the second implementation.
+ * Host records the sim has been handed, by host id — what `rt.persisted` answers from.
+ * Core's `PersistedSource` is satisfied structurally: the barrel exports the class, not the type.
  */
 export class SessionRecords {
     readonly #byHost = new Map<string, { [field: string]: unknown }>();
@@ -34,12 +29,8 @@ export class SessionRecords {
     }
 
     /**
-     * Captures a departing host's fields as the write the host owes the store.
-     *
-     * Captured synchronously because the record is torn down the moment the player leaves — a save
-     * that only started an async read of it would find a host that no longer exists. The fields stay
-     * cached until {@link SessionRecords.release}, so a rejoin inside this session reads them back
-     * whether or not the store write has landed.
+     * Captures a departing host's fields as the write the host owes the store. Synchronous, since
+     * the record is torn down at the leave; the fields stay cached until `release`.
      */
     capture(record: HostRecord): SaveOrder {
         const fields: { [field: string]: JsonValue } = {};
@@ -53,7 +44,7 @@ export class SessionRecords {
         return { hostKey: record.hostId, fields };
     }
 
-    /** Drops a host the store has confirmed, so a long session is sized by its players rather than by its history. */
+    /** Drops a host the store confirmed, so a session is sized by its players, not its history. */
     release(hostId: string): void {
         this.#byHost.delete(hostId);
     }

@@ -1,7 +1,5 @@
-// The Node host: a WebSocket listener in front of a game instance.
-//
-// It installs no signal handlers — a library that called `process.on('SIGINT')` would fight whatever
-// the application already does about shutdown, so `close()` is exposed and the wiring is the app's.
+// Installs no signal handlers — a library calling `process.on('SIGINT')` would fight the app's
+// own shutdown, so `close()` is exposed and the wiring is the app's.
 
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import { WebSocketServer } from 'ws';
@@ -17,12 +15,8 @@ export interface ListenOptions {
     /** An existing HTTP server to share, for a game socket behind the same origin as a page. */
     server?: HttpServer;
     /**
-     * Who the game should think this socket is.
-     *
-     * Resolved from the upgrade request and NEVER from a frame, which is the whole reason the
-     * server takes identity from its host: whatever this returns is what the game trusts, and it
-     * reaches every other peer as `player.id`. Returning `undefined` admits the connection
-     * anonymously, and nothing it writes survives the process.
+     * Who the game should think this socket is. From the upgrade request, NEVER a frame — this is
+     * what the game trusts, and it reaches every peer as `player.id`.
      */
     identify?: (request: IncomingMessage) => string | undefined;
     /** Diagnostics. Absent, a refused or broken connection is silent. */
@@ -38,12 +32,7 @@ export interface ServedGame {
     close(): Promise<void>;
 }
 
-/**
- * Puts a WebSocket listener in front of an instance that is already built.
- *
- * The instance is started here rather than by the caller, so the world is ticking before the first
- * socket can arrive.
- */
+/** Puts a WebSocket listener in front of a built instance, starting it so it ticks first. */
 export function listenOn(instance: GameInstance, opts: ListenOptions): ServedGame {
     const { port, server, identify, onLog } = opts;
     if (port === undefined && server === undefined) {

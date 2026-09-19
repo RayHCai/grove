@@ -1,8 +1,4 @@
-// The driver: the accumulator, the spiral guard, the shed's two halves, the send cadence, and the
-// deliver→step order.
-//
-// It runs against a STUB step, so the clock is exercised without a world behind it. `apps/grove/game-instance`
-// owns this same policy in Rust, and these are the cases its own suite has to answer too.
+// Runs against a STUB step, so the clock is exercised with no world behind it.
 
 import { describe, expect, it } from 'vitest';
 import { defined } from '@platform/math';
@@ -136,7 +132,8 @@ describe('send-tick accounting lives on the driver', () => {
         spy.driver.pump(3 / 60);
         expect(spy.sends).toHaveLength(1);
 
-        // Held on the driver rather than derived from `rt.tick % N`, so a setSimRate cannot desync it.
+        // Held on the driver rather than derived from `rt.tick % N`, so a setSimRate cannot desync
+        // it.
         spy.driver.setRates(30, 10);
         spy.driver.pump(3 / 60 + 3 / 30);
         expect(spy.sends).toHaveLength(2);

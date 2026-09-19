@@ -1,10 +1,4 @@
-// @platform/glue/server
-// The authority's half: a booted world, a WebSocket listener to put in front of it, and a store
-// that outlives the process.
-//
-// Behind a subpath because this path reaches `ws` and `node:fs`. Its peer is
-// `@platform/glue/client`, and the two never meet — a browser takes the client half without taking
-// a Node runtime's dependencies with it.
+// Behind a subpath because this path reaches `ws` and `node:fs`; its peer is the client half.
 
 export { GameInstance } from './instance.js';
 export type { InstanceOptions } from './instance.js';

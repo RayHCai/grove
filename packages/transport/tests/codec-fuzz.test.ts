@@ -3,9 +3,9 @@ import { MAX_FRAME_BYTES, RESERVED_KEYS, jsonCodec } from '../src/codec.js';
 import { TransportError } from '../src/errors.js';
 import type { Frame, Message } from '../src/transport.js';
 
-// Every guard in this codec is otherwise pinned by the one shape its author thought of, in code that
-// parses bytes from any peer on the internet — so each case here is generated instead, and each guard
-// has a generated input that trips it.
+// Every guard in this codec is otherwise pinned by the one shape its author thought of, in code
+// that parses bytes from any peer on the internet — so each case here is generated instead, and
+// each guard has a generated input that trips it.
 
 /** Fixed, so a failure reproduces: every case derives its seed from this and prints it. */
 const SEED = 0x5eed_0001;
@@ -23,7 +23,7 @@ interface Gen {
     chance(probability: number): boolean;
 }
 
-/** splitmix32 — seeded, because a fuzz test that cannot reproduce its own failure is worse than none. */
+/** splitmix32 — seeded, since a fuzz test that cannot reproduce a failure is worse than none. */
 function gen(seed: number): Gen {
     let state = seed >>> 0;
     const next = (): number => {
@@ -48,8 +48,8 @@ const STRINGS: readonly string[] = [
     'a\nb\tc\u0000\u001f',
     'héllo 日本語',
     '😀🎮',
-    // Lone surrogates: unpaired on purpose, since `byteLength` and `JSON.stringify` each answer them
-    // with a substitution rather than an error.
+    // Lone surrogates: unpaired on purpose, since `byteLength` and `JSON.stringify` each answer
+    // them with a substitution rather than an error.
     '\ud800',
     '\udfff',
     'a\ud83dz',
@@ -156,14 +156,14 @@ function spineFrame(g: Gen, depth: number): string {
     return `${open}1${close}`;
 }
 
-/** Exactly `bytes` UTF-8 bytes across three widths, so the hand-rolled counter is what is measured. */
+/** Exactly `bytes` UTF-8 bytes across three widths, so the hand-rolled counter is measured. */
 function padding(g: Gen, bytes: number): string {
     const wide = g.int(20);
     const mid = g.int(20);
     return '😀'.repeat(wide) + 'é'.repeat(mid) + 'x'.repeat(bytes - wide * 4 - mid * 2);
 }
 
-/** `EncodedFrame` is the wider `Frame`, narrowed once here because this codec's frames are strings. */
+/** `EncodedFrame` is the wider `Frame`, narrowed here because this codec's frames are strings. */
 function encoded(value: Message): string {
     const frame = jsonCodec.encode(value);
     if (typeof frame !== 'string') throw new Error('jsonCodec produced a non-string frame');
@@ -214,8 +214,8 @@ describe('jsonCodec — generated round trip', () => {
     });
 
     it('round-trips a frame sitting exactly on the byte cap, and refuses one byte more', () => {
-        // The cap is the receiver's, and `encode` has none — so a producer can mint a frame its peer
-        // refuses, which is why a producer measures with `byteLength` before it sends.
+        // The cap is the receiver's, and `encode` has none — so a producer can mint a frame its
+        // peer refuses, which is why a producer measures with `byteLength` before it sends.
         for (let i = 0; i < 3; i++) {
             const seed = SEED + 2000 + i;
             const g = gen(seed);
@@ -238,8 +238,8 @@ describe('jsonCodec — generated round trip', () => {
     });
 
     it('accepts a generated wide DAG and refuses one that expands past the node budget', () => {
-        // Sharing one object across levels multiplies rather than adds, so a tiny input expands to a
-        // frame no depth or byte check downstream would have caught.
+        // Sharing one object across levels multiplies rather than adds, so a tiny input expands to
+        // a frame no depth or byte check downstream would have caught.
         for (let i = 0; i < 8; i++) {
             const seed = SEED + 3000 + i;
             const g = gen(seed);
@@ -283,11 +283,8 @@ class Coin {
 }
 
 /**
- * Values `encode` must refuse, each planted at a generated path rather than at a fixed one.
- *
- * `names` is asserted against the message because the rejections overlap — a NaN that slips past the
- * NaN branch is still refused by the non-finite one, under text that sends the reader to the wrong
- * field.
+ * Values `encode` must refuse, each planted at a generated path rather than a fixed one.
+ * `names` is asserted against the message because the rejections overlap and can misname a field.
  */
 const HOSTILE: ReadonlyArray<{ what: string; names: string; make: () => unknown }> = [
     { what: 'undefined', names: 'JSON DROPS', make: () => undefined },
@@ -361,8 +358,8 @@ function plant(g: Gen, value: unknown): { readonly root: unknown; readonly path:
 describe('jsonCodec — generated encode rejections', () => {
     for (const { what, names, make } of HOSTILE) {
         it(`refuses ${what} wherever it is planted, and names it and the path`, () => {
-            // The path is what the creator navigates by, and a walk that reports the frame instead of
-            // the field sends them reading the whole payload.
+            // The path is what the creator navigates by, and a walk that reports the frame instead
+            // of the field sends them reading the whole payload.
             for (let i = 0; i < 12; i++) {
                 const seed = SEED + 4000 + i;
                 const { root, path } = plant(gen(seed), make());
@@ -380,8 +377,8 @@ describe('jsonCodec — generated encode rejections', () => {
 
 describe('jsonCodec — generated hostile frames', () => {
     it('refuses a pollution key at any generated depth or position', () => {
-        // `JSON.parse` makes `__proto__` an OWN property, so it survives to whatever merges the value
-        // next — and one nested under an admissible key is the frame a shallow check misses.
+        // `JSON.parse` makes `__proto__` an OWN property, so it survives to whatever merges the
+        // value next — and one nested under an admissible key is the frame a shallow check misses.
         for (let i = 0; i < 60; i++) {
             const seed = SEED + 5000 + i;
             const g = gen(seed);
@@ -539,8 +536,8 @@ function bitFlip(g: Gen, frame: string): string {
 
 describe('jsonCodec — byteLength against the real encoding', () => {
     it('counts what the encoder would put on the wire, for generated strings of every width', () => {
-        // UTF-16 `.length` undercounts every non-ASCII character, and this count is what backpressure
-        // and the frame cap both read.
+        // UTF-16 `.length` undercounts every non-ASCII character, and this count is what
+        // backpressure and the frame cap both read.
         for (let i = 0; i < 400; i++) {
             const seed = SEED + 40_000 + i;
             const g = gen(seed);

@@ -1,8 +1,4 @@
-// @platform/glue/client
-// The viewer's half: one composed session, and a WebSocket to reach an authority with.
-//
-// Behind a subpath because its peer, `@platform/glue/server`, reaches `ws` and `node:fs`. This one
-// reaches a renderer and a socket and nothing of Node's, so it is the half a browser bundle takes.
+// Behind a subpath because its peer reaches `ws` and `node:fs`; this half is browser-safe.
 
 export { ClientInstance } from './instance.js';
 export type { ClientInstanceOptions } from './instance.js';

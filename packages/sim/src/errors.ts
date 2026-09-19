@@ -3,13 +3,13 @@
 
 /** Every condition the sim throws on. */
 export type SimErrorCode =
-    /** A load-time config value the world cannot run on, such as a `simRate` of 0 or `maxPlayers` below 1. */
+    /** A load-time config value the world cannot run on, such as a `simRate` of 0. */
     | 'invalid-config'
     /** A call argument outside its contract, refused before anything was mutated. */
     | 'invalid-argument'
     /** `loadGame` returned no tick passes, so the input pass has nowhere to install. */
     | 'no-pass-table'
-    /** The sim is closed, and the call would have advanced a world that has already been released. */
+    /** The sim is closed, and the call would advance a world that has already been released. */
     | 'sim-closed';
 
 /** A sim failure with a machine-readable {@link SimErrorCode}. */

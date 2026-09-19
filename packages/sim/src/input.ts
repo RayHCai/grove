@@ -14,20 +14,20 @@ import {
 /** The panel-mapped move axes `BaseMovement.fillIntent` reads. */
 const MOVE_AXES = ['moveX', 'moveY'] as const;
 
-/** A frame and the session it arrived on, which is carried rather than re-derived: the session is the identity. */
+/** A frame and the session it arrived on, carried rather than re-derived: that is the identity. */
 export interface BufferedInput {
     readonly session: Session;
     readonly frame: InputFrame;
 }
 
-/** What admission decided. Every arm from the tick window on resolves the seq — refusals included. */
+/** What admission decided; every arm from the tick window on resolves the seq. */
 export type AdmitResult =
     | { kind: 'buffered'; at: number }
     /** Past the horizon but inside the clamp band, so applied at the horizon. */
     | { kind: 'clamped'; at: number }
     | { kind: 'refused'; reason: RefusalReason };
 
-/** Arrivals waiting for their intended tick, keyed by tick so timing is judged on the tick the player pressed rather than on their ping. */
+/** Arrivals waiting for their intended tick, so timing is judged on the tick pressed, not ping. */
 export class InputBuffer {
     readonly #byTick = new Map<number, BufferedInput[]>();
 
@@ -38,7 +38,7 @@ export class InputBuffer {
         return n;
     }
 
-    /** Runs the window and rate checks in order and, on success, files the frame under the tick it will be applied on. */
+    /** Runs the window and rate checks, then files the frame under the tick it applies on. */
     admit(session: Session, frame: InputFrame, currentTick: number, simRate: number): AdmitResult {
         // A duplicate the frontier has not reached yet is left unresolved: the copy already filed
         // may not have applied, and acking it would let the client prune input it still needs.
@@ -105,7 +105,7 @@ export class InputBuffer {
         else this.#byTick.set(at, [entry]);
     }
 
-    /** A refused frame is resolved, not dropped in silence: the ack advancing past it IS the refusal report. */
+    /** A refused frame is resolved, not dropped in silence: the ack past it IS the report. */
     #refuse(session: Session, frame: InputFrame, reason: RefusalReason): AdmitResult {
         session.admission.resolve(frame.seq);
         return { kind: 'refused', reason };
@@ -120,7 +120,7 @@ export interface InputPassContext {
     sessions(): Iterable<Session>;
 }
 
-/** The pass the server installs over core's stub: drain this tick's frames, fold them, and dispatch the three phases. */
+/** The pass installed over core's stub: drain this tick's frames, fold, dispatch three phases. */
 export function runInputPass(ctx: InputPassContext, dispatch: DispatchOptions): void {
     const { rt, buffer } = ctx;
     const tick = rt.tick;
@@ -174,7 +174,7 @@ export function runInputPass(ctx: InputPassContext, dispatch: DispatchOptions): 
     }
 }
 
-/** Dispatches this connection's queued requests, on the authority, with the player the connection names. */
+/** Dispatches this connection's queued requests on the authority, as the player it names. */
 function drainRequests(rt: Runtime, session: Session, player: Player): void {
     if (session.requests.length === 0) return;
     for (const call of session.requests.splice(0)) {
@@ -182,7 +182,7 @@ function drainRequests(rt: Runtime, session: Session, player: Player): void {
     }
 }
 
-/** Dispatches this connection's queued HUD presses and pointer hits, through core's own entry points so no rule is copied. */
+/** Dispatches queued HUD presses and pointer hits through core's own entry points. */
 function drainInteractions(rt: Runtime, session: Session, player: Player): void {
     if (session.interactions.length === 0) return;
     for (const event of session.interactions.splice(0)) {
@@ -206,14 +206,14 @@ const POINTER_EDGE = {
     'hover-exit': 'onHoverExit',
 } as const satisfies Record<string, PointerEdge>;
 
-/** Every action a synthesized `hold` is owed: held buttons union non-neutral axes, since an axis never enters `held`. */
+/** Every action a synthesized `hold` is owed: held buttons union non-neutral axes. */
 function activeActions(session: Session): Set<string> {
     const out = new Set(session.actions.heldActions());
     for (const { action } of session.actions.axisValues()) out.add(action);
     return out;
 }
 
-/** Folds one frame into the connection's action state, dispatches its edges, and resolves its seq — at the apply, which is what makes `ackSeq` mean resolved. */
+/** Folds one frame, dispatches its edges, resolves its seq at the apply — hence `ackSeq`. */
 function applyBuffered(
     rt: Runtime,
     session: Session,
@@ -228,7 +228,8 @@ function applyBuffered(
         // contract, but a legitimate frame's other actions still deserve to land.
         if (!session.admission.admitsAction(action.action)) continue;
         session.actions.applyEdge(action);
-        // `hold` is synthesized per tick from the fold, so dispatching here too would double-fire it.
+        // `hold` is synthesized per tick from the fold, so dispatching here too would double-fire
+        // it.
         if (action.on === 'hold') continue;
         dispatchInput(
             rt,
@@ -274,7 +275,7 @@ function dispatchInput(
     }
 }
 
-/** The player's host and its avatar's, both of which receive the edge — a spectator has no avatar at all. */
+/** The player's host and its avatar's, both receiving the edge; a spectator has no avatar. */
 function hostKeys(player: Player): string[] {
     return player.hasAvatar
         ? [playerKey(player.id), entityKey(player.avatar.entityId)]

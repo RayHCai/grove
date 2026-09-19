@@ -1,6 +1,3 @@
-// What a shutdown owes the host: every online named player's save, and nothing for a peer nobody
-// named. Whether those writes land is the host's, and `@platform/glue`'s suite is where that is.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime, playerKey } from '@platform/core';
 import { Accounts, Wallet } from '../dist/testkit/fixtures.js';

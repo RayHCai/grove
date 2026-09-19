@@ -1,9 +1,5 @@
-// Decorator-bearing fixtures compiled by the build: `tsc` lowers standard decorators and the test
-// runner's transform does not, so the tests import the compiled classes from `../dist/testkit/` and
-// carry no decorator syntax themselves.
-//
-// Not public surface — exported only so the test suite can reach it, and the one place in this package
-// that touches core's decorated surface: `src/` proper drives core as values and declares no script.
+// Compiled by the build: `tsc` lowers standard decorators and the test runner's transform does
+// not, so tests import these from `../dist/testkit/`. Not public surface.
 
 import type { Ctx, Entity, Player } from '@platform/core';
 import {
@@ -26,7 +22,7 @@ import {
     serverState,
 } from '@platform/core';
 
-/** The authoritative half of a HUD press: the client resolved the widget, the server decides on it. */
+/** The authoritative half of a HUD press: the client resolved the widget, the server decides. */
 export class Storekeeper extends ServerScript {
     @serverState credits = 0;
     presses: string[] = [];
@@ -126,17 +122,14 @@ export class Era extends ServerScript {
 }
 
 /**
- * Game-hosted wrapper state: authoritative with no `@serverState`, marked by the wrapper itself.
- *
- * The field initializer is what binds it — wiring walks the instance's own properties — so a wrapper
- * whose constructor needs the host cannot be declared this way, which is why this one is a
- * `Scoreboard` and not an `Inventory`.
+ * Game-hosted wrapper state: authoritative with no `@serverState`, marked by the wrapper.
+ * The field initializer binds it, so a wrapper needing the host cannot be declared this way.
  */
 export class Standings extends ServerScript {
     readonly scores = new Scoreboard();
 }
 
-/** Player-hosted wrapper state: a `Team` takes only a name, so a field initializer can build one. */
+/** Player-hosted wrapper state: a `Team` takes only a name, so an initializer can build one. */
 export class Squad extends ServerScript<Player> {
     readonly team = new Team('red');
 }
@@ -170,10 +163,7 @@ export class Rules extends ServerScript {
 
 /**
  * A Game script that attaches the player-hosted state inside `@onPlayerJoin`.
- *
- * Attaching there and not after the join is what makes the seeding order testable: the hoist reads
- * `rt.persisted` synchronously, so a record loaded too late seeds nothing and the test still passes
- * if the scripts are attached once the cache is already warm.
+ * Attaching there makes the seeding order testable: the hoist reads `rt.persisted` synchronously.
  */
 export class Accounts extends ServerScript {
     @onPlayerJoin
@@ -194,12 +184,7 @@ export class Spectators extends ServerScript {
     }
 }
 
-/**
- * A Game script that throws every tick, so the breaker trips off nothing but a pump.
- *
- * `@onUpdate` needs no dispatch to provoke it, which is what makes a trip reachable from a test that
- * only advances the clock.
- */
+/** A Game script that throws every tick: `@onUpdate` needs no dispatch, so a pump trips it. */
 export class FaultyRules extends ServerScript {
     @onUpdate
     update(): void {

@@ -3,16 +3,15 @@
 
 /** Every condition the transport and its codecs throw on. */
 export type TransportErrorCode =
-    /** `encode` was handed a value outside the codec's admissible set, which the wire would drop or transform. */
+    /** `encode` got a value outside the codec's set, which the wire would drop or transform. */
     | 'encode-rejected'
     /** A frame is not this codec's output at all: wrong type, truncated, unparseable. */
     | 'malformed-frame'
-    /** A decoded frame carries `__proto__` / `constructor` / `prototype` — rejected, never stripped. */
+    /** A decoded frame carries `__proto__`/`constructor`/`prototype` — rejected, never stripped. */
     | 'pollution-key'
     /**
-     * A frame parsed, but carries a value `encode` would have refused, such as `1e999` decoding to
-     * `Infinity` — distinct from `malformed-frame` because the frame is well-formed and only the
-     * value is inadmissible, which is the asymmetry a hostile peer probes for.
+     * A frame parsed but carries a value `encode` would refuse, such as `1e999` → `Infinity`.
+     * Distinct from `malformed-frame`: the frame is well-formed and only the value is bad.
      */
     | 'unsupported-value'
     /**
@@ -29,7 +28,7 @@ export type TransportErrorCode =
     | 'retention-overflow'
     /** A `latency: 0` `deliver()` never ran out of work, because two handlers answer each other. */
     | 'delivery-not-quiescent'
-    /** A handler called `deliver()` while a pump was already running, which would re-age both queues. */
+    /** A handler called `deliver()` while a pump was running, which would re-age both queues. */
     | 'delivery-reentered'
     /** A second `onMessage` / `onClose` on one end, which would split a connection's frames. */
     | 'handler-already-registered'
@@ -47,7 +46,7 @@ export type TransportErrorCode =
      * is gone but TCP has not noticed, which no close event will ever report.
      */
     | 'heartbeat-timeout'
-    /** The socket's own send buffer passed its cap, so the peer has stopped draining the connection. */
+    /** The socket's send buffer passed its cap, so the peer has stopped draining the connection. */
     | 'send-buffer-overflow';
 
 /** A transport or codec failure with a machine-readable {@link TransportErrorCode}. */

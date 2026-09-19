@@ -1,6 +1,5 @@
-// A types-only package's meaningful tests are compile-time ones: `tsc -p tsconfig.test.json` is the
-// real assertion, and the `expect` calls exist so a reader sees which invariant broke rather than
-// one long list of TS errors.
+// `tsc -p tsconfig.test.json` is the real assertion; the `expect` calls only name which invariant
+// broke, rather than leaving one long list of TS errors.
 
 import { describe, expect, it } from 'vitest';
 import type { Message } from '@platform/transport';
@@ -53,17 +52,11 @@ import { PROTOCOL_VERSION } from '../src/index.js';
 
 /** Fails to compile unless `T` is assignable to `U`. */
 type Assignable<T extends U, U> = T;
-/**
- * `true` only when the two types are mutually assignable; the tuples stop a union distributing.
- *
- * Spelled as a check plus `Assert` rather than one `Exact<T, U, V = T>` helper, because that form
- * needs its third parameter to escape a circular constraint — and anything passed for it, as in
- * `Exact<A, B, string>`, silently disables the reverse direction while still compiling.
- */
+/** `true` only when the two types are mutually assignable; the tuples stop a union distributing. */
 type IsMutual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 /** Fails to compile unless `T` is `true`. */
 type Assert<T extends true> = T;
-/** Fails to compile unless `T` is `never` — how an exhaustive union check reports a leftover arm. */
+/** Fails to compile unless `T` is `never` — how an exhaustive union check reports a leftover. */
 type Empty<T extends never> = T;
 
 const netId = (n: number): NetId => n as NetId;
@@ -202,7 +195,8 @@ const joinRequest: JoinRequest = {
     clientSentMs: 1,
     projectId: 'arcade',
     projectHash: 'a1b2c3',
-    // A joiner holds no bundle yet, which is what the empty string means and why it is not optional.
+    // A joiner holds no bundle yet, which is what the empty string means and why it is not
+    // optional.
     bundleHash: '',
 };
 
@@ -249,8 +243,8 @@ type _RequestFrameIsMessage = Assignable<RequestFrame, Message>;
 type _ServerToClientIsMessage = Assignable<ServerToClient, Message>;
 type _ClientToServerIsMessage = Assignable<ClientToServer, Message>;
 
-// The payload types too: a `readonly` or an `interface` slipped into one of these otherwise fails at
-// the envelope, which is harder to read.
+// The payload types too: a `readonly` or an `interface` slipped into one of these otherwise fails
+// at the envelope, which is harder to read.
 type _StructuralOpIsMessage = Assignable<WireStructuralOp, Message>;
 type _TransformDiffIsMessage = Assignable<TransformDiff, Message>;
 type _SnapshotIsMessage = Assignable<WorldSnapshot, Message>;
@@ -541,17 +535,15 @@ type _DiffCarriesEveryTransformField = Assert<
     IsMutual<Exclude<keyof TransformDiff, 'netId'>, TransformFields>
 >;
 
-// Core's `TransformBuffer` is the store's per-field array set plus the bookkeeping a capture needs.
-// `count` and `slots` describe WHICH slots the buffer covers, which is local to one runtime and
-// meaningless to a peer holding its own; dropping them leaves exactly the per-entity fields the wire
-// must carry, so a real field added to the store breaks this line and nothing else has to remember to.
+// `count` and `slots` describe WHICH slots a buffer covers, local to one runtime and meaningless
+// to a peer; dropping them leaves exactly the per-entity fields the wire must carry.
 type CoreTransformFields = Exclude<keyof TransformBuffer, 'count' | 'slots'>;
 type _WireTransformMatchesCore = Assert<IsMutual<TransformFields, CoreTransformFields>>;
 
 describe('EntitySnapshot and TransformDiff carry the same seven fields', () => {
     it('the seven fields are core’s, in core’s order', () => {
-        // Order is not type-checkable, so it is pinned here: a reader comparing the two files should
-        // find them identical rather than merely equivalent as sets.
+        // Order is not type-checkable, so it is pinned here: a reader comparing the two files
+        // should find them identical rather than merely equivalent as sets.
         expect(Object.keys(transform)).toStrictEqual([
             'posX',
             'posY',
@@ -573,13 +565,8 @@ describe('EntitySnapshot and TransformDiff carry the same seven fields', () => {
     });
 });
 
-// For every channel the steady-state path can modify, the snapshot must supply a baseline. That is
-// the invariant most easily broken one channel at a time, because each omission looks local and the
-// failure appears only on a mid-session join. This is that rule as an exhaustive Record: add a tenth
-// structural op and it fails to compile, at the moment the omission is cheapest to fix.
-//
-// The mapping is semantic, so a human still chooses the value; only the EXHAUSTIVENESS is
-// mechanical, and `null` is the deliberate escape for an op with no consumer yet.
+// Every channel the steady-state path can modify must have a snapshot baseline. As an exhaustive
+// Record, a tenth structural op fails to compile; `null` is the escape for one with no consumer.
 
 type SnapshotBaseline =
     | 'entities'
@@ -769,8 +756,8 @@ describe('wrapper state crosses as a tagged payload, not as a class', () => {
     });
 
     it('carries maps as entry pairs, so a creator-chosen name never lands in key position', () => {
-        // An inventory item called `__proto__` as a KEY would make the codec refuse the whole frame;
-        // as the first half of a pair it is an ordinary string.
+        // An inventory item called `__proto__` as a KEY would make the codec refuse the whole
+        // frame; as the first half of a pair it is an ordinary string.
         const bag: WireWrapperState = {
             kind: 'Inventory',
             player: 'p1',
@@ -813,8 +800,8 @@ describe('state diffs group under one host address', () => {
             '{"kind":"state","tick":1,"ackSeq":0,"structural":[],"state":[{"host":{"kind":"game"},"fields":{"__proto__":{"polluted":true}}}]}';
         expect(() => jsonCodec.decode(hostile)).toThrow();
 
-        // The shape it replaced put the name in VALUE position, where that check cannot see it — this
-        // decoded clean and left the client's apply as the only thing standing in the way.
+        // The shape it replaced put the name in VALUE position, where that check cannot see it —
+        // this decoded clean and left the client's apply as the only thing standing in the way.
         const perField =
             '{"kind":"state","tick":1,"ackSeq":0,"structural":[],"state":[{"host":{"kind":"game"},"field":"__proto__","value":{"polluted":true}}]}';
         expect(() => jsonCodec.decode(perField)).not.toThrow();

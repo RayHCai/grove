@@ -1,9 +1,4 @@
-// The test harness: a Sim driven one batch at a time, with this file playing the host.
-//
-// Pure, no wall-clock and no socket, the way core, the renderer and transport are validated. What a
-// real host does around the sim is reproduced here in miniature — a send cadence counted on its own
-// clock, a store the loads and saves go through, and a peer per connection that only ever sees what
-// an output batch told it to.
+// A Sim driven one batch at a time, with this file playing the host. No wall-clock, no socket.
 
 import type {
     GameRequest,
@@ -44,9 +39,7 @@ export class Peer {
 
     /**
      * The first frame on a connection — the client speaks first.
-     *
-     * Declares no project by default, which is what an unconfigured world declares too: the identity
-     * check passes on agreement, not on absence, so a test that wants a mismatch says so.
+     * Declares no project by default: the identity check passes on agreement, not on absence.
      */
     join(name = 'peer', over: Partial<JoinRequest> = {}): void {
         const request: JoinRequest = {
@@ -164,11 +157,8 @@ export class CountingCodec implements Codec {
 }
 
 /**
- * A store the harness reads and writes through, so the load and save protocol is exercised rather
- * than stubbed.
- *
- * A rejected `get` is a FAILED read, which the sim treats differently from a store that simply held
- * nothing — the first must not be written over at the leave and the second must.
+ * A store the harness reads and writes through, so the load/save protocol runs unstubbed.
+ * A rejected `get` is a FAILED read, which the sim treats differently from one that held nothing.
  */
 export interface HarnessStore {
     get(hostKey: string): Promise<{ [field: string]: unknown } | null>;
@@ -285,10 +275,8 @@ export class Harness {
     }
 
     /**
-     * `n` wakes of exactly one tick each — the ordinary case. Returns the sends they produced.
-     *
-     * The send cadence is counted here rather than derived from the tick index, which is what a host
-     * does: a mid-session `setSimRate` must not be able to desync it.
+     * `n` wakes of exactly one tick each, returning the sends they produced.
+     * The cadence is counted here, as a host does, so a mid-session `setSimRate` cannot desync it.
      */
     pumpTicks(n = 1): number {
         const perSend = ticksPerSend(this.sim.config.simRate, this.sim.config.sendRate);
@@ -304,7 +292,7 @@ export class Harness {
         return sends;
     }
 
-    /** As many single ticks as `seconds` of wall-clock buys, for a test that thinks in the deadline's units. */
+    /** As many single ticks as `seconds` buys, for a test thinking in the deadline's units. */
     pump(seconds: number): number {
         const ticks = Math.max(0, Math.round(seconds * this.sim.config.simRate));
         return this.pumpTicks(ticks);
@@ -322,10 +310,8 @@ export class Harness {
     }
 
     /**
-     * A join that has completed and whose Welcome has been delivered.
-     *
-     * Pumps until the Welcome arrives rather than a fixed count: the world answers a join at the next
-     * SEND-tick, so the snapshot and the journal are cut at the same instant.
+     * A join that has completed and whose Welcome has been delivered. Pumps until it arrives: the
+     * world answers at the next SEND-tick, cutting snapshot and journal at one instant.
      */
     joined(name = 'peer', limit = 32): Peer {
         const peer = this.connect();
@@ -338,10 +324,8 @@ export class Harness {
     }
 
     /**
-     * `joined`, for a host-named peer — whose admission waits on the store read the sim asked for.
-     *
-     * Flushes a macrotask per tick rather than only a microtask, so it settles against a store that
-     * answers on a timer as well as one that resolves immediately.
+     * `joined`, for a host-named peer, whose admission waits on the store read the sim asked for.
+     * Flushes a macrotask per tick, so it settles against a store that answers on a timer too.
      */
     async joinedAs(playerId: string, name = playerId, limit = 32): Promise<Peer> {
         const peer = this.connect(playerId);
