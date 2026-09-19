@@ -1,12 +1,5 @@
-// The `sprout` template — the avatar, the body identity drives.
-//
-//   SproutMovement  PlatformerMovement     coyote time, and a kinder jump
-//   Sprout          SyncedScript<Entity>   the movement knobs
-//   View            ClientScript<Entity>   the camera, and the squash on landing
-//
-// Synced for the body, client for the flourish. There is no server script here: dying
-// is a level rule, so it lives in game.ts. The panel fills the movement slot, which is
-// why `Sprout` only tunes numbers.
+// Synced for the body, client for the flourish. No server script: dying is a level rule, so it
+// lives in game.ts. The panel fills the movement slot, so `Sprout` only tunes numbers.
 
 import {
     ClientScript,

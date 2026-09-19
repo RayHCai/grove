@@ -10,7 +10,7 @@ export interface GitStamp {
     commit: string;
     shortCommit: string;
     subject: string;
-    /** True when the working tree differs from `commit`, which makes the commit an approximation. */
+    /** True when the working tree differs from `commit`, making the commit an approximation. */
     dirty: boolean;
 }
 

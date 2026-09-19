@@ -12,11 +12,11 @@ import type { WorldSpec } from '../worlds.js';
 const SIM_RATE = 60;
 const WARM_TICKS = 200;
 
-/** Entity counts the curve is read off. The top of the range is a curve point, not a playable size. */
+/** Entity counts the curve is read off; the top of the range is a curve point, not a size. */
 export const N_SWEEP = [100, 300, 1000, 3000, 10_000] as const;
 export const SCRIPT_SWEEP = [0, 50, 150, 300] as const;
 
-/** Every pass the loop drives, in tick order — the keys `passes` is stubbed through one at a time. */
+/** Every pass the loop drives, in tick order — the keys `passes` stubs through one at a time. */
 const PASS_NAMES = [
     'starts',
     'input',
@@ -38,11 +38,8 @@ function loopDriver(rt: Runtime): Driver {
 }
 
 /**
- * The fastest of `rounds` timings.
- *
- * A difference between two of these is what the pass breakdown reports, and a mean carries whatever
- * the machine was doing at the time into that subtraction — where it can exceed the pass being
- * priced. The minimum is the run least interfered with, which is the one worth differencing.
+ * The fastest of `rounds` timings. A mean carries whatever the machine was doing into the
+ * subtraction the pass breakdown reports, where it can exceed the pass being priced.
  */
 async function bestOf(meter: Meter, drive: Driver, ticks: number, rounds = 3): Promise<number> {
     let best = Number.POSITIVE_INFINITY;
@@ -137,10 +134,8 @@ export async function nSweep(
 }
 
 /**
- * Tick cost against script count, with the contact walk out of the way.
- *
- * Colliders off on purpose: at any entity count where dispatch is measurable the walk is larger
- * than it, and a sweep that left it in would report the same number four times.
+ * Tick cost against script count, with the contact walk out of the way. Colliders off on purpose:
+ * where dispatch is measurable the walk is larger, and a sweep would report one number four times.
  */
 export async function scriptSweep(
     meter: Meter,
@@ -164,11 +159,8 @@ export async function scriptSweep(
 }
 
 /**
- * What each pass costs, by removing one at a time from a live world.
- *
- * A/B inside one process rather than a table of separate timings: at the entity counts where this
- * matters one pass is three orders of magnitude larger than the rest, and a cross-run difference of
- * that shape is indistinguishable from the noise on the larger number.
+ * What each pass costs, by removing one at a time from a live world. A/B inside one process:
+ * one pass is orders larger than the rest, and a cross-run difference of that shape is noise.
  */
 export async function passBreakdown(
     meter: Meter,
@@ -208,11 +200,8 @@ export async function passBreakdown(
 }
 
 /**
- * What `isServer` costs, measured with the contact walk stubbed out.
- *
- * The flag gates the lag-ring capture and the set of locations that dispatch, and both are single-
- * digit microseconds — left in place, the walk is four orders of magnitude larger and the difference
- * between the roles is not visible at all.
+ * What `isServer` costs, with the contact walk stubbed out. The flag gates the lag-ring capture
+ * and the dispatching locations, both single-digit microseconds — the walk would hide them.
  */
 export async function roleSplit(
     meter: Meter,

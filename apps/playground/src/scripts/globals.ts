@@ -1,10 +1,6 @@
-// The variables panel: every number and name the game is tuned by, in one place.
-//
-// It imports NOTHING — not the engine, not the host, not another script. That is what lets a script
-// read it, the project file describe a world with it, and the browser shell draw a HUD against it,
-// without any of the three learning about the other two.
-//
-// A creator edits this file. Everything else in `scripts/` is behaviour.
+// Imports NOTHING — not the engine, not the host, not another script — which is what lets a
+// script read it, the project file describe a world with it, and the shell draw a HUD against it.
+// A creator edits this file; everything else in `scripts/` is behaviour.
 
 /** Pressed on `mouse:0`; in the lobby the server answers by planting a leaf. */
 export const ACTION_SPAWN = 'spawn';
@@ -16,10 +12,8 @@ export const ACTION_AIM_Y = 'aimY';
 export const ACTION_CLEAR = 'clear';
 
 /**
- * Held on WASD; both ends run the same script and move the avatar.
- *
- * Two axes, not one: a leaf drifts at whatever height the round dropped it, so a left-right-only
- * avatar could reach one height out of the world's whole extent.
+ * Held on WASD; both ends run the same script and move the avatar. Two axes, not one: a leaf
+ * drifts at whatever height the round dropped it.
  */
 export const ACTION_LEFT = 'left';
 export const ACTION_RIGHT = 'right';
@@ -35,7 +29,7 @@ export const CODE_RIGHT = 'keys:KeyD';
 export const CODE_UP = 'keys:KeyW';
 export const CODE_DOWN = 'keys:KeyS';
 
-/** Structurally assignable to `@platform/client`'s `Binding`, which is what keeps this file free of it. */
+/** Structurally assignable to client's `Binding`, which keeps this file free of that import. */
 export type StageBinding =
     | { kind: 'button'; code: string; action: string }
     | { kind: 'axis'; code: string; action: string };
@@ -53,10 +47,8 @@ export const BINDINGS: StageBinding[] = [
 ];
 
 /**
- * Added to the aim axis before it goes on the wire, and taken off on arrival.
- *
- * A value of exactly 0 reads as a neutral axis and the client's quantizer drops it, which would
- * swallow the first click on the stage's centre line. It cancels out on both sides and means nothing.
+ * Added to the aim axis before it goes on the wire, and taken off on arrival. Exactly 0 reads as
+ * neutral and the quantizer drops it, swallowing the first click on the centre line.
  */
 export const AIM_BIAS = 1000;
 
@@ -74,9 +66,7 @@ export const DESIGN = { width: 960, height: 540 } as const;
 
 /**
  * The two named rectangles the round is played across: `bonus` ripens a leaf, `compost` wilts one.
- *
- * Both are `@onEnter`/`@onExit` on the leaf, which is what makes them regions rather than an `x >`
- * test in the drift pass.
+ * Both are `@onEnter`/`@onExit` on the leaf, which is what makes them regions.
  */
 export const REGION_BONUS = 'bonus';
 export const REGION_COMPOST = 'compost';
@@ -95,19 +85,16 @@ export const MARKER_PIXELS = { width: 8, height: 8 } as const;
 /** The leaf itself, drawn the same for everyone. */
 export const LEAF_TEMPLATE = 'leaf';
 
-/** `'player'` is the name core's roster spawns an avatar under, so `player.spawn()` needs no config. */
+/** `'player'` is what core's roster spawns an avatar under, so `player.spawn()` needs no config. */
 export const AVATAR_TEMPLATE = 'player';
 export const AVATAR_SHADOW_TEMPLATE = 'player-shadow';
 
-/** Announced through `declareVisuals` on the first win: an unspawned template needs no manifest entry. */
+/** Announced through `declareVisuals` on the first win: an unspawned template needs no entry. */
 export const CROWN_TEMPLATE = 'crown';
 
 /**
- * One tint per palette seat.
- *
- * A transform diff carries no colour, so the tint rides the TEMPLATE and a template per seat is what
- * makes it per player. Eight hues, well separated on a dark stage — two concurrent players sharing
- * one would make the ripe-for badge unreadable.
+ * One tint per palette seat. A transform diff carries no colour, so the tint rides the TEMPLATE
+ * and a template per seat is what makes it per player. Eight hues, well separated on a dark stage.
  */
 export const PLAYER_TINTS = [
     0x52b788, // green
@@ -147,16 +134,14 @@ export function tintCss(slot: number): string {
 export const AVATAR_STEP = 4;
 
 /**
- * Where it stands, how large it draws, and how wide its harvest reach is.
- *
- * `marker.png` is 8x8, so {@link AVATAR_SCALE} draws the body 40 world px across — the same width as
- * the collider `Harvester` gives it, since a sprite narrower than its reach reads as thin-air catches.
+ * Where it stands, how large it draws, and how wide its harvest reach is. `marker.png` is 8x8, so
+ * the scale draws the body as wide as its collider — a narrower sprite reads as thin-air catches.
  */
 export const AVATAR_Y = -200;
 export const AVATAR_HALF = 20;
 export const AVATAR_SCALE = 5;
 
-/** Derived from {@link WORLD} rather than a fixed step, which put the last seat past the right edge. */
+/** Derived from {@link WORLD}, not a fixed step, which put the last seat past the right edge. */
 export function avatarX(slot: number): number {
     const usable = WORLD.right - WORLD.left - 2 * AVATAR_HALF;
     return WORLD.left + AVATAR_HALF + (usable * (tintSlot(slot) + 0.5)) / MAX_PLAYERS;
@@ -167,9 +152,7 @@ export const LEAF_TAG = 'leaf';
 
 /**
  * How large a leaf draws, half the box it is caught through, and how fast it crosses.
- *
- * Read by both halves: the authority makes the box a collider, and the browser hit-tests a click
- * against the same box — offset by the send interval the sprite is drawn behind.
+ * Read by both halves: the authority makes the box a collider, the browser hit-tests the same box.
  */
 export const LEAF_SCALE = 3;
 export const LEAF_HALF = 22;
@@ -181,14 +164,12 @@ export const LEAF_SPIN = 90;
 /** How much wider a leaf draws while it is ripe, so `bonus` is legible without a second sprite. */
 export const RIPE_SCALE = LEAF_SCALE * 1.35;
 
-/** The off-stage margin: a leaf enters and retires this far out, so it slides rather than popping. */
+/** The off-stage margin: a leaf enters and retires this far out, so it slides rather than pops. */
 export const EDGE_MARGIN = 32;
 
 /**
  * The badge parented above each leaf: how big, how far above, and how solid.
- *
- * `marker.png` is 8x8, so scale 2 draws it a third of a leaf — legible as a colour without competing
- * with the art.
+ * `marker.png` is 8x8, so scale 2 draws it a third of a leaf — legible without competing.
  */
 export const MARKER_SCALE = 2;
 export const MARKER_OFFSET_Y = 34;
@@ -218,10 +199,8 @@ export const POP_POINTS = 1;
 export const BOARD_SIZE = 5;
 
 /**
- * Game-hosted, so every peer sees them.
- *
- * Constants because the browser reads them off a host record BY NAME: the field is written by a
- * `ServerScript` the browser never links, so a typo would read `undefined` rather than fail to compile.
+ * Game-hosted, so every peer sees them. Constants because the browser reads them off a host
+ * record BY NAME: the field is written by a `ServerScript` the browser never links.
  */
 export const STATE_PHASE = 'phase';
 export const STATE_SECONDS_LEFT = 'secondsLeft';
@@ -233,7 +212,7 @@ export const STATE_ROUND = 'round';
 export const STATE_SCORES = 'scores';
 export const STATE_BOARD = 'board';
 
-/** Player-hosted, and so replicated only to the player they belong to. `slot` is the seat, not `player.index`. */
+/** Player-hosted, so replicated only to their owner. `slot` is the seat, not `player.index`. */
 export const STATE_READY = 'ready';
 export const STATE_LIFETIME = 'lifetimeLeaves';
 export const STATE_BEST = 'bestRound';
@@ -243,10 +222,8 @@ export const STATE_SLOT = 'slot';
 export const STATE_RIPE = 'ripe';
 
 /**
- * The widgets and screens this game writes.
- *
- * A widget name is the event name of an `@onPress` dispatch, so these are the one vocabulary the
- * browser's buttons and the authority's handlers share.
+ * The widgets and screens this game writes. A widget name is the event name of an `@onPress`
+ * dispatch, so these are the one vocabulary the buttons and the handlers share.
  */
 export const WIDGET_READY = 'ready';
 export const WIDGET_PHASE = 'phase';

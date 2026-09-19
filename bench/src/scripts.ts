@@ -4,7 +4,7 @@
 import { SyncedScript, onCollide, onUpdate, serverState } from '@platform/core';
 import type { Entity } from '@platform/core';
 
-/** The cheapest possible `@onUpdate`: what a script-count sweep prices is the dispatch, not the body. */
+/** The cheapest possible `@onUpdate`: a script-count sweep prices dispatch, not the body. */
 export class BenchTicker extends SyncedScript<Entity> {
     ticks = 0;
 
@@ -24,7 +24,7 @@ export class BenchWriter extends SyncedScript<Entity> {
     }
 }
 
-/** A contact handler, so a world with overlapping bodies dispatches rather than only walking pairs. */
+/** A contact handler, so a world with overlapping bodies dispatches rather than only walking. */
 export class BenchCollider extends SyncedScript<Entity> {
     hits = 0;
 

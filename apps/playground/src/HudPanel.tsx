@@ -1,14 +1,5 @@
-// The interface, drawn from the HUD seam rather than from React state.
-//
-// Nothing here decides what a widget says. The authority writes `@serverState`, the bridge turns
-// that into `hud.text` / `hud.number` / `hud.bar`, `ClientHUDSink` collects it and tells this
-// component to look again — so the only thing this file owns is the layout. That is the whole
-// reason the HUD is a seam and not a prop: a panel-authored interface has to be drawable by a host
-// that does not know the game.
-//
-// The ready button is the same seam in the other direction: `pressWidget` runs the screen's own
-// handler locally and puts a press on the interaction frame, which is the one creator-facing
-// client→server command channel there is.
+// Nothing here decides what a widget says: the authority writes `@serverState`, the bridge turns
+// it into `hud.*`, and `ClientHUDSink` tells this component to look again. Layout only.
 
 import { useCallback, useRef, useSyncExternalStore } from 'react';
 import type { ClientHUDSink, HUDWidgetView } from '@platform/glue/client';
@@ -121,11 +112,8 @@ export function HudPanel({ hud, onReady, live }: HudPanelProps): React.JSX.Eleme
 }
 
 /**
- * Subscribes to the HUD sink.
- *
- * The snapshot is rebuilt inside the change callback and handed back by reference, because
- * `useSyncExternalStore` re-reads it on every render and compares by identity — building a fresh
- * `widgets` array per read would re-render forever.
+ * Subscribes to the HUD sink. The snapshot is rebuilt in the change callback and handed back by
+ * reference: `useSyncExternalStore` compares by identity, so a fresh array would re-render forever.
  */
 function useHudView(sink: ClientHUDSink | null): HudView {
     const held = useRef<HudView>(EMPTY);

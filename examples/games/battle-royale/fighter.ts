@@ -1,13 +1,5 @@
-// The `fighter` template — a player's avatar, the body identity drives.
-//
-//   Sprout   SyncedScript<Entity>   the tag, and movement tuning
-//   Gunplay  SyncedScript<Entity>   firing, and the crate pickup
-//   Hitbox   SyncedScript<Entity>   taking damage
-//   Wilt     ServerScript<Entity>   the death sequence
-//
-// Mostly synced, so the shooter sees their own shot this frame and the server's copy
-// decides whether it landed. `Wilt` is the exception and says why. The panel fills
-// the movement slot with `TopDownMovement`, so `Sprout` only tunes a number.
+// Mostly synced, so the shooter sees their own shot this frame and the server's copy decides
+// whether it landed. The panel fills the movement slot, so `Sprout` only tunes a number.
 
 import {
     ServerScript,

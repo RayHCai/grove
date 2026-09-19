@@ -1,10 +1,5 @@
-// The always-on overlay: replicated state in, widgets out, once a frame.
-//
-// This is the whole HUD, and it is a SCRIPT rather than anything in the host app. Nothing here
-// diffs: writing an unchanged widget is free, because the sink compares before it notifies.
-//
-// It also owns which menu is up, because the phase is the only input to that and `render` already
-// reads the phase every frame.
+// Nothing here diffs: writing an unchanged widget is free, since the sink compares before it
+// notifies. It also owns which menu is up, the phase being the only input to that.
 
 import type { HUDScreen, Leaderboard, Player, Scoreboard } from '@platform/engine';
 import { ClientScript, game, hud, onUpdate } from '@platform/engine';
@@ -49,8 +44,8 @@ export class HudScreen extends ClientScript<HUDScreen> {
         // The mirror hoists every replicated field onto the facade it belongs to as it lands, so
         // these read the same names the authority wrote.
         const world = game;
-        // Declared non-null on a `ClientScript`, but a screen can open before the roster carries the
-        // local player — the welcome is what seats them.
+        // Declared non-null on a `ClientScript`, but a screen can open before the roster carries
+        // the local player — the welcome is what seats them.
         const me = this.localPlayer as Player | undefined;
         const phase = readState<MatchPhase>(world, STATE_PHASE) ?? 'lobby';
         const round = readState<number>(world, STATE_ROUND) ?? 0;
@@ -69,8 +64,8 @@ export class HudScreen extends ClientScript<HUDScreen> {
         hud.number(WIDGET_WASTED, readState<number>(world, STATE_WASTED) ?? 0);
         hud.text(WIDGET_WINNER, winner);
 
-        // A peer holding no scripts still holds a real `Scoreboard`: the mirror revives one from the
-        // payload's own tag, so `of` and `top` answer here as they do on the server.
+        // A peer holding no scripts still holds a real `Scoreboard`: the mirror revives one from
+        // the payload's own tag, so `of` and `top` answer here as they do on the server.
         const scores = readState<Scoreboard>(world, STATE_SCORES);
         hud.number(WIDGET_SCORE, me === undefined ? 0 : (scores?.of(me) ?? 0));
 

@@ -1,8 +1,5 @@
-// The render-tree panel: a live view of `renderer.inspect()`.
-//
-// POLLED, NOT PER FRAME. `inspect()` allocates an object per node by design, so calling it 60 times
-// a second would make the debugger the most expensive thing on screen. A few times a second is
-// faster than anyone reads a tree, and the interval is adjustable from the UI.
+// POLLED, NOT PER FRAME: `inspect()` allocates an object per node, so calling it 60 times a
+// second would make the debugger the most expensive thing on screen.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { IRenderer, NodeId, NodeSnapshot, SceneSnapshot } from '@platform/renderer';
@@ -149,12 +146,7 @@ interface TreeNodeProps {
     onSelect: (id: NodeId) => void;
 }
 
-/**
- * One row plus its subtree.
- *
- * Recursion is bounded by the tree's own depth. A cycle is impossible — the core rejects one at
- * `attachNode` — so this needs no visited set.
- */
+/** One row plus its subtree. A cycle is impossible — the core rejects one — so no visited set. */
 function TreeNode({ id, snapshot, depth, selected, onSelect }: TreeNodeProps): React.JSX.Element {
     const node = snapshot.nodes.get(id);
     if (node === undefined) return <li className="tree__row tree__row--stale">{id} (missing)</li>;

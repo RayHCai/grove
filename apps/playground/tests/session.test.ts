@@ -1,10 +1,4 @@
-// The real clients against the real authority, in one process, over loopback pairs.
-//
-// Both packages are otherwise validated against a scripted peer — `@platform/client` against a fake
-// server, `@platform/sim` against a fake client — so this is the first place the two halves meet.
-// It is the same project `main.ts` hosts, booted through the same composition roots; only the
-// transport and the clock differ, which is what makes it worth running before a socket is involved.
-//
+// The first place the two halves meet: both are otherwise validated against a scripted peer.
 // The game's classes come from `dist/`, because they carry decorators and only `tsc` lowers them.
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -71,11 +65,8 @@ interface Tab {
 }
 
 /**
- * One server, N clients, one hand-turned clock.
- *
- * Every join is IDENTIFIED, as `main.ts`'s is: the server reads that player's persisted record
- * before it allocates a `Player`, and that read is a promise — so every step yields to the
- * microtask queue rather than assuming the join completed inside the pump.
+ * One server, N clients, one hand-turned clock. Every join is IDENTIFIED, as `main.ts`'s is:
+ * the server reads the persisted record first, and that read is a promise — hence the yields.
  */
 class Session {
     readonly instance: GameInstance;
@@ -215,11 +206,7 @@ class Session {
     }
 }
 
-/**
- * Turns the microtask queue six times, enough for the admission's promise chain.
- *
- * Not a macrotask flush: nothing on a timer or in I/O runs here.
- */
+/** Turns the microtask queue six times, enough for the admission's promise chain. */
 async function flushMicrotasks(): Promise<void> {
     for (let i = 0; i < 6; i++) await Promise.resolve();
 }
@@ -605,7 +592,8 @@ describe('a round', () => {
         await session.stepUntil(() => leafIds(tab).some((id) => ripe(tab, id)), 600);
         const ripened = leafIds(tab).find((id) => ripe(tab, id))!;
         const rt = runtimeOf(tab);
-        // The region wrote a scale as well as a flag, so the change is visible without a second sprite.
+        // The region wrote a scale as well as a flag, so the change is visible without a second
+        // sprite.
         expect(rt.transforms.scale(ripened)).toBeGreaterThan(3);
 
         await session.stepUntil(() => !rt.entities.isAlive(ripened) || !ripe(tab, ripened), 600);
@@ -720,7 +708,8 @@ describe('the results screen and the lobby after it', () => {
         await session.stepUntil(() => phaseOf(tab) === 'results', 3200);
 
         expect(leavesIn(tab)).toBe(0);
-        // `spectate` destroyed the avatar, which is why every loop over players guards on hasAvatar.
+        // `spectate` destroyed the avatar, which is why every loop over players guards on
+        // hasAvatar.
         expect(() => avatarOf(tab)).toThrow();
         expect(templatesIn(tab)).toContain(CROWN_TEMPLATE);
         // The crown's art was declared mid-session, so the client can actually draw it.

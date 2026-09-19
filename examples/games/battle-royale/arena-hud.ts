@@ -1,7 +1,3 @@
-// The `arena-hud` screen — the round overlay and the hotbar.
-//
-//   Arena  ClientScript<HUDScreen>  the whole screen
-//
 // Panel-marked open at start, so nothing has to close it.
 
 import {

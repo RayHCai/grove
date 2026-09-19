@@ -24,10 +24,7 @@ export interface Measurement {
     ticks?: number;
     /**
      * Ticks the ALLOCATION window ran, which the shrink-to-clean rule makes a different number.
-     *
-     * Reported separately because conflating the two hides the shrink: a byte figure taken over four
-     * ticks and one taken over four thousand answer differently, and a record that showed only the
-     * timing count made the difference invisible.
+     * Reported separately, because conflating the two hides the shrink.
      */
     allocTicks?: number;
     gc?: GcTally;
@@ -98,7 +95,7 @@ function round(value: number | undefined, places: number): number | string {
     return value === undefined ? '' : Number(value.toFixed(places));
 }
 
-/** The same numbers as the JSON, arranged for a terminal — a run is usually read before it is filed. */
+/** The same numbers as the JSON, arranged for a terminal — a run is usually read before filed. */
 export function printRun(run: RunFile): void {
     const rows = run.measurements.map((m) => ({
         id: m.id,

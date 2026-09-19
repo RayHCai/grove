@@ -1,8 +1,5 @@
-// Which palette seat a player holds, and where that seat stands them.
-//
-// Not `player.index`: core allocates indices from a counter a leave never lowers, so after eight
-// tabs have come and gone a ninth takes index 8 and would share both a hue and a spawn point with
-// whoever still holds index 0.
+// Not `player.index`: core allocates from a counter a leave never lowers, so a ninth tab would
+// share both a hue and a spawn point with whoever still holds index 0.
 
 import type { Player } from '@platform/engine';
 import { AVATAR_SCALE, AVATAR_Y, MAX_PLAYERS, avatarX, tintSlot } from '../globals.js';

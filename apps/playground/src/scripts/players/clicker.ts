@@ -1,7 +1,4 @@
-// Attached to every Player at the join: it turns that player's input into world changes.
-//
-// Input reaches a player host and an avatar host, never the Game host — which is why this is
-// per-player rather than a handler on `Rules`.
+// Input reaches a player host and an avatar host, never the Game host — hence per-player.
 
 import type { Ctx, Player } from '@platform/engine';
 import { ServerScript, game, onEvent, onEventHold, onUpdate } from '@platform/engine';

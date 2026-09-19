@@ -1,14 +1,5 @@
-// The React <-> session seam: what is left of it once `@platform/glue/client` owns the composition.
-//
-// Dialling, wiring the state listener before the join, abandoning a dial this component no longer
-// wants, and tearing down in an order that leaves nothing behind are all `connectTo`'s. What is
-// genuinely React's stays here: an `AbortController` per effect, the frame loop this app measures
-// its own fps on, and the three values the chrome renders from.
-//
-// The client owns the frame — `GameClient.frame()` drains the socket, advances the tick clock,
-// flushes input, pushes transforms and calls `render()` — so this hook supplies the loop that
-// drives it, and runs the HUD bridge behind it. Everything the panels show is polled off `stats()`,
-// because the client publishes no events for it; the HUD is not, because `ClientHUDSink` does.
+// The client owns the frame — `GameClient.frame()` drains, advances, flushes and renders — so
+// this hook only supplies the loop. Panels poll `stats()`; the HUD does not, as the sink notifies.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPerformanceClock } from '@platform/client/browser';
@@ -49,7 +40,7 @@ export interface GameStats extends ClientStats {
 }
 
 export interface UseGameOptions {
-    /** `null` until the renderer is initialized; the session must never see an uninitialized one. */
+    /** `null` until the renderer is initialized; the session must never see an uninitialized one */
     renderer: IRenderer | null;
     container: React.RefObject<HTMLDivElement | null>;
     url: string;
@@ -197,11 +188,8 @@ export function useGame(opts: UseGameOptions): UseGameResult {
     }, []);
 
     /**
-     * The one client→server command that is not an input action.
-     *
-     * The screen name scopes the press, so `LobbyScreen`'s own handler answers it locally on this
-     * frame while the authority is told on the next — which is why the button can say "asked"
-     * before anything has granted it.
+     * The one client→server command that is not an input action. The screen name scopes the press,
+     * so the screen's own handler answers locally this frame while the authority is told next.
      */
     const pressReady = useCallback(() => {
         const live = sessionRef.current;
@@ -212,10 +200,8 @@ export function useGame(opts: UseGameOptions): UseGameResult {
 }
 
 /**
- * A rAF frame source that also keeps a rolling fps and runs the host's own after-frame work.
- *
- * The client stops it on close, reject and failure, so the loop's lifetime is the session's rather
- * than the component's.
+ * A rAF frame source that also keeps a rolling fps and runs the host's after-frame work.
+ * The client stops it on close, reject and failure, so its lifetime is the session's.
  */
 function createCountingFrameSource(fps: React.RefObject<number>, after: () => void): FrameSource {
     let handle = 0;
@@ -267,9 +253,7 @@ function describeFailure(reason: FailureReason | undefined): string | null {
 
 /**
  * A per-tab id that survives a reload, so this tab rejoins as the player it saved.
- *
- * `sessionStorage` and not `localStorage`, which every tab shares — but note it is COPIED into a
- * duplicated tab and into one opened from a link, and the server refuses the second claim.
+ * `sessionStorage`, not `localStorage` — but a duplicated tab COPIES it, and loses the race.
  */
 function tabIdentity(): string {
     const held = sessionStorage.getItem(IDENTITY_KEY);

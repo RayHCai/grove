@@ -1,15 +1,5 @@
-// The authored project: one file describing the whole game, as an editor would save it.
-//
-// This is the input BOTH ends take. `GameInstance` validates it, narrows it to the world a runtime
-// is built from and to the manifest a renderer draws, and derives the identity the handshake
-// compares; `createClient` derives the same identity from the same object, which is what makes a
-// mismatch a refused join rather than two ends quietly running different games.
-//
-// It holds ids and no classes, and it imports nothing from `scripts/` but that file's globals. A
-// `ScriptId` here is resolved through the `ScriptRegistry` each half passes separately — the
-// server's holds every class, the browser's only what may run there — so this one file is safe in
-// both bundles. It is compiled by both projects for that reason, which is also why it carries no
-// decorator: only `tsc` lowers those, and Vite reads this from source.
+// Ids and no classes, and nothing from `scripts/` but its globals, so this file is safe in both
+// bundles. It carries no decorator: only `tsc` lowers those, and Vite reads this from source.
 
 import { assetId, scriptId, templateId } from '@platform/project';
 import { PROJECT_FORMAT_VERSION } from '@platform/project';
@@ -52,11 +42,7 @@ export const PROJECT_ID = 'grove-playground';
 
 /**
  * The build of this file and everything it names, bumped by hand when it changes incompatibly.
- *
- * A tab left open across a `dev` restart holds the old bundle, and the constants in
- * `scripts/globals.ts` — action names, templates, script ids, tints, the world extent, the match
- * rules — are what both ends agree on. A mismatch used to show up as leaves drawn in the wrong
- * place; now the server refuses the join and the tab says to reload.
+ * A tab left open across a `dev` restart holds the old bundle; a mismatch now refuses the join.
  */
 export const PROJECT_HASH = '4';
 
@@ -65,10 +51,7 @@ export const SIM_RATE = 60;
 
 /**
  * Broadcasts per second — the package default, and the rate the client interpolates over.
- *
- * A leaf is moved by a server script, so nothing local predicts it; the client draws it one send
- * interval behind and walks between the two poses either side of that moment. Raising this to match
- * `SIM_RATE` buys nothing but `1 + connections` encodes per tick instead of per third tick.
+ * Raising it to `SIM_RATE` buys nothing but `1 + connections` encodes per tick.
  */
 export const SEND_RATE = 20;
 
@@ -88,10 +71,8 @@ const ZONE_COMPOST_TINT = 0x6b4a2f;
 const ZONE_ROWS = [0.55, 0, -0.55] as const;
 
 /**
- * One badge template per player slot, differing only in tint.
- *
- * A template is the only per-entity route a colour has to the wire, so "who is this leaf ripe for"
- * has to be a template choice rather than a field.
+ * One badge template per player slot, differing only in tint. A template is a colour's only
+ * per-entity route to the wire, so the seat has to be a template choice rather than a field.
  */
 const badgeTemplates: TemplateRecord[] = PLAYER_TINTS.map((tint, slot) => ({
     id: templateId(markerTemplate(slot)),
@@ -100,11 +81,8 @@ const badgeTemplates: TemplateRecord[] = PLAYER_TINTS.map((tint, slot) => ({
 }));
 
 /**
- * The pips of one zone: a bare pivot with three sprites beneath it.
- *
- * Placed entities rather than a template subtree, because a zone is one arrangement in one world
- * and a template is a thing spawned repeatedly — and it is what gives the placed-world path
- * something to build, parents before children, at boot.
+ * The pips of one zone: a bare pivot with three sprites beneath it. Placed entities rather than a
+ * template subtree, since a zone is one arrangement — and it exercises the placed-world path.
  */
 function zonePips(
     prefix: string,
@@ -140,12 +118,8 @@ function zonePips(
 }
 
 /**
- * The whole game, as one file.
- *
- * `scriptModules` declares every class this project may attach, with the location and host it was
- * written for — that is what lets `validate` refuse an illegal attachment from the manifest alone,
- * before a module is loaded or a world is built. Player-hosted scripts appear here and in no
- * attachment list: a player is not a tray row, so `Clicker` and `Profile` are attached at the join.
+ * The whole game, as one file. `scriptModules` declares every class with its location and host,
+ * so `validate` refuses an illegal attachment from the manifest alone.
  */
 export const PROJECT: ProjectManifest = {
     formatVersion: PROJECT_FORMAT_VERSION,
