@@ -1,6 +1,3 @@
-// Closing the template graph: the two refusals, and the legal shapes that must not cost what
-// walking every path through them would.
-
 import { describe, expect, it } from 'vitest';
 import type { ProjectManifest, TemplateRecord } from '../src/index.js';
 import { PROJECT_FORMAT_VERSION, ProjectFormatError, templateId, validate } from '../src/index.js';

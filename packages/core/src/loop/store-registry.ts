@@ -1,6 +1,5 @@
-// Every store holding simulation state registers here, because a hand-written snapshot list
-// forgets one store and desyncs a playtest. `scopeMode` has deliberately no default: a store
-// that never declares how it narrows is caught by the coverage test.
+// Every store holding simulation state registers here: a hand-written snapshot list forgets one
+// and desyncs a playtest. `scopeMode` has no default, so an undeclared store fails coverage.
 
 import type { EntityId } from '../ids.js';
 

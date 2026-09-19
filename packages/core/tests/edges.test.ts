@@ -1,7 +1,3 @@
-// The tick order's edges: region crossings, a contact's enter edge, the host's end, and the
-// countdown the loop advances. Each is a diff against a previous tick, so each is tested by
-// stepping rather than by calling once.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { bounds } from '@platform/math';
 import { Edges, Session } from '../dist/testkit/fixtures.js';

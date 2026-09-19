@@ -1,9 +1,3 @@
-// The four verbs that give a player a body and take it away again.
-//
-// Each is one line on `Player` delegating to the roster, which is why the interesting behaviour is
-// what the roster does around them: where a respawn puts the new avatar, what a spectate leaves
-// behind, and which of them a player with no body may be asked for.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { joinPlayer, loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';

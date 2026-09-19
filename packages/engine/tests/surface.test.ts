@@ -23,7 +23,8 @@ const ANCHORS = [
 
 const probes = {
     anchors: true satisfies Same<HUDAnchor, (typeof ANCHORS)[number]>,
-    // The renderer declares its own union rather than reach core, so nothing else holds the two equal.
+    // The renderer declares its own union rather than reach core, so nothing else holds the two
+    // equal.
     mirror: true satisfies Same<HUDAnchor, UiAnchor>,
     handlerConst: true satisfies Same<typeof onStart, HandlerDecorator>,
     handlerFactory: true satisfies Same<ReturnType<typeof onEvent>, HandlerDecorator>,

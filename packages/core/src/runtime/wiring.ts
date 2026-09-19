@@ -29,13 +29,7 @@ export class Wiring {
         this.#rt = rt;
     }
 
-    /**
-     * Attaches to an entity and journals it: which scripts run on which entity is a structural fact,
-     * and the wire carries it nowhere else.
-     *
-     * A class the bundle never stamped with an id is attached locally and journaled not at all —
-     * the op names an id, and nothing on the wire can name a class.
-     */
+    /** Attaches to an entity and journals it; a class with no bundle id attaches locally only. */
     attachToEntity(id: EntityId, klass: AnyScriptClass, props?: ScriptProps): object {
         const entity = this.#rt.entityManager.facade(id);
         const instance = this.#attach(
@@ -84,7 +78,8 @@ export class Wiring {
 
     attachMovement(avatar: Entity, klass: AnyScriptClass): object {
         // BaseMovement.tick's stage order is the contract both endpoints replay, so an override
-        // desyncs prediction. Counted, not compared: importing that class drags in a decorated module.
+        // desyncs prediction. Counted, not compared: importing that class drags in a decorated
+        // module.
         let declarations = 0;
         for (
             let p: object | null = (klass as unknown as { prototype: object }).prototype;
@@ -155,11 +150,8 @@ export class Wiring {
             if (record.values.has(field) && !record.wrappers.has(field)) {
                 throw new Error(`duplicate @serverState name "${field}" on host`);
             }
-            // Nothing but the engine can have put this name on the host: a sibling's hoist is the
-            // duplicate above. Left alone, a prototype member is REPLACED by the accessor and a
-            // method is replaced by a value, so the first `game.players.filter(...)` throws a
-            // TypeError nowhere near the declaration — and an own field like `player.name` is not
-            // replaced at all, which splits one name across two values instead.
+            // Nothing but the engine can have put this name on the host. Left alone, a prototype
+            // member is REPLACED by the accessor, and `game.players.filter(...)` throws far away.
             if (field in host) {
                 throw new LoadError(
                     `@serverState "${field}" is already a member of the ${kind} it is hosted on; rename the field`,
@@ -210,9 +202,10 @@ export class Wiring {
             value.bind(record, field);
             record.wrappers.add(field);
             record.values.set(field, value);
-            // Seeded like a decorated field, and for the same reason: the initializer built an empty
-            // wrapper, and a previous session's contents are exactly what the host record holds.
-            // `restore` already ignores a payload tagged with another class, so a stale one is inert.
+            // Seeded like a decorated field, and for the same reason: the initializer built an
+            // empty wrapper, and a previous session's contents are exactly what the host record
+            // holds. `restore` already ignores a payload tagged with another class, so a stale one
+            // is inert.
             const persisted = this.#rt.persisted?.get(record.hostId, field);
             if (persisted !== undefined) value.restore(persisted);
         }
@@ -241,21 +234,10 @@ export class Wiring {
     }
 }
 
-/**
- * Object keys a prop may not name, because assigning one rewrites the instance rather than a field.
- *
- * `validate` already refuses them in a saved file and the codec refuses them as wire keys, so this
- * is the third layer — and the one that runs against a value a peer chose.
- */
+/** Object keys a prop may not name: assigning one rewrites the instance rather than a field. */
 const RESERVED_PROPS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
-/**
- * Writes each configured prop onto the instance.
- *
- * Authoritative for any field it names: a `@serverState` field is an accessor by now, so this lands
- * in the backing map the hoist reads, and a plain field is a plain write. A constructor that wants
- * to DERIVE something from a prop writes to a different field — this one is the inspector's.
- */
+/** Writes each configured prop onto the instance; authoritative for any field it names. */
 function applyProps(instance: object, props: ScriptProps | undefined): void {
     if (props === undefined) return;
     for (const [key, value] of Object.entries(props)) {

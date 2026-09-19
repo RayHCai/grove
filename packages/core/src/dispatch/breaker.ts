@@ -1,6 +1,5 @@
-// A per-(instance, method) throw count decides whether a handler runs, so it is simulation
-// state and registers with the snapshot — an unrestored counter makes a replay diverge from
-// the original run.
+// A per-(instance, method) throw count is simulation state and registers with the snapshot —
+// an unrestored counter makes a replay diverge from the original run.
 
 import type { Scope, ScopeMode, SnapshotStore } from '../loop/store-registry.js';
 
@@ -38,12 +37,7 @@ export class BreakerCounters implements SnapshotStore<BreakerBuffer> {
         return this.#counts.get(this.#key(instanceId, method)) ?? 0;
     }
 
-    /**
-     * Drops every count for an instance that no longer exists.
-     *
-     * Instance ids are never reused, so a torn-down host's entries are unreachable rather than
-     * merely stale — and a streak that never ended in a success is what leaves one behind.
-     */
+    /** Drops every count for an instance that no longer exists; ids are never reused. */
     forgetInstance(instanceId: number): void {
         const prefix = `${instanceId}#`;
         for (const key of this.#counts.keys()) {

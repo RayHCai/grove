@@ -1,5 +1,3 @@
-// Reaching another host's script by class — the edge that replaces a module-level slot.
-
 import { describe, expect, it } from 'vitest';
 import { ClientScript, ServerScript } from '../src/script/bases.js';
 import { loadGame, joinPlayer } from '../src/runtime/load-game.js';

@@ -1,6 +1,5 @@
-// A ring of transform captures roughly MAX_REWIND_MS long, so the server can judge a shot
-// against the world the shooter saw. Reads a buffer and marks nothing, so it is invisible to
-// replication and to the determinism test. Slots are reused rather than allocated per tick.
+// Reads a buffer and marks nothing, so it is invisible to replication and to the determinism
+// test. Slots are reused rather than allocated per tick.
 
 import { grownCapacity } from '@platform/math';
 import { MAX_REWIND_MS } from '../config.js';

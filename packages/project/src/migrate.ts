@@ -5,29 +5,19 @@
 import { PROJECT_FORMAT_VERSION } from './manifest.js';
 import { ProjectFormatError } from './validate.js';
 
-/**
- * Moves a parsed project one `formatVersion` forward.
- *
- * A step rewrites content only: the walk stamps the new `formatVersion` itself, so a step that
- * forgets to is not a class of bug that exists.
- */
+/** Moves a parsed project one `formatVersion` forward; the walk stamps the new version itself. */
 export type Migration = (project: Record<string, unknown>) => Record<string, unknown>;
 
 /** A target version and every step that reaches it, keyed by the version each step READS. */
 export type MigrationChain = { to: number; steps: ReadonlyMap<number, Migration> };
 
-/** The chain this build applies. Its `to` is `PROJECT_FORMAT_VERSION`, which `validate` requires. */
+/** The chain this build applies; its `to` is `PROJECT_FORMAT_VERSION`, as `validate` requires. */
 export const MIGRATIONS: MigrationChain = {
     to: PROJECT_FORMAT_VERSION,
     steps: new Map<number, Migration>(),
 };
 
-/**
- * Walks a parsed project forward to `chain.to`, or throws if it cannot get there.
- *
- * The chain is a parameter rather than a constant read inside, because a chain is data and the walk
- * over it is not: one function serves the current chain and any older one a tool needs to replay.
- */
+/** Walks a parsed project forward to `chain.to`, or throws. The chain is data, the walk is not. */
 export function migrate(value: unknown, chain: MigrationChain = MIGRATIONS): unknown {
     let project = asObject(value);
     let version = readVersion(project['formatVersion']);

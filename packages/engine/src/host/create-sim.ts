@@ -1,6 +1,6 @@
 // The narrowings are @platform/project's and the boot is @platform/sim's, so what lives here is the
-// ORDER — validate, resolve the attached classes, then build the world — since the returned sim must
-// not be able to take a connection into a world that is not there yet.
+// ORDER — validate, resolve the attached classes, then build the world — since the returned sim
+// must not be able to take a connection into a world that is not there yet.
 
 import type { KVStore } from '@platform/core';
 import { defined } from '@platform/math';
@@ -20,9 +20,9 @@ export interface BundleRef {
 
 /** What a host supplies that a project file cannot: the loaded code, and the seams around it. */
 export interface CreateSimOptions extends Omit<SimOptions, 'config'> {
-    /** The server chunk's classes, by the id an attachment names. Absent, no authored class is wired. */
+    /** The server chunk's classes, by the id an attachment names. Absent, nothing is wired. */
     scripts?: ScriptRegistry<ScriptId>;
-    /** The code every joiner must be running. Omitted, this build serves none and admits only clients that hold none. */
+    /** The code every joiner must run. Omitted, this build admits only clients holding none. */
     bundle?: BundleRef;
     /** The storage a `ServerScript` awaits. Omitted, it dies with the process. */
     kv?: KVStore;
@@ -30,9 +30,7 @@ export interface CreateSimOptions extends Omit<SimOptions, 'config'> {
 
 /**
  * Boots the authority for `project`, connected to nothing and running no clock.
- *
- * A host drives what this returns with `tick(batch)`, one call per fixed step, and does the sockets,
- * the storage and the timekeeping itself — none of which this world can reach.
+ * A host drives it with `tick(batch)` and owns the sockets, the storage and the timekeeping.
  */
 export function createSim(project: ProjectManifest, opts: CreateSimOptions = {}): Sim {
     const { scripts, bundle, kv, ...forwarded } = opts;

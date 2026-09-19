@@ -36,12 +36,7 @@ export interface ScriptInstance extends GuardOwner {
     readonly location: ScriptLocation;
     /** Handlers this class declares, resolved from prototype-chain metadata. */
     readonly handlers: readonly HandlerDecl[];
-    /**
-     * What this attachment was configured with, kept so a join snapshot can restate it.
-     *
-     * The `attach` op carries it to a client already connected; a joiner was not there for that op,
-     * and nothing else on the entity records what an inspector chose.
-     */
+    /** What this attachment was configured with, kept so a join snapshot can restate it. */
     readonly props?: ScriptProps;
 }
 
@@ -83,13 +78,7 @@ export class InstanceRegistry {
     readonly #byHost = new Map<string, ScriptInstance[]>();
     /** The reverse edge, for engine code holding a script object and needing its identity. */
     readonly #byInstance = new WeakMap<object, ScriptInstance>();
-    /**
-     * Attached but not yet started, in attachment order.
-     *
-     * Attaching does not dispatch: `addScript` from a player-join handler runs between ticks, so a
-     * `@onStart` fired there would run against whatever tick the loop last adopted. The starts pass
-     * drains this at a defined point instead.
-     */
+    /** Attached but not yet started, in attachment order; the starts pass drains this. */
     readonly #pendingStart: PendingStart[] = [];
 
     #onRemoved: ((instanceId: number) => void) | null = null;
@@ -118,22 +107,12 @@ export class InstanceRegistry {
         return this.#byHost.get(hostKey) ?? EMPTY;
     }
 
-    /**
-     * The registration for a script object, or undefined for one never attached.
-     *
-     * A pass that holds the instance — movement is the one — otherwise has no way back to the id a
-     * breaker entry is keyed by, short of scanning its host's list for object identity.
-     */
+    /** The registration for a script object, or undefined for one never attached. */
     forInstance(instance: object): ScriptInstance | undefined {
         return this.#byInstance.get(instance);
     }
 
-    /**
-     * Told of every instance a host removal drops, so state keyed by instance id goes with it.
-     *
-     * A seam rather than a `BreakerCounters` reference, for the reason the timer heap takes one: the
-     * registry is not the breaker's owner, and a bare registry still detaches.
-     */
+    /** Told of every instance a host removal drops, so state keyed by instance id goes with it. */
     setOnRemoved(fn: (instanceId: number) => void): void {
         this.#onRemoved = fn;
     }
@@ -150,12 +129,7 @@ export class InstanceRegistry {
         this.dropPendingStarts(hostKey);
     }
 
-    /**
-     * Forgets one host's queued starts, for a caller that has already dispatched them itself.
-     *
-     * A screen is the one host whose open is immediate — a menu that appeared but ran nothing until
-     * the next tick would read as a dropped frame — so it dispatches its own and drops these.
-     */
+    /** Forgets one host's queued starts, for a caller that has already dispatched them. */
     dropPendingStarts(hostKey: string): void {
         for (let i = this.#pendingStart.length - 1; i >= 0; i--) {
             if (this.#pendingStart[i]?.hostKey === hostKey) this.#pendingStart.splice(i, 1);
@@ -168,27 +142,14 @@ export class InstanceRegistry {
         }
     }
 
-    /**
-     * Every instance paired with the host key it hangs off.
-     *
-     * A whole-world dispatch that has to branch on WHICH host — a widget press, which a screen-hosted
-     * handler answers only for its own screen — cannot get that from `all()`, and re-deriving it by
-     * scanning `forHost` per candidate key is quadratic in the registry.
-     */
+    /** Every instance paired with its host key, for a dispatch that must branch on WHICH host. */
     *entries(): IterableIterator<readonly [string, ScriptInstance]> {
         for (const [hostKey, list] of this.#byHost) {
             for (const inst of list) yield [hostKey, inst];
         }
     }
 
-    /**
-     * The instances declaring `kind`, and their host keys, into two caller-owned parallel arrays.
-     *
-     * What the whole-registry passes walk instead of `Array.from(entries())`. Same order and the
-     * same detachment — `attach` pushes into the lists this reads, so a handler adding a script to
-     * its own host must not extend the pass it is running in — but the copy is two arrays for the
-     * pass rather than a tuple per instance, and it holds only what the kind could reach.
-     */
+    /** The instances declaring `kind` and their host keys, into two caller-owned arrays. */
     snapshotByKind(kind: HandlerKind, hostsOut: string[], instancesOut: ScriptInstance[]): number {
         hostsOut.length = 0;
         instancesOut.length = 0;
@@ -203,12 +164,7 @@ export class InstanceRegistry {
         return instancesOut.length;
     }
 
-    /**
-     * Whether `inst`'s class declares any handler of `kind`.
-     *
-     * A coarse pre-filter, not a replacement for `matches`: it narrows on kind alone, which is
-     * enough to skip an instance before a context, an array and a promise have been built for it.
-     */
+    /** Whether `inst`'s class declares any handler of `kind`; a coarse pre-filter. */
     declares(inst: ScriptInstance, kind: HandlerKind): boolean {
         return kindsOf(inst.handlers).has(kind);
     }

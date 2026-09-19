@@ -1,12 +1,3 @@
-// The module-const facades, and the rule that makes them safe: everything they need lives on the
-// runtime and is resolved per call.
-//
-// `game`, `assets`, `hud`, `random` are consts a creator imports once at the top of a file. If any
-// of them captured a runtime — in a module slot, a closure, a cached reference — a second
-// `loadGame` in the same process would leave the first world's scripts writing into the second's.
-// One page holds one client and hides that entirely; a test process, an editor preview and a
-// server-plus-two-clients harness all do not.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { bounds } from '@platform/math';
 import { Asset, AssetRegistry, assets } from '../src/runtime/assets.js';

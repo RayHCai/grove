@@ -1,10 +1,5 @@
-// @platform/engine/host
-// The composition roots: an authored project and the pipes it runs over in, a booted authority or a
-// joinable session out.
-//
-// Behind a subpath for the reason `@platform/client/browser` and `@platform/scripting/toolchain`
-// are: a creator's chunk resolves `@platform/engine`, and these two reach the sim, the client and
-// the renderer. "Host" here is the app hosting a game, never the `Host` a script attaches to.
+// Behind a subpath: a creator's chunk resolves `@platform/engine`, and these reach the sim, the
+// client and the renderer. "Host" is the app hosting a game, never the `Host` a script attaches to.
 
 export { createSim } from './create-sim.js';
 export type { BundleRef, CreateSimOptions } from './create-sim.js';

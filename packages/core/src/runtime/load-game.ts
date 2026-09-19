@@ -38,48 +38,23 @@ import { liveTransformView } from './transform-view.js';
 
 /**
  * What builds a world.
- *
- * Every field is `@platform/project`'s already-validated narrowing rather than a parallel
- * declaration here, so a field added to the authoring shape cannot reach a runtime without passing
- * through this one type. `validate` is the SERVER's to call — core takes the result and never the
- * file. Optional only so a store-level test can build a bare world; the server hands the whole of it.
+ * Every field is `@platform/project`'s validated narrowing, so nothing reaches a runtime unchecked.
  */
 export type GameManifest = Partial<Omit<ProjectGameManifest, 'gameScripts'>> & {
     /** Panel-authored Game-hosted script classes. */
     gameScripts?: readonly GameScriptSpec[];
 };
 
-/**
- * A Game-hosted class to attach, or one with the props its inspector configured.
- *
- * The bare class is the props-free form, which is what most Game scripts are and what a test writes.
- */
+/** A Game-hosted class to attach, or one with the props its inspector configured. */
 export type GameScriptSpec = AnyScriptClass | { klass: AnyScriptClass; props?: ScriptProps };
 
 /** What a world needs that a manifest cannot hold, because it names code rather than data. */
 export interface LoadOptions {
-    /**
-     * The id the running bundle stamped on a class.
-     *
-     * Handed in rather than looked up, because the registry that holds it imports core: an
-     * `attach` op names an id, so a class this cannot name is attached locally and journaled
-     * nowhere.
-     */
+    /** The id the running bundle stamped on a class; handed in, since the registry imports core. */
     scriptIdOf?: (klass: abstract new (...args: never[]) => object) => ScriptId | undefined;
-    /**
-     * Where this world's diagnostics go.
-     *
-     * Core writes to no console and holds no transport, so without one every `warn` the engine makes
-     * ends inside the process that made it.
-     */
+    /** Where this world's diagnostics go; core writes to no console and holds no transport. */
     log?: LogSink;
-    /**
-     * What the world's PRNG starts from, defaulting to `DEFAULT_PRNG_SEED`.
-     *
-     * A world that takes the default replays one stream every session, and a mirror seeded
-     * differently from its server draws a different one — so a seed both ends can be told is the
-     * only way the two agree.
-     */
+    /** What the world's PRNG starts from; both ends must be told the same seed to agree. */
     seed?: number;
 }
 
@@ -148,13 +123,7 @@ export function loadGame(manifest: GameManifest = {}, opts: LoadOptions = {}): R
     return rt;
 }
 
-/**
- * Drains the first batch of deferred `@onStart`s — the Game scripts and the placed world.
- *
- * Not "run every instance's start": attaching queues, and the starts pass drains, so this is the
- * one drain that happens before the loop has stepped at all. It runs to each handler's first await;
- * a join can land before a Game `@onStart` resumes.
- */
+/** Drains the first batch of deferred `@onStart`s, before the loop has stepped at all. */
 export function startGame(rt: Runtime): Promise<void> {
     // Ambient runtime established for the same reason `joinPlayer` establishes it: a second
     // `loadGame` between building this world and starting it repoints the slot every `@onStart`
@@ -198,12 +167,7 @@ export function joinPlayer(rt: Runtime, id: string, name: string): Player {
     return player;
 }
 
-/**
- * Ends a session: the player's own hosts wind up, then the Game is told, then the roster drops them.
- *
- * Innermost host outward, and the removal last, so both @onEnd and @onPlayerLeave can still read the
- * player and everything hoisted onto its record.
- */
+/** Ends a session: the player's hosts wind up, the Game is told, then the roster drops them. */
 export function leavePlayer(rt: Runtime, id: string): void {
     const players = rt.wired.playerManager;
     const player = players.byId(id);
@@ -228,13 +192,7 @@ export interface WidgetPress {
     player?: Player;
 }
 
-/**
- * Dispatches `@onPress` for one widget.
- *
- * A screen-hosted handler answers only its own screen's widgets, which is what keeps two menus with
- * a `back` button from colliding; every other host resolves the widget across the whole HUD. The
- * rule lives here rather than at either endpoint because both dispatch the same press.
- */
+/** Dispatches `@onPress` for one widget; a screen-hosted handler answers only its own screen. */
 export function pressWidget(rt: Runtime, press: WidgetPress): Promise<void> {
     // Under `rt`, like a tick is: a handler reached from here writes widgets through `hud`, which
     // resolves the AMBIENT runtime — so without this a press dispatched outside a tick lands in
@@ -267,15 +225,8 @@ export function pressWidget(rt: Runtime, press: WidgetPress): Promise<void> {
 }
 
 /**
- * Runs every CLIENT-located `@onUpdate` once, at display rate.
- *
- * `@onUpdate` on a `ClientScript` is specified to fire per frame rather than per tick, and no tick
- * pass can do it: core's update pass and the client's both narrow to server-located handlers, since
- * a synced script's update belongs to the simulation and firing it here as well would double it.
- * So the frame loop calls this, and `location === 'client'` is the whole filter.
- *
- * `dt` is the DISPLAY delta, not `1 / simRate` — a handler easing a bar or a camera is drawing, and
- * the tick length would make it stutter on any monitor that is not the sim rate.
+ * Runs every CLIENT-located `@onUpdate` once, at display rate; no tick pass can.
+ * `dt` is the DISPLAY delta, not `1 / simRate` — a handler easing a bar is drawing.
  */
 export function displayUpdate(rt: Runtime, dtSeconds: number): void {
     withRuntime(rt, () => {
@@ -311,12 +262,7 @@ const POINTER_EVENT: Readonly<Record<PointerEdge, string>> = {
     onHoverExit: '@hoverExit',
 };
 
-/**
- * Dispatches a pointer hit at the entity it landed on.
- *
- * The entity is the peer's claim about its own camera and cursor, which no authority can recompute,
- * so this checks only that it is alive — a handler that grants something must check reach itself.
- */
+/** Dispatches a pointer hit at the entity it landed on; only liveness is checked here. */
 export function pointerHit(
     rt: Runtime,
     edge: PointerEdge,
@@ -370,13 +316,7 @@ function dispatchAt(
     );
 }
 
-/**
- * Fires one kind at every attached script, one dispatch each so each keeps its own ctx.
- *
- * Over `entries` rather than `all` for the host key alone: it is what the error boundary logs as
- * `hostId`, and passing the empty string here left every `@onUpdate`, `@onRequest` and `endGame`
- * throw naming no host — the three paths whose records are hardest to place without one.
- */
+/** Fires one kind at every attached script, one dispatch each so each keeps its own ctx. */
 function dispatchEach(
     rt: Runtime,
     kind: HandlerKind,
@@ -407,18 +347,13 @@ function dispatchEach(
 /** One `request()`, as either endpoint hands one to core. */
 export interface PlayerRequest {
     name: string;
-    /** The only untrusted `ctx.data` in the API: it crossed the wire, and a handler must validate it. */
+    /** The only untrusted `ctx.data` in the API: it crossed the wire, so a handler must check. */
     payload?: Record<string, unknown>;
     /** Who asked — engine-supplied from the connection, never from the frame. */
     player?: Player;
 }
 
-/**
- * Dispatches `@onRequest` at every SERVER-located handler, which is the trust boundary itself.
- *
- * A client mirror holds no server-located instance, so a request that reached this there would
- * dispatch to nothing rather than validate an untrusted ask on the untrusted machine.
- */
+/** Dispatches `@onRequest` at every SERVER-located handler — the trust boundary itself. */
 export function deliverRequest(rt: Runtime, request: PlayerRequest): Promise<void> {
     // Ambient runtime established for the same reason `pressWidget` establishes it.
     return withRuntime(rt, () =>

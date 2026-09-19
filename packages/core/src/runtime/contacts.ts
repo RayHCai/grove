@@ -15,14 +15,7 @@ export class ContactSource {
     readonly #live: Broadphase;
     readonly #ids: EntityId[] = [];
     readonly #overlapping: Array<[EntityId, EntityId]> = [];
-    /**
-     * The pairs that overlapped on the previous tick.
-     *
-     * `@onCollide` is the moment two bodies touch, not a per-tick predicate — `getTouching` is the
-     * pull-based "am I still on the plate" — so the pass needs a previous tick to diff against. It
-     * lives here, on what owns the pair walk, and is deliberately not a snapshot store: a rewind
-     * leaves it describing the tick it was last folded on, which is why the client drops the pass.
-     */
+    /** The pairs that overlapped on the previous tick, so the pass can diff. Not snapshotted. */
     #previous = new Set<string>();
     #current = new Set<string>();
     /** Per-body lanes for the pair walk, indexed by position in `#ids`, not by slot. */
@@ -115,13 +108,14 @@ export class ContactSource {
         }
     }
 
-    /** The pairs that began overlapping this tick, and the fold that makes the next call an edge again. */
+    /** The pairs that began overlapping this tick, plus the fold keeping the next call an edge. */
     entered(out: Array<[EntityId, EntityId]> = []): Array<[EntityId, EntityId]> {
         out.length = 0;
         this.#current.clear();
         for (const pair of this.pairs(this.#overlapping)) {
             // `liveIds()` is ascending slot order, so one pair always reaches this in one order and
-            // the key identifies it across ticks; a reused slot carries a new generation and so a new key.
+            // the key identifies it across ticks; a reused slot carries a new generation and so a
+            // new key.
             const key = `${pair[0] as number}:${pair[1] as number}`;
             this.#current.add(key);
             if (!this.#previous.has(key)) out.push(pair);

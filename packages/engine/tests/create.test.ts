@@ -1,8 +1,4 @@
-// The composition roots, driven the way a host drives them: one project file, one loopback pair,
-// and a session that reaches `live` running the world the manifest described.
-//
-// Both ends are built from the SAME manifest and the same registry, which is the single-process
-// local-play arrangement and the one that makes a disagreement between the two derivations visible.
+// Both ends are built from the SAME manifest and registry — the single-process local-play case.
 
 import { describe, expect, it } from 'vitest';
 import { ClientScript, ServerScript } from '@platform/core';
@@ -21,12 +17,7 @@ import type { ProjectManifest } from '../src/host/index.js';
 
 const TICK = 1 / 60;
 
-/**
- * The smallest host a `Sim` runs under: one socket, one tick per call, and the sends written back.
- *
- * `@platform/glue` is the real one; this exists because engine is BELOW glue and a composition root
- * still has to be shown driving what it built.
- */
+/** The smallest host a `Sim` runs under: one socket, one tick per call, sends written back. */
 class MiniHost {
     readonly #sim: Sim;
     readonly #transports = new Map<string, Transport>();
@@ -116,7 +107,7 @@ class Rules extends ServerScript {
     }
 }
 
-/** On the coin template, client-located — so the mirror attaches it and the authority's copy is inert. */
+/** On the coin template, client-located — the mirror attaches it and the authority's is inert. */
 class Sparkle extends ClientScript {
     constructor() {
         super();
@@ -196,7 +187,7 @@ interface Session {
     booted: string[];
     /** Runs `n` display frames, pumping the authority once per frame. */
     run(n: number): void;
-    /** Frames until the session settles, so a test asserts on a state rather than on a tick count. */
+    /** Frames until the session settles, so a test asserts on a state, not a tick count. */
     settle(limit?: number): void;
     close(): void;
 }

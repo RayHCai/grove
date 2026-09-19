@@ -7,12 +7,8 @@ import type { AssetId, ScriptId, TemplateId } from '../src/index.js';
 import { assetId, scriptId, templateId } from '../src/index.js';
 
 /**
- * Core's `EntityId` and protocol's `NetId`, declared verbatim rather than imported.
- *
- * Both of those packages depend on this one, so a devDependency back would close a cycle in the
- * workspace graph. What is under test is that the brand KEYS are disjoint, and a verbatim copy
- * carries that exactly — a shared or stringly-typed brand here would fail these cases just as a
- * real import would.
+ * Core's `EntityId` and protocol's `NetId`, declared verbatim rather than imported: both depend
+ * on this package, so a devDependency back would close a cycle in the workspace graph.
  */
 type EntityId = number & { readonly __entityId: unique symbol };
 type NetId = number & { readonly __netId: unique symbol };

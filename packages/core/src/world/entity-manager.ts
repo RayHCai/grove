@@ -1,6 +1,5 @@
-// One facade per live id, so `===` identity holds across reads of the same entity.
-// Teardown is deferred to the tick's destroy drain so a mid-dispatch destroy cannot mutate
-// the live list underneath the pass that is walking it.
+// One facade per live id, so `===` identity holds across reads. Teardown is deferred to the
+// tick's destroy drain so a mid-dispatch destroy cannot mutate the list a pass is walking.
 
 import { MAX_ENTITIES } from '../config.js';
 import { LoadError } from '../errors.js';
@@ -20,7 +19,7 @@ export class EntityManager {
         throw new Error('EntityManager.makeFacade not wired');
     };
 
-    /** Fires @onEnd at a doomed entity's scripts; set by the runtime wiring, since world/ owns no dispatch. */
+    /** Fires @onEnd at a doomed entity's scripts; set by wiring, since world/ owns no dispatch. */
     dispatchEnd: (id: EntityId) => void = () => {};
 
     constructor(rt: Runtime) {

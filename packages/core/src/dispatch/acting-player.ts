@@ -1,8 +1,5 @@
-// A browser has no AsyncLocalStorage, so this is a module slot the dispatcher saves and restores
-// around each handler call, exactly as it does the ambient invocation.
-//
-// Typed `unknown` to match DispatchCtx.player: a Player type here would point dispatch/ at the
-// runtime facades it is meant to stay below.
+// A module slot the dispatcher saves and restores around each handler call; a browser has no
+// AsyncLocalStorage. Typed `unknown` so dispatch/ stays below the runtime facades.
 
 let current: unknown = null;
 

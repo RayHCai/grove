@@ -163,13 +163,7 @@ export class Player {
         return this;
     }
 
-    /**
-     * This player's instance of `script`, or `null` when it carries none.
-     *
-     * The typed way to reach another host's `@serverState` — `player.getScript(Profile)?.credits`
-     * rather than a cast against a field the `Player` type cannot declare — and the way one script
-     * calls another's method without a module-level slot to publish it through.
-     */
+    /** This player's instance of `script`, or `null`; the typed way to reach another host. */
     getScript<T extends BaseScript<Player>>(script: ScriptQuery<T>): T | null {
         return scriptOnHost(this.#rt, playerKey(this.id), script);
     }
@@ -194,13 +188,7 @@ export class PlayerManager {
         return player;
     }
 
-    /**
-     * Registers a Player built elsewhere, keeping the index it already carries.
-     *
-     * `create` would renumber from arrival order, and a client mirror's numbering then drifts from
-     * the server's the first time a player leaves — but `index` is stable for the session and
-     * observable, so it has to come from whoever is authoritative about it.
-     */
+    /** Registers a Player built elsewhere, keeping its index — `create` would renumber. */
     adopt(player: Player): void {
         if (this.#byId.has(player.id)) return;
         this.#byId.set(player.id, player);

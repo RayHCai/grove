@@ -1,6 +1,3 @@
-// The one TransformView factory over the live stores, and the half-extent function that is the
-// only thing its two callers disagree about.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { bounds } from '@platform/math';
 import type { EntityId } from '../src/ids.js';

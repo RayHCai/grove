@@ -1,7 +1,5 @@
-// What both ends claim about the project they are running, read off the manifest in one place.
-//
-// The server proves a joiner's claim against its own before it allocates a `Player`, so the two
-// derivations have to agree field for field; deriving them twice is how they stop agreeing.
+// What both ends claim about the project, read off the manifest in one place: the server proves a
+// joiner's claim against its own, so the two derivations must agree field for field.
 
 import type { ProjectManifest } from '@platform/project';
 

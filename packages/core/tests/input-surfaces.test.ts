@@ -1,10 +1,3 @@
-// The three creator-facing surfaces core answers for without owning what is behind them: a cursor
-// with no pointer, a binding table with no device, and the region-backed random draw.
-//
-// Two of them are deliberately inert here — a server has no pointer and no keyboard — so what these
-// cases pin is that reading one is safe and that writing one is remembered, which is what a script
-// running on both ends depends on.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { bounds } from '@platform/math';
 import { joinPlayer, loadGame } from '../src/runtime/load-game.js';
@@ -32,7 +25,8 @@ describe('a player cursor with no pointer behind it', () => {
         expect(() => player.cursor.lock()).not.toThrow();
         expect(() => player.cursor.unlock()).not.toThrow();
         player.cursor.visible = false;
-        // Presentation-only and client-owned: the server keeps no cursor state to be asked for later.
+        // Presentation-only and client-owned: the server keeps no cursor state to be asked for
+        // later.
         expect(player.cursor.isDown).toBe(false);
     });
 

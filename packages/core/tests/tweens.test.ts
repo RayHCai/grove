@@ -1,11 +1,3 @@
-// The one tween engine under every timed motion verb: last-one-wins, cancellation, easing and
-// ownership. Each is defined once here so `glideTo`, `fadeTo`, `growTo` and `tween(this, …)` cannot
-// disagree about any of them.
-//
-// The engine is deliberately NOT a snapshot store, which is asserted below rather than described:
-// a rewind restores transforms and leaves an in-flight tween running, so a client that rewinds mid
-// glide keeps gliding rather than snapping.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { TweenEngine } from '../src/loop/tweens.js';
 import type { TweenTarget } from '../src/loop/tweens.js';

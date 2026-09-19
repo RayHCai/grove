@@ -364,12 +364,7 @@ export class Entity {
         return this;
     }
 
-    /**
-     * This entity's instance of `script`, or `null` when it carries none.
-     *
-     * The typed way to reach another host's `@serverState` — `leaf.getScript(Leaf)?.ripe` rather
-     * than a cast against a field the `Entity` type cannot declare.
-     */
+    /** This entity's instance of `script`, or `null`; the typed way to reach another host. */
     getScript<T extends BaseScript<Entity>>(script: ScriptQuery<T>): T | null {
         return scriptOnHost(this.#rt, entityKey(this.#id as number), script);
     }

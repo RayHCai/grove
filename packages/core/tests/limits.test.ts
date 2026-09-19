@@ -1,10 +1,3 @@
-// The engine's own bounds.
-//
-// Each of these exists so a session that runs for hours, or a peer that misbehaves for as long as
-// it likes, cannot grow something without end. None of them is reachable from the creator API, so
-// none has a natural caller to notice if it stopped working — a deleted cap looks exactly like a
-// working one until the machine that hits it is already in trouble.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import {
     BREAKER_THRESHOLD,
@@ -50,13 +43,7 @@ function siteAt(
     return { method, hostId: 'game', tick, event: '@probe' };
 }
 
-/**
- * A hand-built instance whose one handler runs `body`.
- *
- * `concurrent` rather than the `onEvent` default of `ignore`: a re-entrant send is exactly what the
- * depth guard is for, and `ignore` drops the second call before the depth ever grows — which is why
- * a naive recursion test passes without the guard existing at all.
- */
+/** A hand-built instance whose one handler runs `body`; `concurrent`, so the depth can grow. */
 function probe(rt: Runtime, entity: Entity, body: () => void): ScriptInstance {
     const hostKey = entityKey(entity.entityId as number);
     return {
@@ -162,8 +149,8 @@ describe('MAX_DEDUP_KEYS', () => {
     it('clears rather than growing once the distinct-message map fills', () => {
         // Through an UNOWNED guard, which is the only way to reach this cap: an owned handler is
         // disabled by the breaker after 100 consecutive throws, long before 1024 distinct messages
-        // exist. An unowned callback has no instance to charge, so it throws for as long as it likes
-        // — which is exactly the case this bound is here for.
+        // exist. An unowned callback has no instance to charge, so it throws for as long as it
+        // likes — which is exactly the case this bound is here for.
         const rt = loadGame();
         const throwOnce = (n: number): void => {
             rt.dispatcher.guard(null, siteAt(n), () => {
@@ -288,7 +275,8 @@ describe('MAX_BUBBLE_LENGTH', () => {
             { kind: 'tag', id: e.entityId, tag: 'say:gone', added: false },
         ]);
 
-        // Nothing left to remove: an unconditional op would tell a client to drop a tag it never had.
+        // Nothing left to remove: an unconditional op would tell a client to drop a tag it never
+        // had.
         e.clearSay();
         expect(rt.channels.structuralCount).toBe(0);
     });
@@ -372,8 +360,8 @@ describe('MAX_HANDLER_MS', () => {
 
         const trips: BreakerTrip[] = [];
         rt.dispatcher.onTrip((trip) => trips.push(trip));
-        // Charged, not held for a hundred real seconds: what is under test is that an overrun counts
-        // toward the same threshold a throw does, not how long a hundred of them take.
+        // Charged, not held for a hundred real seconds: what is under test is that an overrun
+        // counts toward the same threshold a throw does, not how long a hundred of them take.
         for (let i = 1; i < BREAKER_THRESHOLD; i++) rt.breaker.recordThrow(si.id, 'go');
 
         await e.send('go');

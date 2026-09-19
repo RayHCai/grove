@@ -1,6 +1,4 @@
-// The one implementation under every timed motion verb, so easing, cancellation,
-// awaitability and last-one-wins are defined once. A cancelled tween leaves the property
-// where it stopped, not at the target.
+// A cancelled tween leaves the property where it stopped, not at the target.
 
 import type { Easing } from '@platform/math';
 import { ease, lerp } from '@platform/math';
@@ -28,7 +26,7 @@ interface Tween {
     durationTicks: number;
     easing: Easing;
     resolve: (() => void) | null;
-    /** The script instance that started it — a `TweenTarget` may write a creator-authored setter. */
+    /** The script instance that started it; a `TweenTarget` may write a creator setter. */
     owner: GuardOwner | null;
     cancelled: boolean;
 }
@@ -73,8 +71,9 @@ export class TweenEngine {
         }
         const id = this.#nextId++;
         const durationTicks = Math.max(1, Math.round(seconds * this.#simRate));
-        // Wrapped for the same reason `sleep` is: an `await glideTo(...)` is an await like any other,
-        // and what the handler registers after it belongs to the host that started the tween.
+        // Wrapped for the same reason `sleep` is: an `await glideTo(...)` is an await like any
+        // other, and what the handler registers after it belongs to the host that started the
+        // tween.
         return resumeWith(
             new Promise<void>((resolve) => {
                 const tween: Tween = {
@@ -119,11 +118,7 @@ export class TweenEngine {
 
     /**
      * Advances every tween a tick, in ascending id order because determinism needs one.
-     *
-     * Insertion order is already that order — ids come from a monotonic counter and nothing
-     * re-inserts an old one — so the map is walked directly. `horizon` stands in for the key
-     * snapshot the walk used to take: a guarded `set` reaches a creator setter that may call
-     * `tween()`, and a live iterator would otherwise advance that tween on the tick it started.
+     * `horizon` bounds the walk: a guarded `set` may call `tween()` and start one mid-walk.
      */
     advance(): void {
         if (this.#tweens.size === 0) return;

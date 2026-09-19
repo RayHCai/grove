@@ -28,23 +28,14 @@ export class ProjectFormatError extends Error {
 
 /**
  * Object keys a `props` map may not carry, because they poison a downstream recursive merge.
- *
- * The same three transport's codec refuses, restated rather than imported: reaching for its set
- * would be a VALUE import, and this package's single dependency is type-only so that every consumer
- * can take the authoring types without taking transport's module graph with them.
+ * The same three transport's codec refuses, restated: importing its set would be a value import.
  */
 const RESERVED_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** Nesting a `props` value may reach. The walk below recurses, so this bound is a stack bound. */
 const MAX_PROP_DEPTH = 32;
 
-/**
- * Levels a template subtree may nest.
- *
- * A child names a template, so the graph is a reference graph and one instantiation can be far
- * deeper than any single record looks — which is why the bound is here, on the graph, rather than on
- * a per-record child count that bounds nothing on its own.
- */
+/** Levels a template subtree may nest; a child names a template, so the bound is on the graph. */
 const MAX_TEMPLATE_DEPTH = 8;
 
 /** Each table is keyed by the type it mirrors, so manifest.ts cannot grow a member unnoticed. */
@@ -93,11 +84,8 @@ const TRANSFORM_FIELDS: Record<keyof EntityTransform, true> = {
 };
 
 /**
- * Narrows an untrusted parse to a `ProjectManifest`, or throws a {@link ProjectFormatError} naming
- * the member that failed.
- *
- * `formatVersion` must already be current, so an older file goes through `migrate` first — the two
- * are separate calls because migration rewrites and validation does not.
+ * Narrows an untrusted parse to a `ProjectManifest`, or throws a {@link ProjectFormatError}.
+ * `formatVersion` must already be current, so an older file goes through `migrate` first.
  */
 export function validate(value: unknown): ProjectManifest {
     const manifest = readObject(value, '');
@@ -260,14 +248,7 @@ function readTemplateChildren(value: unknown, path: string, ids: ReadonlySet<str
 
 /**
  * Refuses a template that reaches itself or a subtree that nests past the bound.
- *
- * Both are the same fault seen from either end: instantiating either one mints entities until
- * something else stops it, and the thing that would stop it is memory.
- *
- * Each template's height is measured once and kept, so a node reachable by many paths costs one
- * visit rather than one per path — a diamond stays legal, and a wide legal graph stays linear. The
- * open set is the path currently being measured, which is what a cycle is detected against and what
- * keeps this recursion no deeper than the cap.
+ * Each height is measured once and kept, so a diamond stays legal and a wide graph stays linear.
  */
 function closeTemplates(children: ReadonlyMap<string, string[]>, path: string): void {
     const open = new Set<string>();

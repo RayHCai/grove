@@ -1,6 +1,5 @@
-// Metadata objects inherit prototypally, so a subclass sees its parent's declarations and an
-// override re-registers nothing; writes fork the inherited record so a sibling never reaches
-// the base.
+// Metadata objects inherit prototypally: a subclass sees its parent's declarations, and writes
+// fork the inherited record so a sibling never reaches the base.
 
 import type { HandlerOptions } from './types.js';
 

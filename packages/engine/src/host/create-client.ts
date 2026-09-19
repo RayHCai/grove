@@ -1,8 +1,5 @@
-// createClient: a project and this machine's seams in, a session that can join out.
-//
-// What it adds over `new GameClient` is the identity this client claims — derived from the same
-// manifest the authority booted from, so the two ends agree at the handshake rather than diverging
-// later through code that only looks the same.
+// The identity this client claims is derived from the same manifest the authority booted from, so
+// the two ends agree at the handshake rather than diverging later.
 
 import { GameClient } from '@platform/client';
 import type { GameClientOptions } from '@platform/client';
@@ -21,8 +18,8 @@ export interface CreateClientOptions extends Omit<GameClientOptions, 'project' |
 }
 
 /**
- * Builds a session for `project` over the supplied seams. It does not join: `start()` is the host's,
- * so a lifecycle listener can be registered before the first state change.
+ * Builds a session for `project` over the supplied seams. It does not join — `start()` is the
+ * host's, so a lifecycle listener can be registered before the first state change.
  */
 export function createClient(opts: CreateClientOptions): GameClient {
     const { project, scripts, bundleHash, ...forwarded } = opts;

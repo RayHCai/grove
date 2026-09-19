@@ -1,6 +1,3 @@
-// A historical query reads a past capture and leaves the live simulation untouched: no step,
-// no invocation swept, no channel marked.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';

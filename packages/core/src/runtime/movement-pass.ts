@@ -1,19 +1,12 @@
-// Apart from `movement.ts` because that module declares `@onEvent('jump')`, and a decorator in a
-// module the loop's own graph reaches as a VALUE drags TC39 decorator syntax into every consumer
-// that transforms `src` rather than the built `dist`. The movement classes are a type here.
+// Apart from `movement.ts` because a decorator in a module the loop reaches as a VALUE drags
+// TC39 decorator syntax into every consumer that transforms `src` rather than `dist`.
 
 import type { EntityId } from '../ids.js';
 import { entityKey } from './hosts.js';
 import type { BaseMovement } from './movement.js';
 import type { Runtime } from './runtime.js';
 
-/**
- * One movement instance's tick, contained the way a handler's body is.
- *
- * `accelerate` is abstract and `readIntent` / `applyForces` / `clampSpeed` are all overridable, so
- * every stage of `tick` is creator code reached without a dispatch. Exported because both endpoints
- * run this pass and a second copy of the containment would diverge from this one.
- */
+/** One movement instance's tick, contained the way a handler's body is; both endpoints run it. */
 export function tickMovement(
     rt: Runtime,
     movement: BaseMovement,

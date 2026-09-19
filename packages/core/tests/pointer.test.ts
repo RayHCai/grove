@@ -1,10 +1,3 @@
-// `pointerHit` — the three pointer edges, and the one check core makes before dispatching one.
-//
-// The entity a hit names is the peer's claim about its own camera and cursor, which no authority
-// can recompute: the camera is client state and the cursor never crosses the wire. So the only
-// thing checked here is that the entity is still alive, and a handler that grants something is on
-// its own for reach — which is a rule worth an assertion precisely because it looks like a gap.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { Pointed } from '../dist/testkit/fixtures.js';
 import { joinPlayer, loadGame, pointerHit } from '../src/runtime/load-game.js';

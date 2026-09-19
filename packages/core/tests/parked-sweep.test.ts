@@ -1,7 +1,3 @@
-// A rewind sweeps invocations newer than the target tick: a handler parked
-// at an await from a timeline that did not happen is marked dead, releasing its
-// concurrency lock so the same event can fire fresh after the rewind.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { Cooldown } from '../dist/testkit/fixtures.js';
 import { loadGame } from '../src/runtime/load-game.js';
