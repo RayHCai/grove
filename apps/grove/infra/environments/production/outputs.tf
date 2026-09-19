@@ -13,14 +13,9 @@ output "cdn_distribution_id" {
   value       = module.grove.cdn_distribution_id
 }
 
-output "build_queue_url" {
-  description = "URL a builder polls for queued builds."
-  value       = module.grove.build_queue_url
-}
-
-output "build_dlq_url" {
-  description = "URL of the queue holding builds that never succeeded."
-  value       = module.grove.build_dlq_url
+output "task_streams" {
+  description = "Where the services that queue and claim work reach Redis, and the network it is in."
+  value       = module.grove.task_streams
 }
 
 output "tables" {

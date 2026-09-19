@@ -41,7 +41,8 @@ module "grove" {
   cdn_price_class         = "PriceClass_All"
   cdn_access_logs_enabled = true
 
-  build_alarm_actions = var.build_alarm_actions
+  task_alarm_actions = var.task_alarm_actions
+  task_client_cidrs  = var.task_client_cidrs
 
   tags = local.tags
 }

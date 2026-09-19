@@ -1,6 +1,7 @@
-# The one bucket every published game is served out of. The policy is what tells its three prefixes
-# apart: `bundles/` and `assets/` are reachable from the distribution and the fleet, `sources/` from
-# no principal this module grants.
+# The one bucket every game lives in, game first: `<game-id>/source/`, `<game-id>/assets/`,
+# `<game-id>/manifests/` and `<game-id>/build/`. The policy is what tells those classes apart, and
+# it matches them mid-key rather than at the front, because the game owns the prefix. `source/` and
+# `manifests/` match no pattern and so are reachable from no principal this module grants.
 
 resource "aws_s3_bucket" "games" {
   bucket        = var.bucket_name
@@ -28,8 +29,9 @@ resource "aws_s3_bucket_public_access_block" "games" {
   restrict_public_buckets = true
 }
 
-# An object is named by the hash of its own bytes, so a version is only ever created by a re-upload
-# of identical content — versioning here is a recovery window against a delete, not a history.
+# A save overwrites a creator's file in place, so this is the history: the version id a manifest
+# freezes is what makes every prior byte-set of every path still addressable, and a delete leaves a
+# marker rather than taking the bytes an older manifest still names.
 resource "aws_s3_bucket_versioning" "games" {
   bucket = aws_s3_bucket.games.id
 
@@ -80,13 +82,15 @@ resource "aws_s3_bucket_lifecycle_configuration" "games" {
 }
 
 data "aws_iam_policy_document" "games" {
-  # The distribution reads through an origin access control, and only under the prefixes meant for
-  # the edge: `sources/` is a creator's private code and never leaves the fleet.
+  # The distribution reads through an origin access control, and only the classes meant for the
+  # edge. The wildcard is mid-key because the game comes first, so one pattern covers every game's
+  # build output without naming one: `source/` and `manifests/` match none of them, which is what
+  # keeps a creator's code inside the fleet.
   statement {
     sid     = "AllowCloudFrontRead"
     actions = ["s3:GetObject"]
     resources = [
-      for prefix in var.cdn_prefixes : "${aws_s3_bucket.games.arn}/${prefix}*"
+      for pattern in var.cdn_prefixes : "${aws_s3_bucket.games.arn}/*/${pattern}*"
     ]
 
     principals {
@@ -125,11 +129,4 @@ resource "aws_s3_bucket_policy" "games" {
   policy = data.aws_iam_policy_document.games.json
 
   depends_on = [aws_s3_bucket_public_access_block.games]
-}
-
-# What turns an upload into a build: with this on, every object event goes to the default event bus,
-# which is where `upload-events` picks out the ones under `sources/`.
-resource "aws_s3_bucket_notification" "games" {
-  bucket      = aws_s3_bucket.games.id
-  eventbridge = true
 }

@@ -9,9 +9,9 @@ variable "bucket_name" {
 }
 
 variable "cdn_prefixes" {
-  description = "Key prefixes the distribution may read. Everything else in the bucket is unreachable from the edge."
+  description = "Key patterns, relative to a game, that the distribution may read: each is matched as `<bucket>/*/<pattern>*`. Everything else in the bucket is unreachable from the edge."
   type        = list(string)
-  default     = ["bundles/", "assets/"]
+  default     = ["build/", "assets/"]
 }
 
 variable "noncurrent_version_expiration_days" {

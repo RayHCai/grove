@@ -26,8 +26,14 @@ variable "server_manager_url" {
   type        = string
 }
 
-variable "build_alarm_actions" {
-  description = "SNS topics notified when a build dead-letters."
+variable "task_alarm_actions" {
+  description = "SNS topics notified when the task streams stop answering."
+  type        = list(string)
+  default     = []
+}
+
+variable "task_client_cidrs" {
+  description = "Blocks the services that queue and claim work are deployed into."
   type        = list(string)
   default     = []
 }
