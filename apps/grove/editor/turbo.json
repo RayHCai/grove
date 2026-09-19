@@ -14,6 +14,9 @@
                 "public/**"
             ]
         },
+        "dev": {
+            "dependsOn": ["^build"]
+        },
         "typecheck": {
             "inputs": ["src/**", "tests/**", "tsconfig*.json", "*.config.ts"]
         },

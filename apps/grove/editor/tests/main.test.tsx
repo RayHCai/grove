@@ -1,19 +1,22 @@
 import { act } from 'react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-
-beforeAll(() => {
-    // React refuses to run `act` without it, and says so at the first render rather than at setup.
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-});
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { until } from './helpers';
 
 afterEach(() => {
-    document.body.innerHTML = '';
     // The entry point runs on import, so each case needs it evaluated again.
     vi.resetModules();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
 });
 
+/** The one answer a first load needs from a service nothing has signed into. */
+function stubApi(): void {
+    vi.stubGlobal('fetch', async () => new Response(null, { status: 401 }));
+}
+
 describe('the entry point', () => {
-    it('mounts the shell into #root', async () => {
+    it('mounts the app into #root and dials the service for a session', async () => {
+        stubApi();
         const host = document.createElement('div');
         host.id = 'root';
         document.body.append(host);
@@ -21,11 +24,17 @@ describe('the entry point', () => {
         await act(async () => {
             await import('../src/main');
         });
+        // Nothing opens a session, so what the entry point lands on is the way to the platform.
+        await until(() => host.querySelector('[role="status"]') !== null);
 
-        expect(host.querySelector('main')?.textContent).toBe('Grove — editor');
+        expect(host.querySelector('[role="status"]')?.textContent).toBe(
+            'Taking you to Grove to sign in…',
+        );
+        expect(host.querySelector('.pg-wordmark')?.textContent).toBe('Grove');
     });
 
     it('refuses to mount when the document carries no #root', async () => {
+        stubApi();
         await expect(import('../src/main')).rejects.toThrow('#root is missing from index.html');
     });
 });
