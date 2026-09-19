@@ -1,9 +1,4 @@
-// A protocol-conformant peer over the other end of a loopbackPair.
-//
-// There is no second `GameClient` to gate, so the reusable suite is this: it answers a `JoinRequest`,
-// emits envelopes on a scripted schedule, and acks. It makes every test a BLACK-BOX test of the real
-// client, and it is what `@platform/sim` can later run against to prove the two halves agree — the
-// acceptance test for the pair, which neither package can write alone.
+// A protocol-conformant peer over the far end of a `loopbackPair`, for black-box client tests.
 
 import { defined } from '@platform/math';
 import type { TemplateId } from '@platform/project';
@@ -48,7 +43,7 @@ export interface FakeServerOptions {
     answerTimeSync?: boolean;
     /** The welcome's `RenderManifest`. Defaults to empty, which asks the renderer for nothing. */
     visuals?: RenderManifest;
-    /** What this peer claims to be running. Defaults to declaring nothing, which the client matches. */
+    /** What this peer claims to be running; declares nothing by default, as the client matches. */
     project?: { projectId: string; projectHash: string };
     /** Names a script bundle in the welcome, so the client fetches before it goes live. */
     bundle?: { url: string; hash: string };
@@ -88,11 +83,8 @@ export class FakeServer {
     constructor(transport: Transport, opts: FakeServerOptions = {}) {
         this.#transport = transport;
         this.#opts = opts;
-        // A snapshot tick is the tick this peer IS at, not an unrelated number: the snapshot describes
-        // the world now. Keeping the two in step matters because the client's counter seeds from the
-        // snapshot and then measures every later envelope against it — a peer whose `tick` disagreed
-        // with its own snapshot would send envelopes from the client's future and trip the behind-check
-        // on the next frame, so the resync path would be under test everywhere by accident.
+        // A snapshot tick is the tick this peer IS at: the client's counter seeds from the snapshot
+        // and measures every later envelope against it.
         if (opts.snapshotTick !== undefined) this.tick = opts.snapshotTick;
         transport.onMessage((message) => this.#receive(message));
         transport.onClose(() => {
@@ -166,8 +158,8 @@ export class FakeServer {
         }
 
         if (this.#opts.malformedWelcome === true) {
-            // A `Welcome` that fails to decode — here, one whose required fields are the wrong shape,
-            // which is what a codec mismatch looks like once the frame is parsed at all.
+            // A `Welcome` that fails to decode: required fields the wrong shape, as a codec
+            // mismatch.
             this.#send({ kind: 'welcome' } as unknown as Welcome);
             return;
         }
@@ -188,10 +180,8 @@ export class FakeServer {
             clientSentMs,
             serverSentMs: this.#opts.serverSentMs ?? clientSentMs,
             snapshot: {
-                // This peer's tick NOW, never a fixed number: a snapshot describes the world at the
-                // moment it is built, and one carrying a tick its sender has already passed is stale
-                // against its own clock — which reads to the client as a counter that has fallen behind
-                // and resyncs. `snapshotTick` seeds `this.tick` in the constructor instead.
+                // This peer's tick NOW, never a fixed number: a snapshot with a passed tick is
+                // stale against its own clock and reads as falling behind.
                 tick: this.tick,
                 entities: this.#opts.entities ?? [],
                 players: this.#opts.players ?? [{ id: 'p1', index: 0, name: 'p1' }],
@@ -205,12 +195,7 @@ export class FakeServer {
         this.#send(welcome);
     }
 
-    /**
-     * Moves the snapshot's entities into `snapshot-chunk` frames sent ahead of the `Welcome`.
-     *
-     * Chunks first and the count on the `Welcome`, which is the wire order: a receiver holding a
-     * partial set has not been told a join happened, so it cannot apply half a world.
-     */
+    /** Moves the snapshot's entities into `snapshot-chunk` frames sent ahead of the `Welcome`. */
     #chunkSnapshot(welcome: Welcome): void {
         const count = this.#opts.snapshotChunks ?? 0;
         if (count <= 0) return;
@@ -234,10 +219,7 @@ export class FakeServer {
         this.#send(envelope);
     }
 
-    /**
-     * One send-tick's reliable envelope. Sent even when empty — a wire rule, since a transform envelope
-     * in a quiet tick would otherwise have no counterpart and never apply.
-     */
+    /** One send-tick's reliable envelope. Sent even when empty — a wire rule. */
     sendState(
         structural: WireStructuralOp[] = [],
         state: StateDiff[] = [],
@@ -259,10 +241,7 @@ export class FakeServer {
         this.#send(envelope);
     }
 
-    /**
-     * Resolves every input received so far and reports the headroom of the EARLIEST one — the arithmetic
-     * the lead loop needs: `frame.tick - serverTickOnArrival` for the earliest input in the batch.
-     */
+    /** Resolves every input so far, reporting the EARLIEST one's headroom for the lead loop. */
     ackAll(opts: { tick?: number } = {}): void {
         const pending = this.inputs.filter((i) => i.frame.seq > this.#ackSeq);
         if (pending.length === 0) {

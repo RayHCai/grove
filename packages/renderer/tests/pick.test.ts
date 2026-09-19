@@ -1,9 +1,5 @@
-// `nodeAt` — the pointer's question, answered in the space a pointer event arrives in.
-//
-// Screen space and y-down throughout, which is what lets one call serve a UI widget and a world
-// sprite without the caller knowing which it hit. The scene below is deliberately built at zoom 1
-// with the camera at the origin, so a world point and a screen point differ only by the centring
-// offset the numbers state explicitly.
+// Screen space and y-down throughout; the scene is built at zoom 1 with the camera at the origin,
+// so a world point and a screen point differ only by the centring offset.
 
 import { describe, expect, it } from 'vitest';
 import { NO_NODE } from '../src/node-id.js';
@@ -130,7 +126,8 @@ describe('nodeAt', () => {
             layer: 0,
         });
 
-        // Surface order beats `layer` by construction: a UI node can never sort beneath a world one.
+        // Surface order beats `layer` by construction: a UI node can never sort beneath a world
+        // one.
         expect(renderer.nodeAt(CENTRE)).toBe(widget);
         renderer.destroy();
     });

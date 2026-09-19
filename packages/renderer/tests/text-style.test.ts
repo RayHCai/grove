@@ -1,6 +1,3 @@
-// Our `TextStyle` -> Pixi's. Runs in Node: building a TextStyle needs no WebGL, only the
-// `exactOptionalPropertyTypes` discipline the module exists to keep.
-
 import { describe, it, expect } from 'vitest';
 import { toPixiTextStyleOptions } from '../src/pixi/text-style.js';
 

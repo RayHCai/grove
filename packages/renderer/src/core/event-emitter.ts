@@ -3,8 +3,8 @@
 
 /** Typed fan-out to zero or more handlers per event name. */
 export class EventEmitter<Events> {
-    // `never` erases the payload so one map can hold handlers for every event name; each `on`/`emit`
-    // pair re-narrows at the call site, where the key is known.
+    // `never` erases the payload so one map can hold handlers for every event name; each
+    // `on`/`emit` pair re-narrows at the call site, where the key is known.
     readonly #listeners = new Map<keyof Events, Set<(e: never) => void>>();
 
     /** Subscribes, and returns the unsubscribe. Calling it twice is harmless. */

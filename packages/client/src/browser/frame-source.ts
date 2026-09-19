@@ -1,14 +1,6 @@
-// The rAF frame source, behind the `./browser` subpath so importing the client never drags a DOM adapter
-// into a Node test's module graph.
-
 import type { FrameSource } from '../input.js';
 
-/**
- * `requestAnimationFrame`, in seconds.
- *
- * The timestamp is converted here rather than in `frame()` because every number the clock holds is in
- * seconds, and a millisecond leaking in would read as a 1000× lead.
- */
+/** `requestAnimationFrame`, in seconds — every number the clock holds is in seconds. */
 export function createRafFrameSource(): FrameSource {
     let handle = 0;
     let running = false;
@@ -19,8 +11,7 @@ export function createRafFrameSource(): FrameSource {
             running = true;
             const loop = (nowMs: number): void => {
                 if (!running) return;
-                // Scheduled before the callback, so a `stop()` from inside it cancels this handle rather
-                // than being overwritten by it.
+                // Scheduled before the callback, so a `stop()` from inside it cancels this handle.
                 handle = requestAnimationFrame(loop);
                 onFrame(nowMs / 1000);
             };

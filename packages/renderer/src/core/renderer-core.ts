@@ -1,9 +1,5 @@
-// Everything both backends share, in one copy: the two stores, handle validation, the validation
-// order the contract asserts, hierarchy, the resolve/flush/cull pass, projection and bounds, and
-// non-GPU asset bookkeeping.
-//
-// Anything touching a display object or a GPU resource goes through `SceneSink` instead, and a
-// backend is the only place a Pixi type may appear.
+// Anything touching a display object or a GPU resource goes through `SceneSink`; a backend is
+// the only place a Pixi type may appear.
 
 import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import {
@@ -66,7 +62,7 @@ interface CoreConfig {
     enabledSurfaces: Surface[];
 }
 
-/** Validates raw init options and applies every default, so both backends reject the same inputs. */
+/** Validates raw init options and applies every default, so both backends reject the same input. */
 export function resolveInitOptions(
     options: RendererInitOptions,
     canvas: Size,
@@ -101,7 +97,7 @@ export function resolveInitOptions(
     };
 }
 
-/** A backend owns one of these plus a {@link SceneSink}, and forwards its `IRenderer` calls here. */
+/** A backend owns one of these plus a {@link SceneSink} and forwards `IRenderer` calls here. */
 export class RendererCore {
     readonly nodes = new NodeStore();
     readonly xf = new TransformStore();
@@ -126,7 +122,7 @@ export class RendererCore {
     readonly #liveOut: number[] = [];
     readonly #rootsOut: number[] = [];
 
-    /** The viewport the last cull pass decided against, so a moved camera reconsiders everything. */
+    /** The viewport the last cull pass decided against, so a moved camera reconsiders. */
     readonly #culledViewport: Bounds = bounds();
 
     /** Set when something scene-wide changed and the next flush must reconsider every node. */
@@ -223,12 +219,7 @@ export class RendererCore {
         return fitScale(this.#camera.framing ?? 'stage', scaleMode, canvas, design);
     }
 
-    /**
-     * Validates and allocates a node.
-     *
-     * The order of the checks is part of the contract — surface, then text-on-camera-surface, then
-     * texture, then parent — because reordering them changes which error a caller sees.
-     */
+    /** Validates and allocates a node; check order is contract — surface, text, texture, parent. */
     createNode(desc: NodeDesc): NodeId {
         const surface = desc.surface ?? 'world';
         if (!this.isSurfaceEnabled(surface)) {
@@ -320,11 +311,8 @@ export class RendererCore {
         if (index < 0) return;
 
         const includeRoot = opts?.includeRoot ?? true;
-        // Set-only, establishing no inheritance, so a node attached later is unaffected — and
-        // `{alpha: 0.5}` flattens a subtree that had varied alphas.
-        //
-        // Applied by slot rather than through `updateNodes`, which would pack a handle per node
-        // only to unpack it again and allocate a patch object per node to carry it.
+        // Set-only, establishing no inheritance, so a node attached later is unaffected.
+        // Applied by slot rather than through `updateNodes`, which would allocate a patch per node.
         for (const slot of this.xf.subtree(index, this.#subtreeOut, includeRoot)) {
             const record = this.nodes.recordAt(slot);
             if (record === null) continue;
@@ -416,12 +404,7 @@ export class RendererCore {
         }
     }
 
-    /**
-     * `attachNode`, handle lookup and default included.
-     *
-     * `keepResolvedPosition` defaults to false here and true in {@link detachNode}: the asymmetry
-     * matches the creator API, where `attachTo` reinterprets and `detach` preserves.
-     */
+    /** `attachNode` with handle lookup; `keepResolvedPosition` is false here, true on detach. */
     attachNode(child: NodeId, parent: NodeId, opts?: { keepResolvedPosition?: boolean }): void {
         const index = this.nodes.indexOf(child);
         if (index < 0) return;
@@ -442,12 +425,7 @@ export class RendererCore {
         return out;
     }
 
-    /**
-     * Creates a whole subtree, resolving each `parentInBatch` against the nodes this call made.
-     *
-     * Rolled back rather than pre-validated on a throw: the checks and their order belong to
-     * {@link createNode}, and a second copy here would answer differently the day one moves.
-     */
+    /** Creates a whole subtree, resolving each `parentInBatch`; rolled back on a throw. */
     createSubtree(descs: readonly SubtreeNodeDesc[], out: NodeId[] = []): NodeId[] {
         out.length = 0;
         try {
@@ -643,19 +621,8 @@ export class RendererCore {
     }
 
     /**
-     * The topmost node whose art covers `screenPoint`, or `NO_NODE`.
-     *
-     * Screen space, y-down — the space a pointer event arrives in — so one call answers for a UI
-     * widget and a world sprite alike, and a caller never has to know which surface it hit before
-     * it can ask. The bounds are each node's own screen AABB, which is what `screenBoundsOf`
-     * already computes for both kinds.
-     *
-     * "Topmost" is draw order read backwards: greatest surface first, then greatest `layer`, then
-     * the most recently created. Creation order, never slot index — the freelist is LIFO, so a
-     * node born into a recycled slot would otherwise lose to the node it was drawn over.
-     *
-     * Groups are never hit: a group has no art, so it has no extent to cover a pixel with. An
-     * invisible node is never hit either, whether it was hidden itself or inherited it.
+     * The topmost node whose art covers `screenPoint`, or `NO_NODE`. Screen space, y-down.
+     * Draw order backwards: surface, then `layer`, then creation order — never slot index.
      */
     nodeAt(screenPoint: Vec3Like, opts: PickOptions = {}): NodeId {
         this.xf.resolve();
@@ -756,11 +723,7 @@ export class RendererCore {
 
     /**
      * Resolves the store, pushes dirtied local values, then recomputes cull flags.
-     *
-     * Called by a backend's `render()`. Draws nothing itself — a backend presents afterwards.
-     *
-     * The cull pass is O(dirty), not O(scene): a node's cull answer can only change if its own
-     * values changed, if its resolved position moved, or if the viewport did.
+     * Called by a backend's `render()`; draws nothing. The cull pass is O(dirty), not O(scene).
      */
     flush(): void {
         this.xf.resolve();
@@ -903,11 +866,7 @@ export class RendererCore {
 
     /**
      * A UI node's screen position: its anchoring ancestor's origin plus its resolved design-px
-     * offset, scaled by `fitScale`.
-     *
-     * The anchor comes from the node's surface ROOT, not from the node itself: `uiAnchor` is a
-     * root-only field, a child's resolved position already includes its ancestors' offsets, and
-     * taking a child's own anchor would add a second origin the backend never applies.
+     * offset, scaled by `fitScale`. The anchor is the surface ROOT's — `uiAnchor` is root-only.
      */
     #uiScreenPosition(index: number, out: MutableVec3): MutableVec3 {
         return uiToScreen(

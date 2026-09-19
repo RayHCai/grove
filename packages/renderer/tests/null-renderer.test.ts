@@ -1,6 +1,3 @@
-// The null backend against the reusable contract, plus the handful of behaviors that are
-// specific to being headless.
-
 import { describe, it, expect } from 'vitest';
 import { createNullRenderer, NullRenderer } from '../src/null/index.js';
 import { runRendererContract } from './contract/renderer-contract.js';

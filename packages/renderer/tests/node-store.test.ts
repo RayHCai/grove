@@ -1,8 +1,4 @@
-// Slot table, freelist and generation behaviour.
-//
-// The contract under test is that a handle is only ever valid for the node it was minted
-// for: a released slot MUST be handed out again (dense reuse keeps the flat scan short),
-// and the handle it is handed out with MUST NOT equal the one that was freed.
+// A released slot MUST be handed out again, and MUST NOT carry the handle that was freed.
 
 import { describe, it, expect } from 'vitest';
 import type { SlotTable } from '@platform/math';

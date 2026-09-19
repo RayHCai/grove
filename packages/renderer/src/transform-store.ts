@@ -1,9 +1,6 @@
-// Pure, and authoritative: the backend's tree mirrors this one, and nothing here asks it anything.
-//
-// Three dirty sets, and conflating the subtree-scoped `resolveDirty` with the single-node
-// `flushDirty` is the easiest way to break this file.
-//
-// `Float64Array` because composed positions accumulate and the drift matters more than the bytes.
+// Authoritative: the backend's tree mirrors this one and nothing here asks it anything.
+// Conflating the subtree-scoped `resolveDirty` with the single-node `flushDirty` is the easiest
+// way to break this file. `Float64Array` because composed positions accumulate.
 
 import { growF64, growI32, growU8, grownCapacity } from '@platform/math';
 
@@ -17,11 +14,8 @@ const INITIAL_CAPACITY = 64;
 const WHITE = 0xffffff;
 
 /**
- * The transform graph.
- *
- * Every method takes a slot index, not a `NodeId`: handle validation happens in `node-store.ts`.
- * An out-of-range index is treated as absent rather than throwing, so a race upstream degrades
- * to a no-op here too.
+ * The transform graph. Every method takes a slot index, not a `NodeId`: node-store.ts validates.
+ * An out-of-range index is treated as absent rather than throwing.
  */
 export class TransformStore {
     #posX = new Float64Array(INITIAL_CAPACITY);
@@ -55,13 +49,8 @@ export class TransformStore {
     #depth = new Int32Array(INITIAL_CAPACITY);
 
     /**
-     * Roots in insertion order, with `NONE` for a slot that has left. Roots need this because they
-     * have no parent to hold a child list.
-     *
-     * Tombstoned rather than spliced: removal happens on every link, unlink and release, and an
-     * `indexOf` plus `splice` per call makes creating or destroying a node O(roots) — 20k flat
-     * sprites then cost more to tear down than to draw. `#rootAt` maps a slot to its position, and
-     * compaction runs once the tombstones outnumber the live entries.
+     * Roots in insertion order, `NONE` for a slot that left; roots hold no parent child list.
+     * Tombstoned, not spliced: `indexOf` plus `splice` per call makes create/destroy O(roots).
      */
     #rootOrder: number[] = [];
 
@@ -89,13 +78,7 @@ export class TransformStore {
 
     #visits = 0;
 
-    /**
-     * How many nodes the last `resolve()` composed.
-     *
-     * "Skips clean subtrees" is a claim about work, not output — an implementation that walks a
-     * nested dirty root twice still produces the right numbers — so this counter is what makes
-     * the claim checkable.
-     */
+    /** How many nodes the last `resolve()` composed — what makes the skip claim checkable. */
     get lastResolveVisits(): number {
         return this.#visits;
     }
@@ -105,13 +88,7 @@ export class TransformStore {
         return this.#count;
     }
 
-    /**
-     * Roots of the pending resolve walk — the nodes whose subtrees `resolve()` would recompose.
-     *
-     * Exposed because a write that propagated further than it should have is otherwise
-     * unobservable: a rotation write that wrongly marked a subtree changes no resolved value, so
-     * `consumeResolvedDirty` reports nothing either way.
-     */
+    /** Roots of the pending resolve walk; exposed, since an over-wide mark is else invisible. */
     pendingResolveRoots(out: number[] = []): number[] {
         out.length = 0;
         for (const index of this.#resolveDirty) out.push(index);
@@ -313,12 +290,7 @@ export class TransformStore {
         return this.#int(this.#depth, index, 0);
     }
 
-    /**
-     * Appends `child` as `parent`'s last child; `parent === NONE` makes it a root.
-     *
-     * Stable, which is what makes "within a layer, order is insertion-defined" true. Does not
-     * adjust local position — reinterpret versus preserve is the caller's policy.
-     */
+    /** Appends `child` as `parent`'s last child; `parent === NONE` makes it a root. Stable. */
     link(child: number, parent: number): void {
         if (!this.#has(child)) return;
         if (parent !== NONE && !this.#has(parent)) return;
@@ -384,10 +356,7 @@ export class TransformStore {
 
     /**
      * `index` and every descendant, parent before child.
-     *
-     * Breadth-first over `out` itself: the queue head walks the array being filled, so excluding the
-     * root costs one extra seeding pass rather than a second array — and never a spread, which
-     * throws once a node has more direct children than the engine's argument limit.
+     * Breadth-first over `out` itself, never a spread, which throws past the argument limit.
      */
     subtree(index: number, out: number[] = [], includeRoot = true): number[] {
         out.length = 0;
@@ -428,19 +397,14 @@ export class TransformStore {
         return out;
     }
 
-    /**
-     * Recomposes resolved position and visibility, skipping clean subtrees.
-     *
-     * A dirty node whose ancestor is also dirty is reached by the ancestor's walk and dropped from
-     * the work list first, so no subtree is composed twice.
-     */
+    /** Recomposes resolved position and visibility, skipping subtrees an ancestor walked. */
     resolve(): void {
         this.#visits = 0;
         if (this.#resolveDirty.size === 0) return;
 
-        // Copied into a reused buffer, because `#resolveFrom` deletes from the set it walks and this
-        // runs every frame: sorting by depth would allocate two more arrays to reach the same place
-        // the ancestor check below reaches for nothing.
+        // Copied into a reused buffer, because `#resolveFrom` deletes from the set it walks and
+        // this runs every frame: sorting by depth would allocate two more arrays to reach the same
+        // place the ancestor check below reaches for nothing.
         const pending = this.#pendingRoots;
         pending.length = 0;
         for (const index of this.#resolveDirty) pending.push(index);
@@ -455,12 +419,7 @@ export class TransformStore {
         this.#resolveDirty.clear();
     }
 
-    /**
-     * Marks a node's local values as needing a push to the backend.
-     *
-     * For a change the store does not hold — a texture swap, a new string — whose SIZE still feeds
-     * bounds and culling.
-     */
+    /** Marks a node's local values as needing a push — a texture swap, a new string. */
     markFlushDirty(index: number): void {
         if (!this.#has(index)) return;
         this.#flushDirty.add(index);
@@ -525,12 +484,7 @@ export class TransformStore {
         return false;
     }
 
-    /**
-     * Composes `index` and its descendants from its parent's resolved values.
-     *
-     * Iterative because a deep chain of parented nodes is a legitimate authoring shape and must
-     * not risk the JS stack.
-     */
+    /** Composes `index` and its descendants from the parent's resolved values. Iterative. */
     #resolveFrom(index: number): void {
         const stack = this.#stack;
         stack.length = 0;

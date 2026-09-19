@@ -1,7 +1,5 @@
-// The shared half of `IRenderer` through a probe backend: the no-op-before-`init`-and-after-
-// `destroy` rule and the fonts-last unload are the shell's, and a real backend cannot be asked to
-// prove them for it — the probe supplies its own residency and reference counts, so the unload
-// policy is reachable without loading a texture or building a scene.
+// The probe supplies its own residency and reference counts, so the unload policy is reachable
+// without loading a texture or building a scene.
 
 import { describe, expect, it } from 'vitest';
 import type { Size } from '@platform/math';
@@ -60,12 +58,7 @@ interface Resident {
     size: Size;
 }
 
-/**
- * The smallest backend that satisfies `RendererShell`.
- *
- * `references` is writable by a test, which is the point of the probe: a backend derives the count
- * from a live scene, so no scene can put a font and a texture in use at once as cheaply.
- */
+/** The smallest backend satisfying `RendererShell`; `references` is writable by a test. */
 class ProbeRenderer extends RendererShell {
     readonly references = new Map<string, number>();
 

@@ -1,9 +1,5 @@
-// Prediction: the rewind to the authoritative baseline, the replay of unacked input over it, and the
-// correction the display eases rather than snaps.
-//
-// The mirror holds predicted state, so the render path needs no second source. What the baseline holds is
-// the authoritative world, and a server delta is applied on top of THAT, never on top of a predicted pose:
-// a delta names only what changed, so anything it does not mention would keep its predicted value forever.
+// A server delta lands on the authoritative baseline, never on a predicted pose: a delta names only
+// what changed, so anything it omits would keep its predicted value forever.
 
 import type {
     ActionStates,
@@ -22,7 +18,7 @@ import type { ClientPassContext } from './passes.js';
 import type { InputRing } from './ring.js';
 import { assertHeld } from './ring.js';
 
-/** What a dev console asks of the predicted half. A rising `cappedReplays` is a client falling behind. */
+/** What a dev console asks of the predicted half; a rising `cappedReplays` means falling behind. */
 export interface PredictionCounters {
     /** Ticks handed to `step`, first-time and re-simulated alike. */
     steppedTicks: number;
@@ -30,7 +26,7 @@ export interface PredictionCounters {
     resimulations: number;
     /** Replays that hit `MAX_REPLAY_TICKS`, so ticks the server did simulate were skipped here. */
     cappedReplays: number;
-    /** Corrections shown at once, the server having moved an entity further than easing may hide. */
+    /** Corrections shown at once, the server having moved an entity too far for easing to hide. */
     snappedCorrections: number;
 }
 
@@ -56,26 +52,20 @@ export class Prediction {
     readonly #rt: Runtime;
     readonly #playerId: string;
 
-    /**
-     * The authoritative world, refilled in place.
-     *
-     * `Loop.snapshot` mints a buffer per store per call, and one of them is seven typed arrays sized to
-     * the entity count — at send rate that is garbage measured in hundreds of kilobytes a second. The
-     * store interface exists to refill a caller-owned buffer, so this holds them and re-captures into them.
-     */
+    /** The authoritative world, refilled in place; `Loop.snapshot` would mint a buffer per call. */
     readonly #entries: Array<{ store: SnapshotStore; buffer: unknown }> = [];
     #baselineTick = -1;
 
     readonly #state: StateBaseline;
 
-    /** The entities this client simulates: the local player's own, refreshed when structure changes. */
+    /** The entities this client simulates: the local player's own, refreshed on change. */
     readonly #scope = new Set<EntityId>();
     readonly #liveIds: EntityId[] = [];
 
     /** The fold a replay runs on, seeded from the ring's horizon — never the client's live one. */
     #actions: ActionStates = createActionStates();
 
-    /** The highest tick stepped; ticks at or below it are re-simulations, and suppress client handlers. */
+    /** The highest tick stepped; ticks at or below it re-simulate and suppress client handlers. */
     #highestSimulated = -1;
     /** Where the predicted world stands, or -1 when nothing is predicted over the baseline. */
     #predictedTick = -1;
@@ -91,7 +81,7 @@ export class Prediction {
         snappedCorrections: 0,
     };
 
-    /** The seams the mirror's passes resolve per tick. Built once — the passes hold it for the session. */
+    /** The seams the mirror's passes resolve per tick. Built once and held for the session. */
     readonly context: ClientPassContext;
 
     constructor(opts: PredictionOptions) {
@@ -103,8 +93,7 @@ export class Prediction {
         this.#state = new StateBaseline(this.#rt);
         this.context = {
             rt: this.#rt,
-            // Resolved per call, never captured: the fold is replaced on every reseed and the roster
-            // fills after the join.
+            // Resolved per call, never captured: the fold is replaced on every reseed.
             actions: () => this.#actions,
             player: () => this.#player(),
             scope: () => this.#scope,
@@ -121,15 +110,9 @@ export class Prediction {
         return this.#scope;
     }
 
-    /**
-     * Undoes prediction, so the authoritative write that follows lands on authoritative state.
-     *
-     * Idempotent within a batch: once the predicted world is gone there is nothing to take back, and a
-     * second restore would rewind the delta the first one made room for.
-     */
+    /** Undoes prediction so the authoritative write lands on authoritative state. Idempotent. */
     rewind(): void {
-        // Cleared even when there is nothing to take back: a pose describes the rewind that recorded it,
-        // and a later measurement paired with an older one eases against a pose nobody was shown.
+        // Cleared even with nothing to take back: a pose describes the rewind that recorded it.
         this.#poses.clear();
         if (this.#predictedTick < 0 || this.#baselineTick < 0) return;
         this.#recordPoses();
@@ -141,13 +124,7 @@ export class Prediction {
         this.#predictedTick = -1;
     }
 
-    /**
-     * Simulates up to `localTick`.
-     *
-     * `resimulate` says authoritative state landed this frame: the baseline is retaken and the whole
-     * unacked span re-runs. Without it the world is only carried forward onto the ticks the clock just
-     * produced — re-running settled ticks every frame would fire each synced handler's effects again.
-     */
+    /** Simulates up to `localTick`; `resimulate` retakes the baseline and re-runs unacked. */
     advance(localTick: number, resimulate: boolean): void {
         if (resimulate) {
             this.#refreshScope();
@@ -162,8 +139,7 @@ export class Prediction {
 
         let from = this.#predictedTick + 1;
         if (localTick - from >= MAX_REPLAY_TICKS) {
-            // A span past the ring is a client that has been away; re-running it costs a frame that is
-            // already late, and the ticks it skips are the ones furthest from what is on screen.
+            // A span past the ring is a client that has been away; re-running costs a late frame.
             from = localTick - MAX_REPLAY_TICKS + 1;
             this.counters.cappedReplays++;
         }
@@ -171,7 +147,7 @@ export class Prediction {
         if (localTick > this.#predictedTick) this.#predictedTick = localTick;
 
         if (resimulate) this.#measureCorrections();
-        // Predicted ops mark channels nothing here drains; left alone the journal grows for the session.
+        // Predicted ops mark channels nothing here drains; left alone the journal grows.
         this.#mirror.discardMarks();
     }
 
@@ -186,10 +162,7 @@ export class Prediction {
         return this.#rt.playerManager?.byId(this.#playerId) ?? null;
     }
 
-    /**
-     * Ownership is the client's only handle on its own entities: nothing here fills a `Player`'s avatar,
-     * and `ownerId` is the one field a spawn carries that names a player.
-     */
+    /** Ownership is the client's only handle on its own entities; `ownerId` names the player. */
     #refreshScope(): void {
         this.#scope.clear();
         this.#rt.entities.liveIds(this.#liveIds);
@@ -213,19 +186,14 @@ export class Prediction {
         return { tick: this.#baselineTick, scope: this.#scope, entries: this.#entries };
     }
 
-    /** The hosts a predicted tick may write: the game, the local player, and what that player owns. */
+    /** The hosts a predicted tick may write: the game, the local player, and what they own. */
     *#stateHosts(): IterableIterator<string> {
         yield GAME_KEY;
         yield playerKey(this.#playerId);
         for (const id of this.#scope) yield entityKey(id);
     }
 
-    /**
-     * Seeds the replay's fold: the horizon, then every frame the authority has already simulated.
-     *
-     * The horizon is an interval, not a tick — it is valid from the last pruned frame until the oldest
-     * unacked one — so the frames between it and the depicted tick are folded rather than replayed.
-     */
+    /** Seeds the replay's fold: the horizon, then every frame the authority already simulated. */
     #seedActions(): void {
         const actions = createActionStates();
         assertHeld(this.#ring.heldAtHorizon, actions);
@@ -240,14 +208,14 @@ export class Prediction {
         this.#actions = actions;
     }
 
-    /** Scanned rather than indexed: the ring is bounded, and one flush can stamp two frames on a tick. */
+    /** Scanned rather than indexed: the ring is bounded, and one flush can stamp two frames. */
     #frameFor(tick: number): InputFrame | undefined {
         this.#matches.length = 0;
         for (const frame of this.#frames) if (frame.tick === tick) this.#matches.push(frame);
         return this.#matches.length === 1 ? this.#matches[0] : this.#merged();
     }
 
-    /** Two frames on one tick both applied, in send order — the authority drains them the same way. */
+    /** Two frames on one tick both apply, in send order — as the authority drains them. */
     #merged(): InputFrame | undefined {
         const first = this.#matches[0];
         if (first === undefined) return undefined;
@@ -255,13 +223,7 @@ export class Prediction {
         return { ...first, actions };
     }
 
-    /**
-     * The pose on screen, which is the simulated one plus whatever is still easing.
-     *
-     * The residual belongs in the measurement: an offset replaces rather than accumulates, so a
-     * correction measured from the bare simulated pose would discard the ease still in flight and jump
-     * the drawn position by it — once per authoritative envelope, which is the correction it replaces.
-     */
+    /** The pose on screen: the simulated one plus whatever is still easing. */
     #recordPoses(): void {
         const transforms = this.#rt.transforms;
         for (const id of this.#scope) {
@@ -275,13 +237,7 @@ export class Prediction {
         }
     }
 
-    /**
-     * What the authority disagreed with, handed to the display and never to the simulation.
-     *
-     * The offset carries the pose the player was already looking at and decays to nothing, so the
-     * correction is a fraction of a second of easing rather than a jump — while the simulation keeps
-     * the server's exact answer, which is the only value an input replays against.
-     */
+    /** What the authority disagreed with, handed to the display and never to the simulation. */
     #measureCorrections(): void {
         const transforms = this.#rt.transforms;
         for (const [id, pose] of this.#poses) {
@@ -302,11 +258,7 @@ export class Prediction {
         this.#poses.clear();
     }
 
-    /**
-     * A restore writes the transform arrays directly and marks nothing dirty, and the dirty set is the
-     * render bridge's whole work queue — so a rewind the replay does not happen to overwrite would stay
-     * on screen at the pose it just discarded.
-     */
+    /** A restore marks nothing dirty, and the dirty set is the bridge's work queue — mark here. */
     #remarkDirty(): void {
         const transforms = this.#rt.transforms;
         for (const id of this.#scope) {
@@ -321,18 +273,13 @@ export class Prediction {
     }
 }
 
-/**
- * The `@serverState` half of the baseline, which core's snapshot registry does not carry.
- *
- * Scoped like everything else here: the game, the local player, and the entities that player owns are the
- * hosts a predicted tick may write, and a host table offers no way to enumerate the rest.
- */
+/** The `@serverState` half of the baseline, which core's snapshot registry does not carry. */
 class StateBaseline {
     readonly #rt: Runtime;
     /** One buffer per host key, refilled in place — a capture runs at send rate. */
     readonly #buffers = new Map<string, Map<string, unknown>>();
     readonly #captured: string[] = [];
-    /** This capture's keys, so the table can be pruned to them rather than growing with the session. */
+    /** This capture's keys, so the table is pruned to them rather than growing with the session. */
     readonly #live = new Set<string>();
 
     constructor(rt: Runtime) {
@@ -343,8 +290,7 @@ class StateBaseline {
         this.#captured.length = 0;
         this.#live.clear();
         for (const key of keys) {
-            // `get`, never `ensure`: minting a record here would create an empty one, and a scope with
-            // it, for every host that has no state at all.
+            // `get`, never `ensure`: minting here creates an empty record per stateless host.
             const values = this.#rt.hosts.get(key)?.record.values;
             if (values === undefined) continue;
             let buffer = this.#buffers.get(key);
@@ -358,18 +304,14 @@ class StateBaseline {
             this.#live.add(key);
         }
 
-        // An entity key carries the slot's generation, so a respawn never reuses one — without this the
-        // table holds a buffer per entity the player has ever owned, for the life of the session.
+        // An entity key carries the slot's generation, so a respawn never reuses one — without
+        // this the table holds a buffer per entity ever owned.
         for (const key of this.#buffers.keys()) {
             if (!this.#live.has(key)) this.#buffers.delete(key);
         }
     }
 
-    /**
-     * Cleared and refilled, never merged: a field a predicted tick added is absent from the buffer, and a
-     * merge would leave it behind. The record object itself survives, because a script attached later
-     * hoists its accessors onto that identity.
-     */
+    /** Cleared and refilled, never merged; the record survives for later-hoisted accessors. */
     restore(): void {
         for (const key of this.#captured) {
             const buffer = this.#buffers.get(key);

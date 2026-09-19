@@ -1,13 +1,6 @@
-// The reusable renderer contract.
-//
-// `runRendererContract(() => createNullRenderer())` today; the SAME suite runs unchanged against
-// `PixiRenderer` once a browser-mode vitest target exists. That is the whole reason it exists —
-// an interface validated against one implementation is just that implementation's shape.
-//
-// BACKEND-AGNOSTIC BY CONSTRUCTION: this file may only touch `IRenderer` members plus whatever
-// arrives through `opts`. It imports no backend, no pixi, and assumes no GPU. Where backends
-// legitimately differ — a real PNG's decoded size vs. the headless backend's declared size — the
-// expectation comes in through `opts` rather than being hard-coded.
+// The reusable renderer contract: the same suite must run unchanged against any backend.
+// BACKEND-AGNOSTIC BY CONSTRUCTION — it may touch only `IRenderer` members plus what arrives
+// through `opts`, and imports no backend and no pixi.
 
 import { describe, it, expect } from 'vitest';
 import { defined } from '@platform/math';
@@ -19,12 +12,7 @@ import { RendererError } from '../../src/errors.js';
 export interface RendererContractOptions {
     /** Label for the describe block, so two backends' results are told apart. */
     name?: string;
-    /**
-     * A loadable image entry plus the size the backend is expected to report for it.
-     *
-     * The default declares its own `size`, which every backend must honour: a headless backend
-     * cannot decode an image, and a GPU backend should prefer the manifest over a fetch.
-     */
+    /** A loadable image entry plus the size the backend must report; the default declares one. */
     image?: { name: string; url: string; size: { width: number; height: number } };
     /** Surfaces the backend under test should enable. All five, so surface rules are testable. */
     surfaces?: readonly Surface[];
@@ -496,8 +484,8 @@ export function runRendererContract(
             });
 
             it('resolves a grandchild against a parent created moments earlier', async () => {
-                // The case a committed-node lookup cannot serve: entry 2's parent did not exist when
-                // the call began, and a flat scene looks right until something reparents.
+                // The case a committed-node lookup cannot serve: entry 2's parent did not exist
+                // when the call began, and a flat scene looks right until something reparents.
                 const renderer = await ready();
                 const [root, mid, leaf] = renderer.createSubtree([
                     { kind: 'group', surface: 'world' },
@@ -552,7 +540,8 @@ export function runRendererContract(
             });
 
             it('creates nothing at all when a later desc throws', async () => {
-                // The caller holds no handles yet, so a half-built subtree could never be destroyed.
+                // The caller holds no handles yet, so a half-built subtree could never be
+                // destroyed.
                 const renderer = await ready();
                 const before = renderer.inspect().counts.nodes;
 

@@ -1,10 +1,5 @@
-// The backend-independent half of an `IRenderer`: the members that are pure delegation to
-// `RendererCore`, the "no core yet, or no longer" no-op rule, and the fonts-last unload policy.
-//
-// A backend extends this and supplies only what a display context makes different — `init`,
-// `destroy`, `render`, its surface resize, its context state, the asset pipeline, residency and text
-// measurement. The shared state is `protected` rather than `#`: a subclass cannot reach a private
-// field, so the erasure is the price of holding these members in one copy.
+// The shared state is `protected` rather than `#`: a subclass cannot reach a private field, so
+// the erasure is the price of holding these members in one copy.
 
 import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import type {
@@ -41,7 +36,7 @@ export abstract class RendererShell implements IRenderer {
     /** Set by a backend's `destroy`, so a late call no-ops instead of resurrecting the renderer. */
     protected destroyed = false;
 
-    /** GPU asset work deferred past a context loss; a backend that cannot lose one never fills it. */
+    /** GPU asset work deferred past a context loss; unused by a backend that cannot lose one. */
     protected readonly queue = new AssetQueue();
 
     get initialized(): boolean {
@@ -259,24 +254,14 @@ export abstract class RendererShell implements IRenderer {
         return this.destroyed ? null : this.core;
     }
 
-    /**
-     * Drops the core and any deferred asset work; a backend's `destroy` calls this once.
-     *
-     * A backend's own fields go around it, since only the backend knows what must be released
-     * before the core lets go of the scene and what must outlive it.
-     */
+    /** Drops the core and any deferred asset work; a backend's `destroy` calls this once. */
     protected teardownCore(): void {
         this.core?.teardown();
         this.core = null;
         this.queue.clear();
     }
 
-    /**
-     * Unloads `names`, reporting rather than throwing.
-     *
-     * Fonts last: one still referenced by live text is kept, because dropping it re-rasterizes that
-     * text to a fallback face, which reads as corruption.
-     */
+    /** Unloads `names`, reporting rather than throwing. Fonts last: one still in use is kept. */
     protected unloadResident(names: readonly string[]): AssetUnloadResult {
         const result: AssetUnloadResult = { unloaded: [], unknown: [], inUse: [], queued: false };
 
@@ -295,12 +280,7 @@ export abstract class RendererShell implements IRenderer {
         return result;
     }
 
-    /**
-     * Records `name` as unknown or in use, and answers whether it should unload.
-     *
-     * Reporting is separated from the drop because a backend that only *intends* an unload has to
-     * report the same three ways from the same residency.
-     */
+    /** Records `name` as unknown or in use, and answers whether it should unload. */
     protected reportUnload(name: string, result: AssetUnloadResult): boolean {
         if (!this.isResident(name)) {
             // Reported, not thrown: idempotent teardown needs no guard.

@@ -1,10 +1,4 @@
-// `@onUpdate` on a `ClientScript`, which is the one handler no tick pass can run.
-//
-// Both update passes narrow to server-located handlers — a `SyncedScript`'s update belongs to the
-// simulation, and firing it here as well would run it twice — so the frame loop is the only place a
-// client-located update can come from.
-//
-// Compiled by the build (src/testkit/fixtures.ts); this file carries no decorator syntax.
+// Fixtures are compiled by the build; this file carries no decorator syntax.
 
 import { describe, expect, it } from 'vitest';
 import { displayUpdate, hud } from '@platform/core';
@@ -23,12 +17,7 @@ function world(): Mirror {
     return made;
 }
 
-/**
- * Registers a class on a screen and leaves it open.
- *
- * `hud.screen` answers null until an open has minted the screen, so the pair below is the only way
- * to attach a class ahead of the open that runs it.
- */
+/** Registers a class on a screen and leaves it open; `hud.screen` is null until an open. */
 function openWith(name: string, klass: never): void {
     hud.open(name);
     hud.screen(name)!.addScript(klass);

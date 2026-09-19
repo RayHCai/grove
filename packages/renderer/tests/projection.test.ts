@@ -1,14 +1,6 @@
-// World <-> screen, the y-flip, degrees -> radians, and UI anchors.
-//
-// The y-flip round-trip is the highest-risk case here. The sign is asserted
-// directly — a point ABOVE the camera in world space must get a SMALLER screen y — and then
-// the inverse is checked over a fixed TABLE of cameras, zooms, modes, framings and non-square
-// canvases. The table is fixed on purpose: Math.random() would make a failure unreproducible,
-// and a sign error is not a rare event needing a search to find.
-//
-// The design stage is 800x600, so the wide canvas 1600x900 gives fitScale exactly 1.5 under
-// 'fit' and exactly 2 under 'fill'. Every expected value below is exact in binary floating
-// point, which is why these are `toBe`/`toEqual` rather than `toBeCloseTo`.
+// The y-flip round-trip is the highest-risk case: a point ABOVE the camera must get a SMALLER
+// screen y, checked over a FIXED table of cameras and canvases so a failure is reproducible.
+// The 800x600 stage against 1600x900 gives fitScale exactly 1.5, so every expectation is exact.
 
 import { describe, it, expect } from 'vitest';
 import { DEG2RAD } from '@platform/math';
@@ -497,11 +489,9 @@ describe('uiToScreen', () => {
     });
 
     it('is correct when `out` IS `offset` — the pooled-scratch call', () => {
-        // Callers may reuse pooled objects to hit zero allocation, and the
-        // natural in-place form is `uiToScreen(p, anchor, stage, s, p)`. Writing the anchor
-        // origin into `out` before reading `offset` would clobber the offset first: for
-        // {20,20} at fitScale 1.5 the origin (200,0) lands in `p`, and the result becomes
-        // (200 + 200*1.5, 0 + 0*1.5) = (500, 0) instead of (230, 30).
+        // Callers may pass `out === p` for zero allocation, so the anchor origin must not be
+        // written before `offset` is read — that would clobber the offset and yield (500, 0)
+        // instead of (230, 30).
         for (const anchor of ['top-left', 'center', 'bottom-right'] as const) {
             for (const offset of [
                 { x: 20, y: 20, z: 0 },

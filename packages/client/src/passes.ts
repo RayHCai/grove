@@ -1,10 +1,5 @@
-// The client's tick passes: the input fold the server's own pass mirrors, and the narrowing that
-// keeps a replayed tick inside the entities this client owns.
-//
-// Core's table is whole-world — it ignores the `scope` a client step hands it — so the narrowing lives
-// here or a remote avatar is extrapolated off input this client never had. The input half must agree
-// with `@platform/sim`'s pass edge for edge: it cannot be imported (the client never imports the
-// server), and a second one-tick-wide rule would read as a prediction bug rather than a copied one.
+// The input fold must match `@platform/sim`'s pass edge for edge; the client never imports the
+// server, so the duplication is deliberate. Core's table is whole-world, so narrowing lives here.
 
 import type {
     ActionStates,
@@ -19,11 +14,7 @@ import type { EventPhase } from '@platform/core';
 import { defined } from '@platform/math';
 import type { InputFrame } from '@platform/protocol';
 
-/**
- * The panel-mapped move axes `BaseMovement.fillIntent` reads.
- *
- * Restated rather than shared: core names them in no export, and the server's pass holds the same pair.
- */
+/** The panel-mapped move axes `BaseMovement.fillIntent` reads; core exports no name for them. */
 const MOVE_AXES = ['moveX', 'moveY'] as const;
 
 /** What the client's passes need, resolved per tick because the roster fills after the join. */
@@ -41,15 +32,7 @@ export interface ClientPassContext {
 
 /**
  * The table the mirror installs while it predicts, over the one `loadGame` built.
- *
- * `contacts` and `regions` are both deliberately dropped: each is a consequence of a position this
- * client only predicted, and consequences are the authority's — firing `@onCollide` or `@onEnter`
- * here would apply damage the server has not agreed to. Both also diff against a previous tick that
- * no snapshot store holds, so a rewind would leave the edge describing a tick that was taken back.
- *
- * `countdowns` stays core's: a countdown is host-local display timing with no authoritative
- * counterpart to disagree with, and core's own pass already skips a replayed tick so a re-run
- * cannot spend one twice.
+ * `contacts` and `regions` are dropped: consequences of a predicted position are the authority's.
  */
 export function clientPasses(base: TickPasses, ctx: ClientPassContext): TickPasses {
     return {
@@ -68,11 +51,7 @@ export function clientPasses(base: TickPasses, ctx: ClientPassContext): TickPass
 
 /**
  * Folds this tick's frame, dispatches its edges, and synthesizes the `hold` the wire leaves out.
- *
- * The order is the contract: one `advanceTick` before any edge lands, because `pressed` / `released`
- * are one tick wide and last tick's must clear whether or not a frame arrived; then the edges; then
- * one `hold` per active action, since edges-only input means nothing else can fire an `{ on: 'hold' }`
- * handler; then `fillIntent`, ahead of the movement pass, or `intent` stays zero and nothing moves.
+ * Order is the contract: `advanceTick`, edges, one `hold` per active action, then `fillIntent`.
  */
 function runInputPass(ctx: ClientPassContext, dispatch: DispatchOptions): void {
     const rt = ctx.rt;
@@ -87,8 +66,7 @@ function runInputPass(ctx: ClientPassContext, dispatch: DispatchOptions): void {
     if (frame !== undefined) {
         for (const action of frame.actions) {
             actions.applyEdge(action);
-            // A sampled hold updates the axis and dispatches nothing of its own: the synthesized one
-            // below is the only `hold`, and dispatching here too would double-fire it.
+            // A sampled hold updates the axis only; the synthesized one below is the only `hold`.
             if (action.on === 'hold') continue;
             dispatchInput(
                 rt,
@@ -109,31 +87,21 @@ function runInputPass(ctx: ClientPassContext, dispatch: DispatchOptions): void {
     player.movement?.fillIntent(actions.axis(MOVE_AXES[0]), actions.axis(MOVE_AXES[1]));
 }
 
-/**
- * Every action a synthesized `hold` is owed: held buttons union non-neutral axes.
- *
- * `heldActions()` alone is not enough. An axis reaches the wire as a `hold` sample and a `hold` never
- * enters `held`, so an axis appears in neither the frame's dispatch nor a `heldActions()` walk.
- */
+/** Every action a synthesized `hold` is owed: held buttons union non-neutral axes. */
 function activeActions(actions: ActionStates): Set<string> {
     const out = new Set(actions.heldActions());
     for (const { action } of actions.axisValues()) out.add(action);
     return out;
 }
 
-/**
- * The player's own host and every entity they own.
- *
- * The server resolves the second half as the avatar, which this runtime does not have: nothing here
- * fills a `Player`'s avatar, so ownership is the client's only handle on the same entity.
- */
+/** The player's own host and every entity they own; ownership is this runtime's only handle. */
 function hostKeys(player: Player, scope: ReadonlySet<EntityId>): string[] {
     const keys = [playerKey(player.id)];
     for (const id of scope) keys.push(entityKey(id));
     return keys;
 }
 
-/** Fires one action edge at the local player's hosts, exactly as the authority fires it at its own. */
+/** Fires one action edge at the local player's hosts, as the authority fires at its own. */
 function dispatchInput(
     rt: Runtime,
     player: Player,
@@ -164,13 +132,13 @@ function dispatchInput(
     }
 }
 
-/** Core's movement pass, narrowed: a movement whose host is out of scope belongs to another client. */
+/** Core's movement pass, narrowed: a movement out of scope belongs to another client. */
 function runMovementPass(rt: Runtime, dt: number, scope: ReadonlySet<EntityId> | undefined): void {
     for (const player of rt.playerManager?.players ?? []) {
         const movement = player.movement;
         if (!movement) continue;
-        // A destroyed avatar leaves its movement instance live, and the physics sink would otherwise
-        // keep writing positions for whatever entity reuses the released slot.
+        // A destroyed avatar leaves its movement instance live, and the physics sink would keep
+        // writing positions for whatever reuses the released slot.
         const host = movement.host as unknown as { entityId: EntityId };
         if (!rt.entities.isAlive(host.entityId)) continue;
         if (scope !== undefined && !scope.has(host.entityId)) continue;
@@ -178,13 +146,7 @@ function runMovementPass(rt: Runtime, dt: number, scope: ReadonlySet<EntityId> |
     }
 }
 
-/**
- * `@onUpdate` for the scoped hosts only.
- *
- * `activeLocationsFor('server')` matches core: a `ClientScript`'s `@onUpdate` is display-rate through
- * `frame()` and must not fire from a sim step, while a `SyncedScript`'s is the tick's to run. Game-hosted
- * scripts are left out — the game is nobody's to predict.
- */
+/** `@onUpdate` for the scoped hosts only; `activeLocationsFor('server')` matches core. */
 function runUpdatePass(
     ctx: ClientPassContext,
     dispatch: DispatchOptions,

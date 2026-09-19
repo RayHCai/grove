@@ -1,15 +1,6 @@
-// The browser's bundle source, behind the `./browser` subpath so importing the client never drags
-// `fetch`, `crypto.subtle` or `Blob` into a Node test's module graph.
-
 import type { BundleSource } from '../bundle.js';
 
-/**
- * Fetch + SubtleCrypto + an `import()` of the bytes already hashed.
- *
- * `crypto.subtle` exists only in a secure context, so a page served over plain `http:` on anything
- * but loopback cannot verify a bundle — and this refuses to load one rather than skipping the check,
- * which is the failure mode the hash exists to prevent.
- */
+/** Fetch, hash and `import()` the bytes; refuses to load when `crypto.subtle` is unavailable. */
 export function createBrowserBundleSource(): BundleSource {
     return {
         async fetch(url: string): Promise<ArrayBuffer> {
@@ -35,8 +26,7 @@ export function createBrowserBundleSource(): BundleSource {
         },
 
         async evaluate(bytes: ArrayBuffer): Promise<unknown> {
-            // Evaluated from the bytes that were hashed, never by importing the url a second time: a
-            // second fetch is a second answer, and the digest would then describe something else.
+            // Evaluated from the hashed bytes, never a second fetch: that would be a second answer.
             const objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
             try {
                 return (await import(/* @vite-ignore */ objectUrl)) as unknown;

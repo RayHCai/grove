@@ -1,10 +1,8 @@
-// Engine constants, not creator knobs. Each states its unit, because mixing them is the failure mode:
-// a tick is 16.7 ms at 60 Hz and 50 ms at 20 Hz, so a constant read in the wrong unit means triple the
-// input delay on a 20 Hz project for a reason nobody would look for in a rate setting.
+// Engine constants, not creator knobs. Each states its unit — mixing units is the failure mode.
 
 import { MAX_REWIND_MS } from '@platform/core';
 
-/** Ticks of headroom the lead loop holds the earliest input at: one absorbs jitter, one a dropped send. */
+/** Ticks of headroom the lead loop holds the earliest input at; one absorbs jitter, one a drop. */
 export const HEADROOM_TARGET = 2;
 
 /** Ticks. Loopback's floor is structurally one tick, whatever a tick is worth. */
@@ -22,159 +20,63 @@ export const MAX_FRAME_DT = 0.1;
 /** Seconds of silence that raise `stalled`. */
 export const STALL_SECONDS = 1;
 
-/**
- * The lead loop's proportional gain, dimensionless.
- *
- * Safe because of `effectiveHeadroom`, not because 0.25 is small: the loop's dominant lag is nudge
- * delivery, not the round trip. `GAIN`, `NUDGE_MAX` and `sendRate` are one system — changing any means
- * re-deriving this.
- */
+/** The lead loop's proportional gain, dimensionless. One system with `NUDGE_MAX` and `sendRate`. */
 export const GAIN = 0.25;
 
-/** Fraction the tick duration may be scaled by to deliver a lead correction. 2% is imperceptible. */
+/** Fraction the tick duration may be scaled by to correct the lead. 2% is imperceptible. */
 export const NUDGE_MAX = 0.02;
 
-/**
- * Axis deadzone as a fraction of full deflection — a stick's -1..1, so 1/64 of the range.
- *
- * A cursor has no full deflection, so the cursor axes quantize against this fraction of the viewport
- * extent instead: the same on-screen movement then costs the same number of frames at any zoom.
- */
+/** Axis deadzone as a fraction of full deflection; cursor axes quantize against viewport extent. */
 export const AXIS_QUANTUM = 1 / 64;
 
 /** Ticks of the session's own rate that `ackSeq` may stand still before `stalled`. */
 export const ACK_STALL_TICKS = 60;
 
-/**
- * Ring capacity in frames, one per tick.
- *
- * A literal with headroom, not a derivation: `LEAD_MAX_SECONDS` plus core's rewind window is a span in
- * seconds, and how many ticks it spans depends on a `simRate` this file cannot see.
- */
+/** Ring capacity in frames, one per tick. A literal with headroom — ticks per second vary. */
 export const RING_TICKS = 48;
 
-/**
- * Ticks one replay may simulate before it stops re-running history and starts at the cap instead.
- *
- * The lead is clamped, so an honest replay is a handful of ticks; a span past the ring is a client
- * that has been away, and re-running it costs a frame that is already late.
- */
+/** Ticks one replay may simulate before it starts at the cap instead. */
 export const MAX_REPLAY_TICKS = RING_TICKS;
 
-/** Seconds a display correction eases over. Longer reads as drag, shorter reads as the snap it replaces. */
+/** Seconds a display correction eases over; longer reads as drag, shorter as a snap. */
 export const CORRECTION_SMOOTH_SECONDS = 0.1;
 
-/**
- * Seconds the render path may draw behind the newest transform, whatever `Welcome.sendRate` claims.
- *
- * The delay itself is one send interval — the shortest that keeps a sample on each side of the drawn
- * moment, and every millisecond past it is latency on everything the local player does not own. The cap
- * exists because the interval is the server's to choose: a `sendRate` of 0.01 would otherwise draw a
- * world a minute and a half stale. 0.1 s is the slowest rate a panel offers, so it never bites a real
- * session.
- */
+/** Seconds the render path may draw behind the newest transform, capping a server-chosen rate. */
 export const MAX_INTERPOLATION_DELAY_SECONDS = 0.1;
 
-/**
- * World units, squared — the distance past which a correction is shown at once.
- *
- * Squared because the comparison is the only thing that needs it, and a square root here would be one
- * of the transcendentals the determinism rule keeps out of this package.
- */
+/** World units squared; the distance past which a correction snaps. Squared to avoid `sqrt`. */
 export const CORRECTION_SNAP_DISTANCE_SQUARED = 64 * 64;
 
 /** The viewport the cursor quantum falls back to before the first `Welcome`, in world units. */
 export const DEFAULT_VIEWPORT = { width: 800, height: 600 } as const;
 
-/**
- * Bytes of script bundle this client will hash and evaluate.
- *
- * The length is peer-chosen and both the digest and the parse behind it are linear in it, so it is
- * bounded like every other peer-sized quantity — far above any real bundle, so it never bites one.
- */
+/** Bytes of script bundle this client will hash and evaluate. */
 export const MAX_BUNDLE_BYTES = 8 * 1024 * 1024;
 
-/**
- * Seconds the session may sit pre-`live` waiting for the bundle before it fails.
- *
- * It bounds the held inbox as much as the wait: the server broadcasts from the moment it sends the
- * `Welcome`, and every envelope arriving during the fetch is held rather than dropped.
- */
+/** Seconds the session may wait for the bundle before failing; also bounds the held inbox. */
 export const BUNDLE_DEADLINE_SECONDS = 30;
 
-/**
- * Seconds the session may sit in `connecting` — or in `resyncing` — before the join is failed.
- *
- * The server closes an unjoined connection on a deadline of its own, and without a symmetric one
- * here a peer that accepts the socket and then answers nothing leaves a spinner up for the life of
- * the tab. Longer than the server's, so a peer that means to refuse still gets its `Reject` — which
- * carries a reason — in ahead of this.
- */
+/** Seconds in `connecting` or `resyncing` before the join fails; longer than the server's. */
 export const JOIN_DEADLINE_SECONDS = 10;
 
-/**
- * Nesting past which a `request()` payload value is dropped rather than sent.
- *
- * Held far below the codec's own 128-level cap, which the envelope's own nesting eats into, because a
- * value the encoder passes and the codec then refuses throws out of the send and fails the session.
- */
+/** Nesting past which a `request()` payload value is dropped; held below the codec's own cap. */
 export const MAX_REQUEST_DEPTH = 64;
 
-/**
- * Requests one frame may carry, the rest held for the next.
- *
- * The receiver's own cap, restated: it refuses an over-cap frame WHOLE, so a sender that minted one
- * would lose every call in it rather than the excess. Creator code makes these in a loop, where a
- * human cannot make sixteen clicks in a frame, so the sender is the end that must chunk.
- */
+/** Requests one frame may carry, the rest held; the receiver refuses an over-cap frame whole. */
 export const MAX_REQUESTS_PER_FRAME = 16;
 
-/**
- * Cardinality cap on any single array a server sends, applied before the client walks it.
- *
- * A sanity bound rather than a game rule: the client trusts a server for correctness but must not
- * let one frame buy unbounded work, and nothing below applies a cap of its own. Sized far above any
- * real world so it never bites legitimate traffic — a frame that exceeds it is a broken or hostile
- * peer, and the join or the envelope is refused rather than half-applied.
- */
+/** Cardinality cap on any array a server sends, so one frame cannot buy unbounded work. */
 export const MAX_WIRE_ITEMS = 65_536;
 
-/**
- * Scripts one entity's spawn snapshot may carry, checked before any of them is attached.
- *
- * Smaller than `MAX_WIRE_ITEMS` because the work differs in kind: an entry mints a script instance
- * and hoists its `@serverState` onto the host record, and that instance lives for the session rather
- * than for the frame it arrived in. Far above any authored entity — a saved file refuses the same
- * class twice on one host, so the count is the number of distinct classes an inspector put there.
- */
+/** Scripts one entity's spawn snapshot may carry; each mints a session-lived instance. */
 export const MAX_ENTITY_SCRIPTS = 64;
 
-/**
- * Cardinality cap on the `snapshot-chunk` frames one join may be divided into.
- *
- * The same rule as `MAX_WIRE_ITEMS` applied to a count that arrives across frames rather than inside
- * one: chunks are held until the `Welcome` names how many there were, so an unbounded promise is
- * unbounded memory held before anything has been validated. At `MAX_WIRE_ITEMS` per chunk this is far
- * above any world that could also fit in a browser.
- */
+/** Cap on `snapshot-chunk` frames one join may span; chunks are held before validation. */
 export const MAX_SNAPSHOT_CHUNKS = 256;
 
-/**
- * Bytes of held `snapshot-chunk` payload, summed across the set the `Welcome` will count.
- *
- * The count caps frames and says nothing about how big one is: at the transport's own frame ceiling
- * a full set is a gigabyte of memory held before anything has been validated, so the two bounds are
- * needed together. Far above any world that also fits in a browser.
- */
+/** Bytes of held `snapshot-chunk` payload; caps size where `MAX_SNAPSHOT_CHUNKS` caps count. */
 export const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
 
-/**
- * Levels of `children` below a template's root the client will build, and nodes in one such subtree.
- *
- * A child list is the one recursive shape on the wire, so `MAX_WIRE_ITEMS` bounds nothing on its own:
- * a peer choosing the cap at every level spends it to the power of the depth. These two are what make
- * the work linear again, and they are small rather than generous because they bound ART — a template
- * needing more than this is authored as several entities, which the simulation already bounds.
- */
+/** Depth and node count of a template subtree; a recursive shape needs both to stay linear. */
 export const MAX_TEMPLATE_DEPTH = 8;
 export const MAX_TEMPLATE_NODES = 64;

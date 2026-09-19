@@ -1,9 +1,5 @@
-// Pure. The slot table behind `NodeId`, holding the non-numeric per-node data; the numeric
-// transform data lives in transform-store.ts, addressed by the same slot index — which is why
-// slots reuse densely and `slotCount` never shrinks.
-//
-// The table itself is `@platform/math`'s: generations, the freelist and stale-handle detection are
-// identical to the engine's entity table, and one copy is what keeps them identical.
+// Non-numeric per-node data; the numeric transform data is in transform-store.ts under the same
+// slot index — which is why slots reuse densely and `slotCount` never shrinks.
 
 import { SlotTable } from '@platform/math';
 import type { NodeId } from './node-id.js';
@@ -30,12 +26,7 @@ export interface NodeRecord {
     ordinal: number;
 }
 
-/**
- * Slot table plus freelist for renderer nodes.
- *
- * Records are stored by reference: `create` takes ownership of the object it is handed and
- * `recordAt` gives that same object back for in-place mutation.
- */
+/** Slot table plus freelist for renderer nodes; records are stored and returned by reference. */
 export class NodeStore {
     // A TypeScript `private`, not `#`: the generation-wrap test forces a generation through the
     // capture/apply pair, which has no public route in from a `#` field.

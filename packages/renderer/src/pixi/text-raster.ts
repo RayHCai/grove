@@ -1,11 +1,6 @@
-// Measurement is split from upload because `CanvasTextMetrics` uses a 2D canvas rather than WebGL:
-// a size is obtainable while the GPU context is lost, so `createTextAsset` resolves with a real
-// size mid-loss and layout never blocks on a restore.
-//
-// Text is the one asset built from a string the caller supplies at runtime — a player name, a chat
-// line — so length, size and raster scale are clamped here rather than trusted. Unclamped, a 2000
-// character line or a `resolution` of 64 asks the GPU for a texture measured in hundreds of
-// megapixels, which is a tab crash rather than a rendering bug.
+// Measurement is split from upload because `CanvasTextMetrics` uses a 2D canvas: a size is
+// obtainable while the GPU context is lost. Length, size and raster scale are clamped here —
+// unclamped, a 2000-character line asks the GPU for hundreds of megapixels.
 
 import { CanvasTextMetrics, Text, TextStyle as PixiTextStyle } from 'pixi.js';
 import type { Renderer } from 'pixi.js';
@@ -34,11 +29,8 @@ export function measureText(text: string, style: TextStyle | undefined): Size {
 }
 
 /**
- * Rasterizes `text` to a texture.
- *
- * Needs a live renderer, so this is the half that queues while the context is lost. World text
- * does not re-rasterize on zoom, so `style.resolution` is the caller's answer to zoom blur — capped
- * so that the request cannot exceed what a GPU will allocate.
+ * Rasterizes `text` to a texture. Needs a live renderer, so this half queues during a loss.
+ * World text does not re-rasterize on zoom, so `style.resolution` is the caller's answer to blur.
  */
 export function rasterizeText(
     renderer: Renderer,
