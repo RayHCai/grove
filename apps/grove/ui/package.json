@@ -3,12 +3,16 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "The design tokens every Grove surface renders against.",
+    "sideEffects": [
+        "**/*.css"
+    ],
+    "description": "Grove's theme, tokens and core components: the Grove palette in an app-grade React kit.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
-        }
+        },
+        "./styles.css": "./dist/styles/index.css"
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -16,7 +20,7 @@
         "dist"
     ],
     "scripts": {
-        "build": "tsc -b",
+        "build": "tsc -b && node -e \"require('node:fs').cpSync('src/styles', 'dist/styles', { recursive: true })\"",
         "typecheck": "tsc -p tsconfig.test.json",
         "test": "vitest run --passWithNoTests",
         "clean": "rm -rf dist .turbo"
@@ -26,8 +30,10 @@
     },
     "devDependencies": {
         "@types/react": "^19.2.18",
+        "@types/react-dom": "^19.2.4",
         "jsdom": "^28.0.1",
         "react": "^19.2.8",
+        "react-dom": "^19.2.8",
         "typescript": "^7.0.2",
         "vitest": "^4.1.10"
     }
