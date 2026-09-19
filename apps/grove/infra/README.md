@@ -1,8 +1,8 @@
 # @grove/infra
 
-The AWS deployment: the bucket a game's artifacts are served out of, the distribution in front of
-it, the listener that turns an upload into a build, the tables shaped for game data, and the EC2
-fleet the sessions run on. Terraform.
+The AWS deployment: the bucket every game lives in, the distribution in front of it, the Redis the
+fleet's queued work is announced on, the tables shaped for game data, and the EC2 fleet the sessions
+run on. Terraform.
 
 Two deployments, `staging` and `production`, built from one composing module. What differs between
 them is the values each root passes — durability, replication, edge reach and the size of a box —
@@ -14,7 +14,7 @@ the other.
 | Path                      | Owns                                                                             |
 | ------------------------- | -------------------------------------------------------------------------------- |
 | `modules/game-storage`    | the games bucket, the origin access control, and the distribution in front of it |
-| `modules/upload-events`   | the rule that matches a source upload, and the queue a build is claimed from     |
+| `modules/task-streams`    | the Redis every queued task is announced on, and the network it sits in          |
 | `modules/game-data`       | the two tables `@grove/game-manager`'s store is keyed for                        |
 | `modules/fleet-region`    | one region's network, role, launch template and group                            |
 | `modules/environment`     | one whole deployment, composing the four above                                   |
@@ -27,17 +27,25 @@ the shape of a deployment is in `modules/environment`, and everything that separ
 
 ## The bucket, and what the edge can reach
 
-One bucket, three prefixes, and the bucket policy is what tells them apart.
+One bucket, keyed game first — every key a game owns begins `<game-id>/` — and the bucket policy is
+what tells the classes under that apart.
 
-| Prefix     | Holds                         | Readable by                            |
-| ---------- | ----------------------------- | -------------------------------------- |
-| `sources/` | the archives a build compiles | no principal this configuration grants |
-| `bundles/` | the artifacts a session loads | the distribution, and the fleet        |
-| `assets/`  | what a game draws with        | the distribution, and the fleet        |
+| Key                           | Holds                              | Readable by                            |
+| ----------------------------- | ---------------------------------- | -------------------------------------- |
+| `<game>/source/<path>`        | what a creator writes              | no principal this configuration grants |
+| `<game>/manifests/<revision>` | the set one save froze             | no principal this configuration grants |
+| `<game>/assets/<path>`        | what a game draws with             | the distribution, and the fleet        |
+| `<game>/build/<revision>/`    | what a build of that manifest made | the distribution, and the fleet        |
 
-The distribution reads through an origin access control, and the policy grants it `s3:GetObject`
-only under the two public prefixes. A creator's source is private because a request for it through
-the edge is refused by S3, not because no URL for it was published.
+`cdn_prefixes` is a list of patterns relative to a game rather than of leading prefixes, and each is
+rendered `<bucket>/*/<pattern>*`. The wildcard is mid-string because the game comes first, so one
+pattern covers every game's build output without naming one — and `source/` and `manifests/` match
+none of them, which is what keeps a creator's code inside the fleet. A creator's source is private
+because a request for it through the edge is refused by S3, not because no URL for it was published.
+
+Versioning is the history rather than a recovery window. A save overwrites a creator's file in place,
+so the version id a manifest freezes is what makes every prior byte-set of every path still
+addressable, and a delete leaves a marker rather than taking bytes an older manifest still names.
 
 Every grant here is a read. The configuration creates one role, the fleet box's, and nothing in it
 grants a write to any prefix, so an object arrives in this bucket under a principal held outside
@@ -49,25 +57,29 @@ standard log delivery writes as its own canonical user and grants the owner noth
 says so.
 
 Cached under the managed `CachingOptimized` policy with CORS request and response policies attached:
-a bundle is fetched cross-origin by the player, and an object is named by the hash of its own bytes,
-so a name can never come to mean different bytes and a long cache is never wrong.
+a bundle is fetched cross-origin by the player, and an object under `build/` is immutable because the
+revision naming it is, so a long cache is never wrong.
 
-## The listener
+## The task streams
 
-Object events go to the default event bus, and one rule matches `Object Created` under `sources/`
-and puts it on a queue. That rule is the only thing that queues a build, so a build is never waiting
-on the uploading client to ask for one — a client that uploaded and then failed would otherwise
-leave a game published and never compiled.
+A publish and an asset-carrying save each write a row in `@grove/api`'s database and push its id onto
+a Redis stream, one stream per kind. What makes that queued work visible is the row; the message is
+only what wakes a worker, and a sweeper re-pushes anything still sitting unclaimed. That is why there
+is no bucket notification here: an event is something you can only hope fired.
 
-The queue's visibility timeout is fifteen minutes because a compile is minutes of CPU across a child
-`tsc` and a bundler, and a build reclaimed at thirty seconds is a build running twice. Three failed
-deliveries move it to the dead-letter queue, where one message is one game that was published and
-never built — which is what the alarm on that queue's depth reports.
+Serverless, because the load is a message per save and per publish — a sized node would be chosen for
+a peak nobody can name yet, and this one carries no capacity decision at all. Encryption in transit
+and at rest is not a setting on it; both are always on, which is half of why it is one.
 
-The fleet role is the queue's consumer, because these boxes are the only compute this configuration
-creates. It may receive and delete, never send: what puts a build on the queue is the rule watching
-the bucket, and a principal that could enqueue one could enqueue a build for a source nobody
-uploaded.
+The cache gets a network of its own. The three services that touch these streams — `@grove/api`,
+`@grove/game-builder` and `@grove/asset-upload-service` — are not built by this configuration, and the one
+thing that is, the game-instance fleet, must never reach them: a box running creator code that could
+read the build stream could settle somebody else's build. `client_cidrs` is what opens it to the
+blocks those services are deployed into, and an empty list leaves the cache reachable from nothing,
+which is what an unwired deployment should be.
+
+One alarm, on read latency with `breaching` on missing data: a cache that has stopped answering is
+every save that lands an asset and every publish going unqueued, and nothing else here reports it.
 
 ## The tables
 

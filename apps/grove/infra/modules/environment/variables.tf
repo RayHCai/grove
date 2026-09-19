@@ -81,8 +81,14 @@ variable "tags" {
   default     = {}
 }
 
-variable "build_alarm_actions" {
-  description = "SNS topics notified when a build dead-letters."
+variable "task_alarm_actions" {
+  description = "SNS topics notified when the task streams stop answering."
+  type        = list(string)
+  default     = []
+}
+
+variable "task_client_cidrs" {
+  description = "Blocks `@grove/api`, `@grove/game-builder` and `@grove/asset-upload-service` are deployed into. Empty leaves the streams reachable from nothing."
   type        = list(string)
   default     = []
 }
