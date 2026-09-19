@@ -71,7 +71,7 @@ jobs:
             # Keyed on the go.mod files rather than go.sum: the Go half takes no
             # third-party dependency, so no go.sum exists to hash. A guard on go.work being present
             # would turn a lost workspace file into a skipped gate rather than a failing one.
-            - uses: actions/setup-go@v6
+            - uses: actions/setup-go@v7
               with:
                   go-version-file: go.work
                   cache-dependency-path: |
@@ -186,7 +186,7 @@ jobs:
         steps:
             - uses: actions/checkout@v6
 
-            - uses: actions/setup-go@v6
+            - uses: actions/setup-go@v7
               with:
                   go-version-file: go.work
                   cache-dependency-path: |
