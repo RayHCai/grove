@@ -24,9 +24,18 @@ type Registry struct {
 	staleAfter time.Duration
 	retain     time.Duration
 	hosts      map[string]Host
-	// What has been placed and not yet beaten back, keyed by game: a slot it spent is spent, and
-	// the next player of that game joins it rather than starting a second world.
-	pending map[string]reservation
+	// What has been placed and not yet beaten back: a slot it spent is spent, so the next player of
+	// that world joins it. Keyed by version as well as game, because a rollout leaves the two side by
+	// side and a game-only key would hand a new-version joiner the session minted for the old one.
+	pending map[world]reservation
+	// Transitions nobody has reported onward yet, oldest first. See events.go.
+	events []contract.FleetEvent
+}
+
+// world is one game on one version, which is the unit a session is shared within.
+type world struct {
+	gameID   string
+	revision int
 }
 
 // reservation is one session this service handed out, on the box it was handed out for.
@@ -47,9 +56,16 @@ type Placement struct {
 	Host       Host
 	InstanceID string
 	SessionID  string
+	// The version the world this join landed in is running. The one asked for on every path but a
+	// reservation the caller has yet to start, where it is the version it is about to be started on.
+	Revision int
 	// The port the box bound for this session, which is the one a player dials. Zero until the box
 	// has reported the process, because the kernel picks it at spawn.
 	Port int
+	// Whether this join reserved a world nothing is running yet, which its caller must now ask the
+	// box to start. False for a session already serving and for one an earlier join reserved: a
+	// second start of one session would be a second world half the players are talking to.
+	Starts bool
 }
 
 func NewRegistry(staleAfter time.Duration) *Registry {
@@ -64,7 +80,7 @@ func NewRegistry(staleAfter time.Duration) *Registry {
 		staleAfter: staleAfter,
 		retain:     retain,
 		hosts:      make(map[string]Host),
-		pending:    make(map[string]reservation),
+		pending:    make(map[world]reservation),
 	}
 }
 
@@ -73,16 +89,38 @@ func (reg *Registry) Beat(hb contract.HostHeartbeat, addr string, at time.Time) 
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
 
-	reg.hosts[hb.HostID] = Host{
+	previous, known := reg.hosts[hb.HostID]
+
+	h := Host{
 		ID:        hb.HostID,
 		Region:    hb.Region,
 		AgentPort: hb.AgentPort,
 		Capacity:  hb.Capacity,
 		// Cloned so the decoded body a handler is about to drop cannot alias registry state.
-		Instances:  slices.Clone(hb.Instances),
-		Addr:       addr,
-		LastSeenAt: at,
+		Instances:   slices.Clone(hb.Instances),
+		Addr:        addr,
+		LastSeenAt:  at,
+		Incarnation: hb.Incarnation,
+		Leaving:     hb.Leaving,
+		// Suspicion is deliberately absent: this beat is the box answering, which is the evidence
+		// that outranks whatever failed against it.
+		Reported: previous.Reported,
 	}
+
+	switch {
+	case !known:
+		h.Reported = h.Liveness(at, reg.staleAfter)
+		reg.note(h, contract.FleetRegistered, at, "")
+	case previous.Incarnation != hb.Incarnation:
+		// Recorded as its own kind rather than as a return, because the worlds the previous life
+		// was running went with it — a box back inside the staleness window never looked absent.
+		h.Reported = h.Liveness(at, reg.staleAfter)
+		reg.note(h, contract.FleetRestarted, at, "")
+	default:
+		h = reg.observe(h, at, "")
+	}
+
+	reg.hosts[hb.HostID] = h
 	reg.evict(at)
 	reg.settle(hb)
 }
@@ -101,9 +139,9 @@ func (reg *Registry) evict(at time.Time) {
 // handed never took it, so the next player to join that game ranks again rather than being sent
 // after a process nothing started, and one it does report is the box's own capacity to count.
 func (reg *Registry) settle(hb contract.HostHeartbeat) {
-	for gameID, res := range reg.pending {
+	for key, res := range reg.pending {
 		if _, known := reg.hosts[res.hostID]; !known {
-			delete(reg.pending, gameID)
+			delete(reg.pending, key)
 			continue
 		}
 		if res.hostID != hb.HostID {
@@ -111,14 +149,14 @@ func (reg *Registry) settle(hb contract.HostHeartbeat) {
 		}
 		port, taken := portOf(hb.Instances, res.sessionID)
 		if !taken {
-			delete(reg.pending, gameID)
+			delete(reg.pending, key)
 			continue
 		}
 		// Kept rather than dropped, so two players joining a game the box is still starting are
 		// still handed one session — but no longer counted against the slot the box now counts.
 		res.reported = true
 		res.port = port
-		reg.pending[gameID] = res
+		reg.pending[key] = res
 	}
 }
 
@@ -149,7 +187,7 @@ func (reg *Registry) Candidates(region string, now time.Time) []Host {
 	candidates := make([]Host, 0, len(reg.hosts))
 	for _, h := range reg.hosts {
 		h.Reserved = reserved[h.ID]
-		if !h.Fresh(now, reg.staleAfter) || h.FreeSlots() == 0 {
+		if !h.Placeable(now, reg.staleAfter) || h.FreeSlots() == 0 {
 			continue
 		}
 		if region != "" && h.Region != region {
@@ -160,22 +198,22 @@ func (reg *Registry) Candidates(region string, now time.Time) []Host {
 	return candidates
 }
 
-// Place answers one join: the box it lands on, and the ids the player carries there.
-//
-// ordered is where the balancer would start the game, best box first, read only when nothing
-// already holds it. The whole decision is one critical section because two joins that each mint a
-// session between two beats are two worlds for one game.
+// Place answers one join: the box it lands on, and the ids the player carries there. `ordered` is
+// where the balancer would start the game, read only when nothing already holds it. The whole
+// decision is one critical section, or two joins between beats become two worlds for one game.
 func (reg *Registry) Place(req contract.PlacementRequest, ordered []Host, at time.Time) (Placement, bool) {
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
 
-	// A box already running the game wins over an emptier one, and the ranking never gets a say: a
-	// game is a world its players share, and MostFree would send the second player to the box with
+	key := world{gameID: req.GameID, revision: req.Revision}
+
+	// A box already running this world wins over an emptier one, and the ranking never gets a say:
+	// a world is one its players share, and MostFree would send the second player to the box with
 	// the most free slots — which is never the box already spending one on this game.
-	if running, ok := reg.serving(req.GameID, req.Region, at); ok {
+	if running, ok := reg.serving(key, req.Region, at); ok {
 		return running, true
 	}
-	if held, ok := reg.held(req.GameID, req.Region, at); ok {
+	if held, ok := reg.held(key, req.Region, at); ok {
 		return held, true
 	}
 
@@ -188,8 +226,17 @@ func (reg *Registry) Place(req contract.PlacementRequest, ordered []Host, at tim
 			continue
 		}
 
-		placed := Placement{Host: host, InstanceID: contract.NewUUID(), SessionID: contract.NewUUID()}
-		reg.pending[req.GameID] = reservation{
+		placed := Placement{
+			Host:       host,
+			InstanceID: contract.NewUUID(),
+			SessionID:  contract.NewUUID(),
+			Revision:   req.Revision,
+			// Nothing is running this world anywhere the caller may reach, so the caller owes the
+			// chosen box a start. Committed under this lock so a second join arriving behind it
+			// finds the reservation and waits on one process rather than starting another.
+			Starts: true,
+		}
+		reg.pending[key] = reservation{
 			hostID:     host.ID,
 			instanceID: placed.InstanceID,
 			sessionID:  placed.SessionID,
@@ -199,22 +246,36 @@ func (reg *Registry) Place(req contract.PlacementRequest, ordered []Host, at tim
 	return Placement{}, false
 }
 
-// serving finds the box already running a healthy session of the game, which a joining player joins.
+// Started records the port a box bound for a session this service asked it to start.
 //
-// Deliberately not filtered on free slots the way Candidates is: joining a world that is already
-// running starts no process, so a box at its instance cap can still take the player.
-func (reg *Registry) serving(gameID, region string, now time.Time) (Placement, bool) {
+// Written rather than waited for: the port is in the box's answer, and a placement handed out with
+// a zero port is an address no player can dial for the whole heartbeat it would take to learn one.
+func (reg *Registry) Started(gameID string, revision int, sessionID string, port int) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+
+	key := world{gameID: gameID, revision: revision}
+	if res, ok := reg.pending[key]; ok && res.sessionID == sessionID {
+		res.port = port
+		reg.pending[key] = res
+	}
+}
+
+// serving finds the box already running a healthy session of the game, which a joiner joins.
+// Deliberately not filtered on free slots the way Candidates is: joining a running world starts
+// no process, so a box at its instance cap can still take the player.
+func (reg *Registry) serving(key world, region string, now time.Time) (Placement, bool) {
 	var best Placement
 	found := false
 
 	for _, h := range reg.hosts {
-		if !h.Fresh(now, reg.staleAfter) {
+		if !h.Placeable(now, reg.staleAfter) {
 			continue
 		}
 		if region != "" && h.Region != region {
 			continue
 		}
-		inst, serving := h.Serving(gameID)
+		inst, serving := h.Serving(key.gameID, key.revision)
 		if !serving {
 			continue
 		}
@@ -225,6 +286,7 @@ func (reg *Registry) serving(gameID, region string, now time.Time) (Placement, b
 				Host:       h,
 				InstanceID: inst.InstanceID,
 				SessionID:  inst.SessionID,
+				Revision:   inst.Revision,
 				Port:       inst.Port,
 			}
 			found = true
@@ -233,14 +295,14 @@ func (reg *Registry) serving(gameID, region string, now time.Time) (Placement, b
 	return best, found
 }
 
-// held is the placement this game was already given, while the box that took it has yet to beat.
-func (reg *Registry) held(gameID, region string, now time.Time) (Placement, bool) {
-	res, ok := reg.pending[gameID]
+// held is the placement this world was already given, while the box that took it has yet to beat.
+func (reg *Registry) held(key world, region string, now time.Time) (Placement, bool) {
+	res, ok := reg.pending[key]
 	if !ok {
 		return Placement{}, false
 	}
 	h, known := reg.hosts[res.hostID]
-	if !known || !h.Fresh(now, reg.staleAfter) {
+	if !known || !h.Placeable(now, reg.staleAfter) {
 		return Placement{}, false
 	}
 	// The same hard region filter a running session is joined under, so a caller that named one is
@@ -257,6 +319,7 @@ func (reg *Registry) held(gameID, region string, now time.Time) (Placement, bool
 		Host:       h,
 		InstanceID: res.instanceID,
 		SessionID:  res.sessionID,
+		Revision:   key.revision,
 		Port:       res.port,
 	}, true
 }
@@ -264,7 +327,7 @@ func (reg *Registry) held(gameID, region string, now time.Time) (Placement, bool
 // placeable re-reads a box the balancer ranked, and reports whether it will still take a session.
 func (reg *Registry) placeable(hostID, region string, now time.Time) (Host, bool) {
 	h, known := reg.hosts[hostID]
-	if !known || !h.Fresh(now, reg.staleAfter) {
+	if !known || !h.Placeable(now, reg.staleAfter) {
 		return Host{}, false
 	}
 	// Re-checked here like freshness, because a beat since the ranking rewrites the whole row, and
@@ -319,30 +382,78 @@ func ailing(instances []contract.InstanceReport, sessionID string) bool {
 	})
 }
 
-// Deploy names the healthy boxes in the requested regions, which are the ones a version goes out to.
-//
-// It names them and nothing else: what a box runs is decided at start, from the paths its start
-// request carries, so this answer gates no placement that follows it.
-func (reg *Registry) Deploy(req contract.DeploymentRequest, at time.Time) contract.Deployment {
+// Targets is every box a version must reach: the fresh ones in the requested regions holding a
+// world of the game, ordered by hostId so two identical pushes agree. The reservation counts
+// alongside reported instances, or a box handed a placement seconds ago keeps the old code.
+func (reg *Registry) Targets(req contract.DeploymentRequest, at time.Time) []Host {
 	reg.mu.RLock()
 	defer reg.mu.RUnlock()
 
-	hosts := make([]string, 0, len(reg.hosts))
+	// Every version of the game, not one: a rollout ends the worlds a game has anywhere, and a
+	// reservation on an older revision is a box about to start code this push supersedes.
+	reserving := make(map[string]bool, len(reg.pending))
+	for key, res := range reg.pending {
+		if key.gameID == req.GameID {
+			reserving[res.hostID] = true
+		}
+	}
+
+	targets := make([]Host, 0, len(reg.hosts))
 	for _, h := range reg.hosts {
-		if !h.Fresh(at, reg.staleAfter) {
+		// Freshness rather than placeability, which is the narrower question: a suspected box still
+		// holds worlds a version has to reach, and the attempt is what settles the suspicion either
+		// way. A box that said it was leaving is the one exception — its worlds are already ending.
+		if !h.Fresh(at, reg.staleAfter) || h.Leaving {
 			continue
 		}
 		if len(req.Regions) > 0 && !slices.Contains(req.Regions, h.Region) {
 			continue
 		}
-		hosts = append(hosts, h.ID)
+		if len(h.Holds(req.GameID)) == 0 && !reserving[h.ID] {
+			continue
+		}
+		targets = append(targets, h)
 	}
-	slices.Sort(hosts)
+	slices.SortFunc(targets, func(a, b Host) int { return strings.Compare(a.ID, b.ID) })
+	return targets
+}
 
-	return contract.Deployment{
-		GameID:     req.GameID,
-		Bundles:    req.Bundles,
-		Hosts:      hosts,
-		DeployedAt: contract.Timestamp(at),
+// Draining records what a box just answered a redeploy with, so the router stops sending joiners
+// into a world that is ending. Written here rather than waited for: the next beat overwrites it,
+// but every joiner placed in between would meet a process already refusing upgrades.
+func (reg *Registry) Draining(hostID string, instanceIDs []string) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+
+	h, known := reg.hosts[hostID]
+	if !known {
+		return
+	}
+
+	// The row is replaced rather than edited where it lies, the way a beat replaces one: Candidates
+	// hands out hosts whose instance slices alias what is stored here, and a write into that array
+	// would reach a ranking already running outside this lock.
+	instances := slices.Clone(h.Instances)
+	for i, inst := range instances {
+		if slices.Contains(instanceIDs, inst.InstanceID) {
+			instances[i].State = contract.InstanceDraining
+		}
+	}
+	h.Instances = instances
+	reg.hosts[hostID] = h
+}
+
+// Release hands back the slot a placement held, for a join whose caller is already gone.
+// Guarded on the session rather than the world: a reservation minted for a later joiner must
+// survive an earlier one giving up, or an abandoned join sends the next player nowhere.
+func (reg *Registry) Release(gameID, sessionID string) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+
+	for key, res := range reg.pending {
+		if key.gameID == gameID && res.sessionID == sessionID {
+			delete(reg.pending, key)
+			return
+		}
 	}
 }

@@ -28,6 +28,40 @@ type Host struct {
 	// Sessions placed here that the Capacity above cannot have counted yet, filled in when the box
 	// is offered as a candidate so that filtering and ranking read the same number of free slots.
 	Reserved int
+	// Fixed for the life of the box's agent. A change is the box having restarted, which HostID
+	// cannot show because it survives a reboot on purpose.
+	Incarnation string
+	// Set by the box's own last beat. Silence is how this service finds a crash, so without this a
+	// deploy and a crash are the same event.
+	Leaving bool
+	// Set when work this service dispatched failed against the box, and cleared by its next beat.
+	// Evidence that arrives sooner than the staleness window, and never later than it.
+	Suspected bool
+	// The liveness an event was last emitted for, so a box sitting failed produces one row rather
+	// than one per sweep.
+	Reported contract.HostLiveness
+}
+
+// Liveness is what this service concludes about the box, never what the box claimed.
+// The box's own last word outranks silence: one that said it was leaving stays `left` however
+// long ago, or every deploy ages into a failure an hour later.
+func (h Host) Liveness(now time.Time, staleAfter time.Duration) contract.HostLiveness {
+	switch {
+	case h.Leaving:
+		return contract.HostLeft
+	case !h.Fresh(now, staleAfter):
+		return contract.HostFailed
+	case h.Suspected:
+		return contract.HostSuspected
+	default:
+		return contract.HostHealthy
+	}
+}
+
+// Placeable reports whether a joining player may be sent here, which is the one liveness that earns
+// work: suspected and left are both boxes this service already has a reason to route around.
+func (h Host) Placeable(now time.Time, staleAfter time.Duration) bool {
+	return h.Liveness(now, staleAfter) == contract.HostHealthy
 }
 
 // FreeSlots is how many more game processes the box will take.
@@ -39,10 +73,26 @@ func (h Host) FreeSlots() int {
 	return free
 }
 
-// Serving finds a live session of the game already on this box, which a joining player joins.
-func (h Host) Serving(gameID string) (contract.InstanceReport, bool) {
+// Holds names every world of the game on this box, whatever state it is in. Wider than Serving
+// deliberately: a new version has to reach the sick ones too, and filtering on health would
+// leave a wedged process running the old code.
+func (h Host) Holds(gameID string) []string {
+	ids := make([]string, 0, len(h.Instances))
 	for _, inst := range h.Instances {
-		if inst.GameID == gameID && inst.State == contract.InstanceHealthy {
+		if inst.GameID == gameID {
+			ids = append(ids, inst.InstanceID)
+		}
+	}
+	return ids
+}
+
+// Serving finds a live session of the game on this box a joining player may join. The revision
+// is part of the question, not a preference: a world draining on the previous version runs code
+// the joiner has not fetched, and the handshake there refuses it.
+func (h Host) Serving(gameID string, revision int) (contract.InstanceReport, bool) {
+	for _, inst := range h.Instances {
+		if inst.GameID == gameID && inst.Revision == revision &&
+			inst.State == contract.InstanceHealthy {
 			return inst, true
 		}
 	}
@@ -52,11 +102,12 @@ func (h Host) Serving(gameID string) (contract.InstanceReport, bool) {
 // View renders the row `GET /v1/hosts` answers with.
 func (h Host) View(now time.Time, staleAfter time.Duration) contract.HostView {
 	return contract.HostView{
-		HostID:     h.ID,
-		Region:     h.Region,
-		Capacity:   h.Capacity,
-		LastSeenAt: contract.Timestamp(h.LastSeenAt),
-		Healthy:    h.Fresh(now, staleAfter),
+		HostID:      h.ID,
+		Region:      h.Region,
+		Capacity:    h.Capacity,
+		LastSeenAt:  contract.Timestamp(h.LastSeenAt),
+		Liveness:    h.Liveness(now, staleAfter),
+		Incarnation: h.Incarnation,
 	}
 }
 

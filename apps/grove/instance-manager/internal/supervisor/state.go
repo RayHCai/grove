@@ -24,6 +24,9 @@ type record struct {
 	PID        int       `json:"pid"`
 	Port       int       `json:"port"`
 	StartedAt  time.Time `json:"startedAt"`
+	// When a redeploy put this world into drain, so the next run of this agent resumes a budget
+	// already spent rather than granting a whole new one. Absent on a world nobody has ended.
+	DrainingSince time.Time `json:"drainingSince,omitzero"`
 }
 
 // store is the registry's memory across its own restart, one file per instance so a write cut short
@@ -55,6 +58,34 @@ func (s store) put(rec record) error {
 		return fmt.Errorf("write down instance %s: %w", rec.InstanceID, err)
 	}
 	return nil
+}
+
+// draining stamps the drain onto the record already written for this instance.
+//
+// Read back and rewritten rather than composed afresh: the pid and the port are what make a record
+// adoptable, and this agent has no business restating either of them.
+func (s store) draining(id string, at time.Time) error {
+	if s.dir == "" {
+		return nil
+	}
+
+	raw, err := os.ReadFile(s.path(id))
+	if err != nil {
+		return fmt.Errorf("read instance %s: %w", id, err)
+	}
+
+	var rec record
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return fmt.Errorf("read instance %s: %w", id, err)
+	}
+	// Left at the first drain: a second redeploy must not hand a world that has been ending for ten
+	// minutes a fresh deadline, or a game pushed often enough would never finish draining at all.
+	if !rec.DrainingSince.IsZero() {
+		return nil
+	}
+
+	rec.DrainingSince = at
+	return s.put(rec)
 }
 
 func (s store) all() ([]record, error) {

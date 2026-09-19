@@ -26,9 +26,9 @@ type Vitals struct {
 	Players int `json:"players"`
 }
 
-// Prober asks one child whether it is still serving, and reports the id it asked under along with
-// what it learned. Narrow so the poll loop never touches the network in a test, where a fake answers
-// for a process that was never forked.
+// Prober asks one child whether it is still serving, and reports the id it asked under.
+// Narrow, so the poll loop never touches the network in a test where a fake answers for a
+// process that was never forked.
 type Prober interface {
 	Probe(ctx context.Context, addr string) (Vitals, string, error)
 }

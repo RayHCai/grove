@@ -25,9 +25,9 @@ const (
 
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// A join whose ranked box filled between the ranking and the commit takes the next box in the order:
-// the ranking runs outside the lock, so two joins hold the same order, and only one of them can have
-// the box it names first.
+// A join whose ranked box filled between the ranking and the commit takes the next box: the
+// ranking runs outside the lock, so two joins hold the same order and only one can have the
+// box it names first.
 func TestPlaceFallsPastABoxThatFilledSinceTheRanking(t *testing.T) {
 	reg := NewRegistry(staleAfter)
 	for _, id := range []string{hostA, hostB} {

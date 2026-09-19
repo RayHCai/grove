@@ -6,10 +6,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
 	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/box"
+	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/bundles"
 	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/config"
 	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/heartbeat"
 	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/server"
@@ -23,6 +25,13 @@ import (
 const (
 	pollInterval = 2 * time.Second
 	probeTimeout = 2 * time.Second
+	// Short: this one sits between a drained listener and the process ending, and a box that cannot
+	// reach the router in this long is one the router is about to stop hearing from anyway.
+	farewellTimeout = 3 * time.Second
+	// How long one version of a game may take to come down from the edge. Minutes rather than
+	// seconds: it is paid once per version per box, and the join waiting on it has already been
+	// answered for by the router that asked.
+	bundleFetchTimeout = 2 * time.Minute
 )
 
 func main() {
@@ -37,13 +46,15 @@ func main() {
 	// The three seams are chosen here and nowhere else: what forks a process, what asks one how it
 	// is, and what decides which port it binds.
 	instances := supervisor.New(supervisor.Options{
-		Launcher:     supervisor.NewExecLauncher(cfg.GameInstanceBin),
-		Prober:       supervisor.NewHTTPProber(probeTimeout),
-		Ports:        supervisor.NewKernelPorts(),
-		Log:          log,
-		MaxInstances: cfg.MaxInstances,
-		TokenSecret:  cfg.GameTokenSecret,
-		StateDir:     cfg.StateDir,
+		Launcher:      supervisor.NewExecLauncher(cfg.GameInstanceBin),
+		Prober:        supervisor.NewHTTPProber(probeTimeout),
+		Ports:         supervisor.NewKernelPorts(),
+		Bundles:       bundles.Disk{Dir: cfg.BundleDir, Client: &http.Client{Timeout: bundleFetchTimeout}},
+		Log:           log,
+		MaxInstances:  cfg.MaxInstances,
+		TokenSecret:   cfg.GameTokenSecret,
+		StateDir:      cfg.StateDir,
+		DrainDeadline: cfg.DrainDeadline,
 	})
 
 	// Before anything can be placed here, or the first start of this boot would be weighed against
@@ -77,8 +88,21 @@ func main() {
 	// game binary missing takes every start request and fails it.
 	ready := supervisor.ExecReady(cfg.GameInstanceBin)
 
-	handler := server.New(instances, ready, cfg.FleetSecret, log)
-	if err := httpx.Serve(ctx, cfg.Addr(), handler, log); err != nil {
+	handler := server.New(instances, ready, cfg.FleetSecret, cfg.HostID, cfg.GameManagerURL, log)
+	err = httpx.Serve(ctx, cfg.Addr(), handler, log)
+
+	// After the listener has drained and before this process is gone: one beat saying the box is
+	// leaving deliberately. Silence is how the router finds a crash, so a deploy that just went
+	// quiet would read as one — and the ticker above is stopped here so it cannot race this beat
+	// with an ordinary one that says nothing of the sort.
+	stop()
+	farewell, done := context.WithTimeout(context.Background(), farewellTimeout)
+	defer done()
+	if requestID, ferr := beater.Farewell(farewell); ferr != nil {
+		log.Warn("farewell failed", "err", ferr, "hostId", cfg.HostID, "requestId", requestID)
+	}
+
+	if err != nil {
 		log.Error("serve", "err", err)
 		os.Exit(1)
 	}

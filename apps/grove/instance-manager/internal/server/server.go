@@ -13,7 +13,12 @@ import (
 
 type service struct {
 	instances *supervisor.Registry
-	log       *slog.Logger
+	// The id the fleet knows this box by, which the box names in the row it answers a redeploy with.
+	hostID string
+	// Where @grove/game-manager is, which every child this box forks is given. A fleet address the
+	// box holds, not one a placement carries: the router holds no game data to be naming one.
+	managerURL string
+	log        *slog.Logger
 }
 
 // New builds the handler: the two open routes, the fleet scope, and the wraps around both.
@@ -24,9 +29,11 @@ func New(
 	instances *supervisor.Registry,
 	ready func(context.Context) error,
 	fleetSecret []byte,
+	hostID string,
+	managerURL string,
 	l *slog.Logger,
 ) http.Handler {
-	s := &service{instances: instances, log: l}
+	s := &service{instances: instances, hostID: hostID, managerURL: managerURL, log: l}
 
 	scope := http.NewServeMux()
 	scope.HandleFunc("POST /v1/instances", s.startInstance)
@@ -34,6 +41,7 @@ func New(
 	scope.HandleFunc("GET /v1/instances/{instanceId}", s.readInstance)
 	scope.HandleFunc("DELETE /v1/instances/{instanceId}", s.stopInstance)
 	scope.HandleFunc("GET /v1/instances/{instanceId}/logs", s.readLogs)
+	scope.HandleFunc("POST /v1/games/{gameId}/redeploy", s.redeployGame)
 	// A wrong path under the scope answers only once the bearer has, so a caller without one cannot
 	// map the routes from here.
 	scope.HandleFunc("/v1/", httpx.NotFound)

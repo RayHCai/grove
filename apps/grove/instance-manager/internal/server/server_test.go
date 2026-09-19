@@ -14,12 +14,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/bundles"
 	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/supervisor"
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
 
 const fleetSecret = "a-fleet-secret-of-at-least-32-chars"
+
+// The id the fleet knows this box by, which is the one every row it answers a redeploy with names.
+const hostID = "5b6c7d8e-9f01-4a2b-8c3d-4e5f60718293"
 
 // What a child that was never forked answers when asked which process it is; nothing here goes
 // looking for one.
@@ -41,6 +45,14 @@ type stubLauncher struct{}
 
 func (stubLauncher) Start(context.Context, supervisor.Spec, io.Writer) (supervisor.Child, error) {
 	return &stubChild{exit: make(chan struct{})}, nil
+}
+
+// A box that already holds every version, so nothing in this file waits on a download. What the
+// real store does with a url is its own suite's.
+type stubBundles struct{}
+
+func (stubBundles) Fetch(context.Context, contract.BundleSet) (bundles.Paths, error) {
+	return bundles.Paths{Bundle: "/srv/bundles/sim.js", SimConfig: "/srv/bundles/sim.json"}, nil
 }
 
 // No test here outlives its own registry, so there is never a survivor of an earlier one to take.
@@ -122,6 +134,9 @@ func newTestServiceWith(opts supervisor.Options, ready func(context.Context) err
 	if opts.Launcher == nil {
 		opts.Launcher = stubLauncher{}
 	}
+	if opts.Bundles == nil {
+		opts.Bundles = stubBundles{}
+	}
 	if ready == nil {
 		ready = func(context.Context) error { return nil }
 	}
@@ -130,7 +145,26 @@ func newTestServiceWith(opts supervisor.Options, ready func(context.Context) err
 	opts.Log = log
 	opts.TokenSecret = []byte(strings.Repeat("s", 32))
 
-	return New(supervisor.New(opts), ready, []byte(fleetSecret), log)
+	return New(supervisor.New(opts), ready, []byte(fleetSecret), hostID, "http://game-manager:4001", log)
+}
+
+// The version and the code every start below carries. The hashes are only ever names here — the
+// bundle store is a double, and what it does with a real one is its own suite's.
+const (
+	testRevision  = 7
+	serverHash    = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	clientHash    = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	simConfigHash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+)
+
+// bundlesJSON is the set a start carries, spelled once so a case that changes one field can.
+func bundlesJSON() string {
+	return fmt.Sprintf(`{
+		"server": {"side":"server","hash":"%s","url":"https://cdn.grove.test/s.js","byteLength":4096},
+		"client": {"side":"client","hash":"%s","url":"https://cdn.grove.test/c.js","byteLength":2048},
+		"simConfig": {"hash":"%s","url":"https://cdn.grove.test/c.json","byteLength":142},
+		"syncedHash": "%s"
+	}`, serverHash, clientHash, simConfigHash, clientHash)
 }
 
 func startBodyFor(i int) string {
@@ -138,10 +172,9 @@ func startBodyFor(i int) string {
 		"instanceId": "%08d-2222-4222-8222-222222222222",
 		"gameId": "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
 		"sessionId": "%08d-1111-4111-8111-111111111111",
-		"bundlePath": "/srv/bundles/sim.js",
-		"simConfigPath": "/srv/bundles/sim.json",
-		"managerUrl": "http://game-manager:4001"
-	}`, i, i)
+		"revision": %d,
+		"bundles": %s
+	}`, i, i, testRevision, bundlesJSON())
 }
 
 // The id the placement named, which is the one the player was handed.

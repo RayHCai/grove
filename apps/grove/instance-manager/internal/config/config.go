@@ -25,12 +25,18 @@ type Config struct {
 	// the one this agent presents when it beats.
 	FleetSecret      []byte
 	ServerManagerURL string
+	// Where @grove/game-manager is. Handed to every child, which reaches nothing else.
+	GameManagerURL string
+	// Where this box keeps the build output it has fetched, one file per content hash.
+	BundleDir string
 	// The uuid the fleet knows this box by. It is issued with the box, not chosen here.
 	HostID            string
 	Region            string
 	MaxInstances      int
 	HeartbeatInterval time.Duration
-	GameInstanceBin   string
+	// How long a world put into drain by a redeploy waits for its last player to leave.
+	DrainDeadline   time.Duration
+	GameInstanceBin string
 	// Where the children this box started are written down, so a restart of this agent finds the
 	// ones it left running.
 	StateDir string
@@ -49,14 +55,17 @@ func Read(r *env.Reader) (Config, error) {
 		Port:              r.Port("INSTANCE_MANAGER_PORT", 4004),
 		FleetSecret:       r.Secret("FLEET_SECRET", secretMinLen),
 		ServerManagerURL:  r.URL("SERVER_MANAGER_URL"),
+		GameManagerURL:    r.URL("GAME_MANAGER_URL"),
 		HostID:            r.Required("HOST_ID"),
 		Region:            r.Required("HOST_REGION"),
 		MaxInstances:      r.Int("MAX_INSTANCES", 8),
 		HeartbeatInterval: r.Duration("HEARTBEAT_INTERVAL", 10*time.Second),
+		DrainDeadline:     r.Duration("INSTANCE_DRAIN_DEADLINE", 15*time.Minute),
 		GameInstanceBin:   r.Required("GAME_INSTANCE_BIN"),
 		// Defaulted rather than required: a box provisioned before this agent kept any state must
 		// still start, and the directory is made on the first child it writes down.
 		StateDir:        r.String("INSTANCE_STATE_DIR", "/var/lib/grove"),
+		BundleDir:       r.String("BUNDLE_CACHE_DIR", "/var/lib/grove/bundles"),
 		GameTokenSecret: r.Secret("GAME_TOKEN_SECRET", secretMinLen),
 	}
 	if err := r.Err(); err != nil {
@@ -73,6 +82,9 @@ func Read(r *env.Reader) (Config, error) {
 	}
 	if cfg.MaxInstances < 1 {
 		return Config{}, fmt.Errorf("MAX_INSTANCES must be at least 1, got %d", cfg.MaxInstances)
+	}
+	if cfg.DrainDeadline <= 0 {
+		return Config{}, fmt.Errorf("INSTANCE_DRAIN_DEADLINE must be positive, got %s", cfg.DrainDeadline)
 	}
 	if cfg.HeartbeatInterval <= 0 {
 		return Config{}, fmt.Errorf("HEARTBEAT_INTERVAL must be positive, got %s", cfg.HeartbeatInterval)
