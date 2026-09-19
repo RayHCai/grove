@@ -16,7 +16,7 @@ publish = false
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
 axum = "0.8"
 tower = "0.5"
-tower-http = { version = "0.6", features = ["timeout"] }
+tower-http = { version = "0.7", features = ["timeout"] }
 futures-util = { version = "0.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
