@@ -1,0 +1,41 @@
+/* The dialog box: the pixel body from base.css, with a face per variant. */
+.pg-panel {
+    position: relative;
+    z-index: 0;
+    --pg-face: var(--pg-surface);
+    color: var(--pg-ink);
+}
+.pg-panel::before,
+.pg-panel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    clip-path: var(--pg-notch);
+    pointer-events: none;
+}
+.pg-panel::before {
+    z-index: -2;
+    background: var(--pg-lift-ink);
+    transform: translate(var(--pg-lift), var(--pg-lift));
+}
+.pg-panel::after {
+    z-index: -1;
+    border: var(--pg-bw) solid transparent;
+    background:
+        linear-gradient(var(--pg-face), var(--pg-face)) padding-box,
+        var(--pg-edge) border-box;
+}
+
+.pg-panel--surface {
+    --pg-face: var(--pg-surface);
+}
+.pg-panel--accent {
+    --pg-face: var(--pg-accent-soft);
+}
+.pg-panel--warm {
+    --pg-face: var(--pg-warm-soft);
+}
+.pg-panel--olive {
+    --pg-face: var(--pg-olive);
+    color: var(--pg-cream);
+}

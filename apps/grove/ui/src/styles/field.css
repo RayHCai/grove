@@ -1,0 +1,60 @@
+.pg-field__label {
+    display: block;
+    margin-bottom: var(--pg-sp-3);
+    color: var(--pg-ink);
+    font: normal 11px/1.4 var(--pg-font-brand);
+    letter-spacing: 1px;
+}
+
+/*
+ * A text box, sunk rather than raised: the inset block is the same solid step the panels drop,
+ * pointing the other way, which is what makes a field read as something to type into.
+ */
+.pg-field__control {
+    display: block;
+    width: 100%;
+    min-height: 40px;
+    padding: 9px 12px;
+    border: var(--pg-bw) solid var(--pg-edge);
+    background: var(--pg-surface);
+    box-shadow: inset var(--pg-lift) var(--pg-lift) 0 var(--pg-surface-2);
+    color: var(--pg-ink);
+    font-family: var(--pg-font-ui);
+    font-size: 22px;
+    line-height: 1.2;
+}
+.pg-field__control::placeholder {
+    color: var(--pg-placeholder);
+    opacity: 1;
+}
+.pg-field__control:hover {
+    background: var(--pg-surface-3);
+}
+.pg-field__control:focus-visible {
+    outline: var(--pg-bw) solid var(--pg-focus);
+    outline-offset: var(--pg-bw);
+}
+.pg-field--area .pg-field__control {
+    line-height: 1.45;
+    resize: vertical;
+}
+.pg-field__hint {
+    margin-top: var(--pg-sp-2);
+    color: var(--pg-ink-muted);
+    font-size: 19px;
+}
+.pg-field__control[readonly] {
+    background: var(--pg-surface-2);
+    box-shadow: none;
+    cursor: default;
+}
+.pg-field__control[readonly]::placeholder {
+    color: var(--pg-ink-muted);
+}
+.pg-field__control[disabled],
+.pg-field__control[aria-disabled='true'] {
+    background: var(--pg-surface-2);
+    box-shadow: none;
+    color: var(--pg-ink-faint);
+    cursor: not-allowed;
+}

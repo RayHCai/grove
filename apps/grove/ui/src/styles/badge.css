@@ -1,0 +1,17 @@
+/* An item drop: a bordered chip that sits on its own small block. */
+.pg-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--pg-sp-3);
+    padding: 8px 12px;
+    border: var(--pg-bw) solid var(--pg-edge);
+    box-shadow: var(--pg-shadow-sm);
+    background: var(--pg-surface);
+    color: var(--pg-ink);
+    font: normal 10px/1 var(--pg-font-brand);
+    letter-spacing: 1px;
+    white-space: nowrap;
+}
+.pg-badge__icon {
+    flex: none;
+}
