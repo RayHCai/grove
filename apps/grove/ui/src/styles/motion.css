@@ -1,0 +1,101 @@
+/*
+ * Every move lands on a frame.
+ *
+ * `steps()` rather than a curve throughout: a sprite has no in-between frames to show, and an
+ * eased transform is the one thing that reads as not-pixel however chunky the borders are.
+ */
+
+@keyframes pg-rise {
+    from {
+        opacity: 0;
+        transform: translateY(14px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes pg-blink {
+    0%,
+    49% {
+        opacity: 1;
+    }
+    50%,
+    100% {
+        opacity: 0;
+    }
+}
+
+@keyframes pg-bob {
+    0%,
+    49% {
+        transform: translateY(0);
+    }
+    50%,
+    99% {
+        transform: translateY(-3px);
+    }
+    100% {
+        transform: translateY(0);
+    }
+}
+
+/*
+ * The same idea as the bob, at rest and on four frames: something that wants to be clicked,
+ * drifting where it stands rather than hopping.
+ */
+@keyframes pg-float {
+    0%,
+    24% {
+        transform: translateY(0);
+    }
+    25%,
+    49% {
+        transform: translateY(-2px);
+    }
+    50%,
+    74% {
+        transform: translateY(-4px);
+    }
+    75%,
+    99% {
+        transform: translateY(-2px);
+    }
+    100% {
+        transform: translateY(0);
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    /* The entrance: four frames up, staggered by whoever is choreographing the page. */
+    .pg-rise {
+        animation: pg-rise 0.5s var(--pg-ease) both;
+    }
+
+    /* The menu cursor blinks only while the option is the selected one. */
+    .pg-btn:hover .pg-btn__label::before,
+    .pg-btn:focus-visible .pg-btn__label::before {
+        animation: pg-blink 0.8s var(--pg-step-1) infinite;
+    }
+
+    /* An item drop never sits still. */
+    .pg-badge {
+        animation: pg-bob 2.2s var(--pg-step-1) infinite;
+    }
+
+    /* The slow drift; the delay that staggers a pair of them is the page's to set. */
+    .pg-float {
+        animation: pg-float 3.6s var(--pg-step-1) infinite;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
+    }
+}

@@ -1,0 +1,118 @@
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body {
+    background: var(--pg-bg);
+}
+
+body {
+    color: var(--pg-ink);
+    font-family: var(--pg-font-ui);
+    /* VT323 draws about two thirds the height of a proportional face at the same size, so 21px
+       here is the 14px of the old body text, not a larger one. */
+    font-size: 21px;
+    line-height: 1.45;
+    /* The pixel faces are meant to look aliased; smoothing them rounds the very steps they are. */
+    -webkit-font-smoothing: none;
+    text-rendering: optimizeSpeed;
+}
+
+/*
+ * The scanline wash over the whole page.
+ *
+ * Fixed and unclickable so it never moves with the content or eats a pointer, and kept under the
+ * 0.05 alpha that reads as a CRT rather than as a texture over the text.
+ */
+.pg-scanlines::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--pg-edge) 5%, transparent) 0 2px,
+        transparent 2px 5px
+    );
+}
+
+[hidden] {
+    display: none !important;
+}
+
+::selection {
+    background: var(--pg-selection-bg);
+    color: var(--pg-selection-ink);
+}
+
+img,
+svg {
+    display: block;
+    max-width: 100%;
+}
+
+a {
+    color: inherit;
+}
+
+:focus-visible {
+    outline: var(--pg-bw) solid var(--pg-focus);
+    outline-offset: var(--pg-bw);
+}
+
+.pg-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/*
+ * The panel body: a face, its 3px edge, and the solid block it drops.
+ *
+ * Both layers are pseudo-elements sharing one clip-path, because a `border` cannot follow a
+ * stepped corner and a `box-shadow` cannot be clipped to one. The face is painted as a
+ * padding-box gradient under a border-box edge, which is how one element paints both.
+ */
+.pg-pixel {
+    position: relative;
+    z-index: 0;
+    --pg-face: var(--pg-surface);
+}
+.pg-pixel::before,
+.pg-pixel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    clip-path: var(--pg-notch);
+    pointer-events: none;
+}
+.pg-pixel::before {
+    z-index: -2;
+    background: var(--pg-lift-ink);
+    transform: translate(var(--pg-lift), var(--pg-lift));
+}
+.pg-pixel::after {
+    z-index: -1;
+    border: var(--pg-bw) solid transparent;
+    background:
+        linear-gradient(var(--pg-face), var(--pg-face)) padding-box,
+        var(--pg-edge) border-box;
+}
+
+/* The one-step corner, for a control rather than a panel. */
+.pg-pixel--sm::before,
+.pg-pixel--sm::after {
+    clip-path: var(--pg-notch-sm);
+}

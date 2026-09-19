@@ -1,0 +1,20 @@
+/* The kicker: a rust outline box with a square pip, never a round dot. */
+.pg-eyebrow {
+    display: flex;
+    width: fit-content;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border: var(--pg-bw) solid var(--pg-warm);
+    color: var(--pg-warm-ink);
+    font: normal 11px/1.5 var(--pg-font-brand);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+.pg-eyebrow::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    background: var(--pg-warm);
+}

@@ -1,0 +1,241 @@
+/*
+ * A menu option: the pixel body at the one-step corner, in Press Start 2P.
+ *
+ * The press moves the face onto its own dropped block rather than shrinking a shadow, which is
+ * what makes a click read as a physical key going down.
+ */
+.pg-btn {
+    position: relative;
+    z-index: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    --pg-face: var(--pg-surface);
+    min-height: 34px;
+    padding: 10px 14px;
+    border: none;
+    background: none;
+    color: var(--pg-ink);
+    font: normal 12px/1 var(--pg-font-brand);
+    letter-spacing: 1px;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+}
+.pg-btn::before,
+.pg-btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    clip-path: var(--pg-notch-sm);
+    pointer-events: none;
+}
+.pg-btn::before {
+    z-index: -2;
+    background: var(--pg-lift-ink);
+    transform: translate(var(--pg-lift), var(--pg-lift));
+}
+.pg-btn::after {
+    z-index: -1;
+    border: var(--pg-bw) solid transparent;
+    background:
+        linear-gradient(var(--pg-face), var(--pg-face)) padding-box,
+        var(--pg-edge) border-box;
+}
+
+.pg-btn__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/*
+ * The menu cursor, which appears beside the label only while the option is the one selected.
+ * It is drawn on the label rather than added to the DOM, so no component has to render it.
+ */
+.pg-btn__label::before {
+    content: '';
+    flex: none;
+    width: 12px;
+    height: 20px;
+    background: currentColor;
+    clip-path: var(--pg-arrow);
+    opacity: 0;
+}
+.pg-btn:hover .pg-btn__label::before,
+.pg-btn:focus-visible .pg-btn__label::before {
+    opacity: 1;
+}
+
+.pg-btn__icon {
+    display: inline-flex;
+    flex: none;
+}
+.pg-btn__icon > svg {
+    width: 16px;
+    height: 16px;
+}
+
+.pg-btn:active {
+    transform: translate(2px, 2px);
+}
+.pg-btn:active::before {
+    transform: translate(2px, 2px);
+}
+
+.pg-btn--primary {
+    --pg-face: var(--pg-accent);
+    color: var(--pg-accent-ink);
+}
+.pg-btn--primary:hover {
+    --pg-face: var(--pg-accent-hover);
+}
+.pg-btn--secondary:hover {
+    --pg-face: var(--pg-surface-2);
+}
+
+/* The ghost carries no body at all until it is pointed at, which is what keeps a toolbar quiet. */
+.pg-btn--ghost::before,
+.pg-btn--ghost::after {
+    opacity: 0;
+}
+.pg-btn--ghost:hover::after,
+.pg-btn--ghost:focus-visible::after {
+    opacity: 1;
+}
+.pg-btn--ghost:hover {
+    --pg-face: var(--pg-surface-2);
+}
+
+.pg-btn--sm {
+    min-height: 28px;
+    padding: 7px 10px;
+    font-size: 10px;
+}
+
+.pg-btn[disabled],
+.pg-btn[aria-disabled='true'] {
+    --pg-face: var(--pg-surface-2);
+    color: var(--pg-ink-faint);
+    cursor: not-allowed;
+}
+/* A locked option sits flat on the page: there is nothing under it left to press. */
+.pg-btn[disabled]::before,
+.pg-btn[aria-disabled='true']::before {
+    transform: none;
+}
+.pg-btn[disabled] .pg-btn__label::before,
+.pg-btn[aria-disabled='true'] .pg-btn__label::before {
+    opacity: 0;
+}
+.pg-btn[disabled]:active,
+.pg-btn[aria-disabled='true']:active {
+    transform: none;
+}
+.pg-btn[disabled]:active::before,
+.pg-btn[aria-disabled='true']:active::before {
+    transform: none;
+}
+
+/* ---- the square one ---- */
+
+.pg-iconbtn {
+    position: relative;
+    z-index: 0;
+    display: inline-grid;
+    place-items: center;
+    --pg-face: var(--pg-surface);
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--pg-ink);
+    cursor: pointer;
+    user-select: none;
+}
+.pg-iconbtn::before,
+.pg-iconbtn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    clip-path: var(--pg-notch-sm);
+    pointer-events: none;
+}
+.pg-iconbtn::before {
+    z-index: -2;
+    background: var(--pg-lift-ink);
+    transform: translate(var(--pg-lift), var(--pg-lift));
+}
+.pg-iconbtn::after {
+    z-index: -1;
+    border: var(--pg-bw) solid transparent;
+    background:
+        linear-gradient(var(--pg-face), var(--pg-face)) padding-box,
+        var(--pg-edge) border-box;
+}
+.pg-iconbtn > svg {
+    width: 16px;
+    height: 16px;
+}
+.pg-iconbtn:active {
+    transform: translate(2px, 2px);
+}
+.pg-iconbtn:active::before {
+    transform: translate(2px, 2px);
+}
+
+.pg-iconbtn--primary {
+    --pg-face: var(--pg-accent);
+    color: var(--pg-accent-ink);
+}
+.pg-iconbtn--primary:hover {
+    --pg-face: var(--pg-accent-hover);
+}
+.pg-iconbtn--secondary:hover {
+    --pg-face: var(--pg-surface-2);
+}
+.pg-iconbtn--ghost::before,
+.pg-iconbtn--ghost::after {
+    opacity: 0;
+}
+.pg-iconbtn--ghost:hover::after,
+.pg-iconbtn--ghost:focus-visible::after,
+.pg-iconbtn--ghost[aria-pressed='true']::after,
+.pg-iconbtn--ghost[aria-expanded='true']::after {
+    opacity: 1;
+}
+.pg-iconbtn--ghost:hover {
+    --pg-face: var(--pg-surface-2);
+}
+
+.pg-iconbtn--sm {
+    width: 28px;
+    height: 28px;
+}
+
+.pg-iconbtn[aria-pressed='true'],
+.pg-iconbtn[aria-expanded='true'] {
+    --pg-face: var(--pg-accent-soft);
+    color: var(--pg-ink);
+}
+
+.pg-iconbtn[disabled],
+.pg-iconbtn[aria-disabled='true'] {
+    --pg-face: var(--pg-surface-2);
+    color: var(--pg-ink-faint);
+    cursor: not-allowed;
+}
+.pg-iconbtn[disabled]::before,
+.pg-iconbtn[aria-disabled='true']::before {
+    transform: none;
+}
+.pg-iconbtn[disabled]:active,
+.pg-iconbtn[aria-disabled='true']:active {
+    transform: none;
+}
+.pg-iconbtn[disabled]:active::before,
+.pg-iconbtn[aria-disabled='true']:active::before {
+    transform: none;
+}

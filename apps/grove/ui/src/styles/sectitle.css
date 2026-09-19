@@ -1,0 +1,21 @@
+/*
+ * A section heading as a title plate: inked background, sun text, dropped on olive.
+ *
+ * `fit-content` so the plate is the width of the words rather than of the column.
+ */
+.pg-sectitle {
+    display: block;
+    width: fit-content;
+    padding: 12px 16px;
+    background: var(--pg-plate);
+    box-shadow: var(--pg-lift) var(--pg-lift) 0 var(--pg-plate-lift);
+    color: var(--pg-plate-ink);
+    font: normal 13px/1.6 var(--pg-font-brand);
+    letter-spacing: 1px;
+}
+.pg-sectitle__sub {
+    margin-top: var(--pg-sp-3);
+    color: var(--pg-ink-muted);
+    font-size: 23px;
+    line-height: 1.45;
+}
