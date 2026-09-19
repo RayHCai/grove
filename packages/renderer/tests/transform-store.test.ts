@@ -1,9 +1,5 @@
-// The transform graph: position-only inheritance, the two dirty scopes, and tree integrity
-// This is the highest-risk logic in the package.
-//
-// The assertions below check SET CONTENTS, not just sizes — a dirty-scope bug that widened a
-// single-node write into a subtree write would keep the size right for a leaf and be invisible
-// to a size-only check.
+// The assertions check SET CONTENTS, not just sizes: a dirty-scope bug that widened a single-node
+// write into a subtree write keeps the size right for a leaf and hides from a size-only check.
 
 import { describe, it, expect } from 'vitest';
 import { TransformStore } from '../src/transform-store.js';

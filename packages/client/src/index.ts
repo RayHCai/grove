@@ -1,18 +1,3 @@
-// @platform/client
-// The viewer: one Transport to the server, a script-less mirror of the authoritative world, device input
-// stamped with a tick, and the display loop that pushes transforms into IRenderer.
-//
-// The DOM adapters are not here. `createRafFrameSource` and `createDomInputDevice` live behind
-// `@platform/client/browser`, so importing the session and its seams does not pull a DOM adapter into the
-// module graph. A Node test imports this barrel and injects scripted seams.
-//
-// A host builds a `GameClient` and implements the seams below; the collaborators it composes — the mirror,
-// the clock, the ring, the bridge, the handshake builders, the tuning constants — are named here only as
-// TYPES, so nothing outside can mint a second one or reach past `GameClient` to drive it. This package's
-// own tests import `./src/*.js` directly for the same reason: they are inside the boundary.
-//
-// It never imports @platform/sim. The two agree through @platform/protocol and nowhere else.
-
 export { GameClient } from './client.js';
 export type { ClientStats, GameClientOptions } from './client.js';
 

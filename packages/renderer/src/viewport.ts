@@ -1,23 +1,12 @@
-// Pure, and reads no globals — the DPR is passed in — so this runs in plain Node.
-//
-// `stageRect` is the design stage mapped onto the canvas, what UI anchors against;
-// `visibleRect` is the screen region world content occupies. They coincide only when bars are
-// really drawn.
-//
-// Nothing here throws: option validation belongs to the renderer, and a NaN reaching
-// `camera.viewport` would poison every later frame with no hint where it came from.
+// Reads no globals — the DPR is passed in. `stageRect` is the design stage mapped onto the canvas;
+// `visibleRect` is the screen region world content occupies; they coincide only when bars are
+// drawn. Nothing here throws: option validation belongs to the renderer.
 
 import { bounds, boundsHeight, boundsSet, boundsWidth, finiteOr, positiveOr } from '@platform/math';
 import type { Bounds, Size } from '@platform/math';
 import type { CameraState, Framing, ScaleMode } from './renderer.js';
 
-/**
- * The largest half-extent a viewport may report.
- *
- * A finite but tiny `zoom` — around 1e-306 on a stage-framed 800x600 — overflows
- * `visible / (2 * scale * zoom)` to Infinity, and adding a camera position to this cap still
- * cannot overflow.
- */
+/** The largest half-extent a viewport may report; a tiny `zoom` would otherwise overflow it. */
 const MAX_HALF_EXTENT = Number.MAX_SAFE_INTEGER;
 
 /** A half-extent that is finite and non-negative whatever the arithmetic produced. */
@@ -27,11 +16,8 @@ function safeHalfExtent(value: number): number {
 }
 
 /**
- * Scale from design px to CSS px, before `zoom`.
- *
- * `'free'` and `'expand'` are always 1 — a bigger screen shows more world, not bigger world.
- * Falls back to 1 for a degenerate size or ratio, since every caller divides by this: an
- * extreme canvas:design ratio overflows `cw / dw` from two ordinary finite positives.
+ * Scale from design px to CSS px, before `zoom`; `'free'` and `'expand'` are always 1.
+ * Falls back to 1 for a degenerate size or ratio, since every caller divides by this.
  */
 export function fitScale(
     framing: Framing,
@@ -53,22 +39,14 @@ export function fitScale(
     return positiveOr(scale, 1);
 }
 
-/**
- * `true` when letterbox bars are actually drawn.
- *
- * `fill` crops and `expand` reveals more world; in both the content reaches every canvas
- * edge, so there is nothing to bar.
- */
+/** `true` when letterbox bars are drawn; `fill` crops and `expand` reveals, so neither bars. */
 export function isLetterboxed(framing: Framing, scaleMode: ScaleMode, letterbox: boolean): boolean {
     return framing === 'stage' && scaleMode === 'fit' && letterbox;
 }
 
 /**
  * The stage in screen space — y-down, so `bottom > top`.
- *
- * Under `'free'` the infinite editor canvas has no stage, so the whole canvas is it. Under
- * `'fill'` the scaled rect is larger than the canvas and the edges fall outside it: UI is
- * authored against the stage, so `fill` crops a HUD exactly as it crops the world.
+ * `'free'` has no stage, so the canvas is it; `'fill'` crops a HUD exactly as it crops the world.
  */
 export function stageRect(
     framing: Framing,
@@ -109,15 +87,7 @@ export function visibleRect(
 
 /**
  * The world-space rect on screen right now, y-up (`top > bottom`). Feeds `camera.viewport`.
- *
- * Under fit + letterbox the visible region is `design * fitScale`, so the half-extent reduces
- * algebraically to `design / (2 * zoom)` — but not in floating point, where multiplying then
- * dividing by `s` rounds twice and lands 1 ulp off on canvases whose `s` is not a dyadic
- * rational. That would make "everyone sees the same world" canvas-dependent, so this case
- * cancels `s` symbolically instead.
- *
- * The four edges are always finite, and a 0x0 canvas degrades to a zero-extent rect at the
- * camera rather than a NaN one.
+ * Under fit + letterbox `s` cancels symbolically; rounding twice would land 1 ulp off.
  */
 export function worldViewport(
     camera: Readonly<CameraState>,
@@ -151,12 +121,7 @@ export function worldViewport(
     return boundsSet(out, cx - halfW, cx + halfW, cy + halfH, cy - halfH);
 }
 
-/**
- * The device pixel ratio actually usable: `min(devicePixelRatio, maxResolution)`, floored at 1.
- *
- * The floor means a `maxResolution` below 1 is ignored rather than shrinking the backbuffer
- * below CSS resolution.
- */
+/** The usable DPR: `min(devicePixelRatio, maxResolution)`, floored at 1 so a <1 cap is ignored. */
 export function effectiveResolution(devicePixelRatio: number, maxResolution: number): number {
     const dpr = positiveOr(devicePixelRatio, 1);
     const cap = maxResolution > 0 ? maxResolution : 1;

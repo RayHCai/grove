@@ -1,10 +1,5 @@
-// The script bundle: fetched over HTTP, checked against the hash the `Welcome` named, and only then
-// evaluated.
-//
-// The order is the whole mechanism. A bundle is executable, so a client that evaluated first and
-// compared after would be running the peer's code to decide whether to run the peer's code. It is
-// also why the seam below is three primitives rather than one `load(url, hash)`: the comparison
-// between them belongs to this file, and a host handed the whole job could skip it silently.
+// The hash is checked BEFORE evaluation: a bundle is executable, so comparing after would mean
+// running the peer's code to decide whether to run it.
 
 import { REMOTE_ASSET_SCHEMES, isAllowedAssetUrl } from '@platform/renderer';
 import { MAX_BUNDLE_BYTES } from './constants.js';
@@ -19,12 +14,7 @@ export interface BundleSource {
     evaluate(bytes: ArrayBuffer): Promise<unknown>;
 }
 
-/**
- * Why a bundle did not load. The message reaches a person, so it says what happened in words.
- *
- * Not `BundleError`: `@platform/scripting` throws one of those from the build toolchain, and two classes
- * under one name make `instanceof` answer for whichever was imported.
- */
+/** Why a bundle did not load; the message reaches a person. Not scripting's `BundleError`. */
 export class BundleLoadError extends Error {
     constructor(message: string) {
         super(message);
@@ -32,21 +22,14 @@ export class BundleLoadError extends Error {
     }
 }
 
-/**
- * Fetches, verifies and evaluates the bundle at `url`, or throws a {@link BundleLoadError}.
- *
- * `expectedHash` is the server's; a mismatch is terminal rather than a retry, because the bytes that
- * arrived are not the bytes the authority is simulating with and running them is exactly the silent
- * prediction divergence the hash exists to prevent.
- */
+/** Fetches, verifies and evaluates the bundle at `url`, or throws a {@link BundleLoadError}. */
 export async function loadBundle(
     source: BundleSource,
     url: string,
     expectedHash: string,
 ): Promise<void> {
-    // The constraint the asset manifest's url already carries, for a worse payload: an asset entry
-    // is data and this is code, so a scheme the client did not choose is refused outright. Unlike a
-    // manifest row, a refused bundle fails the session — there is nothing to draw a placeholder for.
+    // Code, not data: a scheme the client did not choose is refused outright, and a refused bundle
+    // fails the session — there is nothing to draw a placeholder for.
     if (!isAllowedAssetUrl(url, REMOTE_ASSET_SCHEMES)) {
         throw new BundleLoadError(
             `the game code is at an address this client will not fetch: ${url}`,

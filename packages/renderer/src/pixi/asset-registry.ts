@@ -1,10 +1,5 @@
-// The `name -> GPU resource` map, atlas expansion, and the retained manifest.
-//
-// The second job is the easily overlooked one: every successful manifest entry is retained because
-// that map is what a context restore merges against, and what lets `unloadAssets` accept entries.
-//
-// Nothing here rejects on a failed load — unlike `Assets.load` — so one 404 sprite yields a
-// placeholder and a reported failure rather than killing a level load.
+// Every successful manifest entry is retained: that map is what a context restore merges against.
+// Nothing here rejects on a failed load, so one 404 yields a placeholder rather than killing it.
 
 import { Assets, BufferImageSource, Texture } from 'pixi.js';
 import type { Spritesheet } from 'pixi.js';
@@ -24,12 +19,7 @@ interface ResidentAsset {
 export interface LoadOutcome {
     info?: AssetInfo;
     failure?: AssetFailure;
-    /**
-     * Frame names an atlas could not claim because another sheet already holds them.
-     *
-     * Reported alongside a successful atlas rather than kept internally: a cross-sheet collision is
-     * an authoring bug, and a list nobody drains is a bug nobody sees.
-     */
+    /** Frame names an atlas could not claim; a cross-sheet collision is an authoring bug. */
     collisions?: AssetFailure[];
 }
 
@@ -40,12 +30,7 @@ function urlOf(entry: AssetManifestEntry): string | null {
     return entry.kind === 'text' ? null : entry.url;
 }
 
-/**
- * A magenta 1x1 for an unresolved texture name.
- *
- * Magenta because a missing texture has to read as a failure at a glance: pixi's shared white would
- * draw as a pale speck, which reads as a layout bug or as nothing at all.
- */
+/** A magenta 1x1 for an unresolved texture name — it has to read as a failure at a glance. */
 function makePlaceholder(): Texture {
     return new Texture({
         source: new BufferImageSource({
@@ -58,12 +43,7 @@ function makePlaceholder(): Texture {
     });
 }
 
-/**
- * name -> texture, plus the retained manifest.
- *
- * Owns no GPU context: it is handed textures by `Assets` and hands them on, so a context loss is
- * the guard's concern rather than this class's.
- */
+/** name → texture, plus the retained manifest. Owns no GPU context; a loss is the guard's. */
 export class AssetRegistry {
     readonly #resident = new Map<string, ResidentAsset>();
 
@@ -97,12 +77,7 @@ export class AssetRegistry {
         return this.#resident.get(name)?.entry.kind ?? null;
     }
 
-    /**
-     * The frame names an atlas contributed; empty for every other kind.
-     *
-     * Exposed because sprites reference an atlas by bare frame name, so an unload has to count and
-     * repoint the frames' users, not the atlas name's.
-     */
+    /** The frame names an atlas contributed; empty for every other kind. Sprites use bare names. */
     framesOf(name: string): readonly string[] {
         return this.#resident.get(name)?.frames ?? EMPTY_FRAMES;
     }
@@ -119,12 +94,7 @@ export class AssetRegistry {
         return [...this.#resident].map(([name, asset]) => ({ name, size: { ...asset.size } }));
     }
 
-    /**
-     * Uploads one manifest entry, resolving with a `failure` rather than rejecting.
-     *
-     * A `text` entry is not handled here: it needs a 2D canvas rather than the loader, so pass its
-     * finished texture to {@link registerTexture} instead.
-     */
+    /** Uploads one manifest entry, resolving with a `failure` rather than rejecting. */
     async load(entry: AssetManifestEntry): Promise<LoadOutcome> {
         try {
             switch (entry.kind) {
@@ -154,24 +124,14 @@ export class AssetRegistry {
         }
     }
 
-    /**
-     * Registers an already-built texture under a name — the text-raster path.
-     *
-     * The entry is retained too, so a rasterized text asset takes part in retention, unloading,
-     * queueing and post-loss re-upload with no special case anywhere.
-     */
+    /** Registers an already-built texture under a name — the text-raster path. */
     registerTexture(entry: AssetManifestEntry, texture: Texture, size: Size): AssetInfo {
         this.#release(this.#resident.get(entry.name));
         this.#resident.set(entry.name, { texture, size, entry, frames: [] });
         return { name: entry.name, size: { ...size } };
     }
 
-    /**
-     * Drops a name and its frames, returning `true` when it was resident.
-     *
-     * Unconditional: a level transition genuinely wants to force an in-use texture out, and
-     * refusing would make the caller destroy nodes in a particular order.
-     */
+    /** Drops a name and its frames, returning `true` when it was resident. Unconditional. */
     unload(name: string): boolean {
         const resident = this.#resident.get(name);
         if (resident === undefined) return false;
@@ -213,11 +173,8 @@ export class AssetRegistry {
         const frames: string[] = [];
         const collisions: AssetFailure[] = [];
 
-        // Bare frame names, not `atlas/frame`: the panel authors the manifest and can guarantee
-        // cross-sheet uniqueness, so a collision is an authoring bug worth reporting.
-        //
-        // A frame this same atlas contributed is not a collision, it is a re-load — which every
-        // context restore performs — so it is re-registered rather than reported and skipped.
+        // Bare frame names, not `atlas/frame`: the panel guarantees cross-sheet uniqueness, so a
+        // collision is an authoring bug. A frame this atlas already gave is a re-load, not a clash.
         for (const [frameName, frameTexture] of Object.entries(sheet.textures)) {
             const held = this.#resident.get(frameName);
             if (held !== undefined && held.entry.name !== entry.name) {
@@ -256,13 +213,7 @@ export class AssetRegistry {
         return { name: entry.name, size: { ...size } };
     }
 
-    /**
-     * Destroys a texture this registry built rather than borrowed.
-     *
-     * A rasterized text asset is a render target and an atlas wrapper is ours, so dropping the map
-     * entry alone leaks GPU memory. Anything `Assets` owns is released through `Assets.unload`
-     * instead, and the shared placeholder is never destroyed.
-     */
+    /** Destroys a texture this registry built rather than borrowed; `Assets` owns the rest. */
     #release(resident: ResidentAsset | undefined): void {
         if (resident === undefined) return;
         if (resident.texture === this.placeholder) return;

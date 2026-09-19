@@ -1,6 +1,5 @@
 // A factory, not a class export, so callers hold the `IRenderer` type rather than an inheritance
-// relationship. The class is exported too, for the test-only observability members the contract
-// suite needs and `IRenderer` deliberately lacks.
+// relationship. The class is exported for the contract suite's test-only members.
 
 import type { IRenderer, RendererInitOptions } from '../renderer.js';
 import { NullRenderer } from './null-renderer.js';

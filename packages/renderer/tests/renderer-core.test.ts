@@ -1,9 +1,5 @@
-// The per-frame contract, measured through a counting sink.
-//
-// `flush()` is the one method the client calls every frame, so what it does per node is a contract
-// and not an implementation detail: a scene where nothing moved must cost nothing per node. A
-// counting `SceneSink` is the only way to see that from outside — the headless backend's sink
-// records nothing, and the Pixi one needs a GPU.
+// A scene where nothing moved must cost nothing per node; a counting `SceneSink` is the only
+// way to see that from outside.
 
 import { describe, it, expect } from 'vitest';
 import { RendererCore, resolveInitOptions } from '../src/core/renderer-core.js';

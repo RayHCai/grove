@@ -1,8 +1,4 @@
-// The clock: two rates off one source, a closed loop on server-measured headroom, and a nudge that only
-// ever changes the tick duration.
-//
-// Display rate and tick rate stay separate because fusing them would tie input timing to frame rate, and a
-// 144 Hz and a 60 Hz client must stamp the same press with the same tick.
+// Display rate and tick rate stay separate: fusing them would tie input timing to frame rate.
 
 import {
     GAIN,
@@ -33,12 +29,7 @@ export class ClientClock {
     /** Where the loop wants the lead. Seconds, converted to ticks on demand. */
     #targetLeadSeconds: number;
 
-    /**
-     * Bookkeeping, not measurement: it moves only by the time the nudge inserted or removed.
-     *
-     * Spelled out because the natural implementation is to measure `(localTick - depictedTick) / simRate`,
-     * which would feed the actuator a sawtoothing stale tick.
-     */
+    /** Bookkeeping, not measurement: it moves only by the time the nudge inserted or removed. */
     #currentLeadSeconds: number;
 
     /** Bumped on entering `stalled` and on resync; the headroom discard keys on it. */
@@ -47,9 +38,7 @@ export class ClientClock {
     constructor(opts: { simRate: number; snapshotTick: number; rttSeconds: number }) {
         this.#simRate = opts.simRate;
 
-        // One RTT, unhalved: reaching server-now costs one one-way trip and server-future costs another. It
-        // is not "client→server→ack" — the ack is not what an input must beat, and folding it in would steer
-        // the loop a whole round trip too high.
+        // One RTT, unhalved: reaching server-now costs one one-way trip and server-future another.
         const seed = clampLead(opts.rttSeconds, this.#simRate);
         this.#targetLeadSeconds = seed;
         this.#currentLeadSeconds = seed;
@@ -89,23 +78,17 @@ export class ClientClock {
         this.#epoch++;
     }
 
-    /**
-     * Advances the tick counter for one frame and returns the tick indices to stamp, in order.
-     *
-     * The nudge changes only the tick duration: running zero or two ticks on a frame would repeat or skip an
-     * index, and a skipped index is a dropped press at exactly the moment the connection misbehaves.
-     */
+    /** Advances the tick one frame, returning indices to stamp; the nudge alters duration only. */
     advance(nowSeconds: number, out: number[] = []): number[] {
         out.length = 0;
 
-        // Discarded rather than stored: one stored NaN would freeze the counter for the whole session.
+        // Discarded rather than stored: one stored NaN would freeze the counter for the session.
         if (!Number.isFinite(nowSeconds)) return out;
 
         const raw = this.#lastNow === undefined ? 0 : nowSeconds - this.#lastNow;
         this.#lastNow = nowSeconds;
 
-        // Backwards clocks are inert. The clamp is why a suspended tab falls behind rather than racing
-        // forward, and the discarded time is deliberately not a deficit to make up.
+        // Backwards clocks are inert; the clamp is why a suspended tab falls behind.
         const dt = Math.min(Math.max(0, raw), MAX_FRAME_DT);
         this.#accumulator += dt;
 
@@ -131,17 +114,7 @@ export class ClientClock {
         return error > 0 ? 1 - NUDGE_MAX : 1 + NUDGE_MAX;
     }
 
-    /**
-     * Steers the target lead off one server-measured headroom sample.
-     *
-     * `effectiveHeadroom` is the anti-windup term, and without it the loop is unstable: headroom describes
-     * the lead as expressed, never as commanded, and the nudge delivers slowly — so integrating the raw
-     * error re-commands a correction already in flight, every ack.
-     *
-     * The two instants are deliberately asymmetric: `targetLeadTicks` is read now, `leadAtSendTicks` is what
-     * the counter expressed when the measured frame left, so the commanded end includes everything asked for
-     * during the round trip. Symmetrizing it would restore the windup.
-     */
+    /** Steers the target lead off one headroom sample; `effectiveHeadroom` prevents windup. */
     sample(s: HeadroomSample): void {
         const targetLeadTicks = this.#targetLeadSeconds * this.#simRate;
         const undelivered = targetLeadTicks - s.leadAtSendTicks;
@@ -154,13 +127,7 @@ export class ClientClock {
         );
     }
 
-    /**
-     * Whether the counter has left the timeline entirely, which a suspended tab does.
-     *
-     * A sign test rather than a threshold, so it is latency-independent: `depictedTick` is stale by the
-     * downlink, the same delay the headroom deficit reflects, so both terms degrade together. Headroom
-     * cannot draw this line — pinned at `LEAD_MAX` on an 800 ms link it already sits near −33 ticks.
-     */
+    /** Whether the counter left the timeline, as a suspended tab does. A sign test. */
     isBehind(depictedTick: number): boolean {
         return this.#localTick < depictedTick;
     }

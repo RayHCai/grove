@@ -1,12 +1,6 @@
-//   webglcontextlost  ->  preventDefault()  ->  'lost'  ->  emit 'contextlost'
-//   webglcontextrestored / GPUDevice.lost
-//                     ->  'restoring'
-//                     ->  merge retained manifest with queued intents, re-upload
-//                     ->  recreate the xform/art pairs from our node records, mark all dirty
-//                     ->  'ok'  ->  emit 'contextrestored'
-//
-// Pixi's own handler already calls `preventDefault()` and a second call is idempotent, so this
-// guard calls it too rather than trusting an ordering it does not control.
+// webglcontextlost → preventDefault → 'lost'; restored → 'restoring' → merge the retained
+// manifest with queued intents, re-upload, recreate xform/art pairs, mark all dirty → 'ok'.
+// Pixi's own handler already calls `preventDefault()`; a second call is idempotent.
 
 import type { ContextState } from '../renderer.js';
 import type { AssetQueue } from '../asset-queue.js';
@@ -25,13 +19,7 @@ export interface ContextGuardHooks {
     onRestored: (reloadedAssets: string[], failedAssets: string[]) => void;
 }
 
-/**
- * A queued GPU operation, its resolver, and the value to settle it with when it cannot run.
- *
- * `cancelled` is per operation rather than one value for the whole queue: a queued unload and a
- * queued load settle with different shapes, and handing an unload caller a load-shaped result makes
- * every field it reads `undefined`.
- */
+/** A queued GPU operation, its resolver, and what to settle with when it cannot run. */
 interface PendingOp<T> {
     resolve: (value: T) => void;
     run: () => Promise<T>;
@@ -41,20 +29,10 @@ interface PendingOp<T> {
 /** The reason string used when a queued operation cannot run. */
 export const CANCELLED_REASON = 'renderer destroyed before the context was restored';
 
-/**
- * Queued operations allowed while the context is gone.
- *
- * The intent queue collapses per name, but one promise per call does not, so a caller looping over
- * a long loss would grow this without bound. Past the cap an operation settles immediately as
- * cancelled instead.
- */
+/** Queued operations allowed while the context is gone; past the cap one settles as cancelled. */
 const MAX_PENDING = 1024;
 
-/**
- * Tracks context state, queues GPU work while it is gone, and drives the restore.
- *
- * WebGPU device loss folds into the same callbacks, since the difference is not a caller's business.
- */
+/** Tracks context state, queues GPU work while it is gone, and drives the restore. */
 export class ContextGuard {
     #state: ContextState = 'ok';
     #canvas: HTMLCanvasElement | null = null;
@@ -114,12 +92,7 @@ export class ContextGuard {
         }
     }
 
-    /**
-     * Runs `op` now, or queues it until the context is back.
-     *
-     * The returned promise resolves either way — with `cancelled()` when the work can never run —
-     * so a caller mid-loss never has to branch and never awaits forever.
-     */
+    /** Runs `op` now, or queues it until the context is back; the promise resolves either way. */
     run<T>(op: () => Promise<T>, cancelled: () => T): Promise<T> {
         if (!this.lost) return op();
         if (this.#pending.length >= MAX_PENDING) return Promise.resolve(cancelled());
@@ -163,11 +136,7 @@ export class ContextGuard {
 
     /**
      * Re-uploads, rebuilds and drains, then reports the context back.
-     *
-     * Every step is contained: an asset that throws on re-upload, a queued operation that rejects,
-     * or a rebuild that fails must not leave the state at `'restoring'`, because `lost` is then
-     * permanently true — `render()` no-ops for the rest of the session and every queued promise is
-     * abandoned. A failure degrades to a reported failed asset instead.
+     * Every step is contained: a throw must not strand the state at `'restoring'`, which is final.
      */
     async #restore(): Promise<void> {
         if (this.#destroyed || this.#state === 'ok' || this.#state === 'restoring') return;

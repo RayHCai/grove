@@ -1,9 +1,3 @@
-// The join sequence and the clock-sync frames.
-//
-// The client speaks first, which forced the server to allocate its `Player` on the first valid
-// `JoinRequest` rather than on `accept()`: the name, a version that can still refuse cleanly, and the
-// reconnect token have nowhere else to live. The cost is one round trip.
-
 import type { Message, Transport } from '@platform/transport';
 import { jsonCodec } from '@platform/transport';
 import type {
@@ -25,13 +19,7 @@ export interface ClockSource {
     nowSeconds(): number;
 }
 
-/**
- * What this client claims to be running, which the server compares against its own before it
- * allocates a `Player`.
- *
- * All-empty is a real answer, not a missing one: it says "I declare no project", which matches a
- * server that declares none and mismatches one that does.
- */
+/** What this client claims to be running, compared against the server's before a `Player`. */
 export interface ClientProject {
     projectId: ProjectId;
     projectHash: string;
@@ -73,22 +61,13 @@ export function send(transport: Transport, envelope: ClientToServer): void {
     transport.send(envelope as unknown as Message);
 }
 
-/**
- * The RTT the lead seeds from, in seconds.
- *
- * Both stamps are the client's own off one clock, so this survives a skewed server clock. The caller passes
- * the stamp it recorded at send, never the peer-controlled echo. Differencing `serverSentMs` against a
- * client stamp instead yields RTT plus an unknown offset, which is how this arithmetic goes wrong.
- */
+/** The RTT the lead seeds from, in seconds; both stamps are the client's own, off one clock. */
 export function rttSeconds(clientNowMs: number, clientSentMs: number): number {
     const rtt = (clientNowMs - clientSentMs) / 1000;
     return Number.isFinite(rtt) && rtt > 0 ? rtt : 0;
 }
 
-/**
- * An array the client will walk, short enough to walk. `Array.isArray` alone bounds nothing, and the
- * count is peer-chosen — so it is checked before the walk, not during it.
- */
+/** An array the client will walk, short enough to walk; the peer-chosen count is checked first. */
 function isBoundedArray(value: unknown): value is unknown[] {
     return Array.isArray(value) && value.length <= MAX_WIRE_ITEMS;
 }
@@ -106,13 +85,7 @@ function isWireBounds(value: unknown): boolean {
 
 /**
  * Narrows an inbound frame to a server envelope, or `undefined`.
- *
- * A type is a compile-time claim and the bytes are a runtime fact, so this checks rather than casts: an
- * exhaustive `kind` test plus the depth-one fields the client dereferences unguarded. Anything deeper is
- * the mirror's drop-and-count, with the drain's catch as backstop — validating a whole snapshot here would
- * duplicate protocol's schema in the hot path.
- *
- * A `welcome` passes on `kind` alone, because an unusable one is terminal where a bad `state` is dropped.
+ * Checks rather than casts: an exhaustive `kind` test plus the fields dereferenced unguarded.
  */
 export function asServerEnvelope(message: unknown): ServerToClient | undefined {
     if (typeof message !== 'object' || message === null) return undefined;
@@ -164,14 +137,7 @@ export function asServerEnvelope(message: unknown): ServerToClient | undefined {
     }
 }
 
-/**
- * True when a `Welcome` is structurally usable.
- *
- * Every field the join path dereferences, because the unguarded ones — `bounds`, `regions`, `visuals`,
- * `snapshot.state` — would otherwise throw out of the frame and end the session with nothing to show.
- * `bundleUrl` and `bundleHash` are here for the sharper reason: the client fetches one and compares
- * against the other, and a non-string either side would compare equal to nothing and fetch nowhere.
- */
+/** True when a `Welcome` is structurally usable: every field the join path dereferences. */
 export function isUsableWelcome(welcome: Welcome): boolean {
     if (typeof welcome !== 'object' || welcome === null) return false;
     const snapshot = welcome.snapshot as unknown;
@@ -204,13 +170,7 @@ export function isUsableWelcome(welcome: Welcome): boolean {
     );
 }
 
-/**
- * A chunk count the client can hold to: absent, or a whole number within the cap it buffers.
- *
- * Absent is the ordinary case and means the world fitted in one frame. The cap is the receiver's, not
- * the shape's — a count is peer-chosen and every chunk it promises is memory the client holds until
- * the `Welcome` arrives.
- */
+/** A chunk count the client can hold to: absent, or a whole number within the cap it buffers. */
 function isChunkCount(value: unknown): boolean {
     if (value === undefined) return true;
     return (
@@ -220,13 +180,7 @@ function isChunkCount(value: unknown): boolean {
     );
 }
 
-/**
- * A snapshot too big for one frame, held until the `Welcome` that names how many pieces there were.
- *
- * Held rather than applied: a chunk carries no tick and describes a world the client has not been told
- * it is joining, so a set with no `Welcome` behind it is never written anywhere. Reassembled here and
- * never in the mirror — every path below the welcome sees one whole world.
- */
+/** A snapshot too big for one frame, held until the `Welcome` names how many pieces there were. */
 export class SnapshotChunks {
     readonly #held: SnapshotChunk[] = [];
     #bytes = 0;
@@ -237,20 +191,13 @@ export class SnapshotChunks {
         return this.#dropped;
     }
 
-    /**
-     * Buffers one chunk, or counts it refused.
-     *
-     * Bounded on arrival rather than at the fold: the count the `Welcome` will name has not been seen
-     * yet, so this is the only place that can refuse to keep growing. `answered` is a join that already
-     * has its `Welcome`, and such a session's world comes from deltas, never from a chunk.
-     */
+    /** Buffers one chunk, or counts it refused; bounded on arrival, the only place that can. */
     offer(chunk: SnapshotChunk, answered: boolean): void {
         if (answered || this.#held.length >= MAX_SNAPSHOT_CHUNKS) {
             this.#dropped++;
             return;
         }
-        // A count bounds frames and says nothing about how big one is, so the memory is bounded here
-        // too — through the codec, since only it knows how its bytes relate to a value.
+        // A count bounds frames, not their size, so memory is bounded here too — through the codec.
         const bytes = jsonCodec.byteLength(JSON.stringify(chunk));
         if (this.#bytes + bytes > MAX_SNAPSHOT_BYTES) {
             this.#dropped++;
@@ -260,19 +207,13 @@ export class SnapshotChunks {
         this.#held.push(chunk);
     }
 
-    /** The next join answers with its own set, at its own tick, so a resync discards what is held. */
+    /** The next join answers with its own set and tick, so a resync discards what is held. */
     clear(): void {
         this.#held.length = 0;
         this.#bytes = 0;
     }
 
-    /**
-     * Prepends every held chunk to the welcome's own snapshot, in index order.
-     *
-     * False when the set does not match what the `Welcome` named — a short set would open a session
-     * on a world missing entities the server believes it sent, which reads later as a mirror bug
-     * rather than as the truncated join it is.
-     */
+    /** Prepends held chunks to the welcome's snapshot in index order; false if the set is short. */
     foldInto(welcome: Welcome): boolean {
         const expected = welcome.snapshotChunks ?? 0;
         if (this.#held.length !== expected) return false;
@@ -280,25 +221,20 @@ export class SnapshotChunks {
         this.#bytes = 0;
         if (expected === 0) return true;
 
-        // The wire is FIFO, so arrival order is already emission order; sorting states the invariant
-        // the fold depends on rather than trusting it, and a duplicate index shows up as a gap.
+        // The wire is FIFO, so arrival order is emission order; sorting states the invariant, and a
+        // duplicate index shows up as a gap.
         held.sort((a, b) => a.index - b.index);
         if (held.some((chunk, at) => chunk.index !== at)) return false;
 
         const snapshot = welcome.snapshot;
-        // Ahead of the welcome's own, because `entities` is parents-before-children across the whole
-        // set and the chunks carry the earlier half of that order.
+        // Ahead of the welcome's own: `entities` is parents-before-children across the whole set.
         snapshot.entities = [...held.flatMap((c) => c.entities), ...snapshot.entities];
         snapshot.state = [...held.flatMap((c) => c.state), ...snapshot.state];
         return true;
     }
 }
 
-/**
- * How a `Reject` reads to a person — never as a network error, since a version mismatch must not retry.
- *
- * An unrecognized reason is terminal rather than a throw: a client that cannot name it still knows.
- */
+/** How a `Reject` reads to a person; an unrecognized reason is terminal rather than a throw. */
 export function rejectMessage(reject: Reject): string {
     switch (reject.reason) {
         case 'version':

@@ -1,9 +1,5 @@
-// The surface roots, the camera application, and the letterbox mask.
-//
-// Only enabled surfaces get containers, so a shipped game allocates no editor objects at all.
-//
-// The camera lives on the surface root, never baked into node values, which is what makes
-// `setCamera` touch one container and zero nodes.
+// Only enabled surfaces get containers, so a shipped game allocates no editor objects.
+// The camera lives on the surface root, never baked into node values.
 
 import { Container, Graphics } from 'pixi.js';
 import type { Bounds, Size } from '@platform/math';
@@ -21,7 +17,7 @@ export class SurfaceTree {
     /** Whether a mask is currently recorded, so an unchanged stage re-records nothing. */
     #maskActive = false;
 
-    /** The stage rect the recorded mask was built from. Meaningless while `#maskActive` is false. */
+    /** The stage rect the recorded mask came from; meaningless while `#maskActive` is false. */
     readonly #maskRect: Bounds = bounds();
 
     /** The container every surface root is added to. */
@@ -56,10 +52,7 @@ export class SurfaceTree {
 
     /**
      * Applies the camera to the camera-transformed roots.
-     *
-     * The scale is positive and uniform: a negative `scale.y` would be the tempting way to get
-     * y-up and mirrors every sprite and glyph in the tree. The y-flip is arithmetic at the write
-     * boundary instead, which is why the y term below reads as a plus.
+     * The scale stays positive and uniform: a negative `scale.y` would mirror every sprite.
      */
     applyCamera(
         camera: Readonly<CameraState>,
@@ -78,11 +71,7 @@ export class SurfaceTree {
         }
     }
 
-    /**
-     * Masks the game surfaces to the stage rect when bars are actually drawn.
-     *
-     * Editor chrome is never clipped, so a bar cannot cut off a gizmo. `stage` is screen space.
-     */
+    /** Masks the game surfaces to the stage rect when bars are drawn; editor chrome is not. */
     applyLetterbox(
         stageRect: Readonly<Bounds>,
         camera: Readonly<CameraState>,

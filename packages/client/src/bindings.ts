@@ -1,8 +1,3 @@
-// Device → action mapping. Pure and table-driven, so it takes fixed-vector tests.
-//
-// Actions are the network protocol: clients send `{player, action, value}`, not keycodes. Bindings are per
-// player, because local co-op needs separate sets.
-
 import { AXIS_QUANTUM } from './constants.js';
 import type { RawInputEvent } from './input.js';
 import type { InputPhase } from '@platform/protocol';
@@ -14,7 +9,7 @@ export interface ResolvedEdge {
     value?: number;
 }
 
-/** `'button'` is a press/release pair; `'axis'` carries a magnitude, ±1 for a key pair via `polarity`. */
+/** `'button'` is a press/release pair; `'axis'` carries a magnitude, ±1 for a key pair. */
 export type Binding =
     | { kind: 'button'; code: string; action: string; context?: string }
     | { kind: 'axis'; code: string; action: string; polarity?: number; context?: string }
@@ -28,11 +23,7 @@ export interface ViewportExtent {
     height: number;
 }
 
-/**
- * A per-player binding table, plus the quantizer state an axis needs to send only on change.
- *
- * The quantizer is per action, not per binding: two bindings driving one axis must not each get a deadband.
- */
+/** A per-player binding table; quantizer state is per action, so bindings share a deadband. */
 export class BindingTable {
     readonly #bindings: Binding[] = [];
     /** Last value sent per action, so a change is measured against the wire and not the device. */
@@ -63,11 +54,7 @@ export class BindingTable {
         this.#activeStale = true;
     }
 
-    /**
-     * Rebinds an action to a set of button codes, dropping its previous button bindings.
-     *
-     * Buttons only: a blanket delete would silently take away the gamepad axis driving the same action.
-     */
+    /** Rebinds an action to button codes only; a blanket delete would drop the gamepad axis too. */
     rebind(action: string, codes: readonly string[]): void {
         for (let i = this.#bindings.length - 1; i >= 0; i--) {
             const b = this.#bindings[i];
@@ -82,12 +69,7 @@ export class BindingTable {
         return [...this.#down];
     }
 
-    /**
-     * Resolves one raw event to zero or more action edges.
-     *
-     * `viewport` sizes the cursor quantum against the current extent rather than a fixed world-px step, so
-     * wire volume does not change when the camera zooms out.
-     */
+    /** Resolves one raw event to action edges; `viewport` sizes the cursor quantum. */
     resolve(
         event: RawInputEvent,
         viewport: ViewportExtent,
@@ -155,12 +137,7 @@ export class BindingTable {
         }
     }
 
-    /**
-     * Sent when it changes past `quantum`, so analog jitter is not an action per tick.
-     *
-     * A return to neutral always sends, unquantized: otherwise a stick released just inside the deadband
-     * leaves the server holding a small permanent deflection.
-     */
+    /** Sent when it changes past `quantum`; a return to neutral always sends, unquantized. */
     #axis(action: string, value: number, quantum: number, out: ResolvedEdge[]): void {
         const last = this.#lastSent.get(action);
         const neutral = value === 0;
@@ -177,13 +154,7 @@ export class BindingTable {
         this.#down.clear();
     }
 
-    /**
-     * Forgets what was sent, keeping the held-code set — the resync case.
-     *
-     * The quantizer must stop suppressing values the server no longer has, or a still-deflected stick is
-     * never reported again. `#down` survives because it is device truth: clearing it would swallow the
-     * release edge for every key held across the resync.
-     */
+    /** Forgets what was sent, keeping held codes — the resync case; `#down` is device truth. */
     forgetSentValues(): void {
         this.#lastSent.clear();
     }

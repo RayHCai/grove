@@ -1,15 +1,6 @@
-// Two display objects per node:
-//
-//   xform  (Container)   position = (local.x, -local.y), visible, sortableChildren
-//     ├─ art  (Sprite | Text)          zIndex 0, inserted first
-//     └─ child xform, child xform, …   zIndex = child.layer
-//
 // `xform` carries only what inherits, `art` only what does not, and a child xform is a SIBLING of
-// `art` — so a child is structurally incapable of picking up its parent's scale, rotation, alpha or
-// tint. Nesting children under `art` silently restores full inheritance.
-//
-// `sortableChildren` is load-bearing, because `[art, ...children]` is the list needing order:
-// Pixi's sort is stable, so a child at the default layer draws in front of its parent's art.
+// `art` — nesting children under `art` silently restores full inheritance.
+// `sortableChildren` is load-bearing: Pixi's stable sort draws a default-layer child over art.
 
 import { Container, Sprite, Text, TextStyle as PixiTextStyle } from 'pixi.js';
 import type { Texture } from 'pixi.js';
@@ -47,12 +38,7 @@ export function createNodeObjects(
     return { xform, art };
 }
 
-/**
- * Attaches a node's xform under a parent's xform, or under a surface root when it has no parent.
- *
- * `zIndex` is the node's `layer`: a surface-wide ordinal for a root, sibling order once parented,
- * so a child cannot escape its parent's layer.
- */
+/** Attaches a node's xform under its parent's, or a surface root; `zIndex` is its `layer`. */
 export function attachXform(objects: NodeObjects, parent: Container, layer: number): void {
     objects.xform.zIndex = layer;
     parent.addChild(objects.xform);

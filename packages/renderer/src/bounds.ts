@@ -1,10 +1,5 @@
-// Pure, and everything takes plain numbers, so the per-frame cull scan and the editor's
-// `worldBoundsOf` share one implementation without either store depending on the other.
-//
-// No ancestor walk anywhere: rotation and scale stop at the node that declares them, so a node's
-// AABB needs only its own size, scale, anchor and rotation plus its resolved world position —
-// which is what makes culling a flat typed-array scan rather than a tree traversal.
-//
+// No ancestor walk anywhere: rotation and scale stop at the node that declares them, so an AABB
+// needs only its own size, scale, anchor and rotation plus its resolved world position.
 // Every rect here is world space, y-up: `top > bottom`.
 
 import type { Bounds, Size } from '@platform/math';
@@ -28,13 +23,7 @@ function quarterTurn(degrees: number): number {
     return ((quarters % 4) + 4) % 4;
 }
 
-/**
- * `cos` of an angle in degrees, exact at multiples of 90.
- *
- * `90 * DEG2RAD` is not π/2, so `cos` of it is 6.1e-17 rather than 0 however exact the cosine is.
- * Without these arms that residue leaks into every edge of a quarter-turned AABB — the commonest
- * authored rotation.
- */
+/** `cos` of an angle in degrees, exact at multiples of 90: `cos(90 * DEG2RAD)` is 6.1e-17. */
 function cosDeg(degrees: number): number {
     switch (quarterTurn(degrees)) {
         case 0:
@@ -65,12 +54,8 @@ function sinDeg(degrees: number): number {
 }
 
 /**
- * Local AABB of a sprite, y-up, relative to the node's own origin: the size scaled per-axis,
- * offset so the 0..1 `anchor` sits at the origin.
- *
- * `anchor` is y-down inside the art, matching a texture's row order, while the rect is y-up —
- * hence the sign flip on the vertical pair. A negative scale mirrors the rect about the origin,
- * and the result is renormalized so `left <= right` and `bottom <= top` always hold.
+ * Local AABB of a sprite, y-up, relative to the node's origin: size scaled per axis, offset so
+ * the 0..1 `anchor` sits at the origin. `anchor` is y-down inside the art, hence the sign flip.
  */
 export function spriteLocalBounds(
     size: Size,
@@ -102,12 +87,7 @@ export function emptyLocalBounds(out: Bounds = bounds()): Bounds {
     return boundsSet(out, 0, 0, 0, 0);
 }
 
-/**
- * Exact half-extents of the AABB of a rect of half-extents (hx, hy) rotated by `degrees`.
- *
- * The absolute values are why the rotation's sign and quadrant drop out: -45, 45 and 135 all
- * expand identically, and a flipped rect's negative half-extents read as magnitudes.
- */
+/** Exact half-extents of a rect of half-extents (hx, hy) rotated by `degrees`; sign drops out. */
 export function rotatedHalfExtents(
     hx: number,
     hy: number,
@@ -120,12 +100,7 @@ export function rotatedHalfExtents(
     return { hx: c * ax + s * ay, hy: s * ax + c * ay };
 }
 
-/**
- * Local bounds rotated about the node origin, then translated to (worldX, worldY). y-up.
- *
- * The pivot is the node's origin — its anchor point — not the rect's center, so an off-center
- * rect has its center swept around the origin as well as its extents expanded.
- */
+/** Local bounds rotated about the node origin, then translated to (worldX, worldY). y-up. */
 export function worldAabb(
     local: Bounds,
     degrees: number,
@@ -169,11 +144,7 @@ export function worldAabb(
 
 /**
  * `true` when the node should be drawn: its world AABB overlaps the margin-expanded viewport.
- *
- * Takes no scale or zoom so that it cannot apply one — the viewport arrives in world coords, so
- * `cullMargin` means the same slack at every zoom. Touching edges count as overlapping, since a
- * sprite flush against the viewport edge contributes a visible pixel column. Which kinds are
- * exempt from culling is the caller's concern; this answers only the geometric question.
+ * Takes no scale or zoom, so `cullMargin` means the same slack at every zoom. Edges count.
  */
 export function isVisibleInViewport(
     worldBounds: Bounds,

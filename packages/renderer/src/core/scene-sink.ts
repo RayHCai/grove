@@ -1,10 +1,4 @@
 // The seam between the backend-independent core and a backend's display objects.
-//
-// Everything a backend must supply is here, and it is deliberately small: create/reparent/destroy
-// a node's objects, push its local values, toggle its art, and answer how big it is. Everything
-// else — the stores, validation, hierarchy, projection, bounds, culling — lives in
-// `renderer-core.ts` in ONE copy.
-//
 // Indices, not `NodeId`s: handle validation already happened in the core.
 
 import type { Bounds, Size } from '@platform/math';
@@ -14,11 +8,7 @@ import type { NodeRecord } from '../node-store.js';
 /** `parentIndex` when a node is a root of its surface. */
 export const NO_PARENT = -1;
 
-/**
- * What a backend implements. The core calls these; it never touches a display object itself.
- *
- * Every method is allowed to be a no-op — that is exactly what the headless backend does.
- */
+/** What a backend implements; the core never touches a display object. Every method may no-op. */
 export interface SceneSink {
     /**
      * Creates the display objects for a node and attaches them under `parentIndex`, or under the
@@ -29,12 +19,7 @@ export interface SceneSink {
     /** Moves a node's objects under a new parent, or its surface root for {@link NO_PARENT}. */
     reparent(index: number, record: NodeRecord, parentIndex: number): void;
 
-    /**
-     * Destroys the objects for a subtree, root first.
-     *
-     * One array rather than a root plus a copied tail: a backend with a nested tree gets the cascade
-     * for free from `subtree[0]` and walks the rest only to drop bookkeeping.
-     */
+    /** Destroys the objects for a subtree, root first; a nested tree cascades from `subtree[0]`. */
     destroySubtree(subtree: readonly number[]): void;
 
     /** Pushes a node's local transform values. Called once per flush-dirty node. */
@@ -52,12 +37,7 @@ export interface SceneSink {
     /** A node's draw order within its parent changed. */
     setLayer(index: number, layer: number): void;
 
-    /**
-     * The texture or measured size behind a node, for bounds and culling.
-     *
-     * The one genuinely backend-specific input to the shared math: a GPU backend measures text
-     * with a font, a headless one cannot.
-     */
+    /** The texture or measured size behind a node; the one backend-specific input to the math. */
     sizeOf(index: number, record: NodeRecord): Size;
 
     /** Applies the camera and the letterbox mask to the surface roots. */

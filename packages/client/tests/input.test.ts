@@ -1,6 +1,3 @@
-// Input: edges only, axes on meaningful change, `ackSeq` pruning on RESOLVED, and the
-// fold-at-prune horizon that makes a replay sufficient.
-
 import { describe, expect, it } from 'vitest';
 import { createActionStates } from '@platform/core';
 import type { InputFrame } from '@platform/protocol';
@@ -194,7 +191,8 @@ describe('focus loss releases everything', () => {
     });
 
     it('forgetSentValues keeps the held set, so a key held across a resync still releases', () => {
-        // Clearing it would swallow the release edge and leave the action held on the server forever.
+        // Clearing it would swallow the release edge and leave the action held on the server
+        // forever.
         const t = table([{ kind: 'button', code: 'keys:KeyW', action: 'jump' }]);
         t.resolve({ kind: 'key', code: 'keys:KeyW', down: true }, VIEWPORT);
         t.forgetSentValues();
@@ -310,16 +308,16 @@ describe('replay sufficiency', () => {
 
         ring.ack(50); // acked through the frame at tick 100
 
-        // `since(100)` is `[release@105]`, and a "last edge per action" map would say `release@105`.
-        // NEITHER says X was held at 100 — the horizon fold is what does.
+        // `since(100)` is `[release@105]`, and a "last edge per action" map would say
+        // `release@105`. NEITHER says X was held at 100 — the horizon fold is what does.
         expect(ring.since(100).map((f) => f.tick)).toEqual([105]);
         expect(ring.heldAtHorizon.held('X')).toBe(true);
     });
 
     it('the horizon is valid across an idle gap, as an INTERVAL not an equality', () => {
         // `horizonTick` is the last PRUNED frame's tick, while prediction restores to the acked
-        // ENVELOPE's tick; across an input-idle gap those differ, so an equality assertion would fail
-        // for a reason that looks like a bug in the fold.
+        // ENVELOPE's tick; across an input-idle gap those differ, so an equality assertion would
+        // fail for a reason that looks like a bug in the fold.
         const ring = new InputRing();
         ring.push(frame(50, 0, [{ action: 'X', on: 'press' }]), 5, 0);
         ring.push(frame(80, 1, []), 5, 0);
@@ -327,7 +325,8 @@ describe('replay sufficiency', () => {
 
         expect(ring.horizonTick).toBe(50);
         expect(ring.horizonValidUntil).toBe(80);
-        // Sound for ANY tick in [50, 80): an edge in the gap would have been pruned too and folded in.
+        // Sound for ANY tick in [50, 80): an edge in the gap would have been pruned too and folded
+        // in.
         for (const tick of [50, 60, 79]) {
             expect(tick).toBeGreaterThanOrEqual(ring.horizonTick);
             expect(tick).toBeLessThan(ring.horizonValidUntil);

@@ -1,6 +1,3 @@
-// The handshake and the session, end to end: a real `GameClient` over a real
-// `loopbackPair` against the `FakeServer`, with no wall-clock, no socket and no canvas.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
 import { defined } from '@platform/math';
@@ -32,12 +29,7 @@ function settle(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-/**
- * A `BundleSource` whose fetch a test opens by hand.
- *
- * Gated rather than immediate, because the whole point of the pre-live state is what happens WHILE
- * the fetch is outstanding — a source that resolved at once would never exercise it.
- */
+/** A `BundleSource` whose fetch a test opens by hand, to exercise the pre-live state. */
 class ScriptedBundle {
     readonly fetched: string[] = [];
     evaluated = 0;
@@ -82,23 +74,11 @@ interface Harness {
     device: ScriptedInputDevice;
     renderer: IRenderer;
     pair: LoopbackPair;
-    /**
-     * Runs `n` display frames, advancing the scripted clock and the server's tick one each, and
-     * BROADCASTING a state envelope every send-tick at the server's own tick — which is what the real
-     * server does unconditionally.
-     *
-     * Both are load-bearing for these tests. An envelope carrying a tick AHEAD of the client's counter
-     * correctly trips the behind-check and resyncs, so a harness that invented tick numbers would test
-     * the resync path everywhere by accident; and a harness that sent nothing would reach `stalled`
-     * after a second, which refuses input.
-     */
+    /** Runs `n` display frames, advancing the scripted clock and broadcasting every send-tick. */
     run(n?: number): void;
     /** Frames with NO server traffic, for the drought that raises `stalled`. */
     runSilent(n?: number): void;
-    /**
-     * Frames where the server broadcasts but NEVER acks — the connection is evidently alive while the
-     * ring only grows, which is what separates occupancy from evidence about the connection.
-     */
+    /** Frames where the server broadcasts but NEVER acks: the ring grows while the link lives. */
     runSilentWithTraffic(n?: number): void;
     /** Delivers in-flight frames without advancing anything — loopback is one deliver() late. */
     flush(): void;
@@ -137,10 +117,8 @@ async function harness(
 
     const simRate = opts.simRate ?? 60;
     const everySendTick = Math.round(simRate / (opts.sendRate ?? 20));
-    // The server ticks at ITS OWN simRate, not once per display frame: at 20 Hz against a 60 fps frame
-    // source that is every third frame. A peer that ticked per frame would run 3× the rate it declared,
-    // outpacing the client's counter by construction and resyncing forever — a harness artifact that
-    // looks exactly like a clock bug.
+    // The server ticks at ITS OWN simRate, not once per display frame: at 20 Hz against 60 fps
+    // that is every third frame. Ticking per frame would outpace the counter and resync forever.
     let frameCount = 0;
     const serverFramesPerTick = Math.round(60 / simRate);
     const advanceServer = (): boolean => {
@@ -193,7 +171,7 @@ async function harness(
     return h;
 }
 
-/** Drives frames until the session is `live`, or throws — so a test never asserts on a half-join. */
+/** Drives frames until the session is `live`, or throws, so no test asserts on a half-join. */
 function untilLive(h: Harness, limit = 20): void {
     for (let i = 0; i < limit && h.client.state !== 'live'; i++) h.run(1);
 }
@@ -209,8 +187,8 @@ describe('the join sequence', () => {
     });
 
     it('registers handlers before sending, so the welcome is never lost to wiring order', async () => {
-        // Asserted rather than assumed: transport retains frames for a handler that has not registered,
-        // and the join path must not depend on that rule for ordering the client controls.
+        // Asserted rather than assumed: transport retains frames for an unregistered handler, and
+        // the join path must not depend on that.
         const h = await harness();
         h.run(3);
         expect(h.client.state).toBe('live');
@@ -231,8 +209,8 @@ describe('the join sequence', () => {
         const h = await harness({ snapshotTick: 900 });
         untilLive(h);
         expect(h.client.state).toBe('live');
-        // The tick the counter seeds from and the tick its initial world describes cannot disagree, so
-        // the mirror is at the server's tick and the counter LEADS it — the only sound statement.
+        // The counter's seed tick and its initial world cannot disagree, so the mirror is at the
+        // server's tick and the counter leads it.
         expect(h.client.mirror!.depictedTick).toBeGreaterThanOrEqual(900);
         expect(h.client.stats().localTick).toBeGreaterThanOrEqual(h.client.mirror!.depictedTick);
     });
@@ -258,8 +236,8 @@ describe('the join sequence', () => {
     });
 
     it('fails a join the server never answers, rather than waiting for the life of the tab', async () => {
-        // The server closes an unjoined connection on its own deadline; with no symmetric one here a
-        // peer that accepts the socket and says nothing leaves a spinner up forever.
+        // The server closes an unjoined connection on its own deadline; without a symmetric one a
+        // silent peer leaves a spinner up forever.
         const h = await harness({ ignoreJoin: true });
         h.runSilent(3);
         expect(h.client.state).toBe('connecting');
@@ -270,8 +248,8 @@ describe('the join sequence', () => {
     });
 
     it('measures a NON-ZERO lead in loopback, so the lead loop executes in local mode', async () => {
-        // Loopback delivers server→client one tick late by construction, so a local run has real
-        // latency, a real lead, and every line of the lead loop executes in a single-player playtest.
+        // Loopback delivers server→client one tick late, so a local run has real latency and a real
+        // lead, exercising the lead loop in a single-player playtest.
         const h = await harness();
         h.run(4);
         expect(h.client.stats().rttSeconds).toBeGreaterThan(0);
@@ -304,8 +282,8 @@ describe('a snapshot too big for one frame', () => {
         });
         h.run(3);
 
-        // A world missing entities the server believes it sent reads later as a mirror bug rather than
-        // as the truncated join it is, so it fails here and names the peer.
+        // A world missing entities the server believes it sent reads later as a mirror bug, so it
+        // fails here and names the peer.
         expect(h.client.state).toBe('failed');
         expect(h.client.lifecycle.failure?.kind).toBe('peer');
         expect(h.client.mirror).toBeUndefined();
@@ -325,8 +303,7 @@ describe('a snapshot too big for one frame', () => {
         h.run(3);
 
         expect(h.client.stats().snapshotChunksDropped).toBeGreaterThan(0);
-        // And what is left no longer adds up to the count the `Welcome` names, so the join is refused
-        // rather than opening a session on the half of the world that fitted.
+        // What is left no longer matches the count the `Welcome` names, so the join is refused.
         expect(h.client.state).toBe('failed');
         expect(h.client.lifecycle.failure?.kind).toBe('peer');
     });
@@ -469,8 +446,8 @@ describe('the script bundle is verified before it is run', () => {
     });
 
     it('fails as `peer` when the welcome’s world throws after the load, not wedging in `loading`', async () => {
-        // The same malformed snapshot fails cleanly through the drain's catch; arriving down the load
-        // path it escapes into a promise, and the session sits in `loading` with nothing left to end it.
+        // Down the load path a malformed snapshot escapes into a promise, leaving `loading` set
+        // with nothing left to end it.
         const bundle = new ScriptedBundle(named.hash);
         const h = await harness(
             { bundle: named, entities: [{ netId: 9, template: 'x' } as never] },
@@ -562,8 +539,8 @@ describe('a refusal is distinguishable from a drop', () => {
     });
 
     it('phrases the refusal when the close that caused it lands between frames', async () => {
-        // Bare delivers, never a frame's pump: a real socket raises the message and the close as two
-        // events of its own, so nothing is guaranteed to drain the inbox between them.
+        // Bare delivers, never a frame's pump: a real socket raises message and close separately,
+        // so nothing guarantees a drain between them.
         const h = await harness({ reject: 'full' });
         h.flush();
         h.flush();
@@ -594,7 +571,7 @@ describe('a refusal is distinguishable from a drop', () => {
         h.run(2);
         expect(h.client.state).toBe('failed');
 
-        // The frame source is stopped, so the close crosses on a bare deliver rather than on a frame.
+        // The frame source is stopped, so the close crosses on a bare deliver, not on a frame.
         h.flush();
         expect(h.server.closed).toBe(true);
     });
@@ -634,9 +611,7 @@ describe('the steady state', () => {
         const local = h.client.mirror!.index.local(1 as never)!;
 
         // The transform arrives BEFORE its counterpart — the WebTransport case, where the two ride
-        // different streams and FIFO no longer orders them. The server's clock is NOT touched by hand:
-        // in loopback the client's lead is only a tick or two, so a hand-advanced server tick eats it
-        // and correctly trips the behind-check, which would test the resync path instead of the hold.
+        // different streams and FIFO no longer orders them. The server's clock is untouched here.
         h.server.sendTransforms([transformDiff(1, { posX: 42 })], h.server.tick + 1);
         h.runSilent(1);
         // Held, not applied: the join key is an equality, so it waits for its counterpart.
@@ -789,9 +764,9 @@ describe('stalling refuses input', () => {
         h.flush();
         expect(h.server.inputs.length).toBe(before);
 
-        // Recovery is the next ordinary envelope, at the server's own (now much later) tick — so the
-        // the behind-check trips too, and the session recovers through a resync rather than straight to
-        // `live`. That is the designed response to a counter that has fallen behind.
+        // Recovery is the next ordinary envelope, at the server's much later tick, so the
+        // behind-check trips and the session recovers through a resync rather than straight to
+        // `live`.
         h.run(4);
         expect(['live', 'resyncing']).toContain(h.client.state);
         untilLive(h, 40);
@@ -826,9 +801,9 @@ describe('stalling refuses input', () => {
             { bindings: [{ kind: 'axis', code: 'gamepad:x', action: 'moveX' }] },
         );
         untilLive(h);
-        // A burst filling the ring past capacity, with the server still broadcasting but never acking.
-        // Occupancy alone must not refuse input; only ACK STARVATION does, and that is asserted
-        // separately below with the deadline actually elapsed.
+        // A burst filling the ring past capacity, with the server still broadcasting but never
+        // acking. Occupancy alone must not refuse input; only ACK STARVATION does, and that is
+        // asserted separately below with the deadline actually elapsed.
         for (let i = 0; i < RING_TICKS + 10; i++) {
             h.device.emit({
                 kind: 'axis',
@@ -851,14 +826,15 @@ describe('stalling refuses input', () => {
         h.device.emit({ kind: 'axis', code: 'gamepad:x', value: 1 });
         h.runSilentWithTraffic(1);
         expect(h.client.ring.size).toBeGreaterThan(0);
-        // Live traffic throughout, so the drought trigger cannot be what fires; only the frozen ack can.
+        // Live traffic throughout, so the drought trigger cannot be what fires; only the frozen ack
+        // can.
         h.runSilentWithTraffic(ACK_STALL_TICKS + 10);
         expect(h.client.state).toBe('stalled');
     });
 
     it('does NOT recover from ack starvation on traffic that did not advance the ack', async () => {
-        // The server sending is not evidence that it is PROCESSING. Recovering here would accept input
-        // again into a ring nothing drains, in a world that is still frozen.
+        // The server sending is not evidence that it is PROCESSING. Recovering here would accept
+        // input again into a ring nothing drains, in a world that is still frozen.
         const h = await harness(
             {},
             { bindings: [{ kind: 'axis', code: 'gamepad:x', action: 'moveX' }] },
@@ -879,21 +855,21 @@ describe('stalling refuses input', () => {
     });
 
     it('counts the ack deadline in TICKS, so a fast display does not stall a slow sim early', async () => {
-        // A frame-counting deadline fires 3× early at 20 Hz — the tick-versus-frame unit confusion, in
-        // the one place it decides whether controls go dead.
+        // A frame-counting deadline fires 3× early at 20 Hz — the tick-versus-frame unit confusion,
+        // in the one place it decides whether controls go dead.
         const h = await harness(
             { simRate: 20, sendRate: 20 },
             { bindings: [{ kind: 'axis', code: 'gamepad:x', action: 'moveX' }] },
         );
         untilLive(h);
         h.device.emit({ kind: 'axis', code: 'gamepad:x', value: 1 });
-        // At simRate 20 against a 60 fps frame source the counter advances every third frame, so the
-        // edge is not stamped until one has elapsed.
+        // At simRate 20 against a 60 fps frame source the counter advances every third frame, so
+        // the edge is not stamped until one has elapsed.
         h.runSilentWithTraffic(4);
         expect(h.client.ring.size).toBeGreaterThan(0);
 
-        // ACK_STALL_TICKS of a 20 Hz sim is 3 s — far longer than the same count of 60 fps frames, so a
-        // frame-counting implementation is already stalled here.
+        // ACK_STALL_TICKS of a 20 Hz sim is 3 s — far longer than the same count of 60 fps frames,
+        // so a frame-counting implementation is already stalled here.
         h.runSilentWithTraffic(ACK_STALL_TICKS + 5);
         expect(h.client.state).toBe('live');
 
@@ -936,10 +912,9 @@ describe('resync', () => {
     });
 
     it('does NOT resync a healthy session, where the lead is only a tick or two', async () => {
-        // The invariant is checked once per frame AFTER the counter advances, not inside apply: in
-        // loopback the lead is structurally ~2 ticks, so a check at drain time — before this frame's own
-        // tick is credited — reads one tick short on ordinary accumulator phase drift and resyncs a
-        // connection that is working perfectly. Measured: it fired within the first ten frames.
+        // Checked once per frame AFTER the counter advances, not inside apply: at drain time it
+        // reads one tick short on ordinary accumulator phase drift and resyncs a healthy
+        // connection.
         const h = await harness({ snapshotTick: 0 });
         untilLive(h);
         h.run(300); // five seconds of ordinary play
@@ -951,9 +926,9 @@ describe('resync', () => {
     });
 
     it('does not resync at 20 Hz either, where the one-tick lead floor has least room', async () => {
-        // The thinnest margin in the system: `LEAD_MIN` is one tick whatever a tick is worth, and at
-        // 20 Hz the counter advances only every third display frame — so any phase-drift sensitivity in
-        // the invariant check shows up here first.
+        // The thinnest margin in the system: `LEAD_MIN` is one tick whatever a tick is worth, and
+        // at 20 Hz the counter advances only every third display frame — so any phase-drift
+        // sensitivity in the invariant check shows up here first.
         const h = await harness({ simRate: 20, sendRate: 20, snapshotTick: 0 });
         untilLive(h, 40);
         h.run(300);
@@ -962,8 +937,8 @@ describe('resync', () => {
     });
 
     it('holds the invariant across a slow link, where both terms degrade together', async () => {
-        // Latency-independent: under a slow path `depictedTick` is stale by the downlink, which is the
-        // same delay the headroom deficit reflects — so a sign test needs no threshold.
+        // Latency-independent: under a slow path `depictedTick` is stale by the downlink, which is
+        // the same delay the headroom deficit reflects — so a sign test needs no threshold.
         const h = await harness({ snapshotTick: 0 }, { latency: 8 });
         untilLive(h, 60);
         h.run(300);
@@ -972,8 +947,9 @@ describe('resync', () => {
     });
 
     it('re-asserts what the player is holding, since the new session holds nothing', async () => {
-        // The server's fresh session has no record of the press, and edges-only means no later event
-        // would ever mention it: the avatar would stand still with the key down until it is released.
+        // The server's fresh session has no record of the press, and edges-only means no later
+        // event would ever mention it: the avatar would stand still with the key down until it is
+        // released.
         const h = await harness(
             { snapshotTick: 0 },
             { bindings: [{ kind: 'button', code: 'keys:KeyW', action: 'jump' }] },
@@ -1082,7 +1058,8 @@ describe('an untrusted frame ends up as state, never as a throw', () => {
 
     it('fails as `peer` when an op is malformed deeper than the boundary checks reach', async () => {
         // The backstop: a spawn with no transform throws inside the mirror, and without a catch it
-        // unwinds through `frame()` into the frame source — ending the session with no state to show.
+        // unwinds through `frame()` into the frame source — ending the session with no state to
+        // show.
         const h = await harness();
         untilLive(h);
         h.server.sendRaw({
