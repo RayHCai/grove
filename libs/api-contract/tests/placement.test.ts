@@ -7,12 +7,14 @@ const HOST_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
 const INSTANCE_ID = '9c858901-8a57-4791-81fe-4c455b099bc9';
 const SESSION_ID = '2ab5f56f-2b3a-4b1c-9c96-6a3a9ec13b8e';
 const GAME_ID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+const INCARNATION = '2b1c6f70-9d3a-4a21-8f55-0c9f7a1d4e88';
 
 const placement = {
     hostId: HOST_ID,
     instanceId: INSTANCE_ID,
     sessionId: SESSION_ID,
     serverUrl: 'wss://use1-b7.grove.example/session',
+    revision: 7,
 };
 
 const report = {
@@ -22,6 +24,7 @@ const report = {
     state: 'healthy',
     players: 4,
     uptimeSeconds: 91,
+    revision: 7,
     port: 41337,
 };
 
@@ -54,6 +57,14 @@ describe('an instance report', () => {
         expect(InstanceReport.safeParse({ ...report, port: 0 }).success).toBe(false);
         expect(InstanceReport.safeParse({ ...report, port: 65_536 }).success).toBe(false);
     });
+
+    it('names the version the world is running, which is what makes it joinable', () => {
+        // Without it the router cannot tell a world on the version a joiner fetched from one still
+        // draining on the last, and a browser sent to the wrong one holds none of its scripts.
+        const { revision: _revision, ...withoutRevision } = report;
+        expect(InstanceReport.safeParse(withoutRevision).success).toBe(false);
+        expect(InstanceReport.safeParse({ ...report, revision: 0 }).success).toBe(false);
+    });
 });
 
 describe('a heartbeat', () => {
@@ -76,6 +87,7 @@ describe('a heartbeat', () => {
             agentPort: 4004,
             capacity: { ...capacity, runningInstances: 0 },
             instances: [],
+            incarnation: INCARNATION,
             reportedAt: '2026-09-05T12:00:00.000Z',
         };
         expect(HostHeartbeat.parse(beat).instances).toEqual([]);
@@ -90,6 +102,7 @@ describe('a heartbeat', () => {
             agentPort: 4004,
             capacity,
             instances: [report],
+            incarnation: INCARNATION,
             reportedAt: '2026-09-05T12:00:00.000Z',
         };
         expect(HostHeartbeat.parse(beat).agentPort).toBe(4004);
@@ -104,6 +117,7 @@ describe('a heartbeat', () => {
             agentPort: 4004,
             capacity,
             instances: [{ ...report, state: 'paused' }],
+            incarnation: INCARNATION,
             reportedAt: '2026-09-05T12:00:00.000Z',
         };
         expect(HostHeartbeat.safeParse(beat).success).toBe(false);

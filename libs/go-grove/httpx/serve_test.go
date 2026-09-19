@@ -204,8 +204,8 @@ func TestReadyBoundsAProbeThatHangs(t *testing.T) {
 	}
 }
 
-// A deadline the listener does not actually carry bounds nothing, and every one of these is invisible
-// at runtime until the day it is needed.
+// A deadline the listener does not actually carry bounds nothing, and every one of these is
+// invisible at runtime until the day it is needed.
 func TestTheListenerCarriesItsDeadlines(t *testing.T) {
 	srv := newServer(http.HandlerFunc(Health), discardLogger())
 
@@ -226,15 +226,16 @@ func TestTheListenerCarriesItsDeadlines(t *testing.T) {
 	if srv.MaxHeaderBytes != maxHeaderBytes {
 		t.Errorf("MaxHeaderBytes: got %d, want %d", srv.MaxHeaderBytes, maxHeaderBytes)
 	}
-	// A listener that logged its own errors to stderr would bypass the handler every other line goes to.
+	// A listener that logged its own errors to stderr would bypass the handler every other line goes
+	// to.
 	if srv.ErrorLog == nil {
 		t.Error("ErrorLog: got nil, want the slog bridge")
 	}
 }
 
 // The four deadlines are one setting, and each is wrong on its own: a write bound under the header
-// bound cuts off a response nobody was slow to ask for, and an idle bound under the ninety seconds a
-// Go client holds a connection makes every caller race a close it cannot see coming.
+// bound cuts off a response nobody was slow to ask for, and an idle bound under the ninety seconds
+// a Go client holds a connection makes every caller race a close it cannot see coming.
 func TestTheListenerDeadlinesHoldTogether(t *testing.T) {
 	if writeTimeout <= readHeaderTimeout {
 		t.Errorf("writeTimeout %s must exceed readHeaderTimeout %s", writeTimeout, readHeaderTimeout)

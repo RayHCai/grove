@@ -1,4 +1,5 @@
-// Package env reads the variables one service is configured with, and reports every problem at once.
+// Package env reads the variables one service is configured with, and reports every problem at
+// once.
 package env
 
 import (
@@ -83,7 +84,8 @@ func (r *Reader) Port(name string, fallback int) int {
 	return port
 }
 
-// Duration returns the variable parsed the way Go writes one — "30s", "5m" — or fallback when unset.
+// Duration returns the variable parsed the way Go writes one — "30s", "5m" — or fallback when
+// unset.
 func (r *Reader) Duration(name string, fallback time.Duration) time.Duration {
 	value, ok := r.lookup(name)
 	if !ok {
@@ -111,7 +113,8 @@ func (r *Reader) Secret(name string, minLen int) []byte {
 	return []byte(value)
 }
 
-// URL returns the variable, required to be absolute — which is all `z.url()` asks on the other side.
+// URL returns the variable, required to be absolute — which is all `z.url()` asks on the other
+// side.
 func (r *Reader) URL(name string) string {
 	value, ok := r.lookup(name)
 	if !ok {

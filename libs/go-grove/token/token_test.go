@@ -10,11 +10,9 @@ import (
 	"testing"
 )
 
-// The vector libs/api-contract/src/session-token.ts actually produced, read from the file the Rust
-// verifier reads too.
-//
-// This is the drift test the whole package exists for: three codecs are one wire format written
-// three times, and a change to any one's bytes must fail here rather than at a join.
+// The vector session-token.ts actually produced, read from the file the Rust verifier reads too.
+// Three codecs are one wire format written three times, and a change to any one's bytes must
+// fail here rather than at a join.
 const vectorFile = "../../api-contract/fixtures/session-token.json"
 
 type vectorCase struct {
@@ -166,7 +164,8 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// A claim added on the minting side must not take every verifier offline at the deploy that adds it.
+// A claim added on the minting side must not take every verifier offline at the deploy that adds
+// it.
 func TestVerifyIgnoresAnUnknownClaim(t *testing.T) {
 	set := vectors(t)
 

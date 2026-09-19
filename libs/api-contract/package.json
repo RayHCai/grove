@@ -3,11 +3,15 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "The request and response shapes both services validate against and every caller parses with.",
+    "description": "The request and response shapes both services validate against and every caller parses with; the token signer is behind ./tokens, so a browser taking the shapes takes no node:crypto with them.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./tokens": {
+            "types": "./dist/session-token.d.ts",
+            "import": "./dist/session-token.js"
         }
     },
     "main": "./dist/index.js",
