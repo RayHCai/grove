@@ -5,8 +5,7 @@ export default defineConfig({
     plugins: [react()],
     server: {
         port: 5176,
-        // Fail loudly rather than silently picking another port — an app on an unexpected port is
-        // worse than one that did not start, because the others are configured to dial this one.
+        // Fail loudly rather than silently picking another port: the other apps dial this one.
         strictPort: true,
     },
     build: {
