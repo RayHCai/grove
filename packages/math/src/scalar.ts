@@ -7,12 +7,7 @@ export const DEG2RAD = Math.PI / 180;
 /** Degrees per radian. */
 export const RAD2DEG = 180 / Math.PI;
 
-/**
- * Constrains `value` to `[min, max]`.
- *
- * A reversed range is normalized rather than returning `NaN`, so a caller that computed
- * its bounds gets a defined answer.
- */
+/** Constrains `value` to `[min, max]`; a reversed range is normalized rather than giving `NaN`. */
 export function clamp(value: number, min: number, max: number): number {
     const lo = min <= max ? min : max;
     const hi = min <= max ? max : min;

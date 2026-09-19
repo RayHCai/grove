@@ -1,11 +1,5 @@
-// Accuracy tests for the deterministic transcendentals.
-//
-// Only one of this module's two promises is asserted here: that the replacement is close enough to
-// the built-in to be usable. Every bound below is a number rather than a description, because a
-// mistyped coefficient produces plausible values everywhere and is invisible without one to fail
-// against. The load-bearing promise — that a result is the same float64 on every machine — cannot
-// be measured against `Math.*` at all, since ECMA-262 lets each engine approximate those its own
-// way; the golden bit vectors are what pin it.
+// Only accuracy is asserted here; the bit-for-bit promise cannot be measured against `Math.*`,
+// which ECMA-262 lets each engine approximate its own way. The golden vectors pin that.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -35,11 +29,8 @@ import {
 import * as math from '../src/index.js';
 
 /**
- * The accuracy bound every function here is held to, as a multiple of the value's own magnitude.
- *
- * 1e-13 rather than a double's 2.2e-16: these are polynomial approximations, and the last two or
- * three bits are what is being traded for reproducibility. A regression that loses more than that
- * is a broken coefficient rather than a rounding difference.
+ * The accuracy bound every function here is held to, relative to the value's own magnitude.
+ * 1e-13 rather than 2.2e-16: the last two or three bits are traded for reproducibility.
  */
 const TOLERANCE = 1e-13;
 
@@ -81,7 +72,8 @@ function agrees(
     tolerance = TOLERANCE,
 ): void {
     const { error, at } = worst(samples, actual, expected);
-    // The failure message carries the input, because a bound this tight is only actionable with one.
+    // The failure message carries the input, because a bound this tight is only actionable with
+    // one.
     expect({ error: error <= tolerance, at }).toStrictEqual({ error: true, at });
     expect(error).toBeLessThanOrEqual(tolerance);
 }

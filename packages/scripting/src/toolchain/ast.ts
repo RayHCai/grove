@@ -30,10 +30,8 @@ export function nodeName(value: unknown): string | undefined {
 }
 
 /**
- * Every child that is evaluated at run time, paired with the key it hangs off.
- *
- * Type syntax is dropped, and so are the identifier positions that name something rather than read
- * it — a member's `.property`, an object key, an import or export specifier, a label.
+ * Every child evaluated at run time, paired with the key it hangs off.
+ * Type syntax is dropped, and so are identifier positions that name rather than read.
  */
 export function forEachChild(node: Node, visit: (child: Node, key: string) => void): void {
     if (node.type.startsWith('TS')) {

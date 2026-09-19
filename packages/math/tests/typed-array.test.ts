@@ -1,9 +1,5 @@
-// Contract tests for typed-array growth.
-//
-// The subtle one is `fill`: it defaults the NEW tail only. A `fill` that started at 0 would erase
-// the copied values with a plausible-looking default — scale 1, or the -1 the tree sentinels use —
-// and every downstream read would still look sane, so each case below seeds the source with values
-// that differ from the fill.
+// `fill` defaults the NEW tail only: starting at 0 would erase copied values with a plausible
+// default, so each case seeds the source with values that differ from the fill.
 
 import { describe, it, expect } from 'vitest';
 import { growF64, growI32, growU8, grownCapacity } from '../src/typed-array.js';

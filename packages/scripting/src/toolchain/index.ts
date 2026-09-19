@@ -31,12 +31,7 @@ export interface BuildOptions<Id extends string = string> {
     readonly baseModules?: readonly string[] | undefined;
 }
 
-/**
- * The whole pipeline: analyse, refuse, lower, link.
- *
- * The refusal comes before the compiler runs, so a determinism diagnostic points at the creator's
- * own line rather than at whatever the lowering turned it into.
- */
+/** The whole pipeline: analyse, refuse, lower, link. Refusal comes before the compiler. */
 export async function buildScriptBundle<Id extends string = string>(
     options: BuildOptions<Id>,
 ): Promise<ScriptBundle<Id>> {

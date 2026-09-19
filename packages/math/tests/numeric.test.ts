@@ -1,9 +1,5 @@
-// Contract tests for the numeric fallbacks.
-//
-// These guard values that reach the renderer from outside — a canvas that reports 0 during a
-// resize, a camera zoom left NaN by a bad divide. `finiteOr` must keep a legitimate negative or
-// zero coordinate, and `positiveOr` must reject 0 and -0, which is the whole difference between
-// them.
+// `finiteOr` must keep a legitimate negative or zero, and `positiveOr` must reject 0 and -0 —
+// which is the whole difference between them.
 
 import { describe, it, expect } from 'vitest';
 import { finiteOr, positiveOr } from '../src/numeric.js';

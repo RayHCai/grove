@@ -22,7 +22,7 @@ analyse source  ->  refuse  ->  tsc lowers  ->  rolldown links
 
 The refusal comes before the compiler so a diagnostic points at the creator's own line. The linker
 runs after it so it only ever sees lowered output. `apps/playground`'s `tsconfig.server.json` and
-`packages/server`'s decorated fixtures are the same split, done by hand.
+`packages/sim`'s decorated testkit fixtures are the same split, done by hand.
 
 ## Two entry points
 

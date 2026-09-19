@@ -80,7 +80,8 @@ describe('the content hash', () => {
         expect(first.server.code).toBe(second.server.code);
         expect(first.server.hash).toBe(second.server.hash);
         expect(first.client.hash).toBe(second.client.hash);
-        // What a handshake compares: the two sides differ by construction, the synced half must not.
+        // What a handshake compares: the two sides differ by construction, the synced half must
+        // not.
         expect(first.syncedHash).toBe(second.syncedHash);
     });
 

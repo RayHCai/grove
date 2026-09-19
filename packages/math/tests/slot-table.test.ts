@@ -1,10 +1,6 @@
-// Contract tests for the slot table.
-//
-// Four properties carry the whole design and each fails silently when broken: a released handle
-// must never equal the handle that reuses its slot, a stale handle must read as absent instead of
-// landing on its replacement, reuse must stay dense from slot 0 because parallel
-// structure-of-arrays stores are scanned flat over the same slot indices, and a slot out of
-// generations must be retired rather than re-mint a handle it already gave out.
+// Four properties carry the design and each fails silently: a released handle must never equal
+// the one reusing its slot, a stale handle must read absent, reuse must stay dense from slot 0,
+// and a slot out of generations must retire rather than re-mint.
 
 import { describe, it, expect } from 'vitest';
 import {
