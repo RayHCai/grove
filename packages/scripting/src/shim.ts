@@ -19,10 +19,8 @@ export interface Shim {
 }
 
 /**
- * Replaces the denied globals with accessors that throw, and `Math` with one that keeps its exact members.
- *
- * The static pass is the mechanism; this is for an embedder that evaluates synced code in a realm
- * of its own.
+ * Replaces the denied globals with accessors that throw, and `Math` with its exact members.
+ * The static pass is the mechanism; this is for an embedder with a realm of its own.
  */
 export function installDeterminismShim(options: ShimOptions = {}): Shim {
     const target = (options.target ?? globalThis) as Record<string, unknown>;

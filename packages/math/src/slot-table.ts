@@ -1,10 +1,6 @@
-// A slot table plus freelist behind generation-packed handles, keyed by branded `Id`.
-//
 // A handle legitimately outlives its record, so each slot carries a generation: bumping it on
-// release makes the stale handle detectable and the caller's write a silent no-op instead of a
-// write landing on whatever record reused the slot. Iteration is by ascending slot — creation
-// order, the stable order determinism needs — and parallel structure-of-arrays stores address
-// the same slot index, which is why reuse is dense and `slotCount` never shrinks.
+// release makes a stale handle detectable rather than a write landing on whatever reused the slot.
+// Iteration is by ascending slot, and reuse is dense so `slotCount` never shrinks.
 
 import {
     FIRST_GENERATION,
@@ -28,12 +24,7 @@ export interface SlotTableSnapshot<R> {
     live: number;
 }
 
-/**
- * Slot table plus freelist.
- *
- * Records are stored by reference: `create` takes ownership of the object it is handed and
- * `recordAt` gives that same object back for in-place mutation.
- */
+/** Slot table plus freelist. Records are stored and handed back by reference. */
 export class SlotTable<Id extends number, R> {
     /** Slot -> record, `null` while the slot is free. */
     #records: (R | null)[] = [];
@@ -138,7 +129,7 @@ export class SlotTable<Id extends number, R> {
         if (this.#recycle(index)) this.#freeList.push(index);
     }
 
-    /** Live handles in ascending slot order — creation order. Fills and returns `out` when given. */
+    /** Live handles in ascending slot order — creation order. Fills `out` when given. */
     liveIds(out: Id[] = []): Id[] {
         out.length = 0;
         for (let index = 0; index < this.#records.length; index++) {
@@ -218,7 +209,7 @@ export class SlotTable<Id extends number, R> {
         return packHandle(index, generation) as unknown as Id;
     }
 
-    /** Advances a freed slot's generation, or retires it when the next would wrap; false once retired. */
+    /** Advances a freed slot's generation, or retires it when the next would wrap. */
     #recycle(index: number): boolean {
         const generation = this.#generationAt(index);
         if (generation >= MAX_GENERATION) {
@@ -230,7 +221,7 @@ export class SlotTable<Id extends number, R> {
         return true;
     }
 
-    /** `#generations` is invariantly as long as `#records`; the fallback only satisfies the index check. */
+    /** `#generations` is invariantly as long as `#records`; the fallback satisfies the check. */
     #generationAt(index: number): number {
         return this.#generations[index] ?? FIRST_GENERATION;
     }

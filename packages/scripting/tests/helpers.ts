@@ -7,12 +7,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '../../..');
 export const FIXTURES = path.join(HERE, 'fixtures');
 
-/**
- * A cleared scratch directory for one case.
- *
- * Under `node_modules` rather than `dist`, so a turbo cache restore of the build output cannot
- * sweep it, and so `@platform/core` still resolves from the chunks written into it.
- */
+/** A cleared scratch dir per case, under `node_modules` so a turbo restore cannot sweep it. */
 export function scratch(name: string): string {
     const dir = path.join(HERE, '..', 'node_modules', '.cache', 'scripting-tests', name);
     rmSync(dir, { recursive: true, force: true });

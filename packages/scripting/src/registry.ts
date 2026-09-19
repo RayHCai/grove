@@ -30,12 +30,7 @@ export function locationsFor(side: ScriptSide): ReadonlySet<ScriptLocation> {
 const SERVER_LOCATIONS: ReadonlySet<ScriptLocation> = new Set(['server', 'synced']);
 const CLIENT_LOCATIONS: ReadonlySet<ScriptLocation> = new Set(['client', 'synced']);
 
-/**
- * A chunk's classes, by the id the bundle stamped on them.
- *
- * The id parameter is left open so a consumer holding an authoring `ScriptId` brand narrows to it
- * without this package taking a dependency on the package that mints one.
- */
+/** A chunk's classes by stamped id; the id parameter stays open so a brand narrows. */
 export class ScriptRegistry<Id extends string = string> {
     readonly #byId: ReadonlyMap<Id, ScriptEntry<Id>>;
     readonly #byClass: ReadonlyMap<ScriptClass, Id>;
@@ -83,16 +78,12 @@ export class ScriptRegistry<Id extends string = string> {
         return this.#byId.get(id)?.location;
     }
 
-    /** The id a class was stamped with — the reverse edge an attach site needs to name it on the wire. */
+    /** The id a class was stamped with — the reverse edge an attach site needs for the wire. */
     idOf(ctor: ScriptClass): Id | undefined {
         return this.#byClass.get(ctor);
     }
 
-    /**
-     * The class's handler and `@serverState` tables, read back through core's decorator metadata.
-     *
-     * Empty tables on a decorated class mean the decorators reached the chunk unlowered.
-     */
+    /** Handler and `@serverState` tables; empty on a decorated class means unlowered. */
     metadataOf(id: Id): ScriptMetadata | undefined {
         const ctor = this.#byId.get(id)?.ctor;
         return ctor ? getMetadata(ctor) : undefined;

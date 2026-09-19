@@ -1,4 +1,5 @@
-// tsc is the only tool in this repo that lowers TC39 decorators, so it has to run before the linker.
+// tsc is the only tool in this repo that lowers TC39 decorators, so it has to run before the
+// linker.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';

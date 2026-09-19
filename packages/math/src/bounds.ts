@@ -1,12 +1,7 @@
 // Nothing here assumes a y direction, because one set of helpers has to serve both a y-up world
 // rect (`top > bottom`) and a y-down screen rect (`bottom > top`).
 
-/**
- * An axis-aligned rectangle, named by its edges.
- *
- * Mutable where `Vec3` is readonly: every helper below writes through one, and `docs/api_spec.ts`
- * declares the creator-facing shape this way.
- */
+/** An axis-aligned rectangle, named by its edges. Mutable: every helper writes through one. */
 export interface Bounds {
     left: number;
     right: number;
@@ -86,12 +81,7 @@ export function boundsContains(b: Bounds, x: number, y: number): boolean {
     return inX && inY;
 }
 
-/**
- * Grows `b` outward by `margin` on all four sides, writing into `out`. Allocation-free.
- *
- * Direction-aware: each edge moves away from the rectangle's interior, so a y-up rect
- * grows `top` up and a y-down rect grows `top` down.
- */
+/** Grows `b` outward by `margin` into `out`; each edge moves away from the interior. */
 export function boundsExpand(out: Bounds, b: Bounds, margin: number): Bounds {
     const xUp = b.right >= b.left ? margin : -margin;
     const yUp = b.top >= b.bottom ? margin : -margin;

@@ -118,7 +118,8 @@ class Walk {
     }
 }
 
-// A literal key counts, because `f['constructor']` reaches Function exactly as `f.constructor` does.
+// A literal key counts, because `f['constructor']` reaches Function exactly as `f.constructor`
+// does.
 function propertyRead(node: Node): string | undefined {
     if (node.computed !== true) return nodeName(node.property);
     const property = node.property;

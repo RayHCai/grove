@@ -1,8 +1,5 @@
-// Contract tests for generation-packed handles.
-//
-// The contract that breaks silently is that the packing is arithmetic. A `generation << 24 | index`
-// version of this module round-trips every case below up to generation 127 and then hands back
-// negative handles that collide with live ones, so generation 128 is pinned explicitly.
+// The packing must be arithmetic: a `generation << 24 | index` version round-trips up to 127 and
+// then hands back negative handles that collide, so generation 128 is pinned explicitly.
 
 import { describe, it, expect } from 'vitest';
 import {

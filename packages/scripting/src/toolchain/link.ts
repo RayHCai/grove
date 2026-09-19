@@ -40,11 +40,8 @@ export interface ScriptBundle<Id extends string = string> {
     readonly client: SideChunk<Id>;
     readonly server: SideChunk<Id>;
     /**
-     * SHA-256 of the synced classes linked on their own.
-     *
-     * A handshake compares this, not either chunk's `hash`: the two sides carry different classes
-     * by construction, so their hashes always differ, while prediction is unsound exactly when the
-     * two ends run different `SyncedScript` bytes.
+     * SHA-256 of the synced classes linked on their own. A handshake compares this, not either
+     * chunk's `hash`: prediction is unsound exactly when the two ends' `SyncedScript` bytes differ.
      */
     readonly syncedHash: string;
     /** Every declaration that reached a chunk, in id order. */
@@ -113,7 +110,8 @@ async function link<Id extends string>(
     writeFileSync(entryPath, entrySource(target, scripts), 'utf8');
 
     const build = await rolldown({
-        // At the lowered root, so a module comment carries a relative path, not someone's home directory.
+        // At the lowered root, so a module comment carries a relative path, not someone's home
+        // directory.
         cwd: loweredDir,
         input: { chunk: entryPath },
         external: (id) => !id.startsWith('.') && !path.isAbsolute(id),

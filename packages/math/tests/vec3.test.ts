@@ -1,9 +1,5 @@
-// Contract tests for vectors.
-//
-// Two contracts here are invisible in the signatures and are the ones that break
-// silently: the `out` helpers must return the very object they were handed (callers
-// rely on that to stay allocation-free), and an omitted `Vec3Like.z` must read as 0
-// even when it has to overwrite a stale non-zero `z` already sitting in `out`.
+// Two contracts are invisible in the signatures: an `out` helper must return the very object it
+// was handed, and an omitted `Vec3Like.z` must read 0 even over a stale non-zero `z` in `out`.
 
 import { describe, it, expect } from 'vitest';
 import type { MutableVec3 } from '../src/vec3.js';

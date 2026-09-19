@@ -1,10 +1,4 @@
-// Contract tests for rectangles.
-//
-// The whole point of this module is that ONE set of helpers serves two y conventions:
-// a world rect is y-up (`top > bottom`, e.g. `camera.viewport`) and a screen rect is
-// y-down (`bottom > top`, e.g. `stageRect`). Every query below is therefore asserted in
-// BOTH orientations, and `boundsExpand` — the one direction-aware helper — is asserted to
-// move `top` in opposite directions for the two.
+// Every query is asserted in BOTH orientations: a world rect is y-up, a screen rect y-down.
 
 import { describe, it, expect } from 'vitest';
 import type { Bounds } from '../src/bounds.js';
