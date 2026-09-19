@@ -1,7 +1,6 @@
 /**
- * Where a service reads the correlation id it logs and forwards, and where it echoes the one it
- * chose. Lowercase because Node hands inbound header names down that way and `reply.header` does not
- * care, while `libs/go-grove/contract` spells the same header `X-Request-Id`.
+ * Where a service reads the correlation id it logs and forwards, and where it echoes its own.
+ * Lowercase because Node hands inbound header names down that way; Go spells it `X-Request-Id`.
  */
 export const REQUEST_ID_HEADER = 'x-request-id';
 

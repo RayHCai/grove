@@ -3,9 +3,14 @@
 The request and response shapes both services validate against, and the session token one mints and
 the other verifies.
 
-One declaration per shape, so a route and the code calling it cannot disagree. `@grove/api` and
-`@grove/game-builder` mount these as Fastify schemas through the zod type provider, which makes them
-the validator, the serializer, and the OpenAPI document at once.
+One declaration per shape, so a route and the code calling it cannot disagree. `@grove/api` mounts
+these as Fastify schemas through the zod type provider, which makes them the validator, the
+serializer, and the OpenAPI document at once, and `@grove/game-builder` parses the same shapes back
+off the wire.
+
+The key layout of the games bucket is here for the same reason a shape is: `@grove/api` writes those
+keys and `@grove/game-builder` reads them, and a prefix spelled twice is a prefix that drifts. So is
+the name of each task stream, which one service pushes to and another claims from.
 
 The Go services carry the same shapes in `libs/go-grove`, whose `contract` package is written against
 this one field for field, and the two Rust crates carry hand-written serde mirrors of the few shapes

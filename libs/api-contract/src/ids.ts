@@ -15,8 +15,9 @@ export const InstanceId = z.uuid().brand<'InstanceId'>();
 export type HostId = z.infer<typeof HostId>;
 export type InstanceId = z.infer<typeof InstanceId>;
 
-export const BuildJobId = z.uuid().brand<'BuildJobId'>();
-export type BuildJobId = z.infer<typeof BuildJobId>;
+/** One piece of queued work the fleet does: a build, an asset upload. */
+export const TaskId = z.uuid().brand<'TaskId'>();
+export type TaskId = z.infer<typeof TaskId>;
 
 /** A content hash, which is what names a built script chunk. */
 export const ContentHash = z.string().regex(/^[0-9a-f]{64}$/u);

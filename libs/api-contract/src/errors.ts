@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-/** Every failure both services return, so a caller branches on a code rather than a status alone. */
+/** Every failure both services return, so a caller branches on a code rather than a status. */
 export const ErrorBody = z.object({
     code: z.enum([
         'unauthorized',

@@ -1,1 +1,1 @@
-{"hostId":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","region":"us-east-1","capacity":{"runningInstances":3,"maxInstances":8,"cpuLoad":0.42,"memoryFreeBytes":6442450944},"lastSeenAt":"2026-09-05T12:00:03.250Z","healthy":true}
+{"hostId":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","region":"us-east-1","capacity":{"runningInstances":3,"maxInstances":8,"cpuLoad":0.42,"memoryFreeBytes":6442450944},"lastSeenAt":"2026-09-05T12:00:03.250Z","liveness":"healthy","incarnation":"2b1c6f70-9d3a-4a21-8f55-0c9f7a1d4e88"}

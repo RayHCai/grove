@@ -1,5 +1,5 @@
-// Package httpx is the HTTP layer every Go service mounts: one error body, one JSON codec on the way
-// in and out, the wraps around a handler, and the listener that drains.
+// Package httpx is the HTTP layer every Go service mounts: one error body, one JSON codec on the
+// way in and out, the wraps around a handler, and the listener that drains.
 package httpx
 
 import (

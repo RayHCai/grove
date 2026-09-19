@@ -29,9 +29,13 @@ func TestWireShapesRoundTripTheirFixtures(t *testing.T) {
 		{"placement.json", func() any { return &Placement{} }},
 		{"host-capacity.json", func() any { return &HostCapacity{} }},
 		{"instance-report.json", func() any { return &InstanceReport{} }},
+		{"instance-start.json", func() any { return &InstanceStart{} }},
 		{"host-heartbeat.json", func() any { return &HostHeartbeat{} }},
 		{"host-view.json", func() any { return &HostView{} }},
+		{"fleet-event.json", func() any { return &FleetEvent{} }},
+		{"fleet-report.json", func() any { return &FleetReport{} }},
 		{"deployment-request.json", func() any { return &DeploymentRequest{} }},
+		{"host-deployment.json", func() any { return &HostDeployment{} }},
 		{"deployment.json", func() any { return &Deployment{} }},
 	}
 

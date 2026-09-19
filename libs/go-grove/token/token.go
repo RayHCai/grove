@@ -1,5 +1,6 @@
-// Package token verifies and mints the join ticket exactly as libs/api-contract/src/session-token.ts
-// does, because a codec written twice is a codec that drifts.
+// Package token verifies and mints the join ticket exactly as
+// libs/api-contract/src/session-token.ts does, because a codec written twice is a codec that
+// drifts.
 package token
 
 import (

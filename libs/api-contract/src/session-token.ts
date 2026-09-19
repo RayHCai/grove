@@ -3,32 +3,23 @@ import { z } from 'zod';
 import { GameId, PlayerId, SessionId } from './ids.js';
 
 /**
- * Which service a token may be presented to.
- *
- * The two are minted with one secret and must not substitute for each other: a browser's join
- * ticket reaches a game process, and a game process's store bearer reaches the data plane, so
- * without this field the 60-second credential a player holds would also rewrite that game's rows.
+ * Which service a token may be presented to. The two are minted with one secret and must not
+ * substitute: without this field a player's 60-second ticket would also rewrite that game's rows.
  */
 export const TokenAudience = z.enum(['game-instance', 'game-manager']);
 export type TokenAudience = z.infer<typeof TokenAudience>;
 
 /**
- * What one service asserts about the bearer and another believes.
- *
- * `gameId` is carried here rather than in a URL on purpose: a request cannot name a game its token
- * did not, so cross-game access is unrepresentable instead of merely checked for.
+ * What one service asserts about the bearer and another believes. `gameId` is carried here rather
+ * than in a URL, so cross-game access is unrepresentable instead of merely checked for.
  */
 export const SessionTokenClaims = z
     .object({
         gameId: GameId,
         sessionId: SessionId,
         /**
-         * Who the API says the bearer is, on a `game-instance` ticket and only there.
-         *
-         * The game host takes `player.id` from here and never from a frame, and every other peer
-         * sees it — so this is the one field that makes a ticket a claim about a PERSON rather than
-         * about a session, and it is what persisted `@serverState` is keyed by across a rejoin. A
-         * `game-manager` bearer belongs to the process rather than to anyone in it, and carries none.
+         * Who the API says the bearer is, on a `game-instance` ticket and only there. The game host
+         * takes `player.id` from here, never a frame, and persisted `@serverState` is keyed by it.
          */
         playerId: PlayerId.optional(),
         aud: TokenAudience,
@@ -52,12 +43,8 @@ function sign(payload: string, secret: string): string {
 }
 
 /**
- * The bytes the signature covers: the five members, in this order, with `playerId` omitted rather
- * than written as null.
- *
- * Spelled out rather than stringified from the argument, because the Go and Rust verifiers encode
- * the same members in the same places and a caller's key order would otherwise sign a payload
- * neither of them can reproduce.
+ * The bytes the signature covers: the five members, in this order, `playerId` omitted not null.
+ * Spelled out, because the Go and Rust verifiers encode the same members in the same places.
  */
 function payloadOf(claims: SessionTokenClaims): string {
     return JSON.stringify({
@@ -82,9 +69,7 @@ export type TokenResult =
 
 /**
  * Verifies before it parses, so a forged payload is never handed to a schema.
- *
- * `audience` is required rather than optional: every caller knows which of the two it is, and a
- * verifier that defaulted would accept the other one by omission.
+ * `audience` is required: a verifier that defaulted would accept the other one by omission.
  */
 export function verifySessionToken(
     token: string,
