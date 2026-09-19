@@ -12,10 +12,10 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
 
-// One megabyte, the limit the Fastify services carry, so a value that crosses one crosses the other.
+// One megabyte, the Fastify services' limit, so a value crossing one crosses the other.
 const maxStateBody = 1 << 20
 
-// written is the whole of a successful write: a caller compares the revision, not the value it sent.
+// written is the whole of a successful write: a caller compares the revision, not its value.
 type written struct {
 	Revision int64 `json:"revision"`
 }

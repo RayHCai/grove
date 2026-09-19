@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/bundles"
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 	"github.com/RayHCai/grove/libs/go-grove/token"
 )
@@ -156,7 +157,7 @@ func portOf(addr string) string {
 	return port
 }
 
-// A child is reachable exactly while it is alive, which is what a refused connection means on a box.
+// A child is reachable exactly while alive, which is what a refused connection means here.
 type fakeProber struct{ launcher *fakeLauncher }
 
 func (p fakeProber) Probe(_ context.Context, addr string) (Vitals, string, error) {
@@ -233,8 +234,9 @@ func (brokenLauncher) Adopt(pid int) (Child, error) {
 // for.
 func testOptions(max int) Options {
 	return Options{
-		Ports: newFakePorts(),
-		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Ports:   newFakePorts(),
+		Bundles: fakeBundles{},
+		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 
 		MaxInstances: max,
 		LogLines:     4,
@@ -263,14 +265,47 @@ func registryOver(launcher *fakeLauncher, stateDir string, max int) *Registry {
 	return New(opts)
 }
 
+// fakeBundles is a box that already holds every version, so a start here costs no download.
+//
+// The real one is covered by its own suite: what the cases below are about is what happens to a
+// process once it exists, and a registry that fetched over HTTP would only be slower at it.
+type fakeBundles struct{}
+
+func (fakeBundles) Fetch(context.Context, contract.BundleSet) (bundles.Paths, error) {
+	return bundles.Paths{Bundle: "/srv/bundles/sim.js", SimConfig: "/srv/bundles/sim.json"}, nil
+}
+
+// refusingBundles is a box that cannot get the code, which is a session it must not claim to hold.
+type refusingBundles struct{}
+
+func (refusingBundles) Fetch(context.Context, contract.BundleSet) (bundles.Paths, error) {
+	return bundles.Paths{}, errors.New("the edge refused the connection")
+}
+
+const testRevision = 7
+
 func request(i int) Request {
 	return Request{
-		InstanceID:    fmt.Sprintf("%08d-2222-4222-8222-222222222222", i),
-		GameID:        "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
-		SessionID:     fmt.Sprintf("%08d-1111-4111-8111-111111111111", i),
-		BundlePath:    "/srv/bundles/sim.js",
-		SimConfigPath: "/srv/bundles/sim.json",
-		ManagerURL:    "http://game-manager:4001",
+		InstanceID: fmt.Sprintf("%08d-2222-4222-8222-222222222222", i),
+		GameID:     "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
+		SessionID:  fmt.Sprintf("%08d-1111-4111-8111-111111111111", i),
+		Revision:   testRevision,
+		Bundles: contract.BundleSet{
+			Server: contract.BundleRef{
+				Side: contract.SideServer, Hash: strings.Repeat("a", 64),
+				URL: "https://cdn.grove.test/a.js", ByteLength: 4096,
+			},
+			Client: contract.BundleRef{
+				Side: contract.SideClient, Hash: strings.Repeat("b", 64),
+				URL: "https://cdn.grove.test/b.js", ByteLength: 2048,
+			},
+			SimConfig: contract.ConfigRef{
+				Hash: strings.Repeat("c", 64),
+				URL:  "https://cdn.grove.test/c.json", ByteLength: 142,
+			},
+			SyncedHash: strings.Repeat("d", 64),
+		},
+		ManagerURL: "http://game-manager:4001",
 	}
 }
 

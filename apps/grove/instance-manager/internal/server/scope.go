@@ -12,10 +12,8 @@ import (
 )
 
 // fleetBearer admits the one caller that has business here: @grove/server-manager, holding the
-// secret this box was given with it.
-//
-// A shared secret rather than a signed claim because there is nothing to scope — every route below
-// acts on this box, and the only question is whether the caller is inside the fleet.
+// secret this box was given with it. A shared secret rather than a signed claim, because every
+// route below acts on this box and the only question is whether the caller is in the fleet.
 func fleetBearer(secret []byte, l *slog.Logger) httpx.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -18,11 +18,9 @@ type service struct {
 	log   *slog.Logger
 }
 
-// New builds the handler: the two open routes, the authenticated /v1 scope, and the wraps around
-// both.
-//
-// Nothing registered at this level decides who may call what — the scope adds the only check
-// there is, so a route mounted outside it starts open and a route mounted inside it starts closed.
+// New builds the handler: the two open routes, the authenticated /v1 scope, and the wraps.
+// Nothing at this level decides who may call what — the scope adds the only check there is, so
+// a route mounted outside it starts open and one mounted inside starts closed.
 func New(st store.Store, secret []byte, l *slog.Logger) http.Handler {
 	s := &service{store: st, log: l}
 

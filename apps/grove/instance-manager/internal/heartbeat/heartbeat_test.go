@@ -265,3 +265,55 @@ func TestRunBeatsBeforeItsFirstTick(t *testing.T) {
 		t.Fatal("Run outlived its context")
 	}
 }
+
+// Silence is how the router finds a crash, so a deploy that simply went quiet would read as one.
+// This is the beat that says otherwise, and it is the only one that carries the flag.
+func TestFarewellMarksTheBeatAsLeaving(t *testing.T) {
+	var beats []contract.HostHeartbeat
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var beat contract.HostHeartbeat
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &beat)
+		beats = append(beats, beat)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	beater := newBeater(t, server.URL, fakeSource{max: 4})
+
+	if _, err := beater.Send(context.Background()); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, err := beater.Farewell(context.Background()); err != nil {
+		t.Fatalf("Farewell: %v", err)
+	}
+
+	if len(beats) != 2 {
+		t.Fatalf("beats: got %d, want the ordinary one and the farewell", len(beats))
+	}
+	if beats[0].Leaving {
+		t.Fatal("an ordinary beat must not say the box is leaving")
+	}
+	if !beats[1].Leaving {
+		t.Fatal("the farewell must say the box is leaving")
+	}
+}
+
+// HostID survives a reboot on purpose, so without a second identity a box that crashed and came
+// back inside the staleness window is a restart nothing upward can see.
+func TestEveryBeatCarriesOneIncarnation(t *testing.T) {
+	beater := newBeater(t, "http://127.0.0.1:1", fakeSource{max: 4})
+
+	first := beater.Body(time.Now()).Incarnation
+	second := beater.Body(time.Now().Add(time.Minute)).Incarnation
+
+	if first == "" {
+		t.Fatal("incarnation: got empty, want one minted when the agent started")
+	}
+	if first != second {
+		t.Fatalf("incarnation: got %q then %q, want one fixed for the life of the agent", first, second)
+	}
+	if other := newBeater(t, "http://127.0.0.1:1", fakeSource{max: 4}).Body(time.Now()).Incarnation; other == first {
+		t.Fatal("a second agent must not mint the incarnation the first one did")
+	}
+}

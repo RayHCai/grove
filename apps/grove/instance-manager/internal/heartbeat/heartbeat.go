@@ -48,6 +48,10 @@ type Options struct {
 	Box       box.Sampler
 	Client    *http.Client
 	Log       *slog.Logger
+	// Fixed for the life of this agent, and minted per Beater when unset. HostID survives a reboot
+	// by design, so without this a box that crashed and came back inside the staleness window is a
+	// restart nothing upward can see.
+	Incarnation string
 }
 
 // Beater sends the beat and owns nothing else.
@@ -63,6 +67,9 @@ func New(opts Options) *Beater {
 	}
 	if opts.Log == nil {
 		opts.Log = slog.Default()
+	}
+	if opts.Incarnation == "" {
+		opts.Incarnation = contract.NewUUID()
 	}
 	return &Beater{
 		opts: opts,
@@ -87,14 +94,28 @@ func (b *Beater) Body(now time.Time) contract.HostHeartbeat {
 			CPULoad:          cpu,
 			MemoryFreeBytes:  memory,
 		},
-		Instances:  b.opts.Source.Live(),
-		ReportedAt: contract.Timestamp(now),
+		Instances:   b.opts.Source.Live(),
+		Incarnation: b.opts.Incarnation,
+		ReportedAt:  contract.Timestamp(now),
 	}
 }
 
 // Send posts one beat and reports the id it went out under along with whether it landed.
 func (b *Beater) Send(ctx context.Context) (string, error) {
-	body, err := json.Marshal(b.Body(time.Now()))
+	return b.post(ctx, b.Body(time.Now()))
+}
+
+// Farewell posts the one beat that says this box is going deliberately rather than dying.
+// Sent after the listener drained, on a context of its own since the process's is cancelled.
+// A failure is dropped: the router then concludes `failed` where it would have said `left`.
+func (b *Beater) Farewell(ctx context.Context) (string, error) {
+	body := b.Body(time.Now())
+	body.Leaving = true
+	return b.post(ctx, body)
+}
+
+func (b *Beater) post(ctx context.Context, beat contract.HostHeartbeat) (string, error) {
+	body, err := json.Marshal(beat)
 	if err != nil {
 		return "", fmt.Errorf("encode heartbeat: %w", err)
 	}
@@ -121,11 +142,9 @@ func (b *Beater) Send(ctx context.Context) (string, error) {
 	return requestID, nil
 }
 
-// Run beats until ctx ends, starting with one immediately so a restarted box is placeable again as
-// soon as it is up.
-//
-// A failed beat is logged and dropped rather than retried: the next one carries the whole state, and
-// a queue of stale beats would tell the router about a box as it was.
+// Run beats until ctx ends, starting with one immediately so a restarted box is placeable as
+// soon as it is up. A failed beat is logged and dropped rather than retried: the next carries
+// the whole state, and a queue of stale beats would describe the box as it was.
 func (b *Beater) Run(ctx context.Context) {
 	tick := time.NewTicker(b.opts.Interval)
 	defer tick.Stop()

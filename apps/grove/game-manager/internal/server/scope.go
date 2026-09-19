@@ -20,11 +20,9 @@ const (
 	sessionKey
 )
 
-// verifyGameToken is middleware rather than a call in each handler because a route is then covered
-// by where it is mounted, and forgetting the check is not something a new route can do.
-//
-// The claims go on the context and the URL carries neither id, so a request cannot name a game its
-// token was not issued for — cross-game access is unrepresentable rather than merely rejected.
+// verifyGameToken is middleware rather than a call in each handler, so a route is covered by
+// where it is mounted. The claims go on the context and the URL carries neither id, which makes
+// cross-game access unrepresentable rather than merely rejected.
 func verifyGameToken(secret []byte, l *slog.Logger) httpx.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

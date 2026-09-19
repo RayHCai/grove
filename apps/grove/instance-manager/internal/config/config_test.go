@@ -12,6 +12,7 @@ func complete() map[string]string {
 	return map[string]string{
 		"FLEET_SECRET":       strings.Repeat("f", 32),
 		"SERVER_MANAGER_URL": "http://server-manager:4003",
+		"GAME_MANAGER_URL":   "http://game-manager:4001",
 		"HOST_ID":            "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
 		"HOST_REGION":        "us-east-1",
 		"GAME_INSTANCE_BIN":  "/usr/local/bin/grove-game-instance",
@@ -56,6 +57,11 @@ func TestReadRefusesAnEnvironmentItCannotRunOn(t *testing.T) {
 			name:    "a fleet secret a guess would reach",
 			change:  func(m map[string]string) { m["FLEET_SECRET"] = "short" },
 			mention: "FLEET_SECRET",
+		},
+		{
+			name:    "a drain deadline no world could empty inside",
+			change:  func(m map[string]string) { m["INSTANCE_DRAIN_DEADLINE"] = "0s" },
+			mention: "INSTANCE_DRAIN_DEADLINE",
 		},
 		{
 			name:    "no server-manager to beat to",

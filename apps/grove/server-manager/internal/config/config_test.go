@@ -21,12 +21,28 @@ func TestLoadFillsTheDefaults(t *testing.T) {
 	if cfg.Addr != "0.0.0.0:4003" {
 		t.Errorf("addr: got %q, want 0.0.0.0:4003", cfg.Addr)
 	}
-	if cfg.StaleAfter != 30*time.Second {
-		t.Errorf("stale after: got %s, want 30s", cfg.StaleAfter)
+	// Two missed beats at the agent's default interval, not three.
+	if cfg.StaleAfter != 20*time.Second {
+		t.Errorf("stale after: got %s, want 20s", cfg.StaleAfter)
 	}
 	// The secure spelling by default, so a fleet handing out cleartext urls was asked to.
 	if cfg.IngressScheme != "wss" {
 		t.Errorf("ingress scheme: got %q, want wss", cfg.IngressScheme)
+	}
+	// Unset is a line in this process, so a box running the whole fleet locally needs no cache.
+	if cfg.JoinQueueURL != "" {
+		t.Errorf("join queue url: got %q, want none", cfg.JoinQueueURL)
+	}
+	if cfg.JoinQueueKey != "grove:joins" || cfg.JoinQueueDepth != 256 {
+		t.Errorf("join line: got %q at depth %d, want grove:joins at 256",
+			cfg.JoinQueueKey, cfg.JoinQueueDepth)
+	}
+	if cfg.JoinDeadline != 1500*time.Millisecond {
+		t.Errorf("join deadline: got %s, want 1.5s", cfg.JoinDeadline)
+	}
+	if cfg.DeployTimeout != 20*time.Second || cfg.AgentTimeout != 5*time.Second {
+		t.Errorf("fan-out budgets: got %s and %s, want 20s and 5s",
+			cfg.DeployTimeout, cfg.AgentTimeout)
 	}
 }
 
@@ -75,6 +91,47 @@ func TestLoadRefusesAnEnvironmentItCannotRouteOn(t *testing.T) {
 			name:    "a staleness window that runs backwards",
 			change:  func(m map[string]string) { m["HOST_STALE_AFTER"] = "-5s" },
 			mention: "HOST_STALE_AFTER",
+		},
+		{
+			name:    "a line with room for nobody",
+			change:  func(m map[string]string) { m["JOIN_QUEUE_DEPTH"] = "0" },
+			mention: "JOIN_QUEUE_DEPTH",
+		},
+		{
+			// The caller aborts at two seconds, so a join held past that is answered for this
+			// service before it ever reaches its own deadline.
+			name:    "a join deadline the caller has already given up on",
+			change:  func(m map[string]string) { m["JOIN_DEADLINE"] = "2s" },
+			mention: "JOIN_DEADLINE",
+		},
+		{
+			name:    "a join deadline nothing can wait for",
+			change:  func(m map[string]string) { m["JOIN_DEADLINE"] = "0s" },
+			mention: "JOIN_DEADLINE",
+		},
+		{
+			// The start runs inside the join that reserved the world, so a box allowed to hold one
+			// for longer than the whole join answers after the player was already told no.
+			name:    "a start given longer than the join waiting on it",
+			change:  func(m map[string]string) { m["START_TIMEOUT"] = "1500ms" },
+			mention: "START_TIMEOUT",
+		},
+		{
+			name:    "a start given no time to happen at all",
+			change:  func(m map[string]string) { m["START_TIMEOUT"] = "0s" },
+			mention: "START_TIMEOUT",
+		},
+		{
+			// A box asked for longer than the whole fan-out has is a box whose answer could never
+			// reach the report.
+			name:    "a box given longer than the rollout it is part of",
+			change:  func(m map[string]string) { m["AGENT_TIMEOUT"] = "30s" },
+			mention: "AGENT_TIMEOUT",
+		},
+		{
+			name:    "a box given no time to answer at all",
+			change:  func(m map[string]string) { m["AGENT_TIMEOUT"] = "0s" },
+			mention: "AGENT_TIMEOUT",
 		},
 	}
 

@@ -9,7 +9,7 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
 
-// heartbeat upserts one box. 204, because the sender has nothing to read and beats every few seconds.
+// heartbeat upserts one box. 204: the sender reads nothing and beats every few seconds.
 func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("hostId")
 	if !contract.ValidUUID(hostID) {

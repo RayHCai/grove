@@ -32,7 +32,7 @@ type Memory struct {
 	bundles map[string]contract.BundleSet
 }
 
-// row is keyed by the game first, so no key here reaches a row without naming the game that owns it.
+// row is keyed by the game first, so no key reaches a row without naming the game that owns it.
 type row struct {
 	game string
 	name string
@@ -68,7 +68,7 @@ func (m *Memory) Read(_ context.Context, game, key string) (contract.StateRecord
 	return record, nil
 }
 
-// Write applies the value and answers the revision it landed on, or refuses a stale compare-and-set.
+// Write applies the value and answers the revision it landed on, or refuses a stale write.
 func (m *Memory) Write(_ context.Context, game, key string, write contract.StateWrite) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
