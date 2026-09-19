@@ -1,8 +1,6 @@
 //! The join ticket, verified exactly as `libs/api-contract/src/session-token.ts` mints it.
-//!
-//! `base64url(JSON(claims)) + "." + base64url(HMAC-SHA256(payload, secret))` — not a JWT, so there
-//! is no header to parse and no `alg` for a peer to choose. The signature is checked BEFORE the
-//! payload is parsed, so a forged payload never reaches a deserializer.
+//! Not a JWT, so there is no header to parse and no `alg` for a peer to choose. The signature is
+//! checked BEFORE the payload is parsed, so a forged payload never reaches a deserializer.
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
@@ -21,10 +19,8 @@ const AUDIENCE: &str = "game-instance";
 const TICKET_LIFETIME_SECONDS: i64 = 60;
 
 /// What the API asserts about the bearer. Mirrors `SessionTokenClaims`.
-///
-/// Unknown members are ignored rather than refused: `z.object` strips them and the Go verifier
-/// ignores them, so a claim added on the minting side must not take every game process offline at
-/// the deploy that introduces it.
+/// Unknown members are ignored rather than refused, so a claim added on the minting side does
+/// not take every game process offline at the deploy that introduces it.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Claims {
@@ -55,7 +51,7 @@ pub enum TicketFailure {
     WrongSession,
     /// A credential minted for the data plane, presented here.
     WrongAudience,
-    /// Expired by more than a ticket's whole life, which is the minting box's clock and not the peer.
+    /// Expired by more than a ticket's whole life: that is the minting box's clock, not the peer.
     ClockSkew(i64),
 }
 

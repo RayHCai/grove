@@ -1,9 +1,6 @@
 // Rolls the sim and everything it imports into one classic script the isolate can evaluate.
-//
-// One file, not a module graph: an isolate has no module loader and no `node_modules` to resolve
-// against, so a bare specifier reaching it is a specifier nothing can answer. `platform: 'neutral'`
-// is what makes esbuild refuse a Node built-in here rather than shim one in — this bundle runs
-// somewhere that has none.
+// One file, not a module graph: an isolate has no module loader, so a bare specifier reaching it
+// is one nothing can answer. `platform: 'neutral'` makes esbuild refuse a Node built-in.
 
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

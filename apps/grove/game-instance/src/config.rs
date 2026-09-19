@@ -1,10 +1,6 @@
-//! What one game process is told about itself, all of it from the environment.
-//!
-//! Nothing here is discovered: `@grove/instance-manager` spawns this process and every value below
-//! is a decision it already made, so a missing one is a wiring fault to fail on rather than a gap to
-//! paper over. Three are defaulted instead — the bind address, the heap limit and the tick budget —
-//! to the same numbers the agent floors them at, so a hand-run process agrees with a supervised one;
-//! a value it cannot use is still refused rather than quietly replaced.
+//! What one game process is told about itself, all of it from the environment. Nothing is
+//! discovered: the agent already decided every value, so a missing one is a wiring fault.
+//! Three are defaulted to the numbers the agent floors them at, so a hand-run process agrees.
 
 use std::path::PathBuf;
 

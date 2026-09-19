@@ -1,13 +1,7 @@
-//! The seam, in Rust. Every type here mirrors one in `packages/sim/src/batch.ts` field for field,
-//! except `Send` and `OutputBatch`, which mirror the ENCODED variants in
-//! `packages/sim/src/isolate-entry.ts` — the two whose envelopes are already the codec's bytes. The
-//! field names are the wire: a rename on either side is a silent mismatch, not an error.
-//!
-//! Nothing here parses a payload. An inbound frame crosses as `RawValue` and an outbound envelope as
-//! the codec's own `String`: the host routes by `to` and `class` and reads nothing inside either, so
-//! a tree would only allocate, re-serialize, and hand the far side bytes that are no longer the ones
-//! it was given. A Rust restatement of `@platform/protocol` would be a second copy of a shape that
-//! package owns.
+//! The seam, in Rust. Every type mirrors one in `packages/sim/src/batch.ts` field for field,
+//! except `Send` and `OutputBatch`, which mirror the ENCODED variants. The field names ARE the
+//! wire: a rename on either side is a silent mismatch, not an error.
+//! Nothing here parses a payload — the host routes by `to` and `class` and reads nothing inside.
 
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -27,8 +21,8 @@ pub struct OpenedConnection {
 #[serde(rename_all = "camelCase")]
 pub struct InboundFrame {
     pub connection_id: ConnectionId,
-    /// Validated as JSON but NOT narrowed and never parsed into a tree: the sim owns the narrowing,
-    /// since it owns what each field bounds, and these bytes reach it exactly as the peer sent them.
+    /// Validated as JSON but NOT narrowed, and never parsed into a tree: the sim owns that, and
+    /// these bytes reach it exactly as the peer sent them.
     pub message: Box<RawValue>,
 }
 
@@ -83,11 +77,9 @@ pub struct Send {
     /// One entry per recipient. More than one means the frame is byte-identical for all of them,
     /// which is the only thing worth encoding once.
     pub to: Vec<ConnectionId>,
-    /// Already encoded by the sim's own codec, and written to the socket verbatim.
-    ///
-    /// The codec, not `JSON.stringify`: it refuses `NaN`, `Infinity` and `undefined`, which JSON
-    /// turns into `null` or drops — and it is the codec the sim measured a `Welcome` against when it
-    /// decided whether to chunk one. Re-encoding here would break both.
+    /// Already encoded by the sim's own codec and written verbatim. The codec, not
+    /// `JSON.stringify`: it refuses `NaN` and `Infinity`, which JSON turns to `null` — and it is
+    /// what the sim measured a `Welcome` against when it decided whether to chunk.
     pub envelope: String,
     pub class: SendClass,
 }
@@ -127,11 +119,9 @@ pub struct SimDiagnostics {
     pub stale: u64,
 }
 
-/// The rates the world is running at as of this batch.
-///
-/// On every batch rather than only on a change, because the seam is a value and not a stream: a
-/// host that learned a retune from one batch it happened to read would run the world at the old
-/// rate for as long as it missed one.
+/// The rates the world is running at as of this batch. On every batch rather than only on a
+/// change, because the seam is a value and not a stream: a host that missed one would run the
+/// world at the old rate for as long as it kept missing.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Rates {
