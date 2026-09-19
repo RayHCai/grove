@@ -172,7 +172,7 @@ jobs:
               # package is named: these runners ship Go and Rust on PATH, so nothing here would skip, and
               # the toolchains go.work and rust-toolchain.toml pin are one download apiece per leg.
               run: >-
-                  pnpm run test --filter='!@grove/game-instance' --filter='!@grove/upload-service'
+                  pnpm run test --filter='!@grove/game-instance' --filter='!@grove/asset-upload-service'
                   --filter='!@grove/go-grove' --filter='!@grove/game-manager'
                   --filter='!@grove/instance-manager' --filter='!@grove/server-manager'
 

@@ -1,5 +1,5 @@
 {
-    "name": "@grove/upload-service",
+    "name": "@grove/asset-upload-service",
     "version": "0.0.0",
     "private": true,
     "type": "module",
