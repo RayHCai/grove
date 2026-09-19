@@ -1,10 +1,3 @@
-// The movement contract both endpoints replay.
-//
-// `tick`'s stage order — accelerate, applyForces, clampSpeed, move — is what a client re-runs when
-// it resimulates, so a subclass overriding a stage changes prediction and a subclass overriding
-// `tick` itself changes the order and desyncs. Everything below drives real ticks rather than
-// calling `tick` directly, because the pass is where the ordering actually lives.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { bounds } from '@platform/math';
 import type { Vec3 } from '@platform/math';
@@ -144,7 +137,8 @@ describe('BaseMovement state', () => {
         move.setVelocity(0, 0);
         move.addForce(0, 600);
         loop.step(1);
-        // 600 * 1/60 = 10, applied once — and the accumulator is cleared, so the next tick adds none.
+        // 600 * 1/60 = 10, applied once — and the accumulator is cleared, so the next tick adds
+        // none.
         const afterOne = move.velocity.y;
         expect(afterOne).toBeCloseTo(10, 9);
 
@@ -240,10 +234,11 @@ describe('PlatformerMovement', () => {
         const { loop, move } = world(PlatformerMovement);
         const p = move as PlatformerMovement;
         p.acceleration = 600;
-        p.walkSpeed = 1000; // Far enough off that one tick cannot reach the target and clamp instead.
+        p.walkSpeed = 1000; // Far enough that one tick cannot reach the target.
         move.setIntent(1, 0);
         loop.step(1);
-        // One tick of 1/60 s at 600 units/s/s, and the stage is `approach`, so it is exactly linear.
+        // One tick of 1/60 s at 600 units/s/s, and the stage is `approach`, so it is exactly
+        // linear.
         expect(move.velocity.x).toBeCloseTo(10, 9);
 
         loop.step(2);

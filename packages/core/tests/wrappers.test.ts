@@ -1,6 +1,3 @@
-// The data wrappers: bind identity, marking, persistence round-trip,
-// and the bind-twice load-time error.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import {
     Scoreboard,

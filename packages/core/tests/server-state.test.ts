@@ -1,6 +1,4 @@
-// The @serverState accessor-pair mechanism — the highest-risk claim in the
-// design. Fixtures are compiled by the build (see src/testkit/fixtures.ts); this file
-// carries no decorator syntax, so the oxc test transform handles it.
+// Fixtures are compiled by the build; this file carries no decorator syntax.
 
 import { describe, it, expect } from 'vitest';
 import { Wallet } from '../dist/testkit/fixtures.js';

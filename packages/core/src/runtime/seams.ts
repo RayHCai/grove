@@ -26,7 +26,7 @@ export class ManualClock implements Clock {
 
 /** The collision integrator. */
 export interface PhysicsSink {
-    /** Sweeps `id` along `velocity` over `dt`, writes the position, reports which sides stopped it. */
+    /** Sweeps `id` along `velocity` over `dt`, writes the position, reports what stopped it. */
     move(
         id: EntityId,
         dt: number,
@@ -87,13 +87,7 @@ export class NullEffectSink implements EffectSink {
     play(): void {}
 }
 
-/**
- * What one panel-authored widget currently shows.
- *
- * The `Countdown` travels rather than a sampled number of seconds: a bound timer counts down every
- * tick with no further call from creator code, so a snapshot would freeze at whatever the last verb
- * left it at. The presenter reads `remaining` when it draws.
- */
+/** What one panel-authored widget currently shows; a `Countdown` travels, not a sampled number. */
 export interface HUDWidgetState {
     text?: string;
     number?: number;
@@ -105,12 +99,7 @@ export interface HUDWidgetState {
     enabled: boolean;
 }
 
-/**
- * One player's interface, as the presentation layer sees it. Real owner: the client.
- *
- * Push, not pull: core holds the authored state and hands over whatever changed, so the presenter
- * never has to walk the whole HUD to find the one widget a handler wrote.
- */
+/** One player's interface as the presentation layer sees it. Push, not pull. */
 export interface HUDSink {
     /** A widget changed; the whole record is handed over rather than a patch. */
     widget(name: string, state: Readonly<HUDWidgetState>): void;

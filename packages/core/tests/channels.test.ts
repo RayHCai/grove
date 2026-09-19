@@ -1,5 +1,3 @@
-// Marks record what a consumer has yet to drain, not simulation state, so no snapshot holds them.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';

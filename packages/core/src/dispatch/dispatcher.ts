@@ -30,13 +30,7 @@ export interface DispatchLog {
 // `performance` is a host global on both ends but sits in neither this package's `lib` nor its
 // types, and core stays free of DOM and Node typings; `Date.now` is the fallback because a budget
 // that silently stopped being enforced is worse than one a clock step can misread once.
-/**
- * The "nothing to await" answer, shared.
- *
- * A settled promise is immutable, so every caller that awaits or chains off this one sees the same
- * thing a fresh `Promise.resolve()` would have given it — and a dispatch that matched no handler is
- * the common case on a pass that runs across the whole registry every tick.
- */
+/** The "nothing to await" answer, shared — a dispatch matching no handler is the common case. */
 const RESOLVED: Promise<void> = Promise.resolve();
 
 const elapsedMs: () => number = (() => {
@@ -95,7 +89,7 @@ export class Dispatcher {
     readonly #log: DispatchLog;
     #depth = 0;
 
-    /** Counts `class#method#message` so a throw storm logs once and `throwCount` still has the total. */
+    /** Counts `class#method#message`, so a throw storm logs once but `throwCount` totals. */
     readonly #dedup = new Map<string, number>();
 
     #onTrip: ((trip: BreakerTrip) => void) | null = null;
@@ -115,12 +109,8 @@ export class Dispatcher {
     }
 
     /**
-     * Runs creator code that reaches the engine outside a handler invocation — a movement tick, a
-     * timer or tween callback, a countdown's completion — under the boundary a handler already gets.
-     *
-     * The same dedup, log and breaker as `#invoke`, because a second implementation of any of the
-     * three would diverge from it the first time one is tuned. Returns false when the breaker had
-     * already disabled this `(owner, method)`, and when the call threw or overran its budget.
+     * Runs creator code that reaches the engine outside a handler invocation, under the same
+     * dedup, log and breaker as `#invoke`. False when disabled, when it threw, or when it overran.
      */
     guard(owner: GuardOwner | null, site: GuardSite, fn: () => void): boolean {
         // An unowned callback cannot be disabled — there is no instance to charge — but it is still
@@ -271,7 +261,8 @@ export class Dispatcher {
         }
 
         // The synchronous span alone, never the wall time to the settle: `await sleep(30)` is a
-        // parked handler rather than a busy one, and charging it would disable every handler that waits.
+        // parked handler rather than a busy one, and charging it would disable every handler that
+        // waits.
         const overran = this.#chargeOverrun(si, site, startedAt);
 
         // Only once the promise settles: recording success when the call returns — at the first
@@ -294,11 +285,7 @@ export class Dispatcher {
 
     /**
      * Charges a call that held the tick past `MAX_HANDLER_MS`, as a throw rather than a success.
-     *
-     * A budget checked on the way out, because nothing inside one realm can interrupt a synchronous
-     * loop: what this bounds is how many more times such a call is entered, since the count it
-     * charges reaches `BREAKER_THRESHOLD` and disables it like any other failure. The message carries
-     * no measurement, so a slow handler is one dedup key rather than one per millisecond.
+     * Checked on the way out: nothing in one realm can interrupt a synchronous loop.
      */
     #chargeOverrun(owner: GuardOwner | null, site: GuardSite, startedAt: number): boolean {
         if (elapsedMs() - startedAt <= MAX_HANDLER_MS) return false;
@@ -352,7 +339,7 @@ export class Dispatcher {
         }
     }
 
-    /** The host's listener runs inside the tick, so its own throw is contained rather than fatal. */
+    /** The host's listener runs inside the tick, so its own throw is contained, not fatal. */
     #reportTrip(trip: BreakerTrip): void {
         const listener = this.#onTrip;
         if (listener === null) return;

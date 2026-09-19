@@ -1,11 +1,5 @@
-// The two narrowings out of the authoring shape: what a runtime needs to BUILD a world, and what a
-// renderer needs to DRAW one.
-//
-// Both target shapes are declared here rather than imported from core and protocol, because the
-// dependency runs the other way — a consumer takes the authoring types, and neither of those two
-// packages may enter this one's graph. Each is written to be assignable to the consumer's own
-// declaration, which is what lets the two collapse into these without either shape being authored
-// twice.
+// Both target shapes are declared here rather than imported from core and protocol: the dependency
+// runs the other way, and neither package may enter this one's graph.
 
 import type { AssetId, ScriptId, TemplateId } from './ids.js';
 import type {
@@ -28,25 +22,13 @@ import type { ScriptProps } from './props.js';
 /** A creator script class, as a host holds one. Props are optional, so a props-free class fits. */
 export type ScriptClass = new (props?: ScriptProps) => object;
 
-/**
- * Resolves an attached script id to the class the host loaded for it.
- *
- * Required rather than optional: a manifest holds ids and a runtime wires classes, and the only
- * layer that can bridge the two is the one that already holds the game's code. Returning `undefined`
- * drops that attachment, which is the resolver's decision to make and not this package's.
- */
+/** Resolves an attached script id to the class the host loaded. `undefined` drops it. */
 export type ScriptResolver = (id: ScriptId) => ScriptClass | undefined;
 
-/**
- * One attachment with its class already resolved.
- *
- * It keeps the `ScriptId` alongside the class rather than replacing it, because a runtime needs both
- * and for different reasons: the class is what it constructs, and the id is what names that class on
- * a wire, where a minified class name is no contract.
- */
+/** One attachment with its class resolved; the `ScriptId` stays, since the wire names that. */
 export type ResolvedAttachment = { script: ScriptId; klass: ScriptClass; props?: ScriptProps };
 
-/** A template as a runtime holds it: what to attach to every instance, and what to mint beneath it. */
+/** A template as a runtime holds it: what to attach to each instance, and what to mint below. */
 export type ResolvedTemplate = {
     id: TemplateId;
     scripts: ResolvedAttachment[];
@@ -63,7 +45,7 @@ export type PlacedEntity = {
     scripts: ResolvedAttachment[];
 };
 
-/** What a runtime is built from: the world's fixed shape, its templates, and the world as placed. */
+/** What a runtime is built from: the world's fixed shape, its templates, and the placed world. */
 export type GameManifest = {
     /** The location filter — which handlers this runtime dispatches, and so its trust boundary. */
     role: 'server' | 'client';
@@ -95,12 +77,7 @@ export function toGameManifest(project: ProjectManifest, opts: GameManifestOptio
     };
 }
 
-/**
- * The two wire rates, which no runtime reads: core simulates and neither sends.
- *
- * Its own narrowing rather than fields on {@link GameManifest}, so a host takes them without the
- * layer that builds a world holding two numbers it has no use for.
- */
+/** The two wire rates, which no runtime reads: core simulates and neither sends. */
 export type ServerSettings = { sendRate: number; maxPlayers: number };
 
 /** Narrows a project to what a host serves it with. */

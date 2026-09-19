@@ -15,30 +15,12 @@ interface StateHolder {
     [STATE_MARK]?: (field: string) => void;
 }
 
-/**
- * Which names this function has defined on which facade, so a re-hoist is told apart from a name
- * the host already owned. Weak because a facade outlives nothing here — an entity's is evicted the
- * tick it dies.
- */
+/** Which names this function defined on which facade, so a re-hoist is told from an own name. */
 const replicated = new WeakMap<object, Set<string>>();
 
 /**
  * Puts a replicated field on a host FACADE, read-only, reading through the record.
- *
- * The authoritative side gets this for free: wiring hoists each `@serverState` field onto the host
- * when the script that declares it attaches. A mirror attaches no such script — it runs none on a
- * Game or a Player — so without this the values a client received would sit in a record nothing
- * reachable from creator code could name, and `this.localPlayer.credits` would read `undefined` on
- * the one machine that is supposed to draw it.
- *
- * Read-only by construction. Client code reads the world and asks; it never tells, and a setter here
- * would be a write to authoritative state that no channel carries and no server would ever see.
- *
- * Returns false for a field the host already answers to, having defined nothing. Field names arrive
- * from the wire, so a peer naming `players` or `avatar` would otherwise replace the engine member
- * with a read-only accessor for the life of the facade — and every later call would throw somewhere
- * far from the envelope that did it. The caller counts the refusal; it cannot throw, because one
- * hostile field must not abort the rest of an envelope.
+ * False for a name the host already owns: a peer naming `players` must not replace it.
  */
 export function hoistReplicated(
     host: object,

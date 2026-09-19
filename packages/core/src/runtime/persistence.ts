@@ -1,10 +1,5 @@
-// `@serverState` that outlives a session, over the `KVStore` seam.
-//
-// The seam is async and every reader of it is not: wiring hoists a host's fields synchronously, in
-// the middle of a join a socket is waiting on, and `@onPlayerLeave` runs on a connection that is
-// already gone. So the cache in front of the store is the thing that is read and written, and the
-// store is written THROUGH — a saved host is readable while its write is in flight, and that trip is a
-// promise the caller may await or route the failure of, but never has to hold a boundary open for.
+// The seam is async and every reader of it is not, so the cache in front is what is read and
+// written, and the store is written THROUGH.
 
 import type { HostRecord } from '../state/host-record.js';
 import { serializeHostField } from './wrappers.js';
@@ -21,13 +16,7 @@ export interface PersistedSource {
 /** One host's persisted fields, as a single KV value — the unit a save and a load both move. */
 export type PersistedFields = { [field: string]: unknown };
 
-/**
- * A synchronous view of persisted `@serverState`, write-through to a `KVStore`.
- *
- * Keyed by host id, which is what `rt.persisted` is asked about, and holds whole records rather than
- * fields: a host is saved and loaded as one KV entry, so a rejoin costs one round trip instead of
- * one per declared field.
- */
+/** A synchronous view of persisted `@serverState`, write-through to a `KVStore`, keyed by host. */
 export class PersistedState implements PersistedSource {
     readonly #kv: KVStore;
     readonly #byHost = new Map<string, PersistedFields>();
@@ -53,13 +42,7 @@ export class PersistedState implements PersistedSource {
         this.#byHost.set(hostId, isFields(stored) ? { ...stored } : {});
     }
 
-    /**
-     * Captures `record` into the cache now, writes it through to the store, and releases it there.
-     *
-     * Synchronous capture is what makes leave-then-rejoin work inside one process: the record is
-     * torn down the moment the player leaves, so a save that only started an async read of it would
-     * be reading a host that no longer exists by the time the promise ran.
-     */
+    /** Captures `record` now, writes through, releases it; sync capture survives a leave. */
     save(record: HostRecord): Promise<void> {
         const fields: PersistedFields = {};
         for (const field of record.values.keys()) {

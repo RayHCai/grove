@@ -22,13 +22,13 @@ export const MAX_LOG_RECORDS = 512;
 /** Speech-bubble text cap; longer strings truncate rather than growing unbounded. */
 export const MAX_BUBBLE_LENGTH = 200;
 
-/** Live entities one world may hold; a spawn past it is refused, so a storm cannot exhaust memory. */
+/** Live entities one world may hold; a spawn past it is refused. */
 export const MAX_ENTITIES = 10_000;
 
 /** Milliseconds one handler may hold the tick before the boundary charges it like a throw. */
 export const MAX_HANDLER_MS = 50;
 
-/** The stream a world draws from when the host names no seed; every session would replay this one. */
+/** The stream a world draws from when the host names no seed. */
 export const DEFAULT_PRNG_SEED = 1;
 
 /** How far back a historical spatial query may reach, in milliseconds. */

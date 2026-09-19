@@ -1,12 +1,6 @@
 /**
- * A template's spawn key — what `game.spawn('coin')` names, and what a template visual is keyed by.
- *
- * Strings, not packed numbers, because an authoring id is written by an editor into a file a human
- * reads in a diff. The brand key is its own `unique symbol`, which makes the three authoring ids
- * mutually unassignable with each other and with the two RUNTIME handles they must never be
- * confused with — core's `EntityId` and protocol's `NetId`. That distinction is the whole reason
- * they are branded: an authoring id survives save, load and a rebuild of the world, while a runtime
- * handle is meaningless outside the runtime that minted it.
+ * A template's spawn key — what `game.spawn('coin')` names and a template visual keys by.
+ * Branded to stay unassignable with the other authoring ids and with `EntityId` / `NetId`.
  */
 export type TemplateId = string & { readonly __templateId: unique symbol };
 

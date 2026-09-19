@@ -1,6 +1,5 @@
-// Simulation state only; the renderer keeps its own interpolated transforms and reads this
-// store through a sink. Float64 because composed positions accumulate and drift costs more
-// than the memory does.
+// Simulation state only; the renderer keeps its own interpolated transforms. Float64 because
+// composed positions accumulate and drift costs more than the memory does.
 
 import { growF64, growI32, grownCapacity } from '@platform/math';
 import type { EntityId } from '../ids.js';
@@ -18,11 +17,8 @@ export interface TransformBuffer {
     opacity: Float64Array<ArrayBuffer>;
     layer: Int32Array<ArrayBuffer>;
     count: number;
-    /**
-     * Slots this buffer holds, or null for the whole `[0, count)` range. A scoped capture must
-     * name them: `apply` would otherwise write the untouched slots too, teleporting every
-     * out-of-scope entity to the buffer's zeros.
-     */
+    /** Slots this buffer holds, or null for all; a scoped capture must name them or `apply`
+     * would teleport every out-of-scope entity to the buffer's zeros. */
     slots: number[] | null;
 }
 
@@ -167,13 +163,7 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
         return this.#count;
     }
 
-    /**
-     * Copies the two position lanes into caller-owned arrays and returns the count written.
-     *
-     * The lag ring's view reads position and nothing else — its half-extents come from the live
-     * facade — so a full capture would copy five lanes per tick that no reader ever looks at.
-     * The caller sizes the arrays; a short one would silently drop the tail.
-     */
+    /** Copies the two position lanes into caller-owned arrays, returning the count written. */
     copyPositions(intoX: Float64Array, intoY: Float64Array): number {
         const cap = this.#count;
         intoX.set(this.#posX.subarray(0, cap));

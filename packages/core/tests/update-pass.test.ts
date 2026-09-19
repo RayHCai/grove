@@ -1,10 +1,3 @@
-// Pass 9 — `@onUpdate` — and the location rule that decides who it reaches.
-//
-// Both update passes force the SERVER's active locations whatever role built the runtime, so a
-// `ClientScript`'s update never fires from `step`. That is not a filter for tidiness: a synced
-// script's update belongs to the simulation, and a client running it from the frame loop as well
-// would run it twice at two different rates and mispredict every tick it touched.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { ClientTicker, FaultyTicker, Rules, Ticker } from '../dist/testkit/fixtures.js';
 import { endGame, loadGame, startGame } from '../src/runtime/load-game.js';

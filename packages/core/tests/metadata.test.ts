@@ -1,6 +1,4 @@
-// The registry's prototype-chain metadata walk: a subclass inherits its
-// parent's declarations, an override does not re-register, and a sibling's write is
-// copy-on-write. Fixtures compiled by the build (src/testkit/fixtures.ts).
+// Fixtures compiled by the build (src/testkit/fixtures.ts).
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { DoubleJump, Movement, Sibling } from '../dist/testkit/fixtures.js';

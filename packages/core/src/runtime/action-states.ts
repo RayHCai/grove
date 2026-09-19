@@ -12,15 +12,11 @@ export interface InputEdge {
     value?: number;
 }
 
-/**
- * A mutable {@link ActionState}, folded forward one edge and one tick at a time.
- *
- * `held` and `axis` persist across ticks; `pressed` and `released` are one tick wide.
- */
+/** A mutable {@link ActionState}: `held`/`axis` persist, `pressed`/`released` are one tick wide. */
 export interface ActionStates extends ActionState {
-    /** A press sets held + pressed; a release clears held and sets released; an axis updates value. */
+    /** A press sets held + pressed; a release clears held, sets released; an axis updates value. */
     applyEdge(edge: InputEdge): void;
-    /** Clears `pressed` / `released`, keeps `held` and axis values — the one-tick-wide edge rule. */
+    /** Clears `pressed`/`released`, keeps `held` and axis values — the one-tick-wide edge rule. */
     advanceTick(): void;
     /** Every action currently held, for the client's horizon re-derivation. */
     heldActions(): string[];
@@ -30,10 +26,7 @@ export interface ActionStates extends ActionState {
 
 /**
  * A fresh action-state map, everything neutral.
- *
- * `press` and `release` also write the axis: a bound button reads as 1 while held and 0 once
- * released, so a movement type filling `intent` from an axis works whether the binding is a stick
- * or a key. An explicit `value` on the edge wins, which is what carries a stick's magnitude.
+ * `press`/`release` also write the axis, so a movement reading `intent` works for key or stick.
  */
 export function createActionStates(): ActionStates {
     const held = new Set<string>();

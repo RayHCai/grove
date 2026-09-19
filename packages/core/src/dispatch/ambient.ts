@@ -14,7 +14,7 @@ export function setCurrentInvocation(scope: InvocationScope | null): void {
     current = scope;
 }
 
-/** Wraps an engine awaitable so whatever resumes behind it runs under the ambient it was made in. */
+/** Wraps an engine awaitable so what resumes behind it runs under the ambient it was made in. */
 export function resumeWith<T>(promise: Promise<T>): Promise<T> {
     // Saved here rather than named by the caller: assigning a fixed scope left a settled handler's
     // dead invocation ambient at top level, where the next `every` inherited it.

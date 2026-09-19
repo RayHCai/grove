@@ -256,26 +256,13 @@ let nextCountdownId = 1;
 /** The wrappers whose state replicates, named by the tag their serialized form carries. */
 export type WrapperKind = 'Scoreboard' | 'Leaderboard' | 'Inventory' | 'Team';
 
-/**
- * A host field as the wire carries it: a bound wrapper's `serialize()`, everything else raw.
- *
- * What the record holds for a wrapper field is the wrapper OBJECT, and no codec represents a class
- * instance — so without this the mark is dropped at the send boundary and counted, which is a silent
- * loss by construction: the channel was marked, so everything upstream looks like it worked.
- */
+/** A host field as the wire carries it: a bound wrapper's `serialize()`, everything else raw. */
 export function serializeHostField(record: HostRecord, field: string): unknown {
     const value = record.values.get(field);
     return value instanceof StatefulWrapper ? value.serialize() : value;
 }
 
-/**
- * Lands a replicated value on a host field.
- *
- * A wrapper already on the record is RESTORED in place rather than replaced, because a script may
- * hold that same instance and assigning the decoded payload over it would leave a methodless object
- * where a `Scoreboard` was. A receiver holding none — the ordinary client, which runs no scripts —
- * revives one from the payload's own tag instead, so `of()` and `top()` work on both ends.
- */
+/** Lands a replicated value on a host field; a wrapper already there is RESTORED, not replaced. */
 export function restoreHostField(record: HostRecord, field: string, value: unknown): void {
     const held = record.values.get(field);
     if (held instanceof StatefulWrapper) {
@@ -293,13 +280,7 @@ export function restoreHostField(record: HostRecord, field: string, value: unkno
     record.wrappers.add(field);
 }
 
-/**
- * Rebuilds a wrapper from its serialized form, or `undefined` when the payload is not one.
- *
- * Keyed off the payload's own `kind`, since a receiver with no scripts has nothing else to go on —
- * which is also why every constructor argument has to ride the wire. An `Inventory` naming a player
- * this world does not know is left as the raw payload rather than attached to a guess.
- */
+/** Rebuilds a wrapper from its serialized form, or `undefined`; keyed off the payload's `kind`. */
 export function reviveWrapper(data: unknown): StatefulWrapper | undefined {
     if (typeof data !== 'object' || data === null) return undefined;
     const d = data as { kind?: unknown; order?: unknown; name?: unknown; player?: unknown };
@@ -338,24 +319,20 @@ function restoreCounts(
     for (const [key, count] of entries) into.set(key, count);
 }
 
-// Not a StatefulWrapper: it is advanced a tick at a time and no method here marks the state channel.
+// Not a StatefulWrapper: it is advanced a tick at a time and no method here marks the state
+// channel.
 export class Countdown {
     #remainingTicks: number;
     #running = false;
     #fired = false;
     readonly #onZero: (() => void) | undefined;
     #simRate: number;
-    /**
-     * The runtime whose countdowns pass advances this one; null when built outside a loaded world.
-     *
-     * Captured rather than resolved per call, so a countdown built inside `withRuntime` still
-     * belongs to that world when a later tick reaches it.
-     */
+    /** The runtime whose countdowns pass advances this one; captured, not resolved per call. */
     readonly #rt: Runtime | null;
 
     /** @internal — who registered it, so a throw in `onZero` is charged like a timer callback's. */
     readonly owner: GuardOwner | null;
-    /** @internal — the breaker key, since `onZero` is a closure the breaker could not otherwise name. */
+    /** @internal — the breaker key; `onZero` is a closure the breaker cannot otherwise name. */
     readonly guardKey: string;
 
     constructor(seconds: number, onZero?: () => void) {

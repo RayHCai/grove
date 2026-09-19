@@ -1,6 +1,4 @@
-// Standard TC39 decorators, whose two shapes are named here so a creator can annotate one without
-// importing the TC39 context types. Symbol.metadata is absent on node 24 and without the polyfill
-// below every table silently stays empty.
+// Symbol.metadata is absent on node 24; without the polyfill below every table stays empty.
 
 import type { HandlerKind } from './metadata.js';
 import { getOrCreateMetadata } from './metadata.js';
@@ -79,13 +77,13 @@ export const serverState: StateDecorator = (_value, context) => {
     return (initial) => initial;
 };
 
-/** Every handler decorator: generic over the method it wraps, so a decorated method keeps its exact signature. */
+/** Every handler decorator, generic over the method so a decorated one keeps its signature. */
 export type HandlerDecorator = <This, Args extends unknown[], Return>(
     value: (this: This, ...args: Args) => Return,
     context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Return>,
 ) => void;
 
-/** The `@serverState` shape: `value` is always undefined, and the returned initializer runs per instance. */
+/** The `@serverState` shape; the returned initializer runs per instance. */
 export type StateDecorator = <This, Value>(
     value: undefined,
     context: ClassFieldDecoratorContext<This, Value>,

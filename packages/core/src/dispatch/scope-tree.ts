@@ -2,19 +2,12 @@
 
 export type ScopeId = number;
 
-/**
- * The scope of nothing. Ids start at 1, so this can never name a live host — which matters because
- * a miss sentinel that callers also pass as an owner would let one host's teardown cancel every
- * hostless timer in the world.
- */
+/** The scope of nothing. Ids start at 1, so this can never name a live host. */
 export const NO_SCOPE: ScopeId = 0;
 
 let nextId = 1;
 
-/**
- * Who a contained throw is charged to — the instance half of a breaker key, plus what a log record
- * needs to name it. `ScriptInstance` satisfies it; a callback registered outside a handler has none.
- */
+/** Who a contained throw is charged to: the instance half of a breaker key, plus log fields. */
 export interface GuardOwner {
     readonly id: number;
     readonly className: string;

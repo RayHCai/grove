@@ -1,6 +1,4 @@
-// A function, not a method, because the destination is always the server. Over a network the
-// uplink carries it; with none the loopback sink dispatches to @onRequest in place; with no world
-// at all it is a no-op.
+// A function, not a method, because the destination is always the server.
 
 import { currentRuntime, hasRuntime } from './runtime.js';
 

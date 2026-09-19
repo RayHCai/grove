@@ -1,6 +1,5 @@
 // Iteration is by ascending slot — creation order, the stable order determinism needs.
-// SimTransformStore addresses entities by the same slot index, so a reused slot is the same
-// entity in both stores.
+// SimTransformStore uses the same slot index, so a reused slot is the same entity in both.
 
 import { SlotTable } from '@platform/math';
 import type { EntityId } from '../ids.js';
@@ -85,7 +84,7 @@ export class EntityTable implements SnapshotStore<EntityTableBuffer> {
         this.#slots.release(id);
     }
 
-    /** How many slots are occupied — what the spawn cap is read against, without building a list. */
+    /** How many slots are occupied — what the spawn cap is read against, without a list. */
     get liveCount(): number {
         return this.#slots.liveCount;
     }

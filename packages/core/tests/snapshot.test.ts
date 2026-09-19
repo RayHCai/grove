@@ -1,7 +1,3 @@
-// Snapshot/restore and the determinism round-trip. Two runs of one
-// input sequence must produce byte-identical state, and restore(snapshot(t)) + replay must
-// reproduce it. Also: the registry-coverage test — every store declares a scoping mode.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';

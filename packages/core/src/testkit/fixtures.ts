@@ -223,7 +223,7 @@ export class Roll extends ServerScript {
     }
 }
 
-/** Roster handlers that call back into the test, which holds the globals a dist fixture cannot see. */
+/** Roster handlers that call back into the test, which holds globals a dist fixture cannot see. */
 export class RosterProbe extends ServerScript<Game> {
     onJoin: (() => void) | null = null;
     onLeave: (() => void) | null = null;
@@ -259,7 +259,8 @@ export class ShadowsPlayerGetter extends ServerScript<Player> {
     @serverState avatar = 0;
 }
 
-// The tick order's edges on one host: a region crossing, a contact's enter edge, and the host's end.
+// The tick order's edges on one host: a region crossing, a contact's enter edge, and the host's
+// end.
 export class Edges extends SyncedScript<Entity> {
     entered: string[] = [];
     exited: string[] = [];
@@ -303,7 +304,8 @@ export class Session extends ServerScript {
     }
 }
 
-// ClientScript is the only legal location on a screen host, so a screen fixture is one by necessity.
+// ClientScript is the only legal location on a screen host, so a screen fixture is one by
+// necessity.
 export class Menu extends ClientScript<HUDScreen> {
     starts = 0;
     ends = 0;
@@ -358,12 +360,7 @@ export class SyncedWithRequest extends SyncedScript<Entity> {
     }
 }
 
-/**
- * Ctor props: a class that reads them at construction and two `@serverState` fields.
- *
- * `speed` is what an inspector configures; `label` is what it leaves alone. The engine writes both
- * kinds of field, so a props-free attach must still land the initializer.
- */
+/** Ctor props: a class reading them at construction plus two `@serverState` fields. */
 export class Configured extends ServerScript<Entity> {
     @serverState speed = 1;
     @serverState label = 'default';

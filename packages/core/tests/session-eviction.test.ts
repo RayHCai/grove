@@ -1,8 +1,3 @@
-// Three maps keyed by something a departing player takes with them — the persisted-record cache, the
-// roster's checkpoints and the breaker's counters. Each is written on a join or a leave and read
-// only while that player is present, so any of them left unpruned sizes a long-running server by the
-// players it has ever seen rather than by the ones it is serving.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { joinPlayer, leavePlayer, loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';

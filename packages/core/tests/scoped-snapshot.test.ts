@@ -1,7 +1,3 @@
-// A scoped snapshot is a partial capture, so restoring one must leave every entity it did not
-// capture exactly as it was — the client rolls back its own simulated set while remote entities
-// keep the positions replication just gave them.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';

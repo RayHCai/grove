@@ -1,5 +1,3 @@
-// What attaching does: inject the inspector's props, and queue the @onStart the pass order drains.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ScriptId, TemplateId } from '@platform/project';
 import {

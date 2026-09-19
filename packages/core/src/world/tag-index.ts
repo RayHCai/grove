@@ -7,7 +7,7 @@ import type { Scope, ScopeMode, SnapshotStore } from '../loop/store-registry.js'
 export interface TagBuffer {
     byTag: Map<string, Set<EntityId>>;
     byEntity: Map<number, Set<string>>;
-    /** Entities this buffer covers, or null for the whole index; a scoped `apply` restores only these. */
+    /** Entities this buffer covers, or null for the whole index; a scoped `apply` restores them. */
     slots: number[] | null;
 }
 

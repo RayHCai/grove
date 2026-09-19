@@ -1,6 +1,3 @@
-// What the dispatcher owes a handler that misbehaves: an async throw counts toward the breaker,
-// and a nested synchronous send gives the outer handler its invocation back.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { AsyncFaulty, Nester } from '../dist/testkit/fixtures.js';
 import { loadGame } from '../src/runtime/load-game.js';

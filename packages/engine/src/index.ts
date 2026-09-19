@@ -1,8 +1,5 @@
-// @platform/engine
-// The one import a creator's script sees: the runtime API core owns, and the primitives math owns.
-//
-// The composition roots that stand a game up are behind `@platform/engine/host`, so a chunk that
-// resolves this specifier never reaches the server, the client or the renderer through it.
+// The one import a creator's script sees. The composition roots are behind `@platform/engine/host`,
+// so a chunk resolving this specifier never reaches the server, client or renderer.
 
 // The primitives are IMPLEMENTED in @platform/math and re-exported here, so each creator-facing
 // name resolves to exactly one type. A creator has one import; the split is internal.

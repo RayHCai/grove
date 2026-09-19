@@ -1,4 +1,3 @@
-// Entities, world, script model, dispatch. No rendering, no network.
 // Enumerated, not `export *`: adding a name to a sub-barrel must not widen what core publishes.
 
 export { BREAKER_THRESHOLD, MAX_REWIND_MS, resolveConfig } from './config.js';
