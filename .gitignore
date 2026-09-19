@@ -5,6 +5,9 @@ target/
 *.tsbuildinfo
 coverage/
 
+# Prisma writes its client as TypeScript source under src/, where this package's own tsc compiles it.
+apps/grove/api/src/generated/
+
 # One JSON per benchmark run, stamped with the commit it measured. Local history, not shared state.
 bench/runs/
 

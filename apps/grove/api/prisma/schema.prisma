@@ -1,0 +1,257 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
+}
+
+// The connection URL lives in prisma.config.ts and reaches the client as a driver adapter: Prisma 7
+// removed `url` from this block, so a datasource here names the dialect and nothing else.
+datasource db {
+  provider = "postgresql"
+}
+
+model Account {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // Stored already folded; a migration CHECK refuses a row that was not, because one mailbox has to
+  // be one account: it is the name a sign-in is looked up by, and the only place a reset can be sent.
+  email       String   @unique @db.VarChar(254)
+  displayName String   @db.VarChar(64)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  password PasswordCredential?
+  resets   PasswordReset[]
+  games    Game[]
+  tasks    Task[]
+}
+
+/// A row of its own, so reading an account cannot carry the hash into a response.
+model PasswordCredential {
+  accountId String @id @db.Uuid
+  hash      String @db.VarChar(255)
+
+  // Counted beside the credential rather than on the account, so the count is dropped with the
+  // password it belongs to instead of outliving it.
+  failedAttempts Int       @default(0)
+  lastFailedAt   DateTime? @db.Timestamptz(3)
+  lockedUntil    DateTime? @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+/// One outstanding key to an account, kept as a digest so the table cannot hand anybody in.
+model PasswordReset {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId String @db.Uuid
+
+  // SHA-256 rather than argon2: the secret in the link already carries 256 bits, and this is the
+  // column the row is found BY, which a salted hash cannot be.
+  tokenHash  Bytes     @unique
+  expiresAt  DateTime  @db.Timestamptz(3)
+  consumedAt DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([expiresAt])
+}
+
+model Game {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId   String   @db.Uuid
+  title     String   @db.VarChar(120)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  /// Who may reach this game. Private by default, because a world nobody has finished must not
+  /// become playable by the act of compiling successfully.
+  visibility GameVisibility @default(private)
+
+  /// What the last save produced; 0 is a game nothing has written to yet. A save names the revision
+  /// it edited from and claims the next one in the same statement, so two editors cannot both land.
+  draftRevision Int @default(0)
+
+  /// The manifest revision the last publish asked for a build of. Null together with the date: a
+  /// game is either published or has never been.
+  publishedRevision Int?
+  publishedAt       DateTime? @db.Timestamptz(3)
+
+  // Restrict, not Cascade: a game's bundles, leaderboards and server state live in S3 and DynamoDB,
+  // and dropping this row would delete the only thing that names them.
+  owner Account @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+
+  tasks Task[]
+  files GameFile[]
+
+  @@index([ownerId, createdAt])
+}
+
+/// Every piece of queued work the fleet does, discriminated by `kind`.
+///
+/// One table rather than one per kind: a build and an asset upload have the same life — claimed,
+/// attempted, settled, swept — and two tables would mean two sweepers, two status routes and two
+/// sets of monotonic-transition rules.
+model Task {
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  gameId    String     @db.Uuid
+  /// Who asked, which is not necessarily who owns the game.
+  accountId String     @db.Uuid
+  kind      TaskKind
+  status    TaskStatus @default(NOT_STARTED)
+
+  /// The manifest this task is pinned to, which is what stops it picking up edits made after it
+  /// was queued. Every kind carries one: an asset upload is settled against the save that landed it.
+  manifestRevision Int
+
+  /// The asset this task is for; null for every kind but ASSET_UPLOAD.
+  assetPath String? @db.VarChar(256)
+
+  attempts   Int       @default(0)
+  detail     Json?
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+  startedAt  DateTime? @db.Timestamptz(3)
+  finishedAt DateTime? @db.Timestamptz(3)
+
+  game    Game    @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([gameId, createdAt])
+  // Postgres indexes no foreign key on its own, and without this the cascade from a deleted account
+  // is a sequential scan of every task ever queued.
+  @@index([accountId])
+  // The sweeper's read: everything of one kind still sitting in NOT_STARTED, oldest first.
+  @@index([kind, status, createdAt])
+  // The allocator's read, on the path of every player who ever joins: the newest build of one game
+  // that finished. Ordered by the revision rather than the date, because what makes one version
+  // newer than another is the manifest it compiled and not when a box got round to it.
+  @@index([gameId, kind, status, manifestRevision])
+}
+
+enum TaskKind {
+  BUILD
+  ASSET_UPLOAD
+}
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUCCESSFUL
+  FAILED
+  CANCELLED
+}
+
+/// Which half of the bucket a path's bytes are in, which is what turns a path into a key.
+enum FileKind {
+  source
+  asset
+}
+
+/// Who may reach a game. `unlisted` is reachable by anybody holding the id and absent from every
+/// listing, which is the whole of what a share link is.
+enum GameVisibility {
+  private
+  unlisted
+  public
+}
+
+/// One path in a game's workspace, and the version of the bytes at it.
+///
+/// The path is the identity: a save upserts and deletes paths, so a row is created, replaced or
+/// gone rather than moved. The bytes are never here — they are at `<gameId>/<kind>/<path>` in the
+/// games bucket, and `versionId` names the exact byte-set this row was written for.
+model GameFile {
+  gameId String @db.Uuid
+  path   String @db.VarChar(256)
+
+  kind        FileKind
+  versionId   String   @db.VarChar(1024)
+  byteLength  Int
+  contentType String   @db.VarChar(128)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  // Cascade drops the row naming the file, never the object: bucket versioning keeps every prior
+  // byte-set addressable, and the manifests are what still name them.
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@id([gameId, path])
+}
+
+/// What @grove/server-manager concluded about a box, never what the box claimed.
+///
+/// `left` and `failed` are both silence; the difference is whether the box said goodbye first, and
+/// it is the difference between a deploy and a page.
+enum FleetLiveness {
+  healthy
+  suspected
+  left
+  failed
+}
+
+/// The transition one row of fleet history records.
+enum FleetEventKind {
+  registered
+  restarted
+  suspected
+  left
+  failed
+  returned
+}
+
+/// One box in the fleet, as @grove/server-manager last reported it.
+///
+/// Never what routing reads: the router answers a join from its own registry, which one interval of
+/// heartbeats rebuilds. This is what survives the router restarting, and what an operator opens.
+model FleetHost {
+  id     String @id @db.Uuid
+  region String @db.VarChar(64)
+
+  liveness FleetLiveness
+
+  /// Fixed for the life of the box's agent, so a change is the box having restarted — which the id
+  /// cannot show, because it survives a reboot on purpose.
+  incarnation String @db.Uuid
+
+  runningInstances Int
+  maxInstances     Int
+  cpuLoad          Float
+  /// Bytes, so BigInt: a box with more than 2 GiB free overflows a 32-bit column, which is every box.
+  memoryFreeBytes  BigInt
+
+  /// When the router last heard from the box, which is the reading its liveness follows.
+  lastSeenAt DateTime @db.Timestamptz(3)
+  /// When a report last named this box, which is how a row nothing has reported in days is found.
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([region, liveness])
+}
+
+/// One transition a box made.
+///
+/// Append-only, and deliberately not a relation to FleetHost: the row an operator goes looking for
+/// is the box that failed and never came back, and a cascade would take exactly that one.
+model FleetHostEvent {
+  /// Minted by the router, so a report retried after a failed write lands on the row it already
+  /// wrote rather than a second copy of it.
+  id     String @id @db.Uuid
+  hostId String @db.Uuid
+  region String @db.VarChar(64)
+
+  kind        FleetEventKind
+  /// The incarnation the box was running, so a restart's events do not read as the last life's.
+  incarnation String         @db.Uuid
+  at          DateTime       @db.Timestamptz(3)
+  /// Why, where the kind alone does not say it — the signal a suspicion came from, say.
+  detail      String?        @db.VarChar(512)
+
+  /// The operator's read: one box's history, newest first.
+  @@index([hostId, at(sort: Desc)])
+  /// The reaper's read: everything past the retention window, whichever box it belongs to.
+  @@index([at])
+}

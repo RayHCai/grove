@@ -1,0 +1,43 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "extends": ["//"],
+    "tasks": {
+        "build": {
+            // `build` runs `prisma generate` before `tsc`, and the schema it reads is not under
+            // src/**, so the root task would replay a cached build across a schema change. The
+            // generated client is this task's output, which is why it is excluded from its inputs.
+            "inputs": [
+                "package.json",
+                "src/**",
+                "!src/generated/**",
+                "tsconfig*.json",
+                "prisma/**"
+            ],
+            "outputs": ["dist/**", "src/generated/**"]
+        },
+        "typecheck": {
+            "inputs": [
+                "src/**",
+                "!src/generated/**",
+                "tests/**",
+                "tsconfig*.json",
+                "*.config.ts",
+                "prisma/**"
+            ]
+        },
+        "test": {
+            // Own `build`, not just `^build`: the suite imports the generated client as a value, and
+            // only this package's build runs `prisma generate`. Without it a clean checkout — where
+            // `src/generated` is gitignored and absent — fails on a tree that is fine.
+            "dependsOn": ["^build", "build"],
+            "inputs": [
+                "src/**",
+                "!src/generated/**",
+                "tests/**",
+                "vitest.config.ts",
+                "tsconfig*.json",
+                "prisma/**"
+            ]
+        }
+    }
+}

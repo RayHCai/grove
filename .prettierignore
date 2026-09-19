@@ -22,3 +22,6 @@ apps/grove/Cargo.lock
 
 # Wire vectors compared byte for byte against `encoding/json`'s output, which has no whitespace.
 libs/api-contract/fixtures/wire
+
+# Prisma's generated client: written by a tool, and it carries its own formatting header.
+apps/grove/api/src/generated
