@@ -8,32 +8,43 @@ import {
 } from 'fastify-type-provider-zod';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { REQUEST_ID_HEADER, validRequestId } from '@grove/api-contract';
-import { unattachedBuilder } from './builder.js';
-import type { Builder } from './builder.js';
 import type { Env } from './env.js';
 import { installErrorHandler } from './errors.js';
 import { unattachedFleet } from './fleet.js';
 import type { Fleet } from './fleet.js';
+import { unattachedMailer } from './mailer.js';
+import type { Mailer } from './mailer.js';
+import { unattachedQueue } from './queue.js';
+import type { TaskQueue } from './queue.js';
 import { unattachedRecords } from './records.js';
 import type { Records } from './records.js';
 import { allocatorRoutes } from './routes/allocator.js';
+import { assetRoutes } from './routes/assets.js';
 import { authRoutes } from './routes/auth.js';
+import { fleetRoutes } from './routes/fleet.js';
+import { gameRoutes, gameSettingsRoutes } from './routes/games.js';
+import { playerRoutes } from './routes/players.js';
 import { publishingRoutes } from './routes/publishing.js';
 import { socialRoutes } from './routes/social.js';
+import { fleetTaskRoutes, taskRoutes } from './routes/tasks.js';
+import { workspaceRoutes } from './routes/workspace.js';
 import { ExpiringSessionStore } from './session-store.js';
+import { unattachedStorage } from './storage.js';
+import type { Storage } from './storage.js';
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Everything registered at THIS level is a capability, not a policy: a parser, a codec, a limiter.
- * Nothing here decides who may call what — each route scope adds its own hooks, so a new scope
- * starts closed rather than inheriting whatever its neighbours happened to need.
+ * Each route scope adds its own hooks, so a new scope starts closed.
  */
 export async function buildApp(
     env: Env,
     records: Records = unattachedRecords,
     fleet: Fleet = unattachedFleet,
-    builder: Builder = unattachedBuilder,
+    storage: Storage = unattachedStorage,
+    queue: TaskQueue = unattachedQueue,
+    mailer: Mailer = unattachedMailer,
 ): Promise<FastifyInstance> {
     const app = Fastify({
         logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
@@ -50,6 +61,10 @@ export async function buildApp(
         // header — and only from the peers named here, since everyone else writes it themselves.
         trustProxy: env.TRUSTED_PROXIES,
     }).withTypeProvider<ZodTypeProvider>();
+
+    // Held rather than constructed inline: a password change and an account close have to reach it
+    // to drop the other sessions that account is holding.
+    const sessions = new ExpiringSessionStore(ONE_DAY_MS);
 
     app.setValidatorCompiler(validatorCompiler);
     app.setSerializerCompiler(serializerCompiler);
@@ -76,7 +91,7 @@ export async function buildApp(
         // The plugin's own store keeps every session the process ever made and mints one for
         // callers that never signed in, which on a public service is a leak with a queue at it.
         saveUninitialized: false,
-        store: new ExpiringSessionStore(ONE_DAY_MS),
+        store: sessions,
         cookie: {
             path: '/',
             httpOnly: true,
@@ -106,11 +121,22 @@ export async function buildApp(
         ok: true,
     }));
 
-    // Four scopes, four different sets of hooks. Sibling scopes share nothing.
-    await app.register(authRoutes(records), { prefix: '/v1/auth' });
+    // Eleven scopes, eleven sets of hooks. Sibling scopes share nothing, so the fleet's task route
+    // can sit beside a creator's without either inheriting the other's gate.
+    await app.register(authRoutes(records, mailer, sessions, env), {
+        prefix: '/v1/auth',
+    });
+    await app.register(playerRoutes(records, sessions), { prefix: '/v1' });
+    await app.register(gameRoutes(records), { prefix: '/v1' });
+    await app.register(gameSettingsRoutes(records), { prefix: '/v1' });
     await app.register(socialRoutes, { prefix: '/v1/social' });
-    await app.register(publishingRoutes(records, builder), { prefix: '/v1' });
-    await app.register(allocatorRoutes(env, fleet), { prefix: '/v1' });
+    await app.register(workspaceRoutes(records, storage, queue), { prefix: '/v1' });
+    await app.register(assetRoutes(records, storage), { prefix: '/v1' });
+    await app.register(publishingRoutes(records, queue), { prefix: '/v1' });
+    await app.register(taskRoutes(records), { prefix: '/v1' });
+    await app.register(fleetTaskRoutes(records, env), { prefix: '/v1' });
+    await app.register(fleetRoutes(records, env), { prefix: '/v1' });
+    await app.register(allocatorRoutes(env, records, fleet), { prefix: '/v1' });
 
     return app;
 }

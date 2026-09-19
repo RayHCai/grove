@@ -9,6 +9,10 @@ packages:
 
 # lefthook's postinstall fetches its platform binary and installs the git hooks; esbuild's fetches
 # the bundler that rolls the sim into the one script @grove/game-instance evaluates in an isolate.
+# Prisma's fetches the schema engine every migration runs through, and without it @prisma/engines
+# installs empty; the CLI's own is a preinstall that resolves its platform binaries.
 allowBuilds:
     lefthook: true
     esbuild: true
+    prisma: true
+    '@prisma/engines': true

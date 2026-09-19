@@ -1,0 +1,53 @@
+# The three things this service develops against. Nothing deploys from this file — a deployed process
+# is pointed at a managed Postgres, a managed Redis and a real bucket through the environment.
+services:
+    postgres:
+        image: postgres:17-alpine
+        environment:
+            POSTGRES_USER: grove
+            POSTGRES_PASSWORD: grove
+            POSTGRES_DB: grove
+        ports:
+            - '5432:5432'
+        volumes:
+            - grove-pgdata:/var/lib/postgresql/data
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U grove -d grove']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+    # The task streams. No persistence: a stream holds task ids, and the rows in Postgres are the
+    # record — a restart that lost the messages is what the sweeper re-announces.
+    redis:
+        image: redis:8-alpine
+        ports:
+            - '6379:6379'
+        healthcheck:
+            test: ['CMD', 'redis-cli', 'ping']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+    # The games bucket, locally. Reached through S3_ENDPOINT, which is the only reason that variable
+    # exists: a bucket name is not a hostname here, so the SDK is put in path style with it.
+    minio:
+        image: minio/minio
+        command: server /data --console-address ':9001'
+        environment:
+            MINIO_ROOT_USER: grove
+            MINIO_ROOT_PASSWORD: grove-dev-secret
+        ports:
+            - '9000:9000'
+            - '9001:9001'
+        volumes:
+            - grove-minio:/data
+        healthcheck:
+            test: ['CMD', 'mc', 'ready', 'local']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+volumes:
+    grove-pgdata:
+    grove-minio:

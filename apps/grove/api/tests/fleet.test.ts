@@ -1,5 +1,3 @@
-// What the fleet seam puts on the wire, and what it makes of each answer that comes back.
-
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     GameId,
@@ -10,6 +8,7 @@ import {
     REQUEST_ID_HEADER,
     SessionId,
 } from '@grove/api-contract';
+import type { PlayableVersion } from '@grove/api-contract';
 import { readEnv } from '../src/env.js';
 import { httpFleet, unattachedFleet } from '../src/fleet.js';
 
@@ -29,15 +28,43 @@ const env = readEnv({
     PLATFORM_ORIGIN: 'https://grove.example',
     EDITOR_ORIGIN: 'https://editor.grove.example',
     SERVER_MANAGER_URL: 'http://server-manager.grove.internal:4003',
-    UPLOAD_SERVICE_URL: 'http://upload-service.grove.internal:4005',
+    ASSET_UPLOAD_SERVICE_URL: 'http://asset-upload-service.grove.internal:4005',
     GAME_BUILDER_URL: 'http://game-builder.grove.internal:4002',
 });
+
+const HASH = 'a'.repeat(64);
+
+/** The version a build registered, which every join names and every placement echoes. */
+const VERSION: PlayableVersion = {
+    revision: 7,
+    bundles: {
+        server: {
+            side: 'server',
+            hash: HASH,
+            url: `https://cdn.grove.example/b/${HASH}`,
+            byteLength: 81_920,
+        },
+        client: {
+            side: 'client',
+            hash: HASH,
+            url: `https://cdn.grove.example/b/${HASH}`,
+            byteLength: 65_536,
+        },
+        simConfig: {
+            hash: HASH,
+            url: `https://cdn.grove.example/b/${HASH}.json`,
+            byteLength: 128,
+        },
+        syncedHash: HASH,
+    },
+};
 
 const PLACEMENT = {
     hostId: HostId.parse('1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d'),
     instanceId: InstanceId.parse('6f5e4d3c-2b1a-4f9e-8d7c-6b5a4f3e2d1c'),
     sessionId: SESSION_ID,
     serverUrl: SERVER_URL,
+    revision: VERSION.revision,
 };
 
 interface Sent {
@@ -68,7 +95,7 @@ afterEach(() => {
 
 describe('the fleet seam with nothing behind it', () => {
     it('reports no box rather than a failure', async () => {
-        expect(await unattachedFleet.place(GAME_ID, PLAYER, REQUEST_ID)).toBeUndefined();
+        expect(await unattachedFleet.place(GAME_ID, PLAYER, VERSION, REQUEST_ID)).toBeUndefined();
     });
 });
 
@@ -76,36 +103,53 @@ describe('the fleet seam over http', () => {
     it('asks the router for a placement, under the bearer its gate compares', async () => {
         const sent = stubFetch(json(PLACEMENT, 200));
 
-        expect(await httpFleet(env).place(GAME_ID, PLAYER, REQUEST_ID)).toEqual({
+        expect(await httpFleet(env).place(GAME_ID, PLAYER, VERSION, REQUEST_ID)).toEqual({
             sessionId: SESSION_ID,
             serverUrl: SERVER_URL,
+            revision: VERSION.revision,
         });
 
         expect(sent).toHaveLength(1);
         expect(sent[0]?.url).toBe('http://server-manager.grove.internal:4003/v1/placements');
         expect(sent[0]?.init.method).toBe('POST');
         expect(sent[0]?.init.headers).toMatchObject({ authorization: `Bearer ${BEARER}` });
+        // The version and the code that goes with it, because a box asked to hold a session it is
+        // not already running has to be told what to start.
         expect(PlacementRequest.parse(JSON.parse(String(sent[0]?.init.body)))).toEqual({
             gameId: GAME_ID,
             playerId: PLAYER,
+            revision: VERSION.revision,
+            bundles: VERSION.bundles,
         });
+    });
+
+    it('refuses a session placed on a version other than the one asked for', async () => {
+        // A browser handed the wrong bundle set is refused at the handshake, or — declaring no hash
+        // — admitted into a world holding none of its scripts. Neither may reach a player.
+        stubFetch(json({ ...PLACEMENT, revision: VERSION.revision - 1 }, 200));
+
+        await expect(httpFleet(env).place(GAME_ID, PLAYER, VERSION, REQUEST_ID)).rejects.toThrow(
+            /revision 6 for a join asking 7/u,
+        );
     });
 
     it('names the join it is placing, so the router logs it under the id the player got', async () => {
         const sent = stubFetch(json(PLACEMENT, 200));
 
-        await httpFleet(env).place(GAME_ID, PLAYER, REQUEST_ID);
+        await httpFleet(env).place(GAME_ID, PLAYER, VERSION, REQUEST_ID);
 
         expect(sent[0]?.init.headers).toMatchObject({ [REQUEST_ID_HEADER]: REQUEST_ID });
     });
 
     it('reads a conflict as the fleet being full', async () => {
         stubFetch(json({ code: 'conflict', message: 'no capacity' }, 409));
-        expect(await httpFleet(env).place(GAME_ID, PLAYER, REQUEST_ID)).toBeUndefined();
+        expect(await httpFleet(env).place(GAME_ID, PLAYER, VERSION, REQUEST_ID)).toBeUndefined();
     });
 
     it('refuses to read a broken router as a full one', async () => {
         stubFetch(json({ code: 'internal', message: 'internal error' }, 503));
-        await expect(httpFleet(env).place(GAME_ID, PLAYER, REQUEST_ID)).rejects.toThrow(/503/u);
+        await expect(httpFleet(env).place(GAME_ID, PLAYER, VERSION, REQUEST_ID)).rejects.toThrow(
+            /503/u,
+        );
     });
 });

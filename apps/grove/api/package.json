@@ -3,16 +3,24 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "The public API: accounts, projects, social, and the allocator that mints join tickets.",
+    "description": "The public API: accounts, games, social, and the allocator that mints join tickets.",
     "scripts": {
-        "build": "tsc -p tsconfig.json",
-        "dev": "tsc -p tsconfig.json && node --watch dist/main.js",
+        "build": "pnpm run db:generate && tsc -p tsconfig.json",
+        "dev": "pnpm run build && node --watch dist/main.js",
         "start": "node dist/main.js",
         "typecheck": "tsc -p tsconfig.test.json",
         "test": "vitest run",
-        "clean": "rm -rf dist .turbo"
+        "format": "prisma format",
+        "format:check": "prisma format --check",
+        "db:generate": "prisma generate",
+        "db:migrate": "node --env-file-if-exists=.env node_modules/prisma/build/index.js migrate dev",
+        "db:deploy": "node --env-file-if-exists=.env node_modules/prisma/build/index.js migrate deploy",
+        "db:studio": "node --env-file-if-exists=.env node_modules/prisma/build/index.js studio",
+        "clean": "rm -rf dist .turbo src/generated"
     },
     "dependencies": {
+        "@aws-sdk/client-s3": "^3.1136.0",
+        "@aws-sdk/s3-request-presigner": "^3.1136.0",
         "@fastify/cookie": "^11.1.2",
         "@fastify/cors": "^11.3.0",
         "@fastify/csrf-protection": "^8.0.1",
@@ -22,12 +30,19 @@
         "@fastify/swagger": "^9.8.1",
         "@fastify/swagger-ui": "^6.1.1",
         "@grove/api-contract": "workspace:*",
+        "@node-rs/argon2": "^2.2.1",
+        "@prisma/adapter-pg": "^7.10.0",
+        "@prisma/client": "^7.10.0",
         "fastify": "^5.12.1",
         "fastify-type-provider-zod": "^7.0.0",
+        "ioredis": "^6.0.0",
         "zod": "^4.5.4"
     },
     "devDependencies": {
+        "@electric-sql/pglite": "^0.5.8",
+        "@electric-sql/pglite-socket": "^0.2.11",
         "@types/node": "^26.1.2",
+        "prisma": "^7.10.0",
         "typescript": "^7.0.2",
         "vitest": "^4.1.10"
     }

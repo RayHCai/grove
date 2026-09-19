@@ -17,9 +17,7 @@ const CODE_BY_STATUS: ReadonlyMap<number, ErrorBody['code']> = new Map([
 
 /**
  * One shape for every failure, so a caller branches on `code` rather than guessing from a status.
- *
- * A response that failed to serialize is a 500, not a 400: the request was fine and the bug is
- * here, and returning the client's own fault for it sends callers looking in the wrong place.
+ * A response that failed to serialize is a 500, not a 400: the request was fine.
  */
 export function installErrorHandler(app: FastifyInstance): void {
     app.setErrorHandler((error: FastifyError, request, reply) => {

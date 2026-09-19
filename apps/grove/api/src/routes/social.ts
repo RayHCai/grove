@@ -10,12 +10,8 @@ const Friend = z.object({
 });
 
 /**
- * Friends, presence, and the block list.
- *
- * Everything here needs a viewer AND that viewer's blocks, and the second hook is the reason this
- * is a scope rather than a shared prefix: `blockedBy` is loaded once per request for these routes
- * and for nothing else. A route added to this file inherits both. A route added to the allocator
- * inherits neither, which is what keeps a per-request friend-graph read off the join path.
+ * Friends, presence, and the block list. A scope because of the second hook: `blockedBy` loads
+ * once per request here and nowhere else, keeping that read off the join path.
  */
 export const socialRoutes: FastifyPluginAsyncZod = async (app) => {
     app.addHook('onRequest', requireSession);
