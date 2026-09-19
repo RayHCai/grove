@@ -19,22 +19,13 @@ interface Queued {
     due: number;
 }
 
-/**
- * The registration refusals, held here so the two backends cannot drift a word apart: a consumer
- * reads the message, and one wire failing differently from the other is the drift this package
- * exists to kill.
- */
+/** The registration refusals, held here so the two backends cannot drift a word apart. */
 const MESSAGE_HANDLER_TAKEN =
     "onMessage is already registered on this end; a second handler would split this connection's frames between two consumers. Dispose the first, or fan out above the transport.";
 const CLOSE_HANDLER_TAKEN =
     'onClose is already registered on this end. Dispose the first, or fan out above the transport.';
 
-/**
- * The overflow message both backends report, for the same reason.
- *
- * `advice` carries the only genuine difference: the lifetime that leaks and the wiring point to
- * move, which are not the same sentence on a pumped wire and on a socket.
- */
+/** The overflow message both backends report; `advice` carries the only genuine difference. */
 export function retentionOverflowMessage(
     retained: number,
     bytes: number,
@@ -50,32 +41,24 @@ export interface InboxPolicy {
     /** Bounds bytes retained while no handler is registered, summed via `codec.byteLength`. */
     readonly maxRetainedBytes: number;
     /**
-     * A frame the cap refused, already dropped: `retained` is what was held before it, `bytes` its
-     * own. Loopback latches the condition and throws from its next pump; a socket reports it once and
-     * stays up.
+     * A frame the cap refused, already dropped. Loopback latches and throws from its next pump;
+     * a socket reports it once and stays up.
      */
     onOverflow(retained: number, bytes: number): void;
     /**
-     * A `decode` rejection on the frame just consumed. Throwing propagates out of the drain; returning
-     * abandons the drain, leaving everything behind that frame queued.
+     * A `decode` rejection on the frame just consumed. Throwing propagates out of the drain;
+     * returning abandons it, leaving everything behind that frame queued.
      */
     onDecodeFailure(error: unknown): void;
 }
 
-/**
- * One end's inbox: the queue, its handlers, the retention accounting, and the drain.
- *
- * Held as a `#` member by both ends, so a consumer holding a `Transport` cannot reach it — a
- * TypeScript `private` is erased and would not have stopped that.
- */
+/** One end's inbox: queue, handlers, retention, drain. A `#` member, so no consumer reaches it. */
 export class FrameInbox {
     readonly #policy: InboxPolicy;
     readonly #entries: Queued[] = [];
     /**
-     * Where the undelivered entries start. A head index rather than `shift()` per frame, because
-     * `shift()` stops being cheap once the backing store leaves V8's trimmable regime, and a
-     * 100k-frame backlog is reachable at the default cap: the cap bounds BYTES, and a one-byte
-     * frame is legal.
+     * Where the undelivered entries start. A head index rather than `shift()`, which stops being
+     * cheap past V8's trimmable regime — and a 100k-frame backlog is reachable at the byte cap.
      */
     #head = 0;
 
@@ -95,8 +78,8 @@ export class FrameInbox {
             transportError('handler-already-registered', MESSAGE_HANDLER_TAKEN);
         }
         this.#onMessage = handler;
-        // The join sequence races wiring order, so frames that arrived with no handler were retained
-        // rather than dropped — flush them now, in order.
+        // The join sequence races wiring order, so frames that arrived with no handler were
+        // retained rather than dropped — flush them now, in order.
         this.drain();
         return () => {
             if (this.#onMessage === handler) this.#onMessage = undefined;
@@ -149,7 +132,7 @@ export class FrameInbox {
         }
     }
 
-    /** True while anything is eligible and a handler exists to take it — the `latency: 0` loop's test. */
+    /** True while anything is eligible and a handler exists — the `latency: 0` loop's test. */
     get deliverable(): boolean {
         const next = this.#entries[this.#head];
         if (next === undefined || next.due > 0) return false;
@@ -159,12 +142,9 @@ export class FrameInbox {
     }
 
     drain(): void {
-        // Consumed one at a time rather than from a snapshot, which buys three properties a snapshot
-        // loses: a handler that closes mid-drain leaves anything behind the marker unconsumed; one
-        // that disposes itself leaves the rest RETAINED for the next registration rather than
-        // delivered into a disposed closure; and one that throws leaves the frames behind it queued
-        // rather than dropped. A `send` from inside a handler never reaches the inbox it is draining —
-        // loopback lands it in the PEER's, a socket writes it to the wire — so it cannot extend this loop.
+        // Consumed one at a time, not from a snapshot: a handler that closes mid-drain leaves
+        // what is behind the marker unconsumed, one that disposes leaves the rest RETAINED,
+        // and one that throws leaves its followers queued.
         while (this.#head < this.#entries.length) {
             const next = this.#entries[this.#head] as Queued;
 
@@ -188,13 +168,13 @@ export class FrameInbox {
 
             let message: Message;
             try {
-                // Decode is paid on delivery, not on enqueue, so a frame dropped under pressure costs
-                // nothing more to discard.
+                // Decode is paid on delivery, not on enqueue, so a frame dropped under pressure
+                // costs nothing more to discard.
                 message = this.#policy.codec.decode(next.item);
             } catch (error) {
                 this.#policy.onDecodeFailure(error);
-                // Left uncompacted deliberately: a policy that returns has abandoned this drain, and
-                // the entries behind the failed frame are still the next drain's to deliver.
+                // Left uncompacted deliberately: a policy that returns has abandoned this drain,
+                // and the entries behind the failed frame are still the next drain's to deliver.
                 return;
             }
 
@@ -203,7 +183,7 @@ export class FrameInbox {
         this.#compact();
     }
 
-    /** Reclaims the consumed prefix, so a long-lived connection's array does not grow without bound. */
+    /** Reclaims the consumed prefix, so a long-lived connection's array does not grow unbounded. */
     #compact(): void {
         if (this.#head === 0) return;
         if (this.#head >= this.#entries.length) {
@@ -211,7 +191,8 @@ export class FrameInbox {
             this.#head = 0;
             return;
         }
-        // Only once the consumed prefix outweighs what is left, so the copy is amortised O(1)/frame.
+        // Only once the consumed prefix outweighs what is left, so the copy is amortised
+        // O(1)/frame.
         if (this.#head >= 1024 && this.#head * 2 >= this.#entries.length) {
             this.#entries.splice(0, this.#head);
             this.#head = 0;

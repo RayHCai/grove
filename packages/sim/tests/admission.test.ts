@@ -1,8 +1,3 @@
-// The bounds on what one peer can buy with one frame, plus the two silent-failure paths.
-//
-// Every case here is a cost a hostile client could impose that no window and no token bucket saw,
-// because they bound how MANY frames arrive rather than what one frame is allowed to contain.
-
 import { describe, expect, it } from 'vitest';
 import { templateId } from '@platform/project';
 import type { Message } from '@platform/transport';
@@ -40,7 +35,8 @@ describe('what one frame is allowed to contain', () => {
         peer.input(h.tick + 2, presses(MAX_ACTIONS_PER_FRAME + 1));
         h.pumpTicks(8);
         // Dropped at the narrowing, which holds no validated seq to resolve — so the ack stalls
-        // exactly as it would on a frame that never arrived, until the abandonment rule releases it.
+        // exactly as it would on a frame that never arrived, until the abandonment rule releases
+        // it.
         expect(peer.lastState?.ackSeq).toBe(-1);
 
         peer.input(h.tick + 2, [{ action: 'jump', on: 'press' }]);
@@ -64,7 +60,8 @@ describe('what one frame is allowed to contain', () => {
         h.settle([peer]);
 
         // Three frames of distinct names, well past the cap: every held name costs a synthesized
-        // `hold` dispatch on every later tick, so the key space is the thing that has to be bounded.
+        // `hold` dispatch on every later tick, so the key space is the thing that has to be
+        // bounded.
         const at = h.tick + 2;
         for (let batch = 0; batch < 3; batch++) {
             peer.input(
@@ -137,9 +134,9 @@ describe('anything the state encoder accepts, the codec accepts', () => {
     it('drops a value nested past the cap rather than letting encode abort the send', () => {
         expect(encodeStateValue(nest(MAX_STATE_DEPTH))).toBeUndefined();
 
-        // The deepest envelope a state value rides is the join snapshot's, so the margin has to hold
-        // there: a value the encoder passes and the codec refuses throws out of the fan-out and takes
-        // every connection's send with it.
+        // The deepest envelope a state value rides is the join snapshot's, so the margin has to
+        // hold there: a value the encoder passes and the codec refuses throws out of the fan-out
+        // and takes every connection's send with it.
         const accepted = encodeStateValue(nest(MAX_STATE_DEPTH - 1));
         expect(accepted).toBeDefined();
         const welcome = {
@@ -159,8 +156,8 @@ describe('shutdown', () => {
 
         h.close();
 
-        // The close path is run directly rather than left to each transport's onClose, which would need
-        // a delivery that is never going to come.
+        // The close path is run directly rather than left to each transport's onClose, which would
+        // need a delivery that is never going to come.
         expect(h.sim.sessions).toHaveLength(0);
         expect(h.sim.runtime.playerManager?.players).toHaveLength(0);
 

@@ -8,9 +8,7 @@ import { TransportError } from '../errors.js';
 
 /**
  * Fixtures for the cases only a codec knows how to express.
- *
- * Every frame-shaped option defaults to a JSON fixture, so a non-JSON codec supplies its own or
- * passes `null` to skip the case its wire cannot express.
+ * Each defaults to a JSON fixture; a non-JSON codec supplies its own or passes `null` to skip.
  */
 export interface CodecContractOptions {
     /** Label for the describe block, so two codecs' results are told apart. */
@@ -19,7 +17,7 @@ export interface CodecContractOptions {
     malformedFrame?: Frame | null;
     /** Builds a well-formed frame nesting `depth` levels, for the decode-side depth cap. */
     makeDeepFrame?: ((depth: number) => Frame) | null;
-    /** A nesting depth every codec must REFUSE on both directions, deep enough to overflow a recursive walk. */
+    /** A nesting depth every codec must REFUSE, deep enough to overflow a recursive walk. */
     hostileDepth?: number;
     /**
      * Frames carrying a pollution key, in this codec's own encoding — unproducible through
@@ -35,25 +33,22 @@ export interface CodecContractOptions {
 }
 
 /**
- * Resolves one fixture.
- *
- * `null` rather than an omitted key is the skip, because `exactOptionalPropertyTypes` makes an
- * explicit `undefined` unassignable and would leave the skip unreachable for every typed caller.
+ * Resolves one fixture. `null` rather than an omitted key is the skip, because
+ * `exactOptionalPropertyTypes` makes an explicit `undefined` unassignable.
  */
 function fixture<T>(supplied: T | null | undefined, fallback: T): T | null {
     return supplied === undefined ? fallback : supplied;
 }
 
 /**
- * Declared rather than imported because `src/` pulls in neither `node` nor `DOM` types, so only the
- * one member the `byteLength` check needs is named — and that check is what pins a hand-rolled UTF-8
- * count to the real encoding instead of trusting it.
+ * Declared rather than imported, since `src/` pulls in neither `node` nor `DOM` types: only the
+ * member the `byteLength` check needs, and that check pins a hand-rolled UTF-8 count.
  */
 declare const TextEncoder: new () => { encode(input: string): { readonly length: number } };
 
 /**
- * Stands in for a live engine object reaching `send` unserialized. It stringifies to `{"id":"e42"}`,
- * so the peer would receive a plausible-looking object that is not an `Entity`.
+ * Stands in for a live engine object reaching `send` unserialized. It stringifies to
+ * `{"id":"e42"}`, so the peer would receive a plausible object that is not an `Entity`.
  */
 class EntityLike {
     constructor(readonly id: string) {}
@@ -271,9 +266,9 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
             if (makeDeepFrame !== null) {
                 it('refuses a deeply nested frame instead of exhausting the stack', () => {
                     const codec = makeCodec();
-                    // The frame is well-formed and a few tens of KB — under any byte cap — so a size
-                    // limit does not catch it. A TransportError closes the connection; a RangeError
-                    // means the process is the attacker's.
+                    // The frame is well-formed and a few tens of KB — under any byte cap — so a
+                    // size limit does not catch it. A TransportError closes the connection; a
+                    // RangeError means the process is the attacker's.
                     expect(() => codec.decode(makeDeepFrame(hostileDepth))).toThrow(TransportError);
                 });
 
@@ -312,8 +307,8 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
                         thrown = error;
                     }
                     expect(thrown).toBeInstanceOf(TransportError);
-                    // As with depth: `frame-too-large` is precise, but a codec whose framing refuses
-                    // the size first reports `malformed-frame`. Both are peer-fault codes.
+                    // As with depth: `frame-too-large` is precise, but a codec whose framing
+                    // refuses the size first reports `malformed-frame`. Both are peer-fault codes.
                     expect(['frame-too-large', 'malformed-frame']).toContain(
                         (thrown as TransportError).code,
                     );
@@ -327,10 +322,10 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
         });
 
         describe('the two directions agree', () => {
-            // The containment property: whatever `encode` emits, `decode` must accept. Without it the
-            // two admissible sets drift apart — each direction is a separate walk over a separate
-            // rule list — and the codec produces frames its own peer rejects under a code that blames
-            // the sender.
+            // The containment property: whatever `encode` emits, `decode` must accept. Without it
+            // the two admissible sets drift apart — each direction is a separate walk over a
+            // separate rule list — and the codec produces frames its own peer rejects under a code
+            // that blames the sender.
             it('accepts every frame it produced, for each admissible value', () => {
                 for (const { value } of ADMISSIBLE) {
                     const codec = makeCodec();
@@ -339,9 +334,9 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
             });
 
             it('handles a key that names a prototype slot the same way in both directions', () => {
-                // A creator naming a field "constructor" is ordinary, so the two answers a codec may
-                // give are refuse-on-encode or accept-on-both. Producing a frame that its own decode
-                // refuses is the one answer that is wrong.
+                // A creator naming a field "constructor" is ordinary, so the two answers a codec
+                // may give are refuse-on-encode or accept-on-both. Producing a frame that its own
+                // decode refuses is the one answer that is wrong.
                 for (const key of ['__proto__', 'constructor', 'prototype']) {
                     const codec = makeCodec();
                     let frame: Frame;
@@ -379,8 +374,8 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
 
             it('accepts a wide DAG of shared leaves, which depth does not bound', () => {
                 const codec = makeCodec();
-                // Depth, not node count, is what the cap bounds: a wide graph of shared references is
-                // legal however many nodes it has, so the two must not be conflated.
+                // Depth, not node count, is what the cap bounds: a wide graph of shared references
+                // is legal however many nodes it has, so the two must not be conflated.
                 const leaf = { v: 1 };
                 const wide = Array.from({ length: 5_000 }, () => leaf);
                 expect(() => codec.encode(wide)).not.toThrow();
@@ -430,8 +425,8 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
 
             it('normalizes an array hole to null rather than rejecting it', () => {
                 const codec = makeCodec();
-                // Built by assignment rather than as a `[1, , 3]` literal, which the linter reads as
-                // a typo.
+                // Built by assignment rather than as a `[1, , 3]` literal, which the linter reads
+                // as a typo.
                 const sparse: number[] = [];
                 sparse[0] = 1;
                 sparse[2] = 3;

@@ -1,10 +1,3 @@
-// What bounds the server's own output: a per-send structural budget with an ordered spill, and a
-// join snapshot divided when one frame cannot carry it.
-//
-// Both exist because a peer refuses an over-cap frame BEFORE parsing it, and the client's answer to a
-// broken session is a resync — which asks for a full snapshot, which is bigger. Nothing recovers on
-// its own, and it happens to every connection at once.
-
 import { describe, expect, it } from 'vitest';
 import type { ServerToClient, SnapshotChunk, WireStructuralOp } from '@platform/protocol';
 import type { Message } from '@platform/transport';
@@ -24,10 +17,8 @@ function spawnMany(h: Harness, count: number, template = 'coin'): void {
 }
 
 /**
- * Mints `count` ordered ops on ONE entity, for the cases that need a deep journal and not a big world.
- *
- * Core's broadphase is naive O(n²) over the live set, so a test that reached a deep journal by
- * spawning would spend its time in contacts rather than in what it is measuring.
+ * Mints `count` ordered ops on ONE entity, for cases needing a deep journal, not a big world.
+ * Core's broadphase is naive O(n²), so reaching a deep journal by spawning measures contacts.
  */
 function tagMany(h: Harness, count: number): string[] {
     const entity = h.sim.runtime.gameInstance!.spawn('coin', 0, 0);
@@ -76,8 +67,8 @@ describe('the per-send structural budget', () => {
         const peer = h.joined();
         h.settle([peer]);
 
-        // Three sends' worth minted in one tick — the runaway the budget exists for. Unbounded, this
-        // is one envelope no peer would parse; bounded, it is three every peer will.
+        // Three sends' worth minted in one tick — the runaway the budget exists for. Unbounded,
+        // this is one envelope no peer would parse; bounded, it is three every peer will.
         const names = tagMany(h, MAX_STRUCTURAL_OPS_PER_SEND * 3);
         statesUntil(h, peer, 4);
 
@@ -105,7 +96,8 @@ describe('the per-send structural budget', () => {
         statesUntil(h, first, 1);
 
         // Joins while ops are still held over. Its snapshot is read from LIVE state, so it already
-        // contains them — replaying would mint a second copy, and a duplicate spawn is not idempotent.
+        // contains them — replaying would mint a second copy, and a duplicate spawn is not
+        // idempotent.
         const late = h.connect();
         late.join('late');
         for (let i = 0; i < 64 && late.welcome === undefined; i++) h.pumpTicks(1);
@@ -121,8 +113,8 @@ describe('the per-send structural budget', () => {
 });
 
 describe('a join snapshot too big for one frame', () => {
-    // A wide template rather than a huge count: it is the BYTES that have to cross the cap, and 4000
-    // entities carrying a kilobyte of template each does it without a slow test.
+    // A wide template rather than a huge count: it is the BYTES that have to cross the cap, and
+    // 4000 entities carrying a kilobyte of template each does it without a slow test.
     const WIDE = 'w'.repeat(1024);
     const COUNT = 4_000;
 
@@ -147,12 +139,13 @@ describe('a join snapshot too big for one frame', () => {
         const peer = h.joined();
 
         const chunks = peer.received.filter((e): e is SnapshotChunk => e.kind === 'snapshot-chunk');
-        // Chunks precede the Welcome, so the client folds them AHEAD of the welcome's own remainder.
+        // Chunks precede the Welcome, so the client folds them AHEAD of the welcome's own
+        // remainder.
         const entities = [...chunks.flatMap((c) => c.entities), ...peer.welcome!.snapshot.entities];
         expect(entities).toHaveLength(COUNT);
 
-        // Indices are dense and ascending, which is what lets the receiver reject a short set rather
-        // than open a session on a world missing entities the server believes it sent.
+        // Indices are dense and ascending, which is what lets the receiver reject a short set
+        // rather than open a session on a world missing entities the server believes it sent.
         expect(chunks.map((c) => c.index)).toStrictEqual(chunks.map((_, at) => at));
     });
 

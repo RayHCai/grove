@@ -6,9 +6,7 @@ import { encodeHostField, readEntitySnapshot, readPlayerSnapshot, toNetId } from
 
 /**
  * The world as `forPlayer` should first see it, at the current tick.
- *
- * The tick rides here rather than on `Welcome`, so the tick a joiner seeds from cannot disagree with
- * the tick the world it describes was read at.
+ * The tick rides here, not on `Welcome`, so a joiner's seed cannot disagree with what it describes.
  */
 export function buildSnapshot(rt: Runtime, forPlayer: Player): WorldSnapshot {
     const ids = ancestorsFirst(rt);
@@ -46,8 +44,8 @@ export function ancestorsFirst(rt: Runtime): EntityId[] {
 
     const out: EntityId[] = [];
     const seen = new Set<number>();
-    // Iterative and `seen`-guarded: a cycle cannot be built through the creator surface today, but a
-    // recursive walk would hang rather than degrade if one ever were.
+    // Iterative and `seen`-guarded: a cycle cannot be built through the creator surface today, but
+    // a recursive walk would hang rather than degrade if one ever were.
     const stack = roots.toReversed();
     for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
         if (seen.has(id as number)) continue;
@@ -60,7 +58,7 @@ export function ancestorsFirst(rt: Runtime): EntityId[] {
     return out;
 }
 
-/** The `@serverState` baseline: all game-record state, this player's own, and every live entity's. */
+/** The `@serverState` baseline: all game-record state, this player's own, and every entity's. */
 function snapshotState(rt: Runtime, forPlayer: Player, ids: readonly EntityId[]): StateDiff[] {
     const out: StateDiff[] = [];
     collect(rt, out, GAME_KEY, { kind: 'game' });
@@ -71,10 +69,10 @@ function snapshotState(rt: Runtime, forPlayer: Player, ids: readonly EntityId[])
     return out;
 }
 
-/** One entry per host that has any field, so a host with none contributes nothing to the snapshot. */
+/** One entry per host that has any field, so a host with none contributes nothing. */
 function collect(rt: Runtime, into: StateDiff[], hostKey: string, host: StateHostAddr): void {
-    // `get`, never `ensure`: ensure mints a record for whatever key it is handed, so a walk that used
-    // it would create an empty host for every entity it asked about.
+    // `get`, never `ensure`: ensure mints a record for whatever key it is handed, so a walk that
+    // used it would create an empty host for every entity it asked about.
     const record = rt.hosts.get(hostKey)?.record;
     if (!record) return;
     const fields: { [field: string]: JsonValue } = {};

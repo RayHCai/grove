@@ -1,7 +1,4 @@
-// The deployment half: a WebSocket in front of a session that does not exist yet.
-//
-// `listenOn` is the shape this mirrors — the socket layer as a function beside the instance rather
-// than inside it, so the instance itself stays reachable over a loopback pair with no socket.
+// The socket layer as a function beside the instance, so the instance stays loopback-drivable.
 
 import { connectWebSocket } from '@platform/transport/websocket';
 import type { ConnectWebSocketOptions } from '@platform/transport/websocket';
@@ -13,30 +10,19 @@ import type { ClientInstanceOptions } from './instance.js';
 export interface ConnectOptions extends Omit<ClientInstanceOptions, 'transport'> {
     url: string;
     /**
-     * Abandons a dial that is no longer wanted.
-     *
-     * The reason this is not left to the caller: a dial resolves on its own schedule, so a host that
-     * unmounted while it was in flight holds no session to close and the socket becomes a player
-     * that never leaves. Aborted, the transport is closed here and nothing is constructed.
+     * Abandons a dial that is no longer wanted. A dial resolves on its own schedule, so a host
+     * that unmounted mid-flight has no session to close and the socket never leaves.
      */
     signal?: AbortSignal;
     /** Diagnostics from the socket itself. Absent, a broken connection is silent. */
     onError?: (error: TransportError) => void;
-    /**
-     * Offered at the upgrade, for an authority that authenticates before it.
-     *
-     * A browser dial can set no header, so a credential the socket has to present ahead of the
-     * connection has nowhere else to ride.
-     */
+    /** Offered at the upgrade: a browser dial sets no header, so a credential has no other ride. */
     protocols?: string[];
 }
 
 /**
- * Dials, composes a session over the socket, and joins.
- *
- * Started, for the reason `listenOn` starts the world it is put in front of: this is the socket
- * layer, and a caller that reached for it wants the session running. A host that needs to hold a
- * built-but-unjoined session builds `ClientInstance` itself and calls `start()` when it is ready.
+ * Dials, composes a session over the socket, and joins. Started, since a caller reaching for
+ * the socket layer wants it running; hold one unjoined by building `ClientInstance` instead.
  */
 export async function connectTo(opts: ConnectOptions): Promise<ClientInstance> {
     const { url, signal, onError, protocols, ...forwarded } = opts;

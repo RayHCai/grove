@@ -1,4 +1,4 @@
-// The drain and the fan-out. Fixtures are compiled by the build.
+// Fixtures are compiled by the build.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SingleStructuralOp } from '@platform/core';
@@ -451,9 +451,9 @@ describe('wrapper state crosses as its wire form, not as a class', () => {
     });
 
     it('counts a mark whose host died first as churn, and not as a bug report', () => {
-        // The write and the destroy land in one send interval, so the address table the drain builds
-        // no longer holds the host. Ordinary in any world that destroys anything — folding it into
-        // `droppedMarks` is what made that counter unusable as a health signal.
+        // The write and the destroy land in one send interval, so the address table the drain
+        // builds no longer holds the host. Ordinary in any world that destroys anything — folding
+        // it into `droppedMarks` is what made that counter unusable as a health signal.
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
         const crate = h.sim.runtime.entityManager.spawn('crate', 0, 0);

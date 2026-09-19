@@ -18,21 +18,16 @@ import type {
 } from './transport.js';
 
 /**
- * Declared rather than imported, since `src/` pulls in neither `node` nor `DOM` types — and only the
- * members named here are ever touched, so one file compiles against all three implementations.
+ * Declared rather than imported, since `src/` pulls in neither `node` nor `DOM` types — and only
+ * the members named here are touched, so one file compiles against all three implementations.
  */
 declare const WebSocket: { new (url: string, protocols?: string[]): WebSocketLike };
 declare const setInterval: (fn: () => void, ms: number) => unknown;
 declare const clearInterval: (handle: unknown) => void;
 
 /**
- * The WebSocket surface this backend uses. Every member is common to a browser's `WebSocket`, Node's
- * global, and `ws`.
- *
- * Event payloads are `unknown` because the three implementations hand over three different event
- * objects, and reading them defensively is honest rather than defeated. `addEventListener` rather
- * than an `onmessage` assignment: the composition root may have its own listener on the socket it
- * accepted, and an assignment would silently replace it.
+ * The WebSocket surface this backend uses; every member is common to browser, Node and `ws`.
+ * `addEventListener`, not an `onmessage` assignment, which would replace the root's listener.
  */
 export interface WebSocketLike {
     /** 0 CONNECTING, 1 OPEN, 2 CLOSING, 3 CLOSED — fixed by the standard. */
@@ -45,9 +40,8 @@ export interface WebSocketLike {
      */
     binaryType?: unknown;
     /**
-     * `Uint8Array<ArrayBuffer>` rather than `Frame`'s plain `Uint8Array`: every socket API requires a
-     * view onto a real `ArrayBuffer`, while a bare `Uint8Array` also admits a `SharedArrayBuffer`
-     * backing — so the wider type makes a real socket unassignable to this interface.
+     * `Uint8Array<ArrayBuffer>` rather than `Frame`'s plain `Uint8Array`: a bare one also admits a
+     * `SharedArrayBuffer` backing, so the wider type makes a real socket unassignable here.
      */
     send(data: string | Uint8Array<ArrayBuffer>): void;
     close(code?: number, reason?: string): void;
@@ -57,19 +51,13 @@ export interface WebSocketLike {
 /** Options common to both doors. */
 export interface WebSocketOptions extends TransportOptions {
     /**
-     * Where a coded failure goes, since `Transport` has no error channel and a socket event has no
-     * catchable stack: a `decode` rejection, a stalled peer, silence, or an abnormal close. The
-     * connection closes behind every one of them, so `onClose` still fires and this only adds the
-     * cause — without it a hostile peer and a clean quit are the same event.
+     * Where a coded failure goes, since `Transport` has no error channel: a `decode` rejection, a
+     * stalled peer, silence, or an abnormal close. Without it a hostile peer and a quit look alike.
      */
     onError?: (error: TransportError) => void;
     /**
-     * Cap on the socket's own unsent bytes before the connection is closed; defaults to
-     * `MAX_FRAME_BYTES`.
-     *
-     * `maxRetainedBytes` bounds what arrived with nobody to take it; this bounds what we handed the
-     * socket and it could not move. Nothing above the transport can see `bufferedAmount`, so nothing
-     * above it could hold this bound.
+     * Cap on the socket's own unsent bytes before the connection closes.
+     * `maxRetainedBytes` bounds what arrived unread; this bounds what would not move.
      */
     maxBufferedBytes?: number;
     /** The heartbeat's scheduling seam; defaults to a real-time source. */
@@ -78,50 +66,26 @@ export interface WebSocketOptions extends TransportOptions {
 
 /** Options for the dial. */
 export interface ConnectWebSocketOptions extends ConnectOptions, WebSocketOptions {
-    /**
-     * Subprotocols offered at the upgrade.
-     *
-     * A browser dial can set no header, so a host that authenticates before the upgrade has
-     * nowhere else to read a credential from.
-     */
+    /** Subprotocols offered at the upgrade; a browser dial sets no header. */
     protocols?: string[];
-    /**
-     * The socket constructor, defaulting to the global `WebSocket`.
-     *
-     * A seam rather than a hard reference to the global: a Node client older than the global's
-     * arrival passes `ws`'s constructor here, which is also how the backend is driven under test.
-     */
+    /** The socket constructor, defaulting to the global `WebSocket`; a seam, so `ws` can pass. */
     createSocket?: (url: string, protocols?: string[]) => WebSocketLike;
 }
 
-/** `readyState` values, named here so a socket the composition root supplied need carry no statics. */
+/** `readyState` values, named here so a supplied socket need carry no statics. */
 const OPEN = 1;
 
 /**
- * Close codes this end reads or writes.
- *
- * `close()` always writes `NORMAL_CLOSURE`: a close code is not a protocol channel here — protocol's
- * own `reject` envelope is, and it is sent ahead of the close. Inbound, `GOING_AWAY` is as clean as
- * normal, because it is what a tab navigating away sends and reporting that as a fault would make
- * every page close look hostile.
+ * Close codes this end reads or writes. `close()` always writes `NORMAL_CLOSURE`: a close code
+ * is not a protocol channel here. Inbound, `GOING_AWAY` is as clean as normal — a tab leaving.
  */
 const NORMAL_CLOSURE = 1000;
 const GOING_AWAY = 1001;
 
-/**
- * Cap on the socket's own unsent bytes, sized off the frame cap rather than chosen.
- *
- * A peer refuses anything larger than one frame, so a send buffer holding more than that is a peer
- * that stopped reading rather than a burst in flight.
- */
+/** Cap on unsent bytes, sized off the frame cap: more means a peer that stopped reading. */
 const DEFAULT_MAX_BUFFERED_BYTES = MAX_FRAME_BYTES;
 
-/**
- * Milliseconds between silence checks, and how many consecutive silent ones close the connection.
- *
- * Three windows is 10–15 s, well past the client's own 1 s stall detection, so a stall is reported
- * and resynced long before the connection is killed.
- */
+/** Milliseconds between silence checks, and how many silent ones close it. Three ≈ 10–15 s. */
 const HEARTBEAT_INTERVAL_MS = 5000;
 const MAX_MISSED_HEARTBEATS = 3;
 
@@ -163,11 +127,8 @@ function resolve(opts: WebSocketOptions | undefined): Resolved {
 }
 
 /**
- * Reads a frame off a message event.
- *
- * `binaryType` is set to `'arraybuffer'` at construction, so a conforming socket hands over a string
- * or one of these two views — never a `Blob`, which would have to be awaited, and awaiting reorders
- * frames.
+ * Reads a frame off a message event. `binaryType` is `'arraybuffer'`, so a conforming socket
+ * hands over a string or a view — never a `Blob`, which would have to be awaited, reordering.
  */
 function frameOf(event: unknown): Frame | undefined {
     const data = (event as { data?: unknown } | null)?.data;
@@ -184,21 +145,19 @@ function closeCodeOf(event: unknown): number | undefined {
 }
 
 /**
- * One end of one established WebSocket. Owns the socket's events, its inbox, and the silence timer.
- *
- * Every member but the five `Transport` methods is `#`-private, so a consumer holding one end cannot
- * reach the inbox or the socket — a TypeScript `private` is erased and would not have stopped that.
+ * One end of one established WebSocket: its events, its inbox, and the silence timer.
+ * Everything but the five `Transport` methods is `#`-private, which a `private` would not be.
  */
 class WebSocketEnd implements Transport {
     readonly #socket: WebSocketLike;
     readonly #opts: Resolved;
     readonly #inbox: FrameInbox;
 
-    /** `'closing'` is "we asked" and `'closed'` is "it is over"; one flag for both double-reports. */
+    /** `'closing'` is "we asked", `'closed'` is "it is over"; one flag for both double-reports. */
     #state: 'open' | 'closing' | 'closed' = 'open';
-    /** One cause per connection: an error event and the abnormal close behind it are one failure. */
+    /** One cause per connection: an error event and the abnormal close behind it are one fault. */
     #causeReported = false;
-    /** Reported once rather than per frame: the frames were dropped, so repeating it is not news. */
+    /** Reported once rather than per frame: the frames were dropped, so repeating is not news. */
     #overflowReported = false;
 
     #heartbeat: unknown;
@@ -213,8 +172,8 @@ class WebSocketEnd implements Transport {
             codec: opts.codec,
             maxRetainedBytes: opts.maxRetainedBytes,
             onOverflow: (retained, bytes) => {
-                // The connection survives: the wiring bug is above the transport, and killing a live
-                // socket would not fix it.
+                // The connection survives: the wiring bug is above the transport, and killing a
+                // live socket would not fix it.
                 if (this.#overflowReported) return;
                 this.#overflowReported = true;
                 opts.report?.(
@@ -230,10 +189,10 @@ class WebSocketEnd implements Transport {
                 );
             },
             onDecodeFailure: (error) => {
-                // Unlike loopback, where the sender's own `encode` produced the frame, this one came
-                // from a peer: a rejection is the peer's bug, so it is reported and the connection
-                // closes rather than throwing into a socket event nothing can catch. An error that is
-                // not a `TransportError` is our defect and propagates.
+                // Unlike loopback, where the sender's own `encode` produced the frame, this one
+                // came from a peer: a rejection is the peer's bug, so it is reported and the
+                // connection closes rather than throwing into a socket event nothing can catch. An
+                // error that is not a `TransportError` is our defect and propagates.
                 if (!(error instanceof TransportError)) throw error;
                 this.#reportCause(error);
                 this.close();
@@ -312,8 +271,8 @@ class WebSocketEnd implements Transport {
         if (this.#state !== 'open') return;
 
         this.#inbox.enqueue(frame);
-        // The event loop is the pump here, so a drain follows every arrival — which is why a backlog
-        // behind a live handler cannot build up on this wire.
+        // The event loop is the pump here, so a drain follows every arrival — which is why a
+        // backlog behind a live handler cannot build up on this wire.
         this.#inbox.drain();
     }
 
@@ -332,8 +291,8 @@ class WebSocketEnd implements Transport {
 
         this.#state = 'closed';
         this.#stopHeartbeat();
-        // Rides the FIFO behind every frame already queued, so a handler registered later still sees
-        // them in order and learns of the close last.
+        // Rides the FIFO behind every frame already queued, so a handler registered later still
+        // sees them in order and learns of the close last.
         this.#inbox.queueClose();
         this.#inbox.drain();
     }
@@ -351,9 +310,7 @@ class WebSocketEnd implements Transport {
 
     /**
      * Reports the cause of one connection's death, at most once.
-     *
-     * The ordinary browser failure is an `error` event and then a 1006 close, two views of one
-     * fault; and after a local `close()` nothing that follows is a fault at all.
+     * A browser's `error` then 1006 close are two views of one fault; after `close()`, none.
      */
     #reportCause(error: TransportError): void {
         if (this.#causeReported || this.#state !== 'open') return;
@@ -385,7 +342,7 @@ class WebSocketEnd implements Transport {
         this.#heartbeat = undefined;
     }
 
-    /** Reports a coded cause the seam cannot carry, then closes. Ordered so the cause outlives it. */
+    /** Reports a coded cause the seam cannot carry, then closes — ordered so the cause survives. */
     #fail(code: TransportErrorCode, message: string): void {
         this.#reportCause(new TransportError(code, message));
         this.close();
@@ -394,10 +351,7 @@ class WebSocketEnd implements Transport {
 
 /**
  * Dials `url` and resolves once the socket is OPEN — the networked `Connect`.
- *
- * Rejects with `connect-failed` if the socket errors or closes before opening, so a caller never
- * holds a `Transport` for a connection that never existed. Everything after OPEN is reported through
- * `onError` instead, because by then the promise has settled.
+ * Rejects with `connect-failed` before OPEN; after it, faults go to `onError` instead.
  */
 export function connectWebSocket(url: string, opts?: ConnectWebSocketOptions): Promise<Transport> {
     // Resolved before the socket is created, so a bad option rejects nothing and opens nothing.
@@ -409,13 +363,15 @@ export function connectWebSocket(url: string, opts?: ConnectWebSocketOptions): P
     return new Promise<Transport>((fulfil, refuse) => {
         let socket: WebSocketLike;
         try {
-            // One argument when nothing is offered, so a factory declaring only a url sees only one.
+            // One argument when nothing is offered, so a factory declaring only a url sees only
+            // one.
             socket =
                 opts?.protocols === undefined
                     ? createSocket(url)
                     : createSocket(url, opts.protocols);
         } catch (cause) {
-            // A malformed URL and a missing global both land here, and both are this caller's to see.
+            // A malformed URL and a missing global both land here, and both are this caller's to
+            // see.
             refuse(
                 new TransportError(
                     'connect-failed',
@@ -464,14 +420,8 @@ export function connectWebSocket(url: string, opts?: ConnectWebSocketOptions): P
 }
 
 /**
- * Wraps a socket a listener already accepted, which is the server's door.
- *
- * Call it in the listener's connection handler SYNCHRONOUSLY: this end registers its own listeners
- * here, and a frame the socket delivered before that is gone — retention covers a late `onMessage`,
- * not a late transport.
- *
- * Throws `invalid-option` for a socket that is not OPEN, because holding a `Transport` means
- * connected; a socket still connecting belongs to `connectWebSocket`.
+ * Wraps a socket a listener already accepted, which is the server's door. Call it SYNCHRONOUSLY
+ * in the connection handler: retention covers a late `onMessage`, not a late transport.
  */
 export function webSocketTransport(socket: WebSocketLike, opts?: WebSocketOptions): Transport {
     if (socket.readyState !== OPEN) {

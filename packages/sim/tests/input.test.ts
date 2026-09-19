@@ -1,4 +1,4 @@
-// The input buffer, admission, and the phases. Fixtures are compiled by the build.
+// Fixtures are compiled by the build.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { TopDownMovement, clearRuntime, entityKey } from '@platform/core';
@@ -219,7 +219,8 @@ describe('ackSeq is the highest contiguous RESOLVED seq', () => {
         peer.clear();
         h.pumpTicks(12);
 
-        // Every seq is settled — applied or definitively rejected — so the frontier passed all four.
+        // Every seq is settled — applied or definitively rejected — so the frontier passed all
+        // four.
         expect(peer.lastState?.ackSeq).toBe(Math.max(...seqs));
         expect(rec.presses + rec.releases).toBeGreaterThan(0);
     });
@@ -235,7 +236,8 @@ describe('ackSeq is the highest contiguous RESOLVED seq', () => {
         expect(rec.presses).toBe(1);
         expect(peer.lastState?.ackSeq).toBe(seq);
 
-        // Already resolved, so no ack could report it either way — applying it again would double-fire.
+        // Already resolved, so no ack could report it either way — applying it again would
+        // double-fire.
         peer.inputAt(seq, h.tick + 2, [{ action: 'jump', on: 'press' }]);
         h.pumpTicks(8);
         expect(rec.presses).toBe(1);

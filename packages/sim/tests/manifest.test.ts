@@ -1,6 +1,3 @@
-// The live render manifest: what a joiner is handed, and what connected peers are
-// owed when a template comes into use after they joined.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
 import type { ManifestUpdate, RenderManifest } from '@platform/protocol';

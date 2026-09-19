@@ -21,8 +21,8 @@ describe('jsonCodec — JSON specifics', () => {
     });
 
     it('rejects a binary frame on decode', () => {
-        // A Uint8Array means the peer is running a different codec, which one codec per process rules
-        // out — so this is a composition-root bug, reported as a malformed frame.
+        // A Uint8Array means the peer is running a different codec, which one codec per process
+        // rules out — so this is a composition-root bug, reported as a malformed frame.
         expect(() => jsonCodec.decode(new Uint8Array([1, 2]))).toThrow(
             expect.objectContaining({ code: 'malformed-frame' }),
         );
@@ -48,8 +48,8 @@ describe('jsonCodec — JSON specifics', () => {
     });
 
     it('keeps float precision through the round trip', () => {
-        // A position that lost its last bits would desync a synced script, so this is exact equality
-        // rather than a tolerance.
+        // A position that lost its last bits would desync a synced script, so this is exact
+        // equality rather than a tolerance.
         for (const n of [0.1, 1 / 3, 1e-7, 1.7976931348623157e308, 5e-324, 123456.789012345]) {
             expect(jsonCodec.decode(jsonCodec.encode({ n }))).toEqual({ n });
         }
@@ -90,7 +90,8 @@ describe('jsonCodec — JSON specifics', () => {
     });
 
     it('explains what to do instead, for each rejection a creator can cause', () => {
-        // The person who wrote the handler is twelve, so the message names the fix rather than the rule.
+        // The person who wrote the handler is twelve, so the message names the fix rather than the
+        // rule.
         expect(() => jsonCodec.encode({ x: undefined } as never)).toThrow(/Send null/);
         expect(() => jsonCodec.encode({ t: Number.NaN })).toThrow(/sentinel|omit/);
         expect(() => jsonCodec.encode({ fn: () => 1 } as never)).toThrow(/ids/);
@@ -157,8 +158,8 @@ describe('jsonCodec — JSON specifics', () => {
 
     it('rejects a reserved key on encode, rather than emitting a frame decode refuses', () => {
         // Without this the codec produced `{"constructor":"wizard"}` and its own decode threw
-        // pollution-key — a peer-fault code for a field a creator named, which closes the connection
-        // and blames the wrong end.
+        // pollution-key — a peer-fault code for a field a creator named, which closes the
+        // connection and blames the wrong end.
         for (const key of ['__proto__', 'constructor', 'prototype']) {
             expect(() => jsonCodec.encode({ [key]: 1 })).toThrow(
                 expect.objectContaining({ code: 'encode-rejected' }),
@@ -169,8 +170,8 @@ describe('jsonCodec — JSON specifics', () => {
 
     it('rejects an own __proto__ key rather than silently dropping it', () => {
         // Assignment to `copy.__proto__` hit the prototype setter, so the key vanished from the
-        // frame: encode returned "{}" where JSON.stringify returned the key. Silent loss in the codec
-        // whose reason for existing is that the wire must not transform a value quietly.
+        // frame: encode returned "{}" where JSON.stringify returned the key. Silent loss in the
+        // codec whose reason for existing is that the wire must not transform a value quietly.
         const source = {};
         Object.defineProperty(source, '__proto__', {
             value: { polluted: true },
@@ -187,7 +188,8 @@ describe('jsonCodec — JSON specifics', () => {
     it('refuses a shared-reference graph that expands past the node budget', () => {
         // MAX_DEPTH bounds the ancestor chain, not the work: the copy is per REFERENCE, so sharing
         // one object between two fields at each level doubles per level. 30 objects nested 29 deep
-        // used to exhaust the heap while sitting far inside the depth cap and far under any byte cap.
+        // used to exhaust the heap while sitting far inside the depth cap and far under any byte
+        // cap.
         let node: Message = { v: 1 };
         for (let i = 0; i < 29; i++) node = { a: node, b: node };
         expect(() => jsonCodec.encode(node)).toThrow(
@@ -197,14 +199,15 @@ describe('jsonCodec — JSON specifics', () => {
     });
 
     it('still accepts a large but honest payload', () => {
-        // The budget must not trip on real traffic: this is bigger than any envelope and well under it.
+        // The budget must not trip on real traffic: this is bigger than any envelope and well under
+        // it.
         const big = { entities: Array.from({ length: 20_000 }, (_, i) => ({ id: `e${i}`, x: i })) };
         expect(() => jsonCodec.encode(big)).not.toThrow();
     });
 
     it('chains the parser error as the cause of a malformed frame', () => {
-        // The parser's message names the byte offset, which is what a consumer debugging a mismatched
-        // peer needs; discarding it left only "not valid JSON".
+        // The parser's message names the byte offset, which is what a consumer debugging a
+        // mismatched peer needs; discarding it left only "not valid JSON".
         try {
             jsonCodec.decode('{"a":');
             expect.unreachable('decode should have thrown');

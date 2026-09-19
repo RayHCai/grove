@@ -1,9 +1,3 @@
-// What a session owns over `createClient`: the three orderings that fail quietly when a host is
-// left to remember them.
-//
-// No server here. Every case below is about the session's own lifecycle, so the peer end of the
-// loopback pair is read directly rather than driven by a world.
-
 import { describe, expect, it } from 'vitest';
 import { ManualFrameSource, ScriptedInputDevice } from '@platform/client';
 import type { SessionState } from '@platform/client';
@@ -134,9 +128,8 @@ describe('a client instance', () => {
 });
 
 /**
- * The socket the dial reaches for when no factory is injected, recording what it was constructed
- * with — which is the only place a subprotocol is observable, since it rides the upgrade and not a
- * frame.
+ * The socket the dial reaches for when no factory is injected, recording its construction —
+ * the only place a subprotocol is observable, since it rides the upgrade and not a frame.
  */
 class SpySocket {
     static last: SpySocket | undefined;

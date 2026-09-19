@@ -1,9 +1,5 @@
-// The contract a bundle running inside a host's isolate publishes: three functions on one global.
-//
-// The isolate has no module loader and no I/O, so a host cannot import anything out of the bundle it
-// evaluated — a global is the whole of what it can reach. JSON in and JSON out for the same reason:
-// the batch is the only thing that crosses, and a shape neither side can hold a reference to is a
-// shape neither side can be surprised by.
+// The isolate has no module loader and no I/O, so a global is the whole of what a host can reach.
+// JSON in and JSON out: the batch is the only thing that crosses.
 
 import type { Codec, Message } from '@platform/transport';
 import { jsonCodec } from '@platform/transport';
@@ -15,41 +11,35 @@ import type { SimConfig } from './sim.js';
 export interface IsolateEntry {
     /** Builds the world. The config is the JSON the host was started with. */
     boot(config: string): void;
-    /** One fixed step. Takes an `InputBatch` as JSON and answers an {@link EncodedBatch} as JSON. */
+    /** One fixed step: an `InputBatch` as JSON in, an {@link EncodedBatch} as JSON out. */
     tick(batch: string): string;
     /** Releases the world and answers the last batch, whose `saves` a host must drain. */
     close(): string;
 }
 
 /**
- * One send whose envelope is already on the wire's terms.
- *
- * A host outside this process writes these bytes verbatim, so they must be the CODEC's and not
- * `JSON.stringify`'s: the codec rejects `NaN`, `Infinity` and `undefined`, which JSON turns into
- * `null` or drops — and it is the codec the sim measured a `Welcome` against when it decided whether
- * to chunk one.
+ * One send whose envelope is already on the wire's terms. These bytes must be the CODEC's,
+ * not `JSON.stringify`'s, which turns `NaN` and `Infinity` into `null`.
  */
 export interface EncodedSend extends Omit<Send, 'envelope'> {
     envelope: string;
 }
 
-/** An {@link OutputBatch} with every envelope encoded, which is what an out-of-process host takes. */
+/** An {@link OutputBatch} with every envelope encoded — what an out-of-process host takes. */
 export interface EncodedBatch extends Omit<OutputBatch, 'sends'> {
     sends: EncodedSend[];
 }
 
 declare global {
-    // `var` rather than `let`: only a `var` declaration widens `globalThis`, which is the whole point.
+    // `var` rather than `let`: only a `var` declaration widens `globalThis`, which is the whole
+    // point.
     // eslint-disable-next-line no-var
     var __grove: IsolateEntry | undefined;
 }
 
 /**
- * Publishes the entry a host drives, over a `Sim` this bundle builds.
- *
- * `build` takes the host's config rather than a `Sim` directly, because the world must not exist
- * until the host says so: a bundle that booted at evaluation time would run every Game `@onStart`
- * before the host had a clock to advance them with.
+ * Publishes the entry a host drives, over a `Sim` this bundle builds. `build` takes config, not
+ * a `Sim`: booting at evaluation time would run every Game `@onStart` before there is a clock.
  */
 export function installIsolateEntry(
     build: (config: SimConfig) => Sim,
@@ -76,11 +66,8 @@ export function installIsolateEntry(
 }
 
 /**
- * Encodes every envelope for the wire, dropping any the codec refuses.
- *
- * Dropped rather than thrown, for the reason an unrepresentable `@serverState` value is dropped: one
- * bad envelope must cost that one send, not the tick that produced it and every other peer's share
- * of it. The loss leaves a line, so it is never silent.
+ * Encodes every envelope for the wire, dropping any the codec refuses — one bad envelope costs
+ * that send, not the tick that produced it. The loss leaves a line, so it is never silent.
  */
 function encodeBatch(out: OutputBatch, codec: Codec): EncodedBatch {
     const sends: EncodedSend[] = [];

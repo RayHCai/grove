@@ -69,7 +69,7 @@ function pack<T>(
     return { groups, dropped };
 }
 
-/** One element's encoded size, plus the separator an array spends on it; one the codec refuses reads as unbounded, so `pack` drops it. */
+/** One element's encoded size plus its separator; one the codec refuses reads as unbounded. */
 function measure(item: unknown, codec: Codec): number {
     try {
         return codec.byteLength(codec.encode(item as Message)) + 1;

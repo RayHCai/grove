@@ -1,6 +1,3 @@
-// `@serverState` across a rejoin: the host names the peer, the record is read under that name
-// before the join handlers run, and the leave writes it back.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import type { KVStore } from '@platform/core';
 import {
@@ -64,8 +61,9 @@ describe('a host-named player rejoins into what the last session saved', () => {
         peer.close();
         first.pumpTicks(2);
         await new Promise((resolve) => setTimeout(resolve, 0));
-        // Every read of the first harness happens before the second exists: `createRuntime` replaces
-        // core's module-global, and a wrapper's player lookup resolves against the newer one.
+        // Every read of the first harness happens before the second exists: `createRuntime`
+        // replaces core's module-global, and a wrapper's player lookup resolves against the newer
+        // one.
         expect(await kv.get(PERSISTENCE_SCOPE, playerKey('alice'))).toMatchObject({ credits: 7 });
         first.close();
 

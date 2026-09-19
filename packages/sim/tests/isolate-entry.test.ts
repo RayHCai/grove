@@ -1,8 +1,4 @@
-// The contract a host reaches a bundle through: three functions on one global, JSON either way.
-//
-// Driven exactly as `apps/grove/game-instance` drives it — a string in and a string out — because a host in
-// another language cannot hold anything else, and a shape that only works when both ends are
-// TypeScript is not a contract at all.
+// Driven exactly as `apps/grove/game-instance` drives it: a string in and a string out.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
@@ -20,7 +16,7 @@ afterEach(() => {
     clearRuntime();
 });
 
-/** What a game bundle's own entry file does: publish the entry over the world it knows how to build. */
+/** What a game bundle's entry file does: publish the entry over the world it builds. */
 function install(): void {
     installIsolateEntry((config) => new Sim({ config: { ...config, gameScripts: [Rules] } }));
 }
@@ -63,8 +59,8 @@ describe('the isolate entry', () => {
                 bundleHash: '',
             },
         });
-        // Identified, so the join waits on a record the host answers in a later batch — asked for on
-        // the tick the request landed, since the open and the frame are both at the top of it.
+        // Identified, so the join waits on a record the host answers in a later batch — asked for
+        // on the tick the request landed, since the open and the frame are both at the top of it.
         const asked = tick(opened);
         expect(asked.loads).toEqual([{ connectionId: 'c1', hostKey: 'player:alice' }]);
 

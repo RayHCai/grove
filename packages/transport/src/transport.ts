@@ -4,10 +4,8 @@
 import type { Codec } from './codec.js';
 
 /**
- * 1 MiB. Large enough that no legitimate join sequence reaches it, small enough to bound a leak.
- *
- * Here rather than in one implementation because every factory defaults to it: two copies of one
- * bound would drift, and the bound is the same bug on either wire.
+ * 1 MiB. Large enough that no legitimate join reaches it, small enough to bound a leak.
+ * Here rather than in one implementation, since every factory defaults to it.
  */
 export const DEFAULT_MAX_RETAINED_BYTES = 1024 * 1024;
 
@@ -17,8 +15,7 @@ export type JsonValue =
 
 /**
  * What the endpoints send and receive, untrusted on receive — the transport narrows nothing.
- *
- * Declare envelopes as `type` aliases: an `interface` has no index signature and is not assignable.
+ * Declare envelopes as `type`: an `interface` has no index signature and is not assignable.
  */
 export type Message = JsonValue;
 
@@ -29,13 +26,11 @@ declare const ENCODED_BY_CODEC: unique symbol;
 
 /**
  * A frame minted by `Codec.encode` — the only authority that can assert the brand.
- *
- * `sendEncoded` skips the receiving end's own `encode`, so a hand-built or foreign-codec frame has
- * to fail at the call site rather than at the peer's `decode`.
+ * `sendEncoded` skips the far end's `encode`, so a foreign frame fails at the call site.
  */
 export type EncodedFrame = Frame & { readonly [ENCODED_BY_CODEC]: true };
 
-/** Scheduling seam for the websocket heartbeat, injected so a silence cutoff needs no wall clock. */
+/** Scheduling seam for the websocket heartbeat, so a silence cutoff needs no wall clock. */
 export interface TimerSource {
     /** Returns an opaque handle `clearInterval` accepts. */
     setInterval(fn: () => void, ms: number): unknown;
@@ -48,23 +43,18 @@ export interface Transport {
     send(message: Message): void;
 
     /**
-     * Enqueue an already-encoded frame, skipping this end's encode.
-     *
-     * Sound only because the codec is process-uniform: the server encodes a broadcast once and calls
-     * this per connection.
+     * Enqueue an already-encoded frame, skipping this end's encode. Sound only because the codec
+     * is process-uniform: the server encodes a broadcast once and calls this per connection.
      */
     sendEncoded(frame: EncodedFrame): void;
 
     /**
-     * Register the peer-message handler; returns a disposer.
-     *
-     * Frames that arrived before registration are retained and flushed here, because the join
-     * sequence races wiring order. One handler per end — a second live registration throws, since
-     * two consumers would split this connection's frames.
+     * Register the peer-message handler; returns a disposer. Frames that arrived before it
+     * are retained and flushed here. One handler per end — a second live registration throws.
      */
     onMessage(handler: (message: Message) => void): () => void;
 
-    /** Register the close handler; fires once, after every frame ahead of it, never inside `close()`. */
+    /** Register the close handler; fires once, after every frame ahead of it. */
     onClose(handler: () => void): () => void;
 
     /** Close this end; idempotent, and the peer's `onClose` fires behind its queued frames. */
@@ -76,11 +66,8 @@ export interface TransportOptions {
     /** Defaults to `jsonCodec`; one codec per process, which is what makes `sendEncoded` sound. */
     codec?: Codec;
     /**
-     * Cap on bytes retained for a handler that has not registered yet, summed via
-     * `codec.byteLength`; defaults to 1 MiB.
-     *
-     * Uncapped retention leaks: a connection whose join sequence throws before reaching `onMessage`
-     * never registers one, so its inbox grows for the life of the process.
+     * Cap on bytes retained for a handler that has not registered yet; defaults to 1 MiB.
+     * Uncapped it leaks: a join that throws before `onMessage` grows its inbox forever.
      */
     maxRetainedBytes?: number;
 }
@@ -88,12 +75,8 @@ export interface TransportOptions {
 /** Options for the loopback factory; its own type because a socket has no `deliver()` to count. */
 export interface LoopbackOptions extends TransportOptions {
     /**
-     * How many `deliver()` calls a frame waits before its handler can see it; defaults to 1.
-     *
-     * `latency: 0` delivers inside one pump, which separates a prediction bug from a simulation bug
-     * in a single run. It does not make a local round trip free: the server enqueues during
-     * `step()`, after that tick's `deliver()` returned, so server→client stays a tick behind
-     * whatever this is set to.
+     * How many `deliver()` calls a frame waits before its handler sees it; defaults to 1.
+     * `latency: 0` delivers inside one pump, but a local round trip still costs a tick.
      */
     latency?: number;
 }
@@ -102,9 +85,7 @@ export interface LoopbackOptions extends TransportOptions {
 export interface ConnectOptions extends TransportOptions {
     /**
      * Rebinds a reconnecting client to its existing `Player`; server-minted and opaque.
-     *
-     * Its wire slot is `JoinRequest.token`, which protocol owns, so no backend here puts it on the
-     * wire — one credential with two channels is a second thing to keep in agreement.
+     * Its wire slot is `JoinRequest.token`, which protocol owns, so no backend here sends it.
      */
     token?: string;
     /** The heartbeat's scheduling seam; defaults to a real-time source. */

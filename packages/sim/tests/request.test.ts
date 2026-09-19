@@ -1,6 +1,4 @@
-// The request arm: the one client → server path with authority behind it. What reaches an
-// `@onRequest` handler here, and what the untrusted boundary refuses first. Fixtures are compiled
-// by the build.
+// Fixtures are compiled by the build.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';

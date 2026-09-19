@@ -41,12 +41,12 @@ import { MAX_STATE_DEPTH } from './constants.js';
 /** Speech bubbles ride a `tag` op that is not in core's tag index, so it is filtered here. */
 const SAY_PREFIX = 'say:';
 
-/** A `NetId` numerically IS the server's `EntityId`; the double cast is required because each brand keys off its own `unique symbol`. */
+/** A `NetId` numerically IS the server's `EntityId`; each brand keys off its own symbol. */
 export function toNetId(id: EntityId): NetId {
     return id as number as NetId;
 }
 
-/** The seven transform fields in core's own declaration order, non-finite cells degraded to slot defaults. A read, never a write. */
+/** The seven transform fields in core's order, non-finite cells degraded to slot defaults. */
 export function readTransform(rt: Runtime, id: EntityId): WireTransform {
     return {
         posX: finiteOr(rt.transforms.posX(id), 0),
@@ -82,7 +82,7 @@ export function readEntitySnapshot(
     };
 }
 
-/** The scripts on one entity as a joiner needs them, read back off the instance registry rather than the template — absent when it carries none. */
+/** The scripts on one entity as a joiner needs them, read off the instance registry. */
 function overridesOf(rt: Runtime, id: EntityId): { overrides?: EntityOverrides } {
     const scripts: WireScriptAttachment[] = [];
     for (const instance of rt.instances.forHost(entityKey(id as number))) {
@@ -101,7 +101,7 @@ export function readPlayerSnapshot(player: Player): PlayerSnapshot {
     return { id: player.id, index: player.index, name: player.name };
 }
 
-/** Everything one send-tick drains, before it is fanned out; `state` is partitioned because scoping has to survive the drain. */
+/** Everything one send-tick drains; `state` is partitioned so scoping survives the drain. */
 export interface SendSet {
     tick: number;
     structural: WireStructuralOp[];
@@ -113,12 +113,8 @@ export interface SendSet {
     /** Marks and ops dropped as unrepresentable, so a silent loss is visible. */
     dropped: number;
     /**
-     * Marks whose host was gone by the time the send drained them.
-     *
-     * Counted apart from `dropped` because it is ordinary churn, not a defect: a script writes a
-     * field and the entity or player it lives on dies inside the same send interval. Folding the two
-     * together left `dropped` nonzero for every world that destroys anything, which is what a health
-     * signal cannot be.
+     * Marks whose host was gone by the time the send drained them. Counted apart from `dropped`:
+     * it is ordinary churn when an entity dies inside the same send interval.
      */
     staleMarks: number;
 }
@@ -131,7 +127,7 @@ export interface RosterOps {
     leaves: string[];
 }
 
-/** Drains all three channels exactly once and assembles the send set — nothing else drains them on the server. */
+/** Drains all three channels once and assembles the send set — the only drain on the server. */
 export function drainOnce(
     rt: Runtime,
     tick: number,
@@ -155,8 +151,9 @@ export function drainOnce(
         ordered.push({ kind: 'player-join', player: snapshot });
     }
 
-    // Converted to wire form HERE, before any of it can be held over: a spawn's snapshot is read from
-    // live state, and an entity destroyed while its op waited would go out with an empty template.
+    // Converted to wire form HERE, before any of it can be held over: a spawn's snapshot is read
+    // from live state, and an entity destroyed while its op waited would go out with an empty
+    // template.
     const journal = rt.channels.drainStructural();
     const ephemeral = ephemeralIds(rt, journal);
     for (const op of journal) {
@@ -294,7 +291,7 @@ function toWireSingle(
     }
 }
 
-/** hostId → its wire address, built forward from the hosts that exist rather than by parsing a key, so a core rename becomes a compile error. */
+/** hostId → wire address, built forward from the hosts that exist, so a rename fails to compile. */
 function hostAddresses(rt: Runtime): Map<string, StateHostAddr> {
     const table = new Map<string, StateHostAddr>();
     table.set(GAME_KEY, { kind: 'game' });
@@ -313,20 +310,15 @@ function put<K, V>(into: Map<K, V>, key: K, value: V): V {
 }
 
 /**
- * One `@serverState` field as JSON, or `undefined` for "not representable", which the caller drops —
- * the one read both the join baseline and the per-tick delta go through, so neither can keep a field
- * the other discards.
- *
- * Through core's `serializeHostField`, because a wrapper field's value IS the wrapper and no codec
- * represents a class instance. A reserved key is refused here too: the grouped diff makes the name a
- * KEY, so assigning one would set the bucket's prototype instead of adding a member.
+ * One `@serverState` field as JSON, or `undefined` for "not representable", which the caller
+ * drops. Both the join baseline and the per-tick delta go through it, so they cannot disagree.
  */
 export function encodeHostField(record: HostRecord, field: string): JsonValue | undefined {
     if (RESERVED_KEYS.has(field)) return undefined;
     return encodeStateValue(serializeHostField(record, field));
 }
 
-/** A `@serverState` value as JSON, or `undefined` for "not representable"; a ref travels as what identifies it across the wire. */
+/** A `@serverState` value as JSON, or `undefined`; a ref travels as what identifies it. */
 export function encodeStateValue(
     value: unknown,
     open: Set<object> = new Set(),
@@ -376,10 +368,8 @@ export function encodeStateValue(
 }
 
 /**
- * One session's reliable envelope — the per-connection residue, and the reason a state frame can
- * never be encoded once.
- *
- * It takes the ack, so it runs exactly once per session per send.
+ * One session's reliable envelope — the per-connection residue, and why a state frame cannot
+ * be encoded once. It takes the ack, so it runs exactly once per session per send.
  */
 export function stateEnvelopeFor(session: Session, player: Player, set: SendSet): StateEnvelope {
     const ack = session.admission.takeAck();
@@ -397,7 +387,7 @@ export function stateEnvelopeFor(session: Session, player: Player, set: SendSet)
     return envelope;
 }
 
-/** The shared subset: identical for every peer, so the host encodes it once however many receive it. */
+/** The shared subset: identical for every peer, so the host encodes it once for all. */
 export function transformEnvelope(set: SendSet): TransformEnvelope {
     return { kind: 'transform', tick: set.tick, transform: set.transform };
 }
