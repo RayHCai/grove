@@ -4,7 +4,7 @@
 
 [workspace]
 resolver = "2"
-members = ["game-instance", "upload-service"]
+members = ["game-instance", "asset-upload-service"]
 
 [workspace.package]
 version = "0.0.0"
@@ -20,6 +20,11 @@ tower-http = { version = "0.6", features = ["timeout"] }
 futures-util = { version = "0.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
+
+# The asset stream this fleet queues work on, and the one HTTP call a worker makes back to
+# @grove/api to settle it.
+redis = { version = "1.7", features = ["tokio-comp"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "webpki-roots", "http2"] }
 hmac = "0.12"
 sha2 = "0.10"
 subtle = "2.6"

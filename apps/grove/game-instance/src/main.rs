@@ -1,12 +1,7 @@
-//! One game session, in one process.
-//!
-//! Two halves that never share a thread: `tokio` owns the sockets and the store, and one dedicated
-//! thread owns the V8 isolate the world runs in. They meet at a single channel of `HostEvent`, which
-//! is what gives the tick one order over everything that happened to it.
-//!
-//! The process boundary is the isolation, and the isolate is the second one inside it: this process
-//! holds no database credential and no platform secret — a session-scoped bearer for
-//! `@grove/game-manager` and the shared secret it verifies tickets with, and nothing else.
+//! One game session, in one process. Two halves that never share a thread: `tokio` owns the
+//! sockets and the store, one dedicated thread owns the V8 isolate. They meet at a single channel
+//! of `HostEvent`, which gives the tick one order over everything that happened to it.
+//! This process holds no database credential and no platform secret.
 
 mod clock;
 mod config;
@@ -30,10 +25,8 @@ use crate::config::Config;
 use crate::session::{HostEvent, SessionOptions};
 
 /// What the bundle's own config file must name, beside whatever `SimConfig` it carries.
-///
-/// camelCase because the file IS the `SimConfig` the isolate boots with, and serde discards an
-/// unknown field without a word: read under the wrong spelling these fall back to the defaults and
-/// the Rust clock steps at a rate the world never declared.
+/// camelCase because the file IS that `SimConfig`, and serde discards an unknown field without a
+/// word: read under the wrong spelling these fall back to defaults the world never declared.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Rates {

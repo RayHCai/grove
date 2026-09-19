@@ -2,11 +2,11 @@
 //! the two have to agree: a game behaves differently under a shed, so a divergence here is a
 //! divergence a playtest cannot reproduce.
 
-/// Slack on the accumulator's `>= dt` test: a host advancing by exactly `1 / sim_rate` rounds short,
-/// and a wake owing one tick would step zero times.
+/// Slack on the accumulator's `>= dt` test: exactly `1 / sim_rate` rounds short, and a wake
+/// owing one tick would step zero times.
 const STEP_EPSILON: f64 = 1e-9;
 
-/// Wall-clock one wake may catch up before it sheds, sized so a stalled host drains without shedding.
+/// Wall-clock one wake may catch up before shedding; sized so a stalled host drains first.
 pub const MAX_CATCHUP_MS: f64 = 250.0;
 
 /// Ticks one wake may step before it sheds the rest as wall-clock.
@@ -33,11 +33,9 @@ pub struct Wake {
     pub shed: bool,
 }
 
-/// The accumulator, the step cap, and the send cadence.
-///
-/// It steps nothing itself: `wake` reports how many ticks are owed and which of them drain, and the
-/// caller runs them. That keeps the isolate — which is neither `Send` nor re-entrant — off the far
-/// side of a callback.
+/// The accumulator, the step cap, and the send cadence. It steps nothing itself: `wake` reports
+/// what is owed and the caller runs it, which keeps the isolate — neither `Send` nor re-entrant —
+/// off the far side of a callback.
 pub struct Clock {
     sim_rate: f64,
     send_rate: f64,
@@ -71,10 +69,8 @@ impl Clock {
         }
     }
 
-    /// Retunes mid-session, for a world that changed its own rate.
-    ///
-    /// The accumulator and the send counter are left where they are: a retune is a change to what
-    /// happens next, and zeroing them would lose a partly-owed tick and restart the send interval
+    /// Retunes mid-session, for a world that changed its own rate. The accumulator and send counter
+    /// are left where they are: zeroing them would lose a partly-owed tick and restart the interval
     /// at a boundary no client was told about.
     pub fn set_rates(&mut self, sim_rate: f64, send_rate: f64) {
         if sim_rate.is_finite() && sim_rate > 0.0 {

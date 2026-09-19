@@ -1,10 +1,6 @@
-//! The session thread: the one place the isolate is touched, and the loop that turns arrivals into
-//! batches and batches into writes.
-//!
-//! A `JsRuntime` is not `Send`, so it never crosses into a `tokio` task. Everything the async side
-//! learns arrives here as a `HostEvent` on a channel, and everything this side wants done goes back
-//! out the same way. That is not a workaround — it is what makes the tick a single-threaded,
-//! ordered, replayable sequence, which is the whole claim `@platform/sim` is written against.
+//! The session thread: the one place the isolate is touched, and the loop that turns arrivals
+//! into batches and batches into writes. A `JsRuntime` is not `Send`, so it never crosses into a
+//! `tokio` task — which is what makes the tick a single-threaded, ordered, replayable sequence.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -35,18 +31,14 @@ const BOOT_BUDGET: Duration = Duration::from_secs(10);
 /// batch their saves travel in.
 const CLOSE_BUDGET: Duration = Duration::from_secs(2);
 
-/// How long a drain waits for the last player to leave before it ends the session regardless.
-///
-/// This, `CLOSE_BUDGET`, `FLUSH_DEADLINE` and `SETTLE_DEADLINE` run back to back at the end, and
-/// together they have to finish inside the twenty seconds `@grove/instance-manager` allows before it
-/// kills the child.
+/// How long a drain waits for the last player to leave before ending the session regardless.
+/// This and the three deadlines below run back to back, and together must finish inside the
+/// twenty seconds `@grove/instance-manager` allows before it kills the child.
 const DRAIN_DEADLINE: Duration = Duration::from_secs(6);
 
-/// How long the runtime is held open for the frames queued to the peers being hung up.
-///
-/// Longer than the writer's own grace, which only starts once the dropped `HangUp` has woken the
-/// peer's task: dropping the runtime before then cancels the writer inside its `send`, and the death
-/// token the socket was closed with is the frame that never lands.
+/// How long the runtime is held open for frames queued to the peers being hung up.
+/// Longer than the writer's own grace: dropping the runtime first cancels the writer inside its
+/// `send`, and the death token the socket was closed with is the frame that never lands.
 const FLUSH_DEADLINE: Duration = Duration::from_secs(1);
 
 /// How long the runtime is held open at the end for the writes already in flight.
@@ -156,8 +148,8 @@ pub fn run(
 
     loop {
         let woke = Instant::now();
-        // Non-blocking: the loop's pace is the clock's, not the channel's, and a wake that waited on
-        // a message would run the game at the rate its players happened to type.
+        // Non-blocking: the loop's pace is the clock's, not the channel's, and a wake that waited
+        // on a message would run the game at the rate its players happened to type.
         while let Ok(event) = events.try_recv() {
             match event {
                 HostEvent::Opened {
@@ -206,8 +198,8 @@ pub fn run(
         }
 
         // Wall-clock, as `GameInstance` feeds its own driver: the accumulator clamps a reading that
-        // moved backwards, so a corrected clock costs at most the correction, and the same reading is
-        // what the batch is stamped with — a monotonic one would put 1970 on every `serverSentMs`.
+        // moved backwards, and the same reading stamps the batch — a monotonic one would put 1970
+        // on every `serverSentMs`.
         let wake = clock.wake(unix_millis() / 1000.0, &mut drains);
         if wake.shed {
             tracing::warn!(
@@ -286,7 +278,7 @@ pub fn run(
                 break;
             }
             // A player who will not leave is not worth the SIGKILL that ends this process at twenty
-            // seconds: the close batch written late still carries every save, and the kill does not.
+            // seconds: a close batch written late still carries every save, and the kill does not.
             if started.elapsed() > DRAIN_DEADLINE {
                 tracing::warn!(held = peers.len(), "the drain ran out of time");
                 break;
@@ -367,8 +359,8 @@ fn apply(
     }
 
     for send in out.sends {
-        // The sim's own bytes, written verbatim and shared across the whole list — which is the only
-        // reason `to` is a list. Re-encoding here would hand a peer bytes the sim never measured.
+        // The sim's own bytes, written verbatim and shared across the list — the only reason `to`
+        // is a list. Re-encoding would hand a peer bytes the sim never measured.
         let text = Arc::new(send.envelope);
         for connection_id in &send.to {
             let Some(peer) = peers.get(connection_id) else {
@@ -380,9 +372,9 @@ fn apply(
             };
             match peer.writes.try_send(outgoing) {
                 Ok(()) => {}
-                // A full queue is a peer that cannot keep up. A droppable frame is superseded by the
-                // next of its kind, so discarding it is the backpressure policy; a reliable one is
-                // not, and a peer that cannot take it has to go rather than fall silently behind.
+                // A full queue is a peer that cannot keep up. A droppable frame is superseded by
+                // the next of its kind, so discarding it is the backpressure policy; a reliable one
+                // is not, and such a peer has to go rather than fall silently behind.
                 Err(mpsc::error::TrySendError::Full(dropped)) => {
                     if matches!(
                         dropped,
@@ -415,8 +407,8 @@ fn apply(
         let events = events.clone();
         io.spawn(async move {
             let fields = match store.load(&load.host_key).await {
-                // `{}` for a store that held nothing, so the leave still writes; `null` only for the
-                // read that failed, which is what stops the leave overwriting a save nobody read.
+                // `{}` for a store that held nothing, so the leave still writes; `null` only for a
+                // read that failed, stopping the leave overwriting a save nobody read.
                 Ok(Some(fields)) => Some(fields),
                 Ok(None) => RawValue::from_string("{}".to_owned()).ok(),
                 Err(error) => {
@@ -450,7 +442,7 @@ fn apply(
                 };
                 if attempt == SAVE_ATTEMPTS {
                     // Not acknowledged: the sim holds the record so a rejoin inside this session
-                    // still reads its own values back, which is the better of the two wrong answers.
+                    // still reads its own values back — the better of two wrong answers.
                     tracing::warn!(%error, key = %save.host_key, "persisting failed");
                     return;
                 }
@@ -462,12 +454,9 @@ fn apply(
     }
 }
 
-/// Waits for the peers just hung up to report themselves closed, which is the echo that says their
-/// last frame reached the socket.
-///
-/// A queued close is four scheduling hops from the wire, and returning from `run` drops the runtime,
-/// which cancels the peer's task inside its own grace and the writer inside `send` — so the reason a
-/// session died reaches nobody unless this thread waits here for it.
+/// Waits for the peers just hung up to report themselves closed — the echo that says their last
+/// frame reached the socket. Returning from `run` drops the runtime, cancelling the writer inside
+/// `send`, so the reason a session died reaches nobody unless this thread waits.
 fn flush(
     io: &tokio::runtime::Handle,
     events: &mut mpsc::UnboundedReceiver<HostEvent>,
@@ -494,10 +483,8 @@ fn flush(
     });
 }
 
-/// Drops the handles of the saves that have already landed.
-///
-/// A `JoinHandle` keeps its task's cell allocated after the task has finished, and the sim spawns one
-/// save per departing player, so a session with churn would hold every one of them to the end.
+/// Drops the handles of the saves that have already landed. A `JoinHandle` keeps its task's cell
+/// allocated after the task finished, and the sim spawns one save per departing player.
 fn prune(spawned: &mut Vec<JoinHandle<()>>) {
     spawned.retain(|handle| !handle.is_finished());
 }
@@ -717,9 +704,9 @@ mod tests {
         }
     }
 
-    /// A `leave` that lands while the watchdog is killing must not cancel a termination that has not
-    /// been called yet: the flag survives into the next span, and killing that one ends the session
-    /// for every player on a world that was healthy.
+    /// A `leave` landing while the watchdog kills must not cancel a termination not yet called:
+    /// the flag survives into the next span, and killing that one ends the session for every
+    /// player on a world that was healthy.
     #[test]
     fn a_leave_that_races_the_kill_still_clears_it() {
         let io = tokio::runtime::Builder::new_multi_thread()
