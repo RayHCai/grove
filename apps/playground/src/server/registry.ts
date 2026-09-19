@@ -1,14 +1,5 @@
-// The authority's half of the script registry: every class in `scripts/` this process may be asked
-// to attach, under the id the project file and the wire name it by.
-//
-// This is the seam between the game and the engine. `scripts/` knows nothing about registries,
-// manifests or transports; the ids are the only thing the two sides share, and they come from the
-// game's own globals rather than from `klass.name` — a minifier rewrites that, and the wire carries
-// it across a process boundary where a name is no contract.
-//
-// A second registry lives in the browser half holding only what may run there. That split is
-// `ScriptSide`, not a duplication: a `ServerScript` linked into a page would be authoritative code
-// on the untrusted end.
+// Ids come from the game's own globals, never `klass.name`: a minifier rewrites that, and the
+// wire carries it across a process boundary where a name is no contract.
 
 import type { ScriptId } from '@platform/project';
 import { scriptId } from '@platform/project';

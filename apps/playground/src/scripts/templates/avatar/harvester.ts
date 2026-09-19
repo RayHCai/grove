@@ -1,5 +1,3 @@
-// The `player` template's reach: what turns walking into harvesting.
-
 import type { Ctx, Entity } from '@platform/engine';
 import { ServerScript, game, onCollide, onStart } from '@platform/engine';
 import { AVATAR_HALF, LEAF_TAG } from '../../globals.js';
@@ -8,10 +6,8 @@ import { slotOf } from '../../game/slots.js';
 import { Leaf, harvestValue } from '../leaf/leaf.js';
 
 /**
- * On every avatar, from the Player template.
- *
- * `@onCollide` is the ENTER edge of an overlap and fires once per tag on the other body, so a leaf
- * walked into scores once however many ticks the two stay touching.
+ * On every avatar, from the Player template. `@onCollide` is the ENTER edge and fires once per
+ * tag, so a leaf walked into scores once however many ticks the two stay touching.
  */
 export class Harvester extends ServerScript<Entity> {
     @onStart

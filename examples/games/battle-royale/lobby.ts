@@ -1,9 +1,4 @@
-// The `lobby` screen — ready-up, player count, leaderboard.
-//
-//   Greenhouse  ClientScript<HUDScreen>  the whole screen
-//
-// A screen exists on one machine, so ClientScript is its only legal location.
-// Everything here is local until the one `request`.
+// A screen exists on one machine, so `ClientScript` is its only legal location.
 
 import { ClientScript, game, hud, onPress, onUpdate, request } from '@platform/engine';
 import type { HUDScreen } from '@platform/engine';

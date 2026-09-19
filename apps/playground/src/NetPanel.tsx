@@ -1,11 +1,5 @@
-// The session panel: a live view of this tab's connection to the authority, beside the render tree.
-//
-// Where the Inspector shows WHAT is drawn, this shows where it came from — the tick the server has
-// depicted, the tick this client stamps input with, the round trip between them, and the lead the
-// clock is holding to land input on time.
-//
-// POLLED, NOT PER FRAME, for the same reason as the Inspector: `stats()` allocates and the client
-// publishes no change event, so reading it per frame would couple React's render rate to the wire.
+// POLLED, NOT PER FRAME: `stats()` allocates and the client publishes no change event, so
+// reading it per frame would couple React's render rate to the wire.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GameStats } from './use-game';

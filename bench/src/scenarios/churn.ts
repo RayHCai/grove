@@ -1,7 +1,5 @@
-// Worlds that change shape while they run.
-//
-// A steady world cannot see either of the two costs here: a slot table only recycles when something
-// is destroyed, and a capture buffer is only regrown when the entity count passes what it holds.
+// A steady world sees neither cost: a slot table recycles only on a destroy, and a capture buffer
+// regrows only when the entity count passes what it holds.
 
 import { Loop, clearRuntime } from '@platform/core';
 import type { EntityId, Runtime } from '@platform/core';
@@ -19,17 +17,12 @@ const MAX_ENTITIES = 10_000;
 const PROBE_TICKS = 17;
 /**
  * Windows one `run` may drive: timing, allocation, and allocation's retry chain.
- *
- * `Meter.allocation` retries a collected window at a quarter of its length, so the chain converges
- * to four thirds of one window and the true worst case is 1 + 4/3. Four, for the slack.
+ * The retry chain converges to four thirds of one window, so the worst case is 1 + 4/3. Four.
  */
 const WINDOWS_PER_RUN = 4;
 /**
- * One grid width for the base world and every later spawn alike.
- *
- * The base world and the churn must share an index space or they collide: a width derived from the
- * count changes as the world grows, so two indexes eventually land on one point — and two
- * colliderless bodies at one point compare as overlapping, turning this into a pair walk.
+ * One grid width for the base world and every later spawn alike: they must share an index space
+ * or two indexes land on one point, and two colliderless bodies there read as an overlap.
  */
 const GRID_SIDE = 512;
 
@@ -81,10 +74,8 @@ async function run(
 }
 
 /**
- * The two shapes, both with colliders off so the O(n²) walk does not drown what is measured.
- *
- * `rising` is the one the capture buffers care about: a count that keeps passing its own high-water
- * mark is what makes them regrow at all, and it is the only shape that prices the growth policy.
+ * The two shapes, colliders off so the O(n²) walk does not drown what is measured.
+ * `rising` is the one the capture buffers care about: only it prices the growth policy.
  */
 export async function churnScenarios(
     meter: Meter,

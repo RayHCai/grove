@@ -1,9 +1,5 @@
-// `terraform validate` over every environment root under the calling package.
-//
-// Validation needs a provider schema, so each root is initialised first — with `-backend=false`,
-// because checking that the configuration is well-formed must not require a credential or reach the
-// state bucket. The modules are validated through the roots that call them: a module validated
-// alone reports every unset variable the root supplies.
+// Each root is initialised with `-backend=false`: checking that the configuration is well-formed
+// must not need a credential. Modules are validated through the roots that supply their variables.
 
 import { readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';

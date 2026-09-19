@@ -1,10 +1,5 @@
-// The scenario table. One entry per thing a run can measure, so `--only` names something stable
-// and a smoke test can walk them all at a token size.
-//
-// Each entry loads its own module when it runs, and not before. Core's scenarios reach nothing but
-// `@platform/core`, and a static table would still drag the authority, the codec and the renderer
-// into the process to measure a bare loop — so one unbuildable package downstream would take out
-// every scenario that does not depend on it.
+// Each entry loads its own module when it runs: a static table would drag the authority, the codec
+// and the renderer into a process that only measures a bare loop.
 
 import { budgetFor } from '../meter.js';
 import type { Meter, Mode } from '../meter.js';
@@ -15,11 +10,8 @@ export interface Scenario {
     /** What it answers, printed by `--list`. */
     about: string;
     /**
-     * The modes this scenario has an answer for.
-     *
-     * Declared rather than assumed: a scenario whose whole result is a difference between two
-     * timings has nothing to say about collection counts, and running it under `--mode=gc` anyway
-     * would file an allocation number in a GC run's results as though the mode had been honoured.
+     * The modes this scenario has an answer for, declared rather than assumed: one whose result
+     * is a difference between timings would file an allocation number in a GC run.
      */
     modes: readonly Mode[];
     run: (meter: Meter, mode: Mode, quick: boolean) => Promise<Measurement[]>;

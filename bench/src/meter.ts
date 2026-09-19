@@ -1,18 +1,12 @@
-// The three meters, and the validity rules that make their numbers mean anything.
-//
-// Two of them cannot run in one process. An exact byte figure needs a semi-space large enough that
-// no collection runs inside the window, and a real scavenge count needs the semi-space a server
-// actually ships with — so the mode is a process-level choice and `assertMode` refuses the wrong one.
+// Two meters cannot run in one process: an exact byte figure needs a semi-space large enough that
+// nothing collects, and a real scavenge count needs the shipped one — so the mode is process-level.
 
 import { PerformanceObserver } from 'node:perf_hooks';
 import v8 from 'node:v8';
 
 /**
- * Runs `ticks` ticks of whatever is under measurement.
- *
- * One abstraction rather than a synchronous meter and an asynchronous twin: core's loop never
- * yields and a client's frame must, and two implementations of the shrink-and-retry rule below
- * would diverge the first time one of them was tuned.
+ * Runs `ticks` ticks of whatever is under measurement. One abstraction rather than a sync meter
+ * and an async twin: two copies of the shrink-and-retry rule would diverge once one was tuned.
  */
 export type Driver = (ticks: number) => void | Promise<void>;
 
@@ -49,10 +43,8 @@ export interface AllocationSample {
     bytesPerTick: number;
     ticks: number;
     /**
-     * Whether no collection ran inside the window.
-     *
-     * False makes `bytesPerTick` a lower bound of unknown discount, never a measurement: a scavenge
-     * inside the window reclaims bytes the heap delta then never saw.
+     * Whether no collection ran inside the window. False makes `bytesPerTick` a lower bound of
+     * unknown discount, never a measurement: a scavenge reclaims bytes the heap delta never saw.
      */
     exact: boolean;
 }
@@ -86,12 +78,8 @@ export function emptyTally(): GcTally {
 }
 
 /**
- * Turns the event loop once.
- *
- * Every drain in this file is preceded by one. A `gc` entry reaches an observer on a task, so a
- * window that blocked the loop and drained the instant it finished reads back empty — which is not
- * "nothing collected", it is "nothing has been delivered yet", and the two are indistinguishable
- * from the result.
+ * Turns the event loop once; every drain here is preceded by one. A `gc` entry reaches an
+ * observer on a task, so a window that drained at once reads empty — not "nothing collected".
  */
 function turn(): Promise<void> {
     return new Promise((resolve) => {
@@ -104,14 +92,8 @@ function hasExecArg(prefix: string): boolean {
 }
 
 /**
- * Refuses a run whose process flags contradict its mode.
- *
- * This is the guard for the three ways these numbers go quietly wrong: no `--expose-gc` and every
- * window starts on an unswept heap; a default semi-space under `alloc` and a scavenge lands inside
- * the window; and — the one that hides behind a plausible answer — a raised MAXIMUM alone. V8 sizes
- * the young generation adaptively and shrinks it on collection, so the forced sweep that establishes
- * a baseline hands the window a young generation of a megabyte or two however high the ceiling was.
- * Pinning the MINIMUM as well is what actually keeps a window collection-free.
+ * Refuses a run whose process flags contradict its mode. The subtle one is a raised MAXIMUM
+ * alone: V8 shrinks the young generation on collection, so the MINIMUM is what pins a window.
  */
 export function assertMode(mode: Mode): void {
     if (typeof globalThis.gc !== 'function' || !hasExecArg('--expose-gc')) {
@@ -152,17 +134,13 @@ function collect(): void {
 const MIN_WINDOW = 4;
 
 /**
- * Watches collections for the span of one window, and nothing longer.
- *
- * Per-window rather than per-run, which is the whole point. A single observer held across a session
- * of heavy scenarios stops delivering: entries pile up faster than they are drained, the timeline's
- * buffer for the type is exceeded, and later windows read back empty — reported as `exact: true`,
- * which is the one answer a discounted byte figure must never be given. Opened and disconnected
- * around each window, no observer ever holds more than that window's entries.
+ * Watches collections for one window and nothing longer. An observer held across a session stops
+ * delivering, and later windows read empty — reported as `exact: true`.
  */
 class GcWatch {
     readonly #obs = new PerformanceObserver(() => {
-        // Entries are read through takeRecords(); the callback exists only to open the subscription.
+        // Entries are read through takeRecords(); the callback exists only to open the
+        // subscription.
     });
 
     constructor() {
@@ -207,11 +185,8 @@ export class Meter {
     }
 
     /**
-     * Runs up to `ticks` ticks without measuring, so the JIT and every lazy cache are warm.
-     *
-     * Capped by wall time as well as by count, and it is the wall cap that matters: at ten thousand
-     * entities one tick is most of a second, and a fixed two hundred would spend minutes warming a
-     * loop that tiers up inside its first pass. Returns what it actually ran.
+     * Runs up to `ticks` ticks unmeasured, so the JIT and every lazy cache are warm. Capped by wall
+     * time as well as count: at ten thousand entities one tick is most of a second.
      */
     async warm(drive: Driver, ticks: number, maxMs = 1500): Promise<number> {
         const deadline = process.hrtime.bigint() + BigInt(Math.round(maxMs * 1e6));
@@ -238,11 +213,8 @@ export class Meter {
     }
 
     /**
-     * Bytes allocated per tick, exact when the window stayed collection-free.
-     *
-     * A window that collected is retried a quarter as long rather than reported: shrinking is what
-     * turns a heavy scenario back into a measurable one, and a scenario that cannot get clean even
-     * at the floor is returned marked inexact rather than retried forever.
+     * Bytes allocated per tick, exact when the window stayed collection-free. One that collected is
+     * retried a quarter as long; one that cannot get clean is returned marked inexact.
      */
     async allocation(drive: Driver, ticks: number): Promise<AllocationSample> {
         let window = Math.max(MIN_WINDOW, ticks);
@@ -264,9 +236,7 @@ export class Meter {
 
     /**
      * Collections and pause time per simulated second, at the heap a server actually ships with.
-     *
-     * Chunked one simulated second at a time so the drain between chunks has a loop turn to happen
-     * on, which is the only way these entries are ever seen.
+     * Chunked one simulated second at a time, so the drain between chunks has a loop turn.
      */
     async gcProfile(drive: Driver, simSeconds: number, simRate: number): Promise<GcSample> {
         await this.#settle();
@@ -302,23 +272,15 @@ export class Meter {
     }
 }
 
-/**
- * A tick count that keeps one measurement near `targetMs` of wall time.
- *
- * Every scenario here spans four orders of magnitude of tick cost, so a fixed count either takes
- * minutes at the top of the range or measures noise at the bottom.
- */
+/** A tick count keeping one measurement near `targetMs`; tick cost spans four orders here. */
 export function ticksForBudget(nsPerTick: number, targetMs = 1500, min = 4, max = 20_000): number {
     if (!Number.isFinite(nsPerTick) || nsPerTick <= 0) return min;
     return Math.max(min, Math.min(max, Math.round((targetMs * 1e6) / nsPerTick)));
 }
 
 /**
- * A window size for `drive`, found by timing it first.
- *
- * Two probes rather than one fixed count, for the same reason the budget exists: a cheap tick needs
- * more than a single sample to size a window from, and a tick costing most of a second must not be
- * sampled again just to confirm what the first one already showed.
+ * A window size for `drive`, found by timing it first. Two probes rather than one: a cheap tick
+ * needs more than a sample, and a tick costing a second must not be sampled twice.
  */
 export async function sized(meter: Meter, drive: Driver, targetMs: number): Promise<number> {
     const first = await meter.time(drive, 1);

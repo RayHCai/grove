@@ -1,11 +1,5 @@
-// The Game template — the session and the world.
-//
-//   Match    ServerScript<Game>   phases, clock, ring, roster, leaderboard
-//   Screens  ClientScript<Game>   which screen is up, and the music
-//
-// Two locations on one host: the orchestrator is authoritative, "which menu is up" is
-// one player's screen. The round's shape is declared here because Match enforces it;
-// the HUD imports it to label what it draws.
+// Two locations on one host: the orchestrator is authoritative, "which menu is up" is one
+// player's screen. The round's shape is declared here because `Match` enforces it.
 
 import {
     ClientScript,

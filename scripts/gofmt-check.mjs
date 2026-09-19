@@ -1,7 +1,4 @@
-// Fails when `gofmt` would rewrite a file in the calling module.
-//
-// `gofmt -l` lists the offenders and exits zero either way, so a gate has to read its output rather
-// than its status. Separate from `go.mjs` because gofmt is its own binary, not a `go` subcommand.
+// `gofmt -l` lists the offenders and exits zero either way, so this reads its output, not status.
 
 import { spawnSync } from 'node:child_process';
 import { installed, skip } from './toolchain.mjs';

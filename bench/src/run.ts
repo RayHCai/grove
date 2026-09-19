@@ -68,14 +68,8 @@ async function measureOne(name: string, mode: Mode, quick: boolean): Promise<Mea
 }
 
 /**
- * Runs one scenario in a fresh process and reads back its measurements.
- *
- * Isolation is not tidiness here, it is correctness. V8's optimisation state is a function of
- * everything the process has already run: the same thousand-entity world measured on its own
- * allocates 8.5 MB a tick, and measured after a sweep that has shown `Loop.step` five other world
- * shapes it allocates 573 KB — both figures honest, both collection-free, and not comparable. A
- * scenario is only ever compared against the same scenario from another run, so what each one needs
- * is the same starting state every time, which is a process that has run nothing else.
+ * Runs one scenario in a fresh process and reads back its measurements. Isolation is correctness:
+ * V8's optimisation state depends on everything already run, so two honest figures disagree.
  */
 function runChild(name: string, args: Args): Promise<Measurement[]> {
     const argv = [

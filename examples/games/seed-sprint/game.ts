@@ -1,22 +1,6 @@
-// Seed Sprint — a single-player endless scrolling platformer. Run right, jump the
-// gaps, don't fall. The corridor generates ahead of you and is reclaimed behind.
-//
-// ONE FILE PER HOST, holding every script the panel attaches there:
-//
-//   game.ts    the Game    Terrain, Sky                     ← you are here
-//   sprout.ts  `sprout`    SproutMovement, Sprout, View
-//
-//   Terrain  ServerScript<Game>   streams the corridor, restarts a dead run
-//   Sky      ClientScript<Game>   parallax and music
-//
-// No HUD, no screens, no score — the run is the whole game, and dying restarts it.
-//
-// Panel-authored: the script-free `chunk-*` templates, the `backdrop`-tagged parallax
-// sprites, the `dust` effect, and the `jump` / `moveX` actions. Attachment is panel
-// mapping, so nothing imports these.
-//
-// Single player (`maxPlayers: 1`), but the loops still read `game.players`: a
-// Game-hosted @onStart runs at session start, before any player exists.
+// ONE FILE PER HOST, holding every script the panel attaches there. Attachment is panel mapping,
+// so nothing imports the panel-authored templates, effects or actions.
+// Single player, but the loops still read `game.players`: a Game `@onStart` runs before any exist.
 
 import {
     ClientScript,
