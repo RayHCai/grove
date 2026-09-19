@@ -25,14 +25,15 @@ module "storage" {
   tags                = local.tags
 }
 
-module "events" {
-  source = "../upload-events"
+module "tasks" {
+  source = "../task-streams"
 
   environment   = var.environment
-  bucket_name   = module.storage.bucket_name
-  alarm_actions = var.build_alarm_actions
+  client_cidrs  = var.task_client_cidrs
+  alarm_actions = var.task_alarm_actions
   tags          = local.tags
 }
+
 module "data" {
   source = "../game-data"
 
@@ -59,7 +60,6 @@ module "fleet_a" {
   fleet_cidrs           = local.agent_cidrs
   artifact_bucket_arn   = module.storage.bucket_arn
   dynamodb_arn_patterns = module.data.table_arn_patterns
-  build_queue_arn       = module.events.queue_arn
   tags                  = local.tags
 }
 
@@ -79,7 +79,6 @@ module "fleet_b" {
   fleet_cidrs           = local.agent_cidrs
   artifact_bucket_arn   = module.storage.bucket_arn
   dynamodb_arn_patterns = module.data.table_arn_patterns
-  build_queue_arn       = module.events.queue_arn
   tags                  = local.tags
 }
 
@@ -99,6 +98,5 @@ module "fleet_c" {
   fleet_cidrs           = local.agent_cidrs
   artifact_bucket_arn   = module.storage.bucket_arn
   dynamodb_arn_patterns = module.data.table_arn_patterns
-  build_queue_arn       = module.events.queue_arn
   tags                  = local.tags
 }

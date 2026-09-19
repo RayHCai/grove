@@ -13,14 +13,14 @@ output "cdn_distribution_id" {
   value       = module.storage.distribution_id
 }
 
-output "build_queue_url" {
-  description = "URL a builder polls for queued builds."
-  value       = module.events.queue_url
-}
-
-output "build_dlq_url" {
-  description = "URL of the queue holding builds that never succeeded."
-  value       = module.events.dlq_url
+output "task_streams" {
+  description = "Where the three services that queue and claim work open a Redis connection, and the network it is in."
+  value = {
+    endpoint          = module.tasks.endpoint
+    vpc_id            = module.tasks.vpc_id
+    subnet_ids        = module.tasks.subnet_ids
+    security_group_id = module.tasks.security_group_id
+  }
 }
 
 output "tables" {

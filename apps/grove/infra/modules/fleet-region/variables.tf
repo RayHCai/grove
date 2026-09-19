@@ -105,8 +105,3 @@ variable "tags" {
   default     = {}
 }
 
-variable "build_queue_arn" {
-  description = "Build queue a box claims work from. Empty grants nothing, which is what a deployment whose builder runs elsewhere passes."
-  type        = string
-  default     = ""
-}
