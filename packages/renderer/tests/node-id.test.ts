@@ -1,10 +1,6 @@
-// Packed-id generation overflow — the highest-risk case in node-id.ts.
-//
-// `generation * 2^24 + index` must be ARITHMETIC. JavaScript's `<<` and `|` coerce to
-// int32, so `generation << 24` goes NEGATIVE at generation 128 and wraps to a value that
-// collides with live handles. Every generation asserted below 128 would also pass under a
-// bitwise implementation — the cases at and above 128 are the ones that catch it, so they
-// are asserted explicitly rather than only inside a loop.
+// `generation * 2^24 + index` must be ARITHMETIC: `<<` and `|` coerce to int32, so
+// `generation << 24` goes NEGATIVE at generation 128 and collides with live handles.
+// The cases at and above 128 are the ones that catch it, so they are asserted explicitly.
 
 import { describe, it, expect } from 'vitest';
 import {

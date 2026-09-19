@@ -1,9 +1,5 @@
-// Framing, scale mode, the two rectangles, and the world viewport.
-//
-// Every assertion here is an exact number. The design stage is 800x600 throughout, and the
-// two canvases are chosen so the ratios stay exactly representable: 1600x900 is WIDER than
-// the design aspect (sx=2, sy=1.5) and 800x1800 is TALLER (sx=1, sy=3). That makes "which
-// axis governs" visible in the numbers rather than hidden behind rounding.
+// Every assertion is an exact number: the 800x600 stage against 1600x900 (sx=2, sy=1.5) and
+// 800x1800 (sx=1, sy=3) makes "which axis governs" visible rather than hidden behind rounding.
 
 import { describe, it, expect } from 'vitest';
 import { boundsHeight, boundsWidth } from '@platform/math';

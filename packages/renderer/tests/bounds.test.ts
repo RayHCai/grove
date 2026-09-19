@@ -1,18 +1,7 @@
-// The rotated-AABB expansion. Three things go wrong quietly here, so each is asserted with exact
-// numbers rather than with a tolerance or a smoke check:
-//
-//   1. The ANCHOR SIGN. `anchor` is y-down inside the art; local bounds are y-up. Getting that
-//      flip backwards mirrors every off-center sprite vertically, which looks like a content
-//      bug rather than a math bug.
-//   2. QUARTER-TURN FUZZ. `Math.cos(90 * DEG2RAD)` is 6.1e-17, so the naive expansion reports
-//      10.000000000000002 for a rect that is exactly 10 wide. Quarter turns are asserted with
-//      `toBe`, and the naive form is asserted to be WRONG so the divergence is unambiguous.
-//      Diagonals get a tolerance instead: they go through `@platform/math`'s polynomial `sin`
-//      and `cos`, which trade about 1e-8 of accuracy for agreeing across engines. Only the 90s
-//      bypass the transcendental, which is why only they are exact.
-//   3. THE MARGIN'S UNIT. `cullMargin` is WORLD px. If it were ever scaled by zoom, a
-//      zoomed-out view would pop sprites at the edge. The zoom-sweep test below is what
-//      catches that.
+// Three things go wrong quietly here, so each is asserted with exact numbers: the ANCHOR SIGN
+// (`anchor` is y-down inside the art, local bounds are y-up), QUARTER-TURN FUZZ (`cos(90°)` is
+// 6.1e-17, so quarter turns use `toBe` while diagonals take a tolerance), and the MARGIN'S UNIT
+// (`cullMargin` is WORLD px — scaling it by zoom would pop sprites at the edge).
 
 import { describe, expect, it } from 'vitest';
 import { DEG2RAD, bounds, boundsHeight, boundsWidth, type Bounds } from '@platform/math';
@@ -517,11 +506,9 @@ describe('isVisibleInViewport', () => {
     });
 
     it('clamps a NEGATIVE margin to zero instead of insetting the viewport', () => {
-        // `cullMargin` is slack ADDED to the viewport; an inset has no specified meaning.
-        // Honouring one is unsafe: `boundsExpand` moves each edge toward the interior, so an
-        // inset deeper than the viewport half-extent INVERTS the axis, and `boundsOverlap`
-        // re-normalizes min/max — so the inverted rect reads as a valid one that GROWS as the
-        // inset deepens. That makes the test non-monotonic: a deeper inset draws MORE.
+        // `cullMargin` is slack ADDED; an inset has no meaning. An inset deeper than the
+        // half-extent INVERTS the axis, and `boundsOverlap` re-normalizes — so a deeper inset would
+        // draw MORE.
         const inside = bounds(-100, 100, 16, -16);
         const justOutside = bounds(500, 540, 16, -16);
         for (const margin of [-1, -64, -269, -271, -540, -1100, -5000]) {
@@ -557,11 +544,8 @@ describe('isVisibleInViewport', () => {
 
 describe('isVisibleInViewport — cullMargin is WORLD px, never CSS px', () => {
     it('yields the same world slack at every zoom, because the function never sees a zoom', () => {
-        // The viewport shrinks in world units as zoom rises, but 64 always means 64
-        // WORLD px of slack. A sprite 63 world px past the right edge is drawn at every zoom
-        // and one 65 past it is culled at every zoom. If the margin were CSS px, the same 64
-        // would buy 6.4 world px at zoom 10 and 640 at zoom 0.1 — the zoomed-out editor view
-        // would pop sprites and the zoomed-in game view would over-draw.
+        // 64 always means 64 WORLD px of slack, at every zoom. In CSS px it would buy 6.4 world px
+        // at zoom 10 and 640 at zoom 0.1 — popping when zoomed out and over-drawing when zoomed in.
         for (const zoom of [0.1, 0.5, 1, 2, 10]) {
             const viewport = stageViewport(zoom);
             const inside = bounds(viewport.right + 63, viewport.right + 70, 0, 0);

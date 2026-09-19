@@ -1,6 +1,4 @@
-// The dev-tooling projection of a live scene: plain objects, allocated per node, reading only
-// what `RendererCore` exposes. Separate from the core so that nothing in the frame path can come
-// to depend on it.
+// Separate from the core so nothing in the frame path can come to depend on it.
 
 import type { Bounds, Size } from '@platform/math';
 import { bounds, boundsCopy, vec3 } from '@platform/math';
@@ -28,13 +26,7 @@ export function blankTransform(): Transform {
     };
 }
 
-/**
- * Slots as ids, ordered by `layer` with ties broken by their position in `slots`.
- *
- * One rule for roots and for a node's children alike: a tree view that ordered the two
- * differently would misrepresent what draws on top. A slot with no record is dropped, because
- * the sibling walk behind a child list is not itself checked for liveness.
- */
+/** Slots as ids, ordered by `layer` with ties broken by position in `slots`. */
 export function inDrawOrder(core: RendererCore, slots: readonly number[]): NodeId[] {
     return (
         slots
@@ -50,14 +42,7 @@ export function inDrawOrder(core: RendererCore, slots: readonly number[]): NodeI
     );
 }
 
-/**
- * The scene as a plain snapshot, for tooling.
- *
- * Allocates per node deliberately: a debugger reading a live view of the SoA stores would see
- * values change under it mid-walk and could mutate the scene through a leaked reference.
- * `assets`, `contextState` and `surfaceVisible` arrive as arguments because residency, the GPU
- * context and surface visibility are the things the core does not own.
- */
+/** The scene as a plain snapshot for tooling; allocates per node, so a walk sees stable values. */
 export function snapshotScene(
     core: RendererCore,
     opts: InspectOptions | undefined,
@@ -148,12 +133,7 @@ export function snapshotScene(
     };
 }
 
-/**
- * The snapshot for a renderer that is not live — before `init`, after `destroy`.
- *
- * So `inspect()` never returns `null` and an inspector panel mounting before init reads zero nodes
- * rather than crashing.
- */
+/** The snapshot for a renderer that is not live, so `inspect()` never returns `null`. */
 export function emptySnapshot(contextState: ContextState): SceneSnapshot {
     return {
         roots: {},

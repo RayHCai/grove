@@ -1,17 +1,10 @@
-// A `request()` payload is creator data on the uplink, so it is encoded here rather than handed to
-// the codec: `encode` throws on a value it refuses, and that throw ends the session over a field a
-// creator named.
+// Encoded here, not in the codec: `encode` throws on a value it refuses, ending the session.
 
 import type { JsonValue } from '@platform/transport';
 import { RESERVED_KEYS } from '@platform/transport';
 import { MAX_REQUEST_DEPTH } from './constants.js';
 
-/**
- * One `request()` payload as wire fields, with everything the wire cannot carry dropped.
- *
- * A field name is a KEY on the wire, which is what puts it under the codec's reserved-key check — so
- * a reserved one is dropped here rather than emitted, since the codec refuses the whole frame.
- */
+/** One `request()` payload as wire fields; reserved keys are dropped, as the codec refuses them. */
 export function requestFields(payload: Record<string, unknown>): { [field: string]: JsonValue } {
     const fields: { [field: string]: JsonValue } = {};
     for (const [field, value] of Object.entries(payload)) {
@@ -41,8 +34,7 @@ function encodeRequestValue(
             return undefined;
     }
 
-    // `open` is an ancestor set, deleted on the way out, so a DAG stays legal exactly as it is on the
-    // wire while a cycle is refused before the recursion blows the stack.
+    // `open` is an ancestor set, deleted on the way out: a DAG stays legal, a cycle is refused.
     if (open.has(value) || depth >= MAX_REQUEST_DEPTH) return undefined;
     open.add(value);
     try {
@@ -55,8 +47,7 @@ function encodeRequestValue(
             }
             return items;
         }
-        // A Map round-trips to `{}` and a Date to a string, so the wire would deliver something other
-        // than what was sent.
+        // A Map round-trips to `{}` and a Date to a string, so the wire delivers something else.
         if (Object.getPrototypeOf(value) !== Object.prototype) return undefined;
         const out: { [key: string]: JsonValue } = {};
         for (const [key, item] of Object.entries(value as Record<string, unknown>)) {

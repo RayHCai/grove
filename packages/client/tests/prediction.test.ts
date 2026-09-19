@@ -1,6 +1,3 @@
-// Prediction: the rewind that makes a delta land on authoritative state, the replay that carries the
-// local player's own entities forward over it, and the correction the display eases rather than snaps.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime, entityKey } from '@platform/core';
 import type { EntityId } from '@platform/core';
@@ -69,8 +66,8 @@ async function harness(): Promise<Harness> {
     const ring = new InputRing();
     const prediction = new Prediction({ mirror, ring, bridge, playerId: PLAYER });
     mirror.simulate(prediction.context);
-    // Exactly what `GameClient` wires: without it the buffer would interpolate the very entities this
-    // suite predicts, and every correction assertion below would read a blended pose instead.
+    // Exactly what `GameClient` wires: without it the buffer would interpolate the entities this
+    // suite predicts, and every correction assertion would read a blended pose.
     bridge.setPredicted(prediction.scope);
 
     // The roster the input pass resolves the local player through — the wire's own player-join op.
@@ -112,12 +109,7 @@ async function harness(): Promise<Harness> {
     return h;
 }
 
-/**
- * Spawns an entity owned by `owner` and attaches the one script this suite simulates.
- *
- * Rewinds first, exactly as the client's drain does: the entity table restores whole even under a
- * scoped baseline, so an authoritative spawn applied over a predicted world is undone by the next one.
- */
+/** Spawns an entity owned by `owner` and attaches the one script this suite simulates. */
 function spawnSlider(h: Harness, netId: number, owner: string | null, posX = 0): EntityId {
     h.prediction.rewind();
     h.bridge.reconcile(
@@ -262,8 +254,8 @@ describe('the rewind takes the predicted world back', () => {
         });
         h.receive(stateEnvelope([], 2), 2);
 
-        // Measured against the abandoned poses this would read as a 20-unit disagreement and ease from
-        // a position nobody was ever shown.
+        // Measured against the abandoned poses this would read as a 20-unit disagreement and ease
+        // from a position nobody was shown.
         expect(h.posX(1)).toBe(50);
         expect(h.bridge.correctionOf(h.local(1)).remaining).toBe(0);
     });
@@ -367,8 +359,8 @@ describe('a correction is eased on screen and exact in the simulation', () => {
         h.bridge.pushTransforms(CORRECTION_SMOOTH_SECONDS / 2);
         const midEase = h.drawnX(1);
 
-        // A second disagreement while the first is still half-drawn. The offset replaces rather than
-        // accumulates, so the residual has to be inside the measurement or the screen jumps by it.
+        // A second disagreement while the first is half-drawn. The offset replaces rather than
+        // accumulates, so the residual must be inside the measurement.
         h.mirror.applyTransforms({
             kind: 'transform',
             tick: 3,
@@ -548,8 +540,8 @@ describe('a whole session predicts', () => {
         const h = await session();
         const rt = h.client.mirror!.runtime;
 
-        // Sampled every frame rather than once: the gap sawtooths, closing to nothing on the frame an
-        // envelope lands naming the tick the counter is already on — and the invariant holds there too.
+        // Sampled every frame rather than once: the gap sawtooths, closing to nothing on the frame
+        // an envelope names the tick the counter is already on.
         let sawALead = false;
         for (let i = 0; i < 12; i++) {
             h.run(1);
@@ -570,14 +562,14 @@ describe('a whole session predicts', () => {
         h.run(6);
         const before = h.client.stats();
 
-        // A transform envelope for a tick already described, so it writes on arrival rather than being
-        // held. Arriving over a predicted pose it would otherwise stomp it with a stale authority.
+        // A transform for a tick already described, so it writes on arrival rather than being held.
         h.server.sendTransforms([transformDiff(1, { posX: 250 })], before.depictedTick);
         h.run(1);
 
         const stats = h.client.stats();
         expect(stats.resimulations).toBeGreaterThan(before.resimulations);
-        // The server's own answer, plus exactly the replayed span — never the predicted pose plus it.
+        // The server's own answer plus exactly the replayed span — never the predicted pose plus
+        // it.
         expect(rt.transforms.posX(h.avatar())).toBe(
             250 + (stats.localTick - stats.depictedTick) * SPEED,
         );
@@ -598,8 +590,8 @@ describe('a whole session predicts', () => {
     });
 
     it('reports a snapped correction on the stats, the one alarm a desync raises', async () => {
-        // Computed per correction and read by nobody: a client whose authority keeps moving it further
-        // than an ease can hide is diverging, and the count is the only place that says so.
+        // Computed per correction and read by nobody: a client corrected further than an ease hides
+        // is diverging, and the count is the only place that says so.
         const h = await session();
         h.run(6);
         expect(h.client.stats().snappedCorrections).toBe(0);
@@ -626,8 +618,8 @@ describe('a whole session predicts', () => {
         expect(h.client.state).toBe('live');
         const stats = h.client.stats();
         expect(rt.transforms.posX(h.avatar())).toBe((stats.localTick - stats.depictedTick) * SPEED);
-        // The rewind on the recovery's first frame recorded poses no replay consumed. Measured against
-        // them, the drought's worth of prediction reads as a correction and the avatar snaps.
+        // The rewind on the recovery's first frame recorded poses no replay consumed; measured
+        // against them the drought reads as a correction and the avatar snaps.
         expect(h.client.prediction?.counters.snappedCorrections).toBe(0);
     });
 });

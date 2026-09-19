@@ -1,6 +1,3 @@
-// Render: create/destroy follow the delta, one moving entity among a hundred produces a
-// one-patch call, and a missing template draws a placeholder — all over the null renderer.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
 import { createReadyNullRenderer } from '@platform/renderer/null';
@@ -44,12 +41,7 @@ function stateEnvelope(structural: WireStructuralOp[] = [], tick = 1): StateEnve
     return { kind: 'state', tick, ackSeq: 0, structural, state: [] };
 }
 
-/**
- * The null renderer plus a record of every `updateNodes` batch, for the patch-count assertions.
- *
- * Initialized rather than bare: an uninitialized harness would pass the delta tests for the wrong
- * reason and fail every assertion about what was drawn.
- */
+/** The null renderer plus a record of every `updateNodes` batch, for patch-count assertions. */
 async function harness(sendRate = SEND_RATE): Promise<{
     renderer: IRenderer;
     batches: NodePatch[][];
@@ -124,9 +116,8 @@ describe('the handle map keys on the local EntityId', () => {
         const childNode = bridge.nodeFor(childLocal)!;
         expect(renderer.parentOf(childNode)).toBe(bridge.nodeFor(parentLocal));
 
-        // Destroying the parent: core cascades the entity, the renderer cascades the node, and the
-        // bridge must drop the child's map entry or a later spawn reusing that EntityId finds a stale
-        // node.
+        // The bridge must drop the child's map entry, or a later spawn reusing that EntityId
+        // finds a stale node.
         const removed = mirror.applyState(
             stateEnvelope([{ kind: 'destroy', netId: 1 as NetId }], 2),
         );
@@ -137,8 +128,7 @@ describe('the handle map keys on the local EntityId', () => {
     });
 
     it('unmaps GRANDCHILDREN too, since destroyNode cascades the whole subtree', async () => {
-        // A grandchild's parent is the child, not the destroyed node, so an immediate-parent test leaves
-        // its entry behind — a stale node a later spawn reusing that EntityId would find.
+        // A grandchild's parent is the child, so an immediate-parent test leaves its entry behind.
         const { mirror, bridge, renderer } = await harness();
         const delta = mirror.applyState(
             stateEnvelope([
@@ -160,9 +150,8 @@ describe('the handle map keys on the local EntityId', () => {
     });
 
     it('follows a reparent into the render tree', async () => {
-        // The mirror applies the op to core, but the node stays under its old parent unless the delta
-        // carries the reparent: the wire's transform is local to the new parent, so a node left behind
-        // renders at the wrong place with no other symptom.
+        // The wire's transform is local to the new parent, so a node left behind renders in the
+        // wrong place with no other symptom.
         const { mirror, bridge, renderer } = await harness();
         bridge.reconcile(
             mirror.applyState(
@@ -193,8 +182,7 @@ describe('the handle map keys on the local EntityId', () => {
     });
 
     it('unmaps a subtree the bridge learned about through a reparent, not a spawn', async () => {
-        // The destroy sweep walks the bridge's own hierarchy rather than the renderer's, so a link made
-        // after creation has to be recorded there too.
+        // The destroy sweep walks the bridge's own hierarchy, not the renderer's.
         const { mirror, bridge, renderer } = await harness();
         bridge.reconcile(
             mirror.applyState(
@@ -333,8 +321,7 @@ describe('the interpolation buffer sits between the send rate and the frame rate
         bridge.pushTransforms(SEND_INTERVAL);
         batches.length = 0;
 
-        // Nothing on the wire for either frame; without the buffer both would be no-ops and the node
-        // would hold its pose until the next envelope.
+        // Nothing on the wire for either frame; without the buffer the node would hold its pose.
         bridge.pushTransforms(SEND_INTERVAL * 1.25);
         const quarter = renderer.localTransformOf(node)!.position.x;
         bridge.pushTransforms(SEND_INTERVAL * 1.75);
@@ -368,8 +355,7 @@ describe('the interpolation buffer sits between the send rate and the frame rate
         move(mirror, 1, 2, { posX: 100 });
         bridge.pushTransforms(SEND_INTERVAL);
 
-        // No delay and no blend — what prediction owns is drawn where the simulation put it, and the
-        // correction it already eases is the only thing allowed to move that pose.
+        // No delay and no blend: what prediction owns is drawn where the simulation put it.
         expect(renderer.localTransformOf(node)!.position.x).toBe(100);
         bridge.pushTransforms(SEND_INTERVAL * 1.5);
         expect(renderer.localTransformOf(node)!.position.x).toBe(100);
@@ -383,8 +369,7 @@ describe('the interpolation buffer sits between the send rate and the frame rate
         move(mirror, 1, 2, { posX: 100 });
         bridge.pushTransforms(SEND_INTERVAL);
 
-        // Two intervals with nothing arriving. Carrying the last segment's velocity on would draw the
-        // entity at 200 and take it back the moment the authority disagreed.
+        // Two intervals with nothing arriving; carrying velocity would draw 200 and take it back.
         bridge.pushTransforms(SEND_INTERVAL * 3);
         expect(renderer.localTransformOf(node)!.position.x).toBe(100);
     });
@@ -396,15 +381,14 @@ describe('the interpolation buffer sits between the send rate and the frame rate
         bridge.pushTransforms(0);
         move(mirror, 1, 2, { posX: 100 });
         bridge.pushTransforms(SEND_INTERVAL);
-        // A second of standstill — an entity that stopped and an entity nobody sent for look the same.
+        // A second of standstill — a stopped entity and an unsent one look the same.
         bridge.pushTransforms(1);
         expect(renderer.localTransformOf(node)!.position.x).toBe(100);
 
         move(mirror, 1, 3, { posX: 200 });
         bridge.pushTransforms(1 + SEND_INTERVAL);
 
-        // Still where it was drawn. Dated from the older sample the segment would be a second long and
-        // 95% spent, jumping the entity almost the whole way on this one frame.
+        // Still where it was drawn. Dated from the older sample it would jump almost the whole way.
         expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(100, 6);
         bridge.pushTransforms(1 + SEND_INTERVAL * 1.5);
         expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(150, 6);
@@ -417,8 +401,7 @@ describe('the interpolation buffer sits between the send rate and the frame rate
         bridge.pushTransforms(0);
         move(mirror, 1, 2, { posX: 100 });
 
-        // 0.1 s is one interval at 10 Hz, so the drawn moment is still the first sample. The same frame
-        // on a 20 Hz session would be at the end of the segment.
+        // 0.1 s is one interval at 10 Hz, so the drawn moment is still the first sample.
         bridge.pushTransforms(0.1);
         expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(0, 6);
         bridge.pushTransforms(0.15);
@@ -435,8 +418,7 @@ describe('the interpolation buffer sits between the send rate and the frame rate
         move(mirror, 1, 3, { rot: 10 });
         bridge.pushTransforms(SEND_INTERVAL * 2);
 
-        // Halfway from 350° to 10° is 360°, which is 0. Lerping the raw numbers draws 180 — the leaf
-        // spinning backwards through half a turn, once per revolution.
+        // Halfway from 350° to 10° is 0; lerping raw numbers draws 180, a backwards half turn.
         bridge.pushTransforms(SEND_INTERVAL * 2.5);
         expect(renderer.localTransformOf(node)!.rotation).toBeCloseTo(360, 6);
     });
@@ -462,8 +444,7 @@ describe('the interpolation buffer sits between the send rate and the frame rate
         bridge.pushTransforms(SEND_INTERVAL);
         bridge.pushTransforms(SEND_INTERVAL * 1.5);
 
-        // A camera on the exact answer while the sprite is halfway to it slides the target across the
-        // screen by a whole send interval of motion.
+        // A camera on the exact answer slides the target by a whole send interval of motion.
         expect(mirror.runtime.transforms.posX(local)).toBe(100);
         expect(bridge.drawnPosition(local).x).toBeCloseTo(50, 6);
     });
@@ -478,8 +459,7 @@ describe('the interpolation buffer sits between the send rate and the frame rate
 
         bridge.clear();
 
-        // The stamps belong to a session that has ended: nothing survives to interpolate from, so the
-        // pose is the simulation's again.
+        // The stamps belong to an ended session: nothing survives to interpolate from.
         expect(bridge.drawnPosition(local).x).toBe(100);
     });
 });
@@ -523,8 +503,7 @@ describe('the manifest and the template table', () => {
 
     it('drops a manifest row with no url rather than letting the loader throw on it', async () => {
         const { bridge, renderer } = await harness();
-        // Untyped wire data: an empty url resolves against the base and would pass a scheme test, but
-        // `loadAssets` refuses it by throwing, which would take the rest of the manifest with it.
+        // Untyped wire data: an empty url passes a scheme test but makes `loadAssets` throw.
         await bridge.loadManifest({
             assets: [
                 { key: assetId('blank'), kind: 'texture', url: '' },
@@ -746,8 +725,7 @@ describe('the manifest and the template table', () => {
         const child = renderer.inspect().nodes.get(root)!.children[0]!;
         expect(renderer.inspect().nodes.get(child)?.culled).toBe(true);
 
-        // Sliding the parent back brings the child in: the cull pass reaches a node the bridge never
-        // patched, through the resolved-changed set.
+        // The cull pass reaches a node the bridge never patched, through the resolved-changed set.
         mirror.applyState(stateEnvelope([], 2));
         mirror.applyTransforms({
             kind: 'transform',
@@ -761,8 +739,8 @@ describe('the manifest and the template table', () => {
     });
 
     it('refuses a child list past the depth bound, drawing the placeholder instead', async () => {
-        // Recursive, so a per-level cardinality cap bounds nothing: the receiver bounds depth too, and
-        // refuses the whole template rather than half-drawing it.
+        // Recursive, so a per-level cap bounds nothing: depth is bounded, the template refused
+        // whole.
         const { mirror, bridge, renderer } = await harness();
         let deep: TemplateChild = { kind: 'sprite', texture: assetId('tip.png') };
         for (let i = 0; i < MAX_TEMPLATE_DEPTH + 1; i++) {

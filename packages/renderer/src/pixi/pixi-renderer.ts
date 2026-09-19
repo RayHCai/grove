@@ -1,7 +1,4 @@
-// Orchestration only: no arithmetic and no store logic. What is left here is genuinely Pixi's —
-// `Application` setup, the DPR read, the ResizeObserver, the asset pipeline, the context guard and
-// presenting a frame — while the shared half lives in `RendererShell` plus `RendererCore`, and
-// the display objects behind `PixiSink`.
+// Orchestration only: no arithmetic and no store logic.
 
 import { Application } from 'pixi.js';
 import type { Size } from '@platform/math';
@@ -327,12 +324,7 @@ export class PixiRenderer extends RendererShell {
         return result;
     }
 
-    /**
-     * The unload a queued intent will perform, reported from residency as it stands now.
-     *
-     * Names in the order given, not fonts-last: nothing is dropped here, so the reordering that
-     * keeps live text off a fallback face would only reshuffle the report.
-     */
+    /** The unload a queued intent will perform, reported from residency as it stands now. */
     #unloadIntent(names: readonly string[]): AssetUnloadResult {
         const result: AssetUnloadResult = { unloaded: [], unknown: [], inUse: [], queued: true };
         for (const name of names) {
@@ -341,12 +333,7 @@ export class PixiRenderer extends RendererShell {
         return result;
     }
 
-    /**
-     * Loads entries sequentially on purpose.
-     *
-     * `Promise.all` would be faster but would make the order of `loaded`/`failed` and the winner of
-     * a cross-sheet frame-name collision nondeterministic.
-     */
+    /** Loads entries sequentially on purpose: `Promise.all` would make order nondeterministic. */
     async #loadNow(entries: readonly AssetManifestEntry[]): Promise<AssetLoadResult> {
         const result: AssetLoadResult = { loaded: [], failed: [], queued: false };
         for (const entry of entries) {
@@ -391,12 +378,7 @@ function cancelledLoad(names: readonly string[]): AssetLoadResult {
     };
 }
 
-/**
- * The container's CSS size, falling back to the design stage.
- *
- * A container measured mid-layout reports 0, and the ResizeObserver corrects the fallback on the
- * first real layout.
- */
+/** The container's CSS size, falling back to the design stage; mid-layout it reports 0. */
 function measureContainer(container: HTMLElement, design: Size): Size {
     const width = container.clientWidth;
     const height = container.clientHeight;

@@ -1,21 +1,9 @@
-// The real implementation of core's HUD seam. Core owns the authored state and pushes what changed;
-// this holds it in the shape a UI layer reads and tells that layer when to look again.
-//
-// No DOM: a HUD is a panel-authored layout the host draws, and which framework draws it is the
-// host's business. This is the boundary those two meet at.
-
 import type { HUDSink, HUDWidgetState } from '@platform/core';
 
 /** One widget under its name — the map entry flattened, for a layer that renders a list. */
 export type HUDWidgetView = HUDWidgetState & { name: string };
 
-/**
- * Whether two widget records say the same thing.
- *
- * Field by field over the six a record holds, because a shallow spread compares by reference and a
- * `Countdown` is a live object whose IDENTITY is what matters — a timer bound to the same countdown
- * has not changed, and rebinding it to a different one has.
- */
+/** Whether two widget records say the same thing; `Countdown` identity matters. */
 function same(a: Readonly<HUDWidgetState>, b: Readonly<HUDWidgetState>): boolean {
     return (
         a.text === b.text &&
@@ -35,15 +23,11 @@ export class ClientHUDSink implements HUDSink {
     readonly #listeners = new Set<() => void>();
 
     widget(name: string, state: Readonly<HUDWidgetState>): void {
-        // Unchanged is not a redraw. A `ClientScript`'s `@onUpdate` runs at DISPLAY rate and the
-        // authored pattern is to write every widget every frame, so without this a HUD that says
-        // the same thing all round still re-renders its host sixty times a second. The comparison
-        // is against the copy below rather than `state`, which core mutates in place — the record
-        // handed over is the same object each time, so it always equals itself.
+        // Unchanged is not a redraw: `@onUpdate` runs at display rate and rewrites every widget.
+        // Compared against the copy below, not `state`, which core mutates in place.
         const held = this.#widgets.get(name);
         if (held !== undefined && same(held, state)) return;
-        // Copied, so a reader holds a value core's next write cannot change under it. Shallow, which
-        // keeps a bound `Countdown` the live object it has to be — the whole point of a timer widget.
+        // Copied, so core's next write cannot change it; shallow, keeping `Countdown` live.
         this.#widgets.set(name, { ...state });
         this.#notify();
     }
@@ -78,7 +62,7 @@ export class ClientHUDSink implements HUDSink {
         return () => this.#listeners.delete(listener);
     }
 
-    /** Drops every widget and screen — a resync builds a new world, and this belongs to the old one. */
+    /** Drops every widget and screen; a resync builds a new world and this is the old one. */
     clear(): void {
         this.#widgets.clear();
         this.#open.length = 0;

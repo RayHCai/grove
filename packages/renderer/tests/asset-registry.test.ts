@@ -1,7 +1,3 @@
-// Residency bookkeeping and the GPU-side release, with no GPU: `Texture` and `BufferImageSource`
-// are plain objects until something draws them, and `Assets` is spied on rather than driven, so the
-// only thing not exercised here is the network fetch itself.
-
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Assets, BufferImageSource, Texture } from 'pixi.js';
 import { AssetRegistry } from '../src/pixi/asset-registry.js';
@@ -93,7 +89,8 @@ describe('AssetRegistry', () => {
 
         registry.unload('tiles');
 
-        // Handing the resolver our logical name makes it invent an entry, warn, and release nothing.
+        // Handing the resolver our logical name makes it invent an entry, warn, and release
+        // nothing.
         expect(unload).toHaveBeenCalledWith('/tiles.json');
     });
 

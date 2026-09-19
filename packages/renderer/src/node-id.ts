@@ -1,6 +1,5 @@
-// `NodeId`'s brand over the shared generation-packed handle: the packing, the field sizes and the
-// arithmetic-never-bitwise rule all live in `@platform/math`, so the entity and node handles cannot
-// drift apart.
+// The packing, field sizes and arithmetic-never-bitwise rule live in `@platform/math`, so entity
+// and node handles cannot drift apart.
 
 import { handleGeneration, handleIndex, packHandle } from '@platform/math';
 

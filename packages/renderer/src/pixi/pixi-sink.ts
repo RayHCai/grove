@@ -37,12 +37,7 @@ export class PixiSink implements SceneSink {
     readonly #surfaces: SurfaceTree;
     readonly #assets: AssetRegistry;
 
-    /**
-     * The core's transform store, supplied by {@link bind}.
-     *
-     * Late-bound because the core takes a sink in its constructor while the sink reads the store
-     * the core owns; the core calls no sink method while constructing, so binding after is safe.
-     */
+    /** The core's transform store, supplied by {@link bind}; late-bound, each needing the other. */
     #xf: TransformStore | null = null;
 
     /** Screen-space slots, so a stage change can re-place them without scanning every node. */
@@ -116,10 +111,7 @@ export class PixiSink implements SceneSink {
 
     /**
      * Pushes a node's local values: `xform` takes what inherits, `art` what does not.
-     *
-     * A world node's y is flipped and its offset is world px; a screen-space node's is not flipped
-     * and is design px, so it carries `fitScale` and — when it is a surface root — its UI anchor
-     * origin. Both go through `projection.ts`, so the sign and anchor conventions live in one place.
+     * Both go through `projection.ts`, so sign and anchor conventions live in one place.
      */
     write(index: number, record: NodeRecord): void {
         const objects = this.#objects.get(index);

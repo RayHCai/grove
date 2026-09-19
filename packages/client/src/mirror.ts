@@ -1,9 +1,4 @@
-// The mirror world: a real core runtime, the one path that writes it from the wire, and the passes a
-// prediction step runs in it.
-//
-// A real runtime rather than typed arrays, because prediction needs one — snapshot/restore reach core's
-// private stores, so a hand-rolled mirror would be thrown away to get it. Idle, every pass is a no-op:
-// simulating is something the client may do only over an authoritative baseline it can rewind to.
+// A real core runtime rather than typed arrays, because prediction needs its snapshot/restore.
 
 import type { AnyScriptClass, EntityId, Runtime, ScriptLocation, TickPasses } from '@platform/core';
 import {
@@ -45,12 +40,7 @@ export interface MirrorReparent {
     parent: EntityId | null;
 }
 
-/**
- * What a batch of applied ops changed, for the layers above to react to.
- *
- * Ordered, not sets: a batch can add and remove the same entity, and a set-union would create a node for a
- * dead entity or destroy one never created.
- */
+/** What a batch of applied ops changed, for the layers above. Ordered, not sets. */
 export interface MirrorDelta {
     added: EntityId[];
     removed: EntityId[];
@@ -60,18 +50,13 @@ export interface MirrorDelta {
     left: string[];
 }
 
-/** Counters for ops the mirror declined to apply. A nonzero count after a clean session is a bug. */
+/** Counters for ops the mirror declined to apply; nonzero after a clean session is a bug. */
 export interface MirrorCounters {
     /** An op naming a netId the mirror does not hold — a reconnect or interest-management race. */
     unknownNetId: number;
     /** A child applied before its parent, which the wire makes the server's obligation. */
     outOfOrderParent: number;
-    /**
-     * `attach` ops naming a `ScriptId` this process holds no class for.
-     *
-     * Zero is the healthy reading, and what the handshake's `projectHash` is for: both ends running
-     * the same build means every id the authority names is one this bundle registered.
-     */
+    /** `attach` ops naming a `ScriptId` this process holds no class for; zero is healthy. */
     droppedAttach: number;
     /** A transform envelope superseded while held for its state envelope. */
     supersededTransforms: number;
@@ -79,20 +64,11 @@ export interface MirrorCounters {
     invalidNetId: number;
     /** An array from the wire past the cap for its kind, refused whole before the element walk. */
     oversizedList: number;
-    /**
-     * A `StateDiff` field whose name the host facade already answers to.
-     *
-     * Applied to the record but hoisted onto nothing, since defining it would replace an engine
-     * member — `game.players`, `player.avatar` — for the life of that facade. A well-formed peer
-     * sends none: the authority refuses the same name at wire time.
-     */
+    /** A `StateDiff` field whose name the host facade already answers to; never hoisted. */
     reservedField: number;
 }
 
-/**
- * The read-only face the render bridge holds, so the layer that runs every frame cannot reach
- * `rt.transforms.setPosition` by accident.
- */
+/** The read-only face the render bridge holds, so it cannot reach `setPosition` by accident. */
 export interface MirrorView {
     readonly runtime: Runtime;
     readonly depictedTick: number;
@@ -105,16 +81,10 @@ export interface MirrorView {
 /** A creator script class, as the host holds one. */
 export type ScriptClass = new () => object;
 
-/**
- * The classes this process's bundle registered, by the id the wire names them with.
- *
- * Declared structurally rather than imported, so `@platform/scripting`'s `ScriptRegistry` satisfies
- * it without this package taking that dependency. It is the ONE table: the wire's `attach` op and a
- * spawn's overrides both name a `ScriptId`, so nothing here is keyed by template or by class name.
- */
+/** The bundle's classes by wire id; structural, so `ScriptRegistry` fits with no dependency. */
 export interface ScriptIndex {
     resolve(id: ScriptId): ScriptClass | undefined;
-    /** Where the class runs. A `ServerScript` is filtered out of a client tick, so it is not attached. */
+    /** Where the class runs; a `ServerScript` is filtered from a client tick, so never attached. */
     locationOf(id: ScriptId): ScriptLocation | undefined;
 }
 
@@ -148,20 +118,15 @@ export class Mirror {
     readonly #loop: Loop;
     readonly #index = new MirrorIndex();
     readonly #scripts: ScriptIndex | undefined;
-    /** The table `loadGame` built, kept so simulating can install over it rather than rebuild it. */
+    /** The table `loadGame` built, kept so simulating installs over it rather than rebuilding. */
     readonly #simPasses: TickPasses;
-    /**
-     * Where the server was in the state the wire last described.
-     *
-     * Its own field rather than `rt.tick`, which a prediction step moves to the local tick: the two agree
-     * only while nothing is predicted, and the behind-check that catches a suspended tab reads this one.
-     */
+    /** Where the server was when the wire last described it; not `rt.tick`, moved by prediction. */
     #depictedTick = 0;
     /** Held until the `StateEnvelope` for the same tick lands — the join key is an equality. */
     #heldTransforms: TransformEnvelope | undefined;
-    /** The highest tick whose state envelope has been applied; the snapshot stands in for its own. */
+    /** Highest tick whose state envelope has been applied; the snapshot stands in for its own. */
     #stateAppliedTick = -1;
-    /** netIds whose teardown is queued; unmapped after `drainDestroyed` so the drain can read them. */
+    /** netIds whose teardown is queued; unmapped after `drainDestroyed` so the drain reads them. */
     readonly #pendingUnmap: NetId[] = [];
 
     readonly counters: MirrorCounters = {
@@ -183,9 +148,7 @@ export class Mirror {
             regions: opts.regions,
             // gameScripts: deliberately absent — the MVP instantiates no creator code.
         });
-        // No startGame(rt): it dispatches @onStart at every attached instance, and there are none.
-        // Skipped rather than awaited — with an empty registry it would resolve immediately, and calling
-        // it would read as though the client runs a lifecycle it does not have.
+        // No `startGame(rt)`: it dispatches `@onStart`, and nothing is attached here.
         this.#simPasses = this.#rt.passes ?? inertPasses();
         this.#rt.passes = inertPasses();
         this.#loop = new Loop(this.#rt);
@@ -200,22 +163,12 @@ export class Mirror {
         return this.#loop;
     }
 
-    /**
-     * The depicted tick — where the server was in the state the wire last described.
-     *
-     * Distinct from the client's `localTick`, which is the input tick and ahead of it; the gap sawtooths,
-     * so the only sound statement is `localTick >= depictedTick`.
-     */
+    /** The depicted tick. Distinct from `localTick`, which is ahead; the gap sawtooths. */
     get depictedTick(): number {
         return this.#depictedTick;
     }
 
-    /**
-     * Installs the passes a prediction step runs, or takes them back out.
-     *
-     * The one writer of `rt.passes` after construction, so what an idle mirror does — nothing — cannot be
-     * changed from outside the file that documents it.
-     */
+    /** Installs or removes the passes a prediction step runs. The one writer of `rt.passes`. */
     simulate(ctx: ClientPassContext | null): void {
         this.#rt.passes = ctx === null ? inertPasses() : clientPasses(this.#simPasses, ctx);
     }
@@ -243,12 +196,11 @@ export class Mirror {
         return this.#rt.entities.record(local)?.template ?? '';
     }
 
-    /** The reliable envelope: structural journal, then `@serverState` diffs, then any held transform. */
+    /** The reliable envelope: structural journal, then `@serverState` diffs, then transform. */
     applyState(envelope: StateEnvelope): MirrorDelta {
         const delta = emptyDelta();
 
-        // Both are set to the envelope's, never incremented: `rt.tick` is what the world believes the
-        // time is, and the depicted tick is what the wire last said it was.
+        // Both set to the envelope's, never incremented: `rt.tick` is what the world believes.
         this.#depictedTick = envelope.tick;
         this.#rt.tick = envelope.tick;
 
@@ -257,8 +209,7 @@ export class Mirror {
             this.#applyStructural(op, delta);
         }
 
-        // Once per envelope, not per op: core's destroy is teardown-at-end-of-tick and the client has no
-        // tick to drain in, and a destroy-then-reparent of a sibling must still see a coherent child list.
+        // Once per envelope, not per op: core destroys at end-of-tick and there is no tick here.
         this.#rt.entityManager.drainDestroyed();
         for (const netId of this.#pendingUnmap) this.#index.delete(netId);
         this.#pendingUnmap.length = 0;
@@ -275,7 +226,7 @@ export class Mirror {
         return delta;
     }
 
-    /** Holds the droppable envelope until its tick's state envelope lands; `tick` is the join key. */
+    /** Holds the droppable envelope until its tick's state envelope lands; `tick` is the key. */
     applyTransforms(envelope: TransformEnvelope): void {
         if (envelope.tick > this.#stateAppliedTick) {
             // Dropped, not queued: transform is droppable and the newer one is strictly better.
@@ -286,12 +237,7 @@ export class Mirror {
         this.#writeTransforms(envelope);
     }
 
-    /**
-     * The initial snapshot, through the same appliers — it is "spawn everything, set every field".
-     *
-     * Applied to a non-empty mirror this is a resync, which is what makes both the resync and prediction's
-     * snap-back cheap.
-     */
+    /** The initial snapshot through the same appliers; on a non-empty mirror this is a resync. */
     applySnapshot(welcome: Welcome): MirrorDelta {
         const snapshot = welcome.snapshot;
         return this.applyState({
@@ -303,8 +249,7 @@ export class Mirror {
                     kind: 'player-join',
                     player,
                 })),
-                // Parents before children is the server's obligation; the applier checks rather than
-                // assuming, and counts a violation.
+                // Parents before children is the server's job; this checks and counts a violation.
                 ...snapshot.entities.map((entity): WireStructuralOp => ({
                     kind: 'spawn',
                     snapshot: entity,
@@ -314,11 +259,7 @@ export class Mirror {
         });
     }
 
-    /**
-     * Empties the world for a resync: every entity destroyed, the roster dropped, the map cleared.
-     *
-     * The runtime is kept, so the fresh snapshot lands through the same path.
-     */
+    /** Empties the world for a resync; the runtime is kept for the fresh snapshot. */
     reset(): MirrorDelta {
         const delta = emptyDelta();
         for (const [, local] of this.#index.entries()) {
@@ -338,7 +279,7 @@ export class Mirror {
         this.#stateAppliedTick = -1;
         this.#depictedTick = 0;
         this.#rt.tick = 0;
-        // The dirty set is the bridge's queue, and `delta.removed` already destroys every node it names.
+        // The dirty set is the bridge's queue, and `delta.removed` already destroys the nodes.
         this.discardMarks();
         return delta;
     }
@@ -362,14 +303,13 @@ export class Mirror {
         switch (op.kind) {
             case 'spawn':
             case 'enter-interest':
-                // One applier for both: the same `EntitySnapshot`, both answering "here is an entity you
-                // have not been watching".
+                // One applier for both: the same `EntitySnapshot` either way.
                 this.#spawn(op.snapshot, delta);
                 return;
 
             case 'destroy':
             case 'leave-interest':
-                // Interest is parent-closed, so a parent leaving never orphans a child still in view.
+                // Interest is parent-closed, so a parent leaving never orphans a child in view.
                 this.#destroy(op.netId, delta);
                 return;
 
@@ -403,8 +343,8 @@ export class Mirror {
                 return;
 
             case 'player-leave': {
-                // The server must emit this after the destroys of that player's entities: journal order is
-                // meaning, and leave-first would null `entity.owner` before anyone is told about the avatar.
+                // The server must emit this after that player's destroys: leave-first would null
+                // `entity.owner` before anyone is told about the avatar.
                 if (this.#rt.playerManager?.byId(op.id) == null) {
                     this.counters.unknownNetId++;
                     return;
@@ -432,9 +372,8 @@ export class Mirror {
     }
 
     #spawn(snapshot: EntitySnapshot, delta: MirrorDelta): void {
-        // The only place a peer-chosen netId enters the map, so the only place it has to be plausible:
-        // a fractional or negative one could never name a server handle, and would key an entry no
-        // later op can address.
+        // The only place a peer-chosen netId enters the map, so the only place it must be sane:
+        // a fractional or negative one could never name a server handle.
         if (!Number.isSafeInteger(snapshot.netId) || snapshot.netId < 0) {
             this.counters.invalidNetId++;
             return;
@@ -452,15 +391,14 @@ export class Mirror {
         if (snapshot.parent !== null) {
             const parent = this.#resolve(snapshot.parent);
             if (parent === undefined) {
-                // Rooted AND counted: a wire requirement no receiver checks quietly stops holding, and a
-                // silently rooted child is the flat-world bug arriving through ordering.
+                // Rooted AND counted: a wire requirement no receiver checks quietly stops holding.
                 this.counters.outOfOrderParent++;
             } else {
                 entity.attachTo(this.#rt.entityManager.facade(parent));
             }
         }
 
-        // Refused whole rather than half-applied: the count is peer-chosen and the work behind it is real.
+        // Refused whole, not half-applied: the count is peer-chosen and the work behind it is real.
         if (snapshot.tags.length > MAX_WIRE_ITEMS) {
             this.counters.oversizedList++;
         } else {
@@ -468,27 +406,19 @@ export class Mirror {
         }
 
         const attachments = snapshot.overrides?.scripts ?? [];
-        // Before the state diffs of this same envelope: attaching hoists `@serverState` onto the host
-        // record, and the wire's values have to land on the hoisted accessors rather than under them.
+        // Before this envelope's state diffs: attaching hoists `@serverState` onto the host record,
+        // and the wire's values must land on the hoisted accessors.
         if (attachments.length > MAX_ENTITY_SCRIPTS) {
             this.counters.oversizedList++;
         } else {
             for (const attachment of attachments) this.#attach(local, attachment);
         }
-        // `spawn` sets position only, so a wall authored at scale 3 on layer 2 would render at scale 1 on
-        // layer 0 forever — a static entity is dirty exactly once.
+        // `spawn` sets position only: a wall authored at scale 3 renders at scale 1 forever.
         this.#writeTransform(local, t);
         delta.added.push(local);
     }
 
-    /**
-     * Attaches one script named by the wire, or counts the miss.
-     *
-     * A `ServerScript` is skipped rather than counted: the authority runs it and a client tick
-     * filters it out of every dispatch, so attaching it here would build an instance nothing could
-     * ever reach. A location this process cannot name at all is a class it does not hold, which is
-     * the miss the counter is for.
-     */
+    /** Attaches one script named by the wire, or counts the miss; a `ServerScript` is skipped. */
     #attach(local: EntityId, attachment: WireScriptAttachment): void {
         const registry = this.#scripts;
         if (registry === undefined) {
@@ -518,8 +448,8 @@ export class Mirror {
             existing.name = snapshot.name;
             return existing;
         }
-        // Minted directly, not through core's `joinPlayer`, which dispatches @onPlayerJoin — the server's
-        // authority. `index` comes from the wire, so a mid-session joiner does not renumber the roster.
+        // Minted directly: `joinPlayer` dispatches `@onPlayerJoin`, which is the server's job.
+        // `index` comes from the wire, so a joiner does not renumber the roster.
         const player = new Player(this.#rt, snapshot.id, snapshot.index, snapshot.name);
         this.#rt.playerManager?.adopt(player);
         this.#rt.hosts.ensure(playerKey(snapshot.id));
@@ -527,14 +457,8 @@ export class Mirror {
     }
 
     /**
-     * Writes the host record directly: with no scripts there is no accessor to hoist onto, and
-     * `channels.markState` would mark a channel with no consumer.
-     *
-     * Attaching a `ClientScript` later hoists onto this same record, which is why it is not a parallel map.
-     *
-     * Through core's own `restoreHostField` rather than a bare `set`, because a wrapper field's value
-     * is a wrapper: assigning the decoded payload over one would leave a methodless object where a
-     * `Scoreboard` was, and a client holding none needs one built from the payload's tag.
+     * Writes the host record directly, so a later `ClientScript` hoists onto this same record.
+     * Through core's `restoreHostField`: a wrapper field's value is a wrapper, not the payload.
      */
     #applyStateField(diff: StateDiff): void {
         const key = this.#hostKey(diff.host);
@@ -542,14 +466,12 @@ export class Mirror {
         const fields = diff.fields;
         if (typeof fields !== 'object' || fields === null) return;
         const record = this.#rt.hosts.ensure(key).record;
-        // Resolved once per diff rather than per field, and only when a facade exists to hoist onto.
+        // Resolved once per diff, not per field, and only when a facade exists to hoist onto.
         const host = this.#facadeFor(diff.host);
         for (const [field, value] of Object.entries(fields)) {
             restoreHostField(record, field, value);
-            // The authoritative side gets this from wiring, when the script declaring the field
-            // attaches. Nothing attaches a Game or Player script here, so without this the values
-            // just applied would be reachable from no creator-facing name at all — and reading them
-            // is the entire job of the client code that draws them.
+            // Nothing attaches a Game or Player script here, so without this the applied values
+            // would be reachable from no creator-facing name at all.
             if (host === undefined) continue;
             if (!hoistReplicated(host, field, record.values)) this.counters.reservedField++;
         }
@@ -569,10 +491,7 @@ export class Mirror {
         }
     }
 
-    /**
-     * Built with core's own helpers: `hosts.ensure` mints a record for any key without validating, so an
-     * unprefixed one silently creates a second, empty record every write lands in.
-     */
+    /** Built with core's helpers: `hosts.ensure` mints a record for any key without validating. */
     #hostKey(host: StateHostAddr): string | undefined {
         switch (host.kind) {
             case 'game':
@@ -616,11 +535,8 @@ export class Mirror {
     }
 
     /**
-     * Core's facades mark channels the client has no consumer for; left alone the journal grows for the
-     * session (3000 marks over 1000 apply cycles). A predicted tick marks them too, so it calls this.
-     *
-     * Safe here specifically because `clear()` does not reach the transform dirty set — that lives on
-     * `SimTransformStore`, not `ReplicationChannels`, and wiping it would drop a frame's movement.
+     * Clears channel marks the client has no consumer for, or the journal grows all session.
+     * Safe because `clear()` does not reach the transform dirty set, which lives elsewhere.
      */
     discardMarks(): void {
         this.#rt.channels.clear();

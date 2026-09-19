@@ -1,8 +1,5 @@
-// The DOM input adapter, behind the `./browser` subpath.
-//
-// Its one non-obvious obligation is the focus-loss sweep: a browser does not reliably deliver `keyup` when
-// focus leaves, and under edges-only the last edge the server saw is then a press — so it holds that action
-// and the avatar runs into a wall until the player returns.
+// The focus-loss sweep is the non-obvious part: browsers drop `keyup` when focus leaves, so under
+// edges-only the server's last edge stays a press and the avatar runs into a wall.
 
 import type { EmittingInputDevice, RawInputEvent } from '../input.js';
 
@@ -11,10 +8,7 @@ export interface DomInputOptions {
     target?: HTMLElement;
 }
 
-/**
- * The DOM device. `emit` is part of the surface so a polled device — {@link pollGamepads} — can feed the
- * same handler the listeners feed.
- */
+/** The DOM device; `emit` is public so {@link pollGamepads} feeds the same handler. */
 export function createDomInputDevice(opts: DomInputOptions = {}): EmittingInputDevice {
     const target: HTMLElement | Window = opts.target ?? window;
     let handler: ((event: RawInputEvent) => void) | undefined;
@@ -53,10 +47,7 @@ export function createDomInputDevice(opts: DomInputOptions = {}): EmittingInputD
         emit({ kind: 'pointerMove', screenX: e.clientX, screenY: e.clientY });
     };
 
-    /**
-     * One event rather than a release per code: the binding table holds the authoritative held set — a code
-     * bound in one context and released in another must still release — so it does the sweep.
-     */
+    /** One event, not a release per code: the binding table holds the authoritative held set. */
     const onFocusLost = (): void => {
         emit({ kind: 'focusLost' });
     };
@@ -110,13 +101,7 @@ interface PadState {
 /** The default poll state, for the common case of one poller per page. */
 const gamepadState = new Map<number, PadState>();
 
-/**
- * Polls connected gamepads and emits only what changed since the last call.
- *
- * The Gamepad API has no event for axis motion, so a poll is the only way to read a stick — but a pad
- * reports ~20 axes and buttons, and emitting all of them every frame would run binding resolution 1200
- * times a second to discover nothing moved.
- */
+/** Polls connected gamepads and emits only what changed; the API has no axis event. */
 export function pollGamepads(
     device: { emit(event: RawInputEvent): void },
     state: Map<number, PadState> = gamepadState,

@@ -1,10 +1,3 @@
-// The context guard's state machine and queue semantics.
-//
-// Runs in Node with no WebGL: the guard listens on a canvas-shaped EventTarget and drives the
-// restore through injected hooks, so everything below the GPU boundary is exercised for real. The
-// two things that genuinely need a browser — that Pixi re-uploads correctly, and that a real
-// `webglcontextlost` fires — need browser mode, not this file.
-
 import { describe, it, expect } from 'vitest';
 import { AssetQueue } from '../src/asset-queue.js';
 import { CANCELLED_REASON, ContextGuard } from '../src/pixi/context-guard.js';

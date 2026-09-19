@@ -7,13 +7,7 @@ export type RawInputEvent =
     | { kind: 'pointer'; button: number; down: boolean; screenX: number; screenY: number }
     | { kind: 'pointerMove'; screenX: number; screenY: number }
     | { kind: 'axis'; code: string; value: number }
-    /**
-     * Focus left, or a device went away. The client answers it with a release per held code.
-     *
-     * A browser does not reliably deliver `keyup` when focus leaves — tab switch, alt-tab, an OS modal
-     * — and under edges-only the last edge the server saw is a press, so it holds that action and the
-     * avatar runs into a wall until the player returns.
-     */
+    /** Focus left, or a device went away. The client answers it with a release per held code. */
     | { kind: 'focusLost' };
 
 /** A source of raw device events. One handler; the returned disposer unregisters it. */

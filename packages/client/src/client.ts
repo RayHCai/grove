@@ -1,9 +1,3 @@
-// GameClient: the frame order, and the one place every seam meets.
-//
-// The loop body is `frame(nowSeconds)` and what calls it is injected, so a Node test drives whole seconds
-// with no rAF, no canvas and no socket. A React app composes rather than competes: a hook that owns the
-// renderer's lifecycle calls `client.frame(now)` from its own rAF loop, so the hook is the `FrameSource`.
-
 import type { ActionStates, EntityId, PointerEdge, Player } from '@platform/core';
 import {
     clearRuntime,
@@ -91,32 +85,17 @@ export interface GameClientOptions {
     bindings?: readonly Binding[];
     /** Held for a later reconnect; carried now so adding one needs no envelope change. */
     token?: string;
-    /** Pumps a loopback pair at the top of the frame. Absent for a real socket, which self-delivers. */
+    /** Pumps a loopback pair at the top of the frame; absent for a real socket. */
     pump?: () => void;
-    /** Resolves the camera each frame from the local player. Defaults to the player's core `Camera`. */
+    /** Resolves the camera each frame from the local player. Defaults to the core `Camera`. */
     camera?: (player: Player | null) => CameraState;
-    /**
-     * Simulates the local player's own entities ahead of the server, replaying unacked input over every
-     * authoritative delta. Off by default: what it runs is the creator scripts attached to those
-     * entities, and a mirror holding none predicts an unchanged world at the cost of the replay.
-     */
+    /** Simulates local entities ahead of the server, replaying unacked input. Off by default. */
     predict?: boolean;
-    /**
-     * The classes this process's bundle registered, by the id the wire names them with.
-     *
-     * What `predict` has to run, and the only thing that resolves an `attach` op. Without it every
-     * attach is dropped and counted, so a predicting client that supplies none simulates nothing.
-     */
+    /** The bundle's classes by wire id; what `predict` runs and what resolves an `attach`. */
     scripts?: ScriptIndex;
-    /**
-     * What this build is, proved against the server's before a `Player` is allocated. Omitted, this
-     * client declares no project — which only an equally undeclared server admits.
-     */
+    /** What this build is, proved against the server's before a `Player` is allocated. */
     project?: ClientProject;
-    /**
-     * Fetches and evaluates the script bundle a `Welcome` names. Needed only when the server names
-     * one; absent, a welcome carrying a `bundleUrl` fails the session rather than skipping the load.
-     */
+    /** Fetches and evaluates the bundle a `Welcome` names; absent, such a welcome fails. */
     bundle?: BundleSource;
 }
 
@@ -187,7 +166,7 @@ export class GameClient {
     #lastSyncSentMs: number | undefined;
     /** All of these are in the FRAME source's seconds, which is the only base `#now` ever holds. */
     #now = 0;
-    /** Stamped on the first frame after a join, since `start()` runs before the source has a time. */
+    /** Stamped on the first frame after a join: `start()` runs before the source has a time. */
     #joinSentAt: number | undefined;
     /** The previous frame's stamp, for the display delta. Undefined before the first frame. */
     #lastFrameAt: number | undefined;
@@ -200,20 +179,9 @@ export class GameClient {
     #rejoined = false;
     #torn = false;
 
-    /**
-     * The frame time the bundle fetch started, or undefined when nothing is being awaited.
-     *
-     * While it is set the inbox drain holds everything: a welcome that has not opened its session
-     * yet has no mirror, clock or bridge for a later envelope to land in.
-     */
+    /** Frame time the bundle fetch started, or undefined; while set, the inbox drain holds. */
     #loadingSince: number | undefined;
-    /**
-     * The bundle already fetched, verified and evaluated in this process.
-     *
-     * Survives a resync deliberately — the code is loaded, and re-fetching it on every reconnect
-     * would re-evaluate a module the page still holds. It is also what the next `JoinRequest`
-     * reports, so a server that has since moved on refuses rather than letting the two diverge.
-     */
+    /** The bundle already evaluated here; survives a resync and is what the next join reports. */
     #bundleHash: string;
 
     /** Scratch for the tick indices one frame advanced. */
@@ -234,13 +202,7 @@ export class GameClient {
         return this.#lifecycle;
     }
 
-    /**
-     * The mirrored world, for a host that needs the runtime behind it — a HUD bridge, an inspector.
-     *
-     * These three hand out the live collaborator, not a copy: writing through one (`simulate(null)`,
-     * `ring.reset()`) breaks invariants this file holds from the outside, where nothing checks.
-     * Everything a dev console wants is on `stats()` instead.
-     */
+    /** The mirrored world for a host that needs the runtime. Live, not a copy; prefer `stats()`. */
     get mirror(): Mirror | undefined {
         return this.#mirror;
     }
@@ -258,15 +220,7 @@ export class GameClient {
         return this.#hud;
     }
 
-    /**
-     * A HUD widget press: the local handlers run now, and the authority is told.
-     *
-     * The local half is unconditional — hover, press animation, selection and disabled styling are
-     * client state and must not go dead because the session stalled — while the wire half is gated
-     * like input, since a press the server would refuse as stale is worse than one never sent.
-     * `screen` names the screen the widget belongs to, which is what scopes a `ClientScript<HUDScreen>`
-     * handler to its own buttons.
-     */
+    /** A HUD widget press: local handlers always run; the wire half is gated like input. */
     pressWidget(widget: string, screen?: string): void {
         const rt = this.#mirror?.runtime;
         if (rt !== undefined) {
@@ -285,12 +239,7 @@ export class GameClient {
         });
     }
 
-    /**
-     * A pointer hit on a mirrored entity, addressed by the LOCAL handle the render layer holds.
-     *
-     * The netId mapping happens here and nowhere above, so the layer that hit-tests never learns
-     * there is a network; an entity with no mapping is local-only and reaches no authority.
-     */
+    /** A pointer hit by LOCAL handle; the netId mapping happens here and nowhere above. */
     pointer(edge: PointerEdge, local: EntityId): void {
         const rt = this.#mirror?.runtime;
         if (rt !== undefined) {
@@ -303,20 +252,7 @@ export class GameClient {
         this.#interactions.push({ kind: POINTER_WIRE_KIND[edge], netId: net });
     }
 
-    /**
-     * The entity drawn under `screenPoint`, or `undefined` — the other half of a pointer hit.
-     *
-     * `client.pointer(edge, local)` takes an entity handle, and nothing below this could produce
-     * one: the renderer knows nodes, the mirror knows entities, and only this class holds the map
-     * between them. Composed here so a host never has to.
-     *
-     * It picks against what is DRAWN, which is why it is correct and a hand-rolled test against
-     * `rt.transforms` is not: the render bridge buffers every entity it does not predict by one
-     * send interval, so the simulated pose is up to that far from the sprite a person clicked.
-     *
-     * A template that draws a subtree contributes several nodes and one entity, so a hit on a
-     * descendant walks up until a node names one — a click on a shadow is a click on its avatar.
-     */
+    /** The entity drawn under `screenPoint`; picks against what is DRAWN, not what is simulated. */
     entityAt(screenPoint: { x: number; y: number }, opts?: PickOptions): EntityId | undefined {
         const bridge = this.#bridge;
         if (bridge === undefined) return undefined;
@@ -366,23 +302,21 @@ export class GameClient {
         };
     }
 
-    /** Handlers register before the send, so ordering never depends on transport's retention rule. */
+    /** Handlers register before the send, so ordering never depends on transport's retention. */
     start(): void {
         const { transport, device, frames } = this.#opts;
 
         this.#disposers.push(transport.onMessage((message) => this.#receive(message)));
         this.#disposers.push(
             transport.onClose(() => {
-                // A `Reject` rides in ahead of the close it caused, and the loop this handler is about
-                // to stop is the only thing that would ever have drained it into a reason.
+                // A `Reject` rides in ahead of the close it caused; this loop is what drains it.
                 const refusal = this.#inbox.find((envelope) => envelope.kind === 'reject');
                 if (refusal !== undefined) {
                     this.#onReject(refusal);
                     return;
                 }
                 this.#lifecycle.to('disconnected');
-                // A fetch still in flight belongs to a session that no longer exists, and the bundle
-                // behind it would otherwise open one on a socket that is gone.
+                // A fetch in flight belongs to a session that no longer exists.
                 this.#loadingSince = undefined;
                 frames.stop();
             }),
@@ -399,13 +333,7 @@ export class GameClient {
         return this.#opts.clock.nowSeconds() * 1000;
     }
 
-    /**
-     * The join request, stamped now and carrying the bundle this client currently holds.
-     *
-     * Built here rather than at each call site so the resync sends the same claim the first join
-     * did — with one difference that matters: a bundle loaded since then rides it, and a server that
-     * has moved on refuses rather than letting the two run different code.
-     */
+    /** The join request, stamped now and carrying the bundle this client holds. */
     #joinFrame(): ReturnType<typeof joinRequest> {
         this.#joinSentMs = this.#nowMs();
         // Cleared rather than stamped, because the deadline runs in the frame source's seconds and
@@ -427,12 +355,10 @@ export class GameClient {
 
         this.#opts.pump?.();
 
-        // Order-sensitive: one `deliver()` routinely hands over several envelopes, and the bridge consumes
-        // their deltas in the same order rather than merging them.
+        // Order-sensitive: one `deliver()` hands over several envelopes, consumed in order.
         this.#drainInbox();
 
-        // 0..N ticks. The push is below rather than inside this, because it is display work at display
-        // rate: a frame that advanced three ticks still pushes once.
+        // 0..N ticks. The push is below, not inside: display work runs once per frame.
         if (this.#lifecycle.state !== 'failed' && this.#clock !== undefined) {
             this.#flushInput(this.#clock.advance(nowSeconds, this.#ticks).at(-1));
             this.#flushInteractions();
@@ -448,9 +374,7 @@ export class GameClient {
         this.#checkLiveness();
         this.#maybeSync();
 
-        // Client-located `@onUpdate`, once, at display rate — after prediction so a screen reads the
-        // world it is about to be shown, and before the push so a handler that moved a camera or
-        // wrote a widget is reflected on this frame rather than the next.
+        // Client-located `@onUpdate`, once, at display rate — after prediction, before the push.
         this.#displayUpdate(nowSeconds);
 
         if (this.#bridge !== undefined) {
@@ -460,14 +384,7 @@ export class GameClient {
         this.#opts.renderer.render();
     }
 
-    /**
-     * Runs every `ClientScript`'s `@onUpdate` for this frame.
-     *
-     * Neither tick pass can: both narrow to server-located handlers, because a `SyncedScript`'s
-     * update belongs to the simulation and firing it here as well would run it twice. `dt` is the
-     * real frame delta, clamped, so a handler easing something is not handed a backwards or an
-     * unbounded step after a tab has been hidden.
-     */
+    /** Runs every `ClientScript`'s `@onUpdate`; `dt` is the clamped real frame delta. */
     #displayUpdate(nowSeconds: number): void {
         const rt = this.#mirror?.runtime;
         const previous = this.#lastFrameAt;
@@ -478,13 +395,7 @@ export class GameClient {
         displayUpdate(rt, dt);
     }
 
-    /**
-     * Carries the predicted world up to the local tick.
-     *
-     * Only while `live`: `stalled` refuses input, and simulating on through it would run the avatar off
-     * held keys with nothing arriving to correct it — ghost gameplay by another route. A `resimulate`
-     * dropped here is not lost, because the next envelope raises it again.
-     */
+    /** Carries the predicted world up to the local tick, only while `live`. */
     #predict(): void {
         const resimulate = this.#resimulate;
         this.#resimulate = false;
@@ -496,12 +407,10 @@ export class GameClient {
     }
 
     #receive(message: Message): void {
-        // A terminal session drains nothing ever again, so an envelope kept here is memory held for the
-        // life of the tab rather than work postponed.
+        // A terminal session never drains again; an envelope kept here is held for the tab's life.
         if (isTerminal(this.#lifecycle.state)) return;
         const envelope = asServerEnvelope(message);
-        // A frame that is not an envelope, or one missing a field the client dereferences, is a mismatched
-        // or hostile peer: dropped rather than crashing the session.
+        // A frame that is not an envelope is a mismatched or hostile peer: dropped, not fatal.
         if (envelope === undefined) return;
         this.#inbox.push(envelope);
     }
@@ -514,23 +423,20 @@ export class GameClient {
         const batch = this.#inbox.splice(0);
         this.#lastEnvelopeAt = this.#now;
 
-        // Once, ahead of the batch's first authoritative write rather than inside it: a delta names only
-        // what changed, so a field it does not mention would keep its predicted value and never converge.
+        // Once, ahead of the batch's first authoritative write: a delta names only what changed.
         if (this.#prediction !== undefined && batch.some(isAuthoritative)) {
             this.#prediction.rewind();
             this.#resimulate = true;
         }
 
         for (let at = 0; at < batch.length; at++) {
-            // Nothing after a terminal failure can matter, and applying into a half-torn session is how a
-            // second fault gets reported instead of the first.
+            // Applying into a half-torn session reports a second fault instead of the first.
             if (this.#lifecycle.state === 'failed') return;
             try {
                 this.#dispatch(batch[at] as ServerToClient);
             } catch (error) {
-                // An envelope that passed the boundary narrowing and still threw is malformed deeper than
-                // depth-one checks reach. Failing here names the peer; letting it unwind would escape
-                // `frame()` through the frame source and end the session with nothing to show a person.
+                // An envelope that passed narrowing and still threw is malformed deeper than these
+                // checks reach; failing here names the peer.
                 this.#failPeer(error);
                 return;
             }
@@ -583,7 +489,7 @@ export class GameClient {
         }
     }
 
-    /** Ends the session with the refusal phrased for a person, from the drain or from the close behind it. */
+    /** Ends the session with the refusal phrased for a person, from the drain or the close. */
     #onReject(reject: Reject): void {
         this.#fail({
             kind: 'rejected',
@@ -592,18 +498,11 @@ export class GameClient {
         });
     }
 
-    /**
-     * Accepts a `Welcome` and decides whether a session can open now or has to wait for code.
-     *
-     * The RTT is measured HERE rather than after any load: it seeds the lead, and a fetch folded into
-     * it would size the lead to the download instead of to the round trip.
-     */
+    /** Accepts a `Welcome`; the RTT is measured HERE, before any load, since it seeds the lead. */
     #onWelcome(welcome: Welcome): void {
-        // No envelope is accepted before the Welcome, and a second one is ignored: the mirror it would
-        // rebuild is the resync path's, which goes through `#resync`.
+        // No envelope is accepted before the Welcome; a second goes through `#resync`.
         if (this.#welcome !== undefined || this.#loadingSince !== undefined) return;
-        // Folded in before anything reads the snapshot, so every path below sees one whole world and
-        // chunking stays invisible past this line.
+        // Folded in before anything reads the snapshot, so chunking is invisible past this line.
         if (!this.#chunks.foldInto(welcome)) {
             this.#fail({
                 kind: 'peer',
@@ -612,8 +511,7 @@ export class GameClient {
             return;
         }
         if (!isUsableWelcome(welcome)) {
-            // A `Welcome` the client cannot use means the server does not speak this client's JSON —
-            // terminal, and distinct from a `Reject`, which carries a reason.
+            // A `Welcome` the client cannot use is terminal, and distinct from a `Reject`.
             this.#fail({ kind: 'undecodable' });
             return;
         }
@@ -631,8 +529,7 @@ export class GameClient {
 
         const source = this.#opts.bundle;
         if (source === undefined) {
-            // Never silently skipped: a client with no loader cannot run what the server is running,
-            // and going live anyway is the divergence the hash exists to catch.
+            // Going live without the code is the divergence the hash exists to catch.
             this.#fail({
                 kind: 'bundle',
                 message: 'the server sent game code this client has no way to load',
@@ -645,12 +542,7 @@ export class GameClient {
         void this.#load(source, welcome);
     }
 
-    /**
-     * Fetches, verifies and evaluates the bundle, then opens the session — or fails, terminally.
-     *
-     * A mismatch is not a retry: the bytes that arrived are not the bytes the authority simulates
-     * with, and running them anyway is exactly the silent divergence this whole path exists to stop.
-     */
+    /** Fetches, verifies and evaluates the bundle, then opens the session — or fails terminally. */
     async #load(source: BundleSource, welcome: Welcome): Promise<void> {
         try {
             await loadBundle(source, welcome.bundleUrl, welcome.bundleHash);
@@ -672,19 +564,12 @@ export class GameClient {
         try {
             this.#openSession(welcome);
         } catch (error) {
-            // The same backstop the drain gives the synchronous path: a snapshot that throws while it
-            // is applied names the peer either way, and here it would otherwise leave `loading` set
-            // with no fetch outstanding and nothing left to end it.
+            // A snapshot that throws while applied names the peer, and would leave `loading` set.
             this.#failPeer(error);
         }
     }
 
-    /**
-     * Whether the welcome a fetch was started for is still the one being answered.
-     *
-     * A teardown, a close or a resync during the fetch each end that welcome, and its bundle must not
-     * open a session over the one that replaced it.
-     */
+    /** Whether the welcome a fetch started for is still the one being answered. */
     #stillLoading(): boolean {
         return (
             !this.#torn && this.#loadingSince !== undefined && this.#lifecycle.state === 'loading'
@@ -701,19 +586,17 @@ export class GameClient {
             regions: welcome.regions.map((r) => ({ name: r.name, bounds: wireBounds(r.bounds) })),
             ...defined({ scripts: this.#opts.scripts }),
         });
-        // `sendRate` is the interval between transforms, and so the interval the render path buffers over:
-        // without it an entity nothing local predicts holds its pose until the next envelope.
+        // `sendRate` is the interval the render path buffers over; without it an unpredicted
+        // entity holds its pose until the next envelope.
         this.#bridge = new RenderBridge(this.#opts.renderer, this.#mirror.view(), welcome.sendRate);
-        // Started, not awaited: the template table fills synchronously, so the snapshot below resolves
-        // every template. A rejection means missing art, which the renderer already draws as a
-        // placeholder — so it is counted rather than allowed to become an unhandled rejection.
+        // Started, not awaited: the template table fills synchronously. A rejection means missing
+        // art, which the renderer draws as a placeholder, so it is counted rather than unhandled.
         this.#bridge.loadManifest(welcome.visuals).catch(() => {
             this.#assetLoadFailed++;
         });
 
-        // The snapshot's tick seeds the counter and the RTT seeds the lead — and because the tick rides
-        // `snapshot.tick` rather than a field of its own, the tick the counter seeds from and the tick its
-        // initial world describes cannot disagree.
+        // The snapshot's tick seeds the counter and the RTT seeds the lead; riding `snapshot.tick`
+        // keeps the seeded tick and the world it describes from disagreeing.
         this.#clock = new ClientClock({
             simRate: welcome.simRate,
             snapshotTick: welcome.snapshot.tick,
@@ -741,16 +624,14 @@ export class GameClient {
                 playerId: welcome.yourPlayerId,
             });
             this.#mirror.simulate(this.#prediction.context);
-            // Handed over live: the scope is refilled in place whenever authoritative state lands, and an
-            // entity this replays is one the buffer must leave alone — two smoothers rubber-band.
+            // Handed over live: the scope refills in place, and the buffer must leave these alone.
             this.#bridge.setPredicted(this.#prediction.scope);
-            // The snapshot is authoritative state, so this frame already has a baseline to replay over.
+            // The snapshot is authoritative state, so this frame has a baseline to replay over.
             this.#resimulate = true;
         }
 
         this.#lastSyncAt = this.#now;
-        // Both liveness clocks start at the welcome, not at time zero: a join that took a moment must not
-        // be charged against the first ack's deadline.
+        // Both liveness clocks start at the welcome: a slow join is not charged to the first ack.
         this.#ackSeqStillAt = this.#now;
         this.#lifecycle.to('live');
         this.#resumeInput();
@@ -763,15 +644,14 @@ export class GameClient {
 
         this.#apply(mirror.applyState(envelope));
 
-        // The ack: prune the ring, then steer the lead off the sample describing the earliest frame this
-        // ack resolved.
+        // The ack: prune the ring, then steer the lead off the earliest frame it resolved.
         if (envelope.ackSeq > this.#ackSeq) {
             this.#ackSeq = envelope.ackSeq;
             this.#ackSeqStillAt = this.#now;
             const earliest = this.#ring.ack(envelope.ackSeq);
             const headroom = envelope.earliestHeadroom;
-            // Recovery is defined on the ring, not on arrival: an ack arriving after a stall describes a
-            // frame sent before it, and reads deeply negative because nothing was being processed.
+            // Recovery is defined on the ring, not on arrival: an ack after a stall describes an
+            // earlier frame and reads deeply negative.
             if (
                 earliest !== undefined &&
                 headroom !== undefined &&
@@ -781,12 +661,11 @@ export class GameClient {
             }
         }
 
-        // The behind-check and stall recovery deliberately do not run here, though this is where the
-        // depicted tick changes: see `#checkNotBehind` and `#checkLiveness`.
+        // The behind-check and stall recovery run elsewhere: `#checkNotBehind`, `#checkLiveness`.
     }
 
     #onTimeSyncReply(reply: TimeSyncReply): void {
-        // Only a reply echoing the stamp we sent is ours; the interval is measured off our own clock.
+        // Only a reply echoing our stamp is ours; the interval is measured off our own clock.
         const sentMs = this.#lastSyncSentMs;
         if (sentMs === undefined || reply.clientSentMs !== sentMs) return;
         this.#lastSyncSentMs = undefined;
@@ -794,8 +673,8 @@ export class GameClient {
     }
 
     #onRateChange(change: RateChange): void {
-        // A resync rather than a live retune, because core retunes neither a pending timer's schedule, the
-        // lag ring's size, nor an already-stamped input frame's meaning.
+        // A resync, not a live retune: core retunes neither a pending timer, the lag ring, nor an
+        // already-stamped frame.
         if (this.#welcome === undefined) return;
         this.#welcome = { ...this.#welcome, simRate: change.simRate };
         this.#resync();
@@ -811,8 +690,7 @@ export class GameClient {
         if (this.#edges.length === 0) return;
 
         if (event.kind === 'focusLost') {
-            // Immediately, not from the frame loop: a hidden tab stops being driven, so a release left for
-            // the next frame waits until the player returns. Exempt from the `stalled` refusal too.
+            // Immediately, not from the frame loop: a hidden tab stops being driven.
             this.#pending.push(...this.#edges);
             this.#flushInput(this.#clock?.localTick, { exempt: 'focus-loss' });
             return;
@@ -822,20 +700,12 @@ export class GameClient {
         this.#pending.push(...this.#edges);
     }
 
-    /**
-     * Frames the pending edges and sends them, stamped with the newest tick this frame advanced.
-     *
-     * One frame per frame that advanced a tick, not one per tick: every edge since the last flush
-     * belongs to the last tick advanced, the earliest it could apply on. `seq` and `tick` still move
-     * together, so `ackSeq` names a tick boundary. `undefined` is a frame that advanced none.
-     *
-     * Empty frames are not sent.
-     */
+    /** Frames the pending edges and sends them, stamped with the newest tick advanced. */
     #flushInput(tick: number | undefined, release?: { exempt: 'focus-loss' }): void {
         const clock = this.#clock;
         if (clock === undefined) return;
         if (release === undefined && !this.#lifecycle.acceptsInput) {
-            // Dropped rather than held: they are stamped against a tick the server will refuse as too old.
+            // Dropped, not held: they are stamped against a tick the server will refuse as too old.
             this.#pending.length = 0;
             return;
         }
@@ -844,7 +714,7 @@ export class GameClient {
         this.#actions.advanceTick();
         if (this.#pending.length === 0) return;
 
-        // One entry per (action, phase), coalesced — which is also what makes the batch well-formed.
+        // One entry per (action, phase), coalesced — which makes the batch well-formed.
         const byAction = new Map<string, InputAction>();
         for (const edge of this.#pending) {
             const action: InputAction = { action: edge.action, on: edge.on };
@@ -864,13 +734,7 @@ export class GameClient {
         this.#guard(() => send(this.#opts.transport, frame));
     }
 
-    /**
-     * Sends this frame's interactions, stamped with the tick they happened on.
-     *
-     * No `seq` and no ring: an interaction is one discrete event, so there is nothing to re-derive
-     * from a later sample and nothing to replay — which is also why it is not folded into the input
-     * frame, where every field exists to make edges replayable.
-     */
+    /** Sends this frame's interactions, stamped with the tick they happened on. No ring. */
     #flushInteractions(): void {
         const clock = this.#clock;
         if (clock === undefined || this.#interactions.length === 0) return;
@@ -886,13 +750,7 @@ export class GameClient {
         this.#guard(() => send(this.#opts.transport, frame));
     }
 
-    /**
-     * Queues a creator's `request()` for the uplink, encoding the payload here rather than at `send`.
-     *
-     * Gated like input, because a client that cannot reach the authority cannot be asking it for
-     * anything; the encode drops what the wire cannot carry, since a throw at `send` would end the
-     * session over a field a creator named.
-     */
+    /** Queues a creator's `request()` for the uplink; gated like input, and encoded here. */
     #queueRequest(name: string, payload?: Record<string, unknown>): void {
         if (!this.#lifecycle.acceptsInput) return;
         const call: GameRequest = { name };
@@ -900,12 +758,7 @@ export class GameClient {
         this.#requests.push(call);
     }
 
-    /**
-     * Sends this frame's requests, stamped with the tick they were made on.
-     *
-     * Its own frame rather than a field on the interaction one: the two are different asks with
-     * different costs, and folding them would put one admission decision over both.
-     */
+    /** Sends this frame's requests, stamped with the tick they were made on. */
     #flushRequests(): void {
         const clock = this.#clock;
         if (clock === undefined || this.#requests.length === 0) return;
@@ -924,13 +777,7 @@ export class GameClient {
         this.#guard(() => send(this.#opts.transport, frame));
     }
 
-    /**
-     * Input resumed, so what the wire believes is stale: nothing was sent while it was refused.
-     *
-     * An axis re-asserts unconditionally, because a `hold` is idempotent. A press re-asserts only after a
-     * re-join, where the server's session holds nothing — after a stall it still holds it, and a second
-     * press would dispatch a spurious edge.
-     */
+    /** Input resumed, so re-assert what the wire missed: axes always, presses after re-join. */
     #resumeInput(): void {
         this.#bindings.forgetSentValues();
         for (const { action, value } of this.#actions.axisValues()) {
@@ -943,12 +790,7 @@ export class GameClient {
         }
     }
 
-    /**
-     * The counter must lead the depicted tick, or it has left the timeline entirely.
-     *
-     * Once per frame rather than once per apply, so the counter has been credited this frame's tick first —
-     * checking at drain time resyncs a healthy session on ordinary accumulator phase drift.
-     */
+    /** The counter must lead the depicted tick, or it has left the timeline. Once per frame. */
     #checkNotBehind(): void {
         const clock = this.#clock;
         const mirror = this.#mirror;
@@ -957,14 +799,7 @@ export class GameClient {
         if (clock.isBehind(mirror.depictedTick)) this.#resync();
     }
 
-    /**
-     * Fails a session whose bundle never arrives.
-     *
-     * It bounds the held inbox as much as the wait: the server broadcasts from the moment it sent the
-     * `Welcome`, and a fetch that hangs would otherwise queue envelopes for as long as the tab lives.
-     * `stalled` cannot cover this — that is a decision about a live session's connection, and there is
-     * no session yet.
-     */
+    /** Fails a session whose bundle never arrives; also bounds the inbox held during the fetch. */
     #checkBundleDeadline(): void {
         const since = this.#loadingSince;
         if (since === undefined || this.#now - since < BUNDLE_DEADLINE_SECONDS) return;
@@ -975,13 +810,7 @@ export class GameClient {
         });
     }
 
-    /**
-     * Fails a join the server never answers, in either state that waits for a `Welcome`.
-     *
-     * The server closes an unjoined connection on a deadline of its own; without this one a peer that
-     * accepts the socket and then says nothing holds the session on a spinner for the life of the tab,
-     * and a resync that goes unanswered wedges the same way with its whole world already discarded.
-     */
+    /** Fails a join the server never answers, in either state that waits for a `Welcome`. */
     #checkJoinDeadline(): void {
         const state = this.#lifecycle.state;
         if (state !== 'connecting' && state !== 'resyncing') return;
@@ -997,13 +826,7 @@ export class GameClient {
         });
     }
 
-    /**
-     * The single decider for `stalled`, in both directions — which is what keeps recovery honest.
-     *
-     * A drought is the server not sending; a frozen `ackSeq` is the server not processing. Recovering on any
-     * inbound envelope would cure the second with traffic that did not advance the ack. Ring occupancy is
-     * deliberately not a trigger — it would let an energetic player disable their own controls.
-     */
+    /** The single decider for `stalled`, both directions: a drought, or a frozen `ackSeq`. */
     #checkLiveness(): void {
         const state = this.#lifecycle.state;
         const clock = this.#clock;
@@ -1013,7 +836,7 @@ export class GameClient {
         const since = this.#lastEnvelopeAt;
         const drought = since !== undefined && this.#now - since >= STALL_SECONDS;
 
-        // In the session's own ticks, not frames: counting frames fires 7× early on 144 Hz over a 20 Hz sim.
+        // In session ticks, not frames: frames fire 7× early on 144 Hz over a 20 Hz sim.
         const ackFrozen =
             this.#ring.size > 0 &&
             this.#now - this.#ackSeqStillAt >= ACK_STALL_TICKS / clock.simRate;
@@ -1028,7 +851,7 @@ export class GameClient {
     #stall(): void {
         if (this.#lifecycle.state === 'stalled') return;
         this.#lifecycle.to('stalled');
-        // This stall's samples describe starved batches, discarded by epoch rather than by arrival time.
+        // This stall's samples describe starved batches, discarded by epoch, not arrival time.
         this.#clock?.bumpEpoch();
     }
 
@@ -1041,13 +864,7 @@ export class GameClient {
         this.#guard(() => send(this.#opts.transport, timeSync(sentMs)));
     }
 
-    /**
-     * Re-runs the join and applies a fresh snapshot through the one path.
-     *
-     * A resync rather than a counter repair: a 30 s suspension leaves the mirror 30 s stale too, so fixing
-     * the counter alone yields a correctly clocked client rendering an abandoned world — worse, because it
-     * looks like it worked. It also adds no mechanism that could break the tick sequence.
-     */
+    /** Re-runs the join and applies a fresh snapshot; a suspension leaves the mirror stale too. */
     #resync(): void {
         this.#lifecycle.to('resyncing');
         this.#clock?.bumpEpoch();
@@ -1057,15 +874,14 @@ export class GameClient {
         // The replacement bridge must start from an empty namespace, hierarchy included.
         this.#bridge?.clear();
 
-        // The horizon rebuilds from live action state: what is physically held did not change because the
-        // session's clock did.
+        // The horizon rebuilds from live action state: what is held did not change with the clock.
         this.#ring.reset(this.#actions);
         this.#pending.length = 0;
         // The HUD belongs to the world being discarded, and the interactions name netIds the next
         // session will not hold.
         this.#hud.clear();
         this.#interactions.length = 0;
-        // Stamped against a tick the next session will not be seeded from, so it would arrive stale.
+        // Stamped against a tick the next session is not seeded from, so it would arrive stale.
         this.#requests.length = 0;
         this.#ackSeq = -1;
         this.#ackSeqStillAt = this.#now;
@@ -1078,7 +894,7 @@ export class GameClient {
         this.#mirror = undefined;
         this.#bridge = undefined;
         this.#clock = undefined;
-        // Dropped with the runtime it belongs to: a baseline holds handles that mean nothing in the next.
+        // Dropped with its runtime: a baseline holds handles that mean nothing in the next.
         this.#prediction = undefined;
         this.#resimulate = false;
         // The new session will hold nothing, so what is physically held has to be said again.
@@ -1103,21 +919,15 @@ export class GameClient {
         const bridge = this.#bridge;
         if (target !== null && bridge !== undefined && 'entityId' in target) {
             const local: EntityId = target.entityId;
-            // The drawn position, not the simulated one: a camera locked to the exact answer slides its
-            // target across the screen — while a predicted avatar eases towards a correction, and by a
-            // whole send interval for a target the interpolation buffer draws.
+            // The drawn position, not the simulated one: a camera locked to the exact answer slides
+            // its target across the screen.
             const drawn = bridge.drawnPosition(local);
             return { position: { x: drawn.x, y: drawn.y, z: 0 }, zoom: camera.zoom };
         }
         return { position: camera.position, zoom: camera.zoom };
     }
 
-    /**
-     * Reverse of setup, and idempotent throughout — a `failed` teardown and an unmount race.
-     *
-     * `ownsRenderer` defaults false: a host that built the renderer destroys it itself, and doing it here
-     * would race that teardown.
-     */
+    /** Reverse of setup, and idempotent — a `failed` teardown and an unmount race. */
     destroy(opts: { ownsRenderer?: boolean } = {}): void {
         if (this.#torn) return;
         this.#torn = true;
@@ -1132,12 +942,12 @@ export class GameClient {
         this.#bridge = undefined;
         this.#prediction = undefined;
 
-        // Only if the slot still holds ours: core keeps one module-global, and a second client — or a server
-        // in this process — would otherwise lose its own to our teardown.
+        // Only if the slot still holds ours: core keeps one module-global, and a second client
+        // would otherwise lose its own to our teardown.
         if (runtime !== undefined && hasRuntime() && currentRuntime() === runtime) clearRuntime();
     }
 
-    /** Maps a `TransportError` onto a failure state: `encode-rejected` is ours, the rest are the peer's. */
+    /** Maps a `TransportError` to a failure state: `encode-rejected` is ours, else the peer's. */
     #guard(fn: () => void): void {
         try {
             fn();
@@ -1151,7 +961,7 @@ export class GameClient {
         }
     }
 
-    /** The one way a session ends terminally: the reason is recorded, then everything is shut down. */
+    /** The one way a session ends terminally: record the reason, then shut everything down. */
     #fail(reason: FailureReason): void {
         this.#lifecycle.fail(reason);
         this.#shutdown();
@@ -1165,13 +975,7 @@ export class GameClient {
         });
     }
 
-    /**
-     * Stops the loop and drops the connection with it.
-     *
-     * The transport is closed rather than merely ignored: a failed session decodes every later
-     * envelope into an inbox no frame will ever drain, which is the peer choosing how much memory
-     * this tab holds. The handlers go first, so our own `close()` does not read back as a peer close.
-     */
+    /** Stops the loop and closes the transport, so a dead session cannot decode into its inbox. */
     #shutdown(): void {
         this.#opts.frames.stop();
         this.#inbox.length = 0;

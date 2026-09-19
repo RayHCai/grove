@@ -1,6 +1,3 @@
-// The mirror: server ids never leak, apply order and envelope pairing, the mark discard,
-// and nothing writing outside apply.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ScriptLocation } from '@platform/core';
 import {
@@ -41,12 +38,7 @@ class Rules extends ServerScript {}
 const RUNNER = 'runner' as ScriptId;
 const RULES = 'rules' as ScriptId;
 
-/**
- * The one table the wire's ids resolve through, as `@platform/scripting`'s registry answers it.
- *
- * Declared here rather than imported: the client depends on the shape and not on the package, which
- * is what lets a host build the registry from its own chunk.
- */
+/** The one table the wire's ids resolve through, as scripting's registry answers it. */
 function registry(): ScriptIndex {
     const classes: Record<string, { ctor: ScriptClass; location: ScriptLocation }> = {
         [RUNNER]: { ctor: Runner as unknown as ScriptClass, location: 'synced' },
@@ -108,7 +100,7 @@ describe('the script-less runtime', () => {
     it('is a client runtime, so Loop.step would not capture the lag ring', () => {
         const m = mirror();
         expect(m.runtime.isServer).toBe(false);
-        // The ring object still exists on a client runtime, so the guard is `isServer`, not absence.
+        // The ring exists on a client runtime, so the guard is `isServer`, not absence.
         expect(m.runtime.lagRing).toBeDefined();
     });
 
@@ -143,10 +135,8 @@ describe('the script-less runtime', () => {
 describe('server ids never leak', () => {
     it('produces a local id set that differs from the wire netIds', () => {
         const m = mirror();
-        // The wire's worked example: a server that spawned a, b, destroyed a, then spawned c
-        // holds [33554432, 16777217], where a client told only about the live entities holds
-        // [16777216, 16777217]. Asserted as SETS, not per-element — the second handle coincides, and
-        // an assertion that every id differs would be false for a reason that is not a leak.
+        // Asserted as SETS, not per-element: the second handle coincides, and requiring every id to
+        // differ would be false for a reason that is not a leak.
         const delta = m.applyState(
             stateEnvelope([
                 { kind: 'spawn', snapshot: entity(33554432) },
@@ -190,8 +180,8 @@ describe('apply order and the envelope pairing', () => {
         });
         expect(m.runtime.transforms.posX(local)).toBe(0);
 
-        // Once tick 6's state envelope lands, it applies — landing at the TRANSFORM's position rather
-        // than the spawn's, which pins it against `initSlot`'s zeroing.
+        // Once tick 6's state envelope lands it applies, at the TRANSFORM's position rather than
+        // the spawn's, pinning it against `initSlot`'s zeroing.
         m.applyState(stateEnvelope([], { tick: 6 }));
         expect(m.runtime.transforms.posX(local)).toBe(50);
     });
@@ -505,7 +495,7 @@ describe('the roster populates from the wire', () => {
         expect(delta.joined).toHaveLength(1);
         const player = m.runtime.playerManager?.byId('p9');
         expect(player?.name).toBe('Nine');
-        // The wire's index wins: core's own counter would have said 0 and drifted from the server's.
+        // The wire's index wins: core's counter would have said 0 and drifted from the server's.
         expect(player?.index).toBe(4);
         expect(m.runtime.hosts.get('player:p9')).toBeDefined();
     });

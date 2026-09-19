@@ -1,8 +1,3 @@
-// The canvas input adapter: viewport pixels in, canvas pixels and world units out.
-//
-// No DOM environment here, so `window`, `document` and the container are hand-rolled listener
-// registries — which is also the only way to assert that dispose actually unregisters.
-
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RawInputEvent } from '../src/input.js';
 import type { CanvasPress } from '../src/browser/canvas-input.js';

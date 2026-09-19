@@ -1,9 +1,5 @@
-// Decorator-bearing fixtures compiled by the build: `tsc` lowers standard decorators and the test
-// runner's transform does not, so the tests import the compiled classes from `../dist/testkit/` and
-// carry no decorator syntax themselves.
-//
-// Not public surface — exported only so the test suite can reach it, and the one place in this package
-// that declares a script at all: `src/` proper drives core as values and attaches nothing.
+// Compiled by the build: `tsc` lowers standard decorators and the test runner's transform does not,
+// so tests import these from `../dist/testkit/`. Not public surface.
 
 import type { Entity, HUDScreen } from '@platform/core';
 import {
@@ -31,12 +27,7 @@ export class Slider extends SyncedScript<Entity> {
     }
 }
 
-/**
- * A screen that redraws every frame — the authored HUD pattern, and the one handler no tick runs.
- *
- * `label` is static so a test can change what it writes without reaching into an instance the
- * runtime owns.
- */
+/** A screen that redraws every frame, the authored HUD pattern; `label` is static for tests. */
 export class Overlay extends ClientScript<HUDScreen> {
     static frames = 0;
     static label = 'a';
@@ -48,11 +39,7 @@ export class Overlay extends ClientScript<HUDScreen> {
     }
 }
 
-/**
- * The same handler on a SYNCED script, which the simulation already runs.
- *
- * Its counter staying at zero across a frame is what proves the display pass does not double it.
- */
+/** The same handler on a SYNCED script; a zero counter proves the display pass never doubles it. */
 export class Drift extends SyncedScript<Entity> {
     static frames = 0;
 
@@ -62,12 +49,7 @@ export class Drift extends SyncedScript<Entity> {
     }
 }
 
-/**
- * A server-located `@onRequest` handler, standing where one must never run.
- *
- * Attached to a MIRROR's Game, its counter staying at zero is what proves a `request()` left this
- * process instead of being checked on the machine that made it.
- */
+/** A server-located `@onRequest` handler; a zero counter proves `request()` left this process. */
 export class LocalVault extends ServerScript {
     static asks = 0;
 

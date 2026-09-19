@@ -1,6 +1,3 @@
-// The clock: the lead closes on headroom without winding up, the nudge is the only thing
-// that moves the counter, and a suspended tab is distinguishable from a slow path.
-
 import { describe, expect, it } from 'vitest';
 import { ClientClock } from '../src/clock.js';
 import { HEADROOM_TARGET, LEAD_MAX_SECONDS, NUDGE_MAX } from '../src/constants.js';
@@ -44,8 +41,7 @@ describe('the seed', () => {
     });
 
     it('stores the lead in SECONDS, so one latency yields one duration at any simRate', () => {
-        // A tick-valued constant would mean 100 ms of input delay at 60 Hz and 300 ms at 20 Hz —
-        // same connection, triple the latency, for a reason nobody would look for in a rate setting.
+        // A tick-valued constant would mean 100 ms of input delay at 60 Hz and 300 ms at 20 Hz.
         const fast = clock({ simRate: 60, rttSeconds: 0.09 });
         const slow = clock({ simRate: 20, rttSeconds: 0.09 });
         expect(fast.currentLeadSeconds).toBeCloseTo(slow.currentLeadSeconds, 10);
@@ -96,8 +92,7 @@ describe('the accumulator', () => {
     });
 
     it('does not treat a clamped dt as a deficit to make up', () => {
-        // After a scripted multi-second gap the counter must not run fast to recover discarded
-        // wall-clock time — the clamp is doing its job, which is why suspension is detected by the behind-check instead.
+        // After a multi-second gap the counter must not run fast to recover discarded time.
         const c = clock({ simRate: 60, rttSeconds: 0 });
         c.advance(0);
         const jumped = c.advance(30).length; // 30 s in one frame
@@ -129,10 +124,8 @@ describe('the lead loop', () => {
     });
 
     it('DOES NOT WIND UP: the outstanding correction stays bounded at a sustained deficit', () => {
-        // The load-bearing property, stated as what `effectiveHeadroom` actually buys: the loop stops
-        // re-commanding once enough is in flight, so (target − current) settles at a small equilibrium
-        // instead of growing to the full range. Without the term the raw error is re-integrated every
-        // ack and the gap opens immediately.
+        // `effectiveHeadroom` stops the loop re-commanding once enough is in flight, so the error
+        // settles at a small equilibrium instead of growing.
         const c = clock({ simRate: 60, rttSeconds: 0.05 });
         settle(c, -1, 200);
         const outstanding = (c.targetLeadSeconds - c.currentLeadSeconds) * 60;
@@ -141,9 +134,7 @@ describe('the lead loop', () => {
     });
 
     it('winds up WITHOUT the compensation term, which is what the term is for', () => {
-        // The control, expressed through the same code: passing `leadAtSendTicks = targetLeadTicks`
-        // asserts "everything commanded has been delivered", which zeroes `undelivered` and leaves the
-        // raw error — the uncompensated loop.
+        // The control: `leadAtSendTicks = targetLeadTicks` zeroes `undelivered`, leaving raw error.
         const raw = clock({ simRate: 60, rttSeconds: 0.05 });
         const compensated = clock({ simRate: 60, rttSeconds: 0.05 });
         for (let i = 0; i < 20; i++) {
@@ -220,8 +211,7 @@ describe('the nudge is the actuator, and only the rate', () => {
     });
 
     it('advances the counter beyond what the clock alone would produce, when raising the lead', () => {
-        // Raising the target by 2 ticks advances the counter 2 ticks further over the same wall-clock,
-        // and every index is still stamped exactly once, in order.
+        // Raising the target by 2 ticks advances the counter 2 further, each index stamped once.
         const base = clock({ simRate: 60, rttSeconds: 0.05 });
         const nudged = clock({ simRate: 60, rttSeconds: 0.05 });
         nudged.sample({ headroom: HEADROOM_TARGET - 8, leadAtSendTicks: nudged.currentLeadTicks });
@@ -247,9 +237,7 @@ describe('the nudge is the actuator, and only the rate', () => {
         const c = clock({ simRate: 60, rttSeconds: 0 });
         for (let i = 0; i < 400; i++) c.sample({ headroom: -50, leadAtSendTicks: 0 });
         expect(c.targetLeadSeconds).toBeCloseTo(LEAD_MAX_SECONDS, 6);
-        // The whole range is LEAD_MAX − one tick ≈ 233 ms, delivered at 2% of each tick, so ~700 ticks
-        // of nudging. Run well past that and it closes to within the deadband it stops inside — half a
-        // tick, which is the resolution the counter has and the reason it stops there.
+        // The range is ~233 ms at 2% per tick, so ~700 ticks; it closes to within half a tick.
         run(c, 40000);
         expect(c.leadError).toBeLessThanOrEqual(0.5 / 60);
     });

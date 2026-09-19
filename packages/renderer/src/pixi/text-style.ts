@@ -1,8 +1,5 @@
-// Our `TextStyle` -> Pixi's, with the clamps that keep a caller-supplied style from reaching the
-// GPU as an unbounded raster or a colour pixi refuses.
-//
-// Conditional spread throughout, because `exactOptionalPropertyTypes` makes `{fontSize: undefined}`
-// a compile error: an absent field has to be an absent key.
+// Conditional spread throughout: `exactOptionalPropertyTypes` makes `{fontSize: undefined}` a
+// compile error, so an absent field has to be an absent key.
 
 import type { TextStyle as PixiTextStyle } from 'pixi.js';
 import type { TextStyle } from '../renderer.js';
@@ -19,12 +16,7 @@ const MAX_SIZE = 512;
 /** Largest wrap width a style may ask for, in px — the same bound a raster is capped to. */
 const MAX_WRAP = 4096;
 
-/**
- * A `0xRRGGBB` colour, or the fallback.
- *
- * Pixi throws on a value outside the 24-bit range, and an ARGB literal — a plausible caller slip,
- * since the field is just a `number` — would otherwise take down whatever is rasterizing.
- */
+/** A `0xRRGGBB` colour, or the fallback: Pixi throws outside the 24-bit range. */
 function color(value: number | undefined, fallback: number): number {
     if (value === undefined || !Number.isFinite(value)) return fallback;
     return Math.min(Math.max(Math.trunc(value), 0), 0xffffff);

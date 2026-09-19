@@ -1,6 +1,3 @@
-// The lifecycle state machine. The client is the only package with a person watching, so its states are a
-// surface, not a log.
-
 /** Why a session ended terminally. */
 export type FailureReason =
     | { kind: 'rejected'; reason: string; serverProtocolVersion: number }
@@ -8,7 +5,7 @@ export type FailureReason =
     | { kind: 'undecodable' }
     /** `encode-rejected` — our bug, and it must surface loudly. */
     | { kind: 'internal'; message: string }
-    /** A peer that did not hold up its end: bad frames, an applying throw, or a join never answered. */
+    /** A peer that did not hold up its end: bad frames, a throw, or a join never answered. */
     | { kind: 'peer'; message: string }
     /** The script bundle would not load, or was not the bundle the server said it would be. */
     | { kind: 'bundle'; message: string };
@@ -16,14 +13,11 @@ export type FailureReason =
 export type SessionState =
     /** `JoinRequest` sent, no `Welcome` yet. Input refused. */
     | 'connecting'
-    /**
-     * `Welcome` accepted, its script bundle still fetching. Input refused, and every envelope behind
-     * the welcome is HELD rather than applied — there is no session for one to land in yet.
-     */
+    /** `Welcome` accepted, bundle still fetching. Input refused; later envelopes are held. */
     | 'loading'
     /** `Welcome` applied, clock seeded. Input accepted. */
     | 'live'
-    /** No envelope for `STALL_SECONDS`, or `ackSeq` frozen. Input refused; the world holds its pose. */
+    /** No envelope for `STALL_SECONDS`, or `ackSeq` frozen. Input refused; the pose holds. */
     | 'stalled'
     /** `localTick < depictedTick`, or a `RateChange`. Input refused. */
     | 'resyncing'
@@ -32,13 +26,7 @@ export type SessionState =
     /** Terminal, with a reason. */
     | 'failed';
 
-/**
- * Whether input may be captured and sent in this state.
- *
- * `stalled` refuses it so a player cannot accumulate ghost gameplay: prediction stops with it, so the world
- * freezes and mashing keys would fill the ring with inputs the server will refuse as too old. Synthetic
- * releases are exempt at the call site — a release can only ever end ghost gameplay.
- */
+/** Whether input may be captured; `stalled` refuses so stopped prediction banks nothing. */
 export function acceptsInput(state: SessionState): boolean {
     return state === 'live';
 }
@@ -48,15 +36,12 @@ export function isTerminal(state: SessionState): boolean {
     return state === 'failed' || state === 'disconnected';
 }
 
-/**
- * Deliberately not a transition table: the legal moves are few and each is named at its call site with the
- * evidence that justified it, which is what anything able to refuse input owes a reader.
- */
+/** Not a transition table: the few legal moves are each named at their call site. */
 export class Lifecycle {
     #state: SessionState = 'connecting';
     #failure: FailureReason | undefined;
     readonly #listeners = new Set<(state: SessionState) => void>();
-    /** Reused, so a listener that subscribes or unsubscribes cannot alter the dispatch it is inside. */
+    /** Reused, so a listener subscribing or unsubscribing cannot alter the dispatch it is in. */
     readonly #dispatching: Array<(state: SessionState) => void> = [];
 
     get state(): SessionState {
@@ -78,20 +63,15 @@ export class Lifecycle {
         };
     }
 
-    /** Moves to `state`, unless already terminal — a closed session does not become `live` again. */
+    /** Moves to `state` unless already terminal — a closed session does not become `live`. */
     to(state: SessionState): void {
         if (isTerminal(this.#state)) return;
         this.#move(state);
     }
 
-    /**
-     * Ends the session with a reason, from any state including a close that arrived first.
-     *
-     * The one move a terminal state does not absorb: a `Reject` and the close behind it land in the
-     * same delivery, and `failed` is the only state that says why.
-     */
+    /** Ends the session with a reason, from any state — the one move terminal does not absorb. */
     fail(reason: FailureReason): void {
-        // Recorded even on a repeat call: the first reason is the interesting one, and `#move` refuses.
+        // Recorded even on a repeat call: the first reason is the interesting one.
         this.#failure ??= reason;
         this.#move('failed');
     }
@@ -102,7 +82,7 @@ export class Lifecycle {
 
         this.#dispatching.length = 0;
         for (const listener of this.#listeners) this.#dispatching.push(listener);
-        // A throwing listener must not cost the others their notification, nor unwind into the frame loop.
+        // A throwing listener must not cost the others their notification.
         for (const listener of this.#dispatching) {
             try {
                 listener(state);

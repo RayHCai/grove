@@ -1,11 +1,4 @@
-// `request()` from a client: it leaves this process rather than running here.
-//
-// Server-to-client is implicit replication and client-to-server is always an explicit, checked
-// request — so the half that matters is the negative one. A client that dispatched locally would be
-// validating an untrusted ask on the untrusted machine, and against a mirror that holds no
-// authoritative state to check it against.
-//
-// Compiled by the build (src/testkit/fixtures.ts); this file carries no decorator syntax.
+// Fixtures are compiled by the build; this file carries no decorator syntax.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime, request, withRuntime } from '@platform/core';
@@ -92,9 +85,8 @@ describe('a client request goes to the authority', () => {
     it('does NOT run an @onRequest handler in this process', async () => {
         LocalVault.asks = 0;
         const h = await harness();
-        // Attached to the mirror's own Game, so a loopback dispatch would find it: the counter is the
-        // whole assertion, and the ask still reaching the wire is what makes zero mean "sent", not
-        // "dropped".
+        // Attached to the mirror's own Game, so a loopback dispatch would find it: zero means
+        // "sent", not "dropped".
         h.client.mirror?.runtime.gameInstance.addScript(LocalVault as never);
         h.ask('buy', { item: 'shield' });
         h.run(2);
@@ -105,8 +97,8 @@ describe('a client request goes to the authority', () => {
 
     it('drops a payload field the wire cannot carry rather than failing the session', async () => {
         const h = await harness();
-        // A reserved key would make the codec refuse the whole frame, and a function is a value no
-        // wire delivers — either would throw out of `send` and end the session over a creator's typo.
+        // A reserved key makes the codec refuse the frame, and a function is a value no wire
+        // carries; either would throw out of `send`.
         h.ask('buy', {
             item: 'shield',
             ['__proto__']: { polluted: true },
@@ -123,8 +115,8 @@ describe('a client request goes to the authority', () => {
 
     it('spreads a burst across frames rather than minting one the authority refuses whole', async () => {
         const h = await harness();
-        // Creator code makes these in a loop — one per inventory item — where a human cannot make 17
-        // clicks in a frame. A single over-cap frame is refused entire, so all 17 would be lost.
+        // Creator code makes these in a loop, where a human cannot make 17 clicks in a frame. An
+        // over-cap frame is refused entire, so all 17 would be lost.
         for (let i = 0; i < MAX_REQUESTS_PER_FRAME + 1; i++) h.ask('sell', { slot: i });
         h.run(4);
 
@@ -139,8 +131,8 @@ describe('a client request goes to the authority', () => {
 
     it('sends nothing while input is refused, since a stalled session can ask for nothing', async () => {
         const h = await harness();
-        // A stall is the client's own judgement that the authority is not processing; a request held
-        // through one would arrive stamped against a tick the server has long passed.
+        // A stall is the client's judgement that the authority is not processing; a request held
+        // through one would arrive stamped against a passed tick.
         h.client.lifecycle.to('stalled');
         h.ask('buy', { item: 'shield' });
         h.run(2);

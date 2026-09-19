@@ -1,8 +1,5 @@
-// Pure. An intent map, not a log: load -> unload -> load collapses to one net load, so the queue
-// is bounded by the number of distinct asset names and needs no growth cap.
-//
-// Iteration is first-mention order per name, because `Map.set` on an existing key updates in
-// place without moving it — so churn changes intents without reordering the restore.
+// An intent map, not a log: load → unload → load collapses to one net load, so the queue is
+// bounded by distinct names. Iteration is first-mention order per name.
 
 import { rendererError } from './errors.js';
 import type { AssetManifestEntry } from './renderer.js';
@@ -10,13 +7,7 @@ import type { AssetManifestEntry } from './renderer.js';
 /** What the queue intends for one name. */
 export type AssetIntent = { op: 'load'; entry: AssetManifestEntry } | { op: 'unload' };
 
-/**
- * Schemes the asset loader may fetch from.
- *
- * A manifest can arrive from a server, so the scheme is checked rather than assumed: `javascript:`
- * and `file:` have no business reaching a loader, and a relative path — the ordinary case — has
- * no scheme at all.
- */
+/** Schemes the asset loader may fetch from; a server-supplied manifest is checked, not trusted. */
 export const LOADER_ASSET_SCHEMES: ReadonlySet<string> = new Set([
     'http:',
     'https:',
@@ -24,23 +15,13 @@ export const LOADER_ASSET_SCHEMES: ReadonlySet<string> = new Set([
     'blob:',
 ]);
 
-/**
- * Schemes a server-supplied manifest may name.
- *
- * Narrower than what the loader accepts: `data:` and `blob:` are ours to construct locally, and a
- * peer that can name one can hand us bytes we never fetched.
- */
+/** Schemes a server manifest may name; narrower — `data:` and `blob:` are ours to construct. */
 export const REMOTE_ASSET_SCHEMES: ReadonlySet<string> = new Set(['http:', 'https:']);
 
 /** Resolves a relative url. Only its scheme matters, and `http:` is in every allowed set. */
 const RELATIVE_URL_BASE = 'http://localhost/';
 
-/**
- * Throws `invalid-asset-entry` unless the entry is structurally usable.
- *
- * Shared by both backends: a manifest the headless backend accepts and the Pixi one rejects is a
- * divergence the contract suite cannot see, since it runs against one of them.
- */
+/** Throws `invalid-asset-entry` unless the entry is usable; shared, so backends agree. */
 export function validateAssetEntry(entry: AssetManifestEntry): void {
     if (typeof entry?.name !== 'string' || entry.name === '') {
         rendererError('invalid-asset-entry', 'an asset entry needs a non-empty name');
@@ -78,10 +59,7 @@ export function validateAssetEntry(entry: AssetManifestEntry): void {
 
 /**
  * `true` for a relative path or an absolute url whose scheme is in `allowed`.
- *
- * Parsed rather than pattern-matched, because a lexical scheme test is defeated by any character
- * the parser normalises away: `"java\nscript:alert(1)"` matches no scheme pattern, so it reads as a
- * relative path and passes, while the parser strips the newline and reports `javascript:`.
+ * Parsed, never pattern-matched: a lexical test is defeated by what the parser normalises away.
  */
 export function isAllowedAssetUrl(url: string, allowed: ReadonlySet<string>): boolean {
     try {
@@ -100,12 +78,7 @@ export interface MergedAssetWork {
     toUnload: string[];
 }
 
-/**
- * Pending GPU asset work, keyed by asset name.
- *
- * Store mutations apply immediately during a context loss; GPU operations land here instead and
- * are applied on restore.
- */
+/** Pending GPU asset work by name: store mutations apply at once, GPU work waits for restore. */
 export class AssetQueue {
     readonly #intents = new Map<string, AssetIntent>();
 
@@ -138,12 +111,7 @@ export class AssetQueue {
         return out;
     }
 
-    /**
-     * Merges `retained` — what was resident before the loss — with the queued intents.
-     *
-     * Merging before applying is what lets a queued unload suppress a re-upload; the reverse
-     * order resurrects assets a level transition meant to drop.
-     */
+    /** Merges `retained` with the queued intents; merging first lets an unload cancel a load. */
     merge(retained: ReadonlyMap<string, AssetManifestEntry>): MergedAssetWork {
         const toLoad: AssetManifestEntry[] = [];
         const toUnload: string[] = [];

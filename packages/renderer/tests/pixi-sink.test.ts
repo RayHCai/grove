@@ -1,6 +1,5 @@
-// Placement, in the real Pixi backend, with no GPU: `Container`, `Sprite` and `Text` are plain
-// objects, so everything below `Application` is testable in Node. This is the seam the contract
-// suite cannot reach, because it runs against the headless sink, which draws nothing.
+// `Container`, `Sprite` and `Text` are plain objects until something draws them, so everything
+// below `Application` is testable in Node.
 
 import { describe, it, expect } from 'vitest';
 import { Container } from 'pixi.js';

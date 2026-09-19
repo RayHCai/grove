@@ -166,10 +166,7 @@ export type NodeDesc = SpriteNodeDesc | GroupNodeDesc | TextNodeDesc;
 export type SubtreeNodeDesc = NodeDesc & {
     /**
      * Position in the batch of this node's parent, which must be SMALLER than this desc's own.
-     *
-     * Parents before children, so one forward pass resolves every reference and no cycle is
-     * expressible. It overrides `parent`, and a desc that omits `surface` takes the batch parent's
-     * — the `'world'` default would otherwise be a cross-surface throw for every UI subtree.
+     * Parents before children, so one forward pass resolves every reference. Overrides `parent`.
      */
     parentInBatch?: number;
 };
@@ -192,12 +189,7 @@ export interface NodePatch {
     text?: string;
 }
 
-/**
- * A node's transform.
- *
- * Only `position` and `visible` can differ between the local and resolved forms, because nothing
- * else inherits.
- */
+/** A node's transform; only `position` and `visible` differ local-to-resolved. */
 export interface Transform {
     position: MutableVec3;
     rotation: number;
@@ -206,12 +198,7 @@ export interface Transform {
     visible: boolean;
 }
 
-/**
- * One node, as a debugger sees it.
- *
- * Every field is a copy, so holding one cannot mutate the scene and reading one later cannot
- * observe a change. `children` is in draw order, same rule as {@link SceneSnapshot.roots}.
- */
+/** One node, as a debugger sees it: every field a copy, `children` in draw order. */
 export interface NodeSnapshot {
     id: NodeId;
     kind: 'sprite' | 'group' | 'text';
@@ -280,12 +267,7 @@ export interface RendererEvents {
     resize: { canvas: Size; stage: Bounds; viewport: Bounds; resolution: number };
 }
 
-/**
- * The renderer contract.
- *
- * An interface with per-backend factories rather than an abstract class: no inheritance coupling,
- * no runtime import needed to reference the type, and a mock is one object literal.
- */
+/** The renderer contract. An interface with per-backend factories, so a mock is one literal. */
 export interface IRenderer {
     readonly initialized: boolean;
     readonly contextState: ContextState;
@@ -326,12 +308,7 @@ export interface IRenderer {
     /** Synchronous by design: `game.spawn` is specified sync and always safe. */
     createNode(desc: NodeDesc): NodeId;
     createNodes(descs: readonly NodeDesc[], out?: NodeId[]): NodeId[];
-    /**
-     * Creates a parented subtree in one call, each `parentInBatch` resolved inside the batch.
-     *
-     * All or nothing: a desc that throws takes the batch's already-created nodes with it, since the
-     * caller holds no handle yet and a half-built subtree could never be destroyed.
-     */
+    /** Creates a parented subtree in one call, all or nothing — the caller holds no handle yet. */
     createSubtree(descs: readonly SubtreeNodeDesc[], out?: NodeId[]): NodeId[];
     createNodeAsync(desc: NodeDesc): Promise<{ id: NodeId } & AssetInfo>;
     /** Cascades to children, matching `Entity.destroy()`. */
@@ -377,10 +354,7 @@ export interface IRenderer {
     screenBoundsOf(id: NodeId): Bounds | null;
     /**
      * The topmost node covering `screenPoint`, or `NO_NODE` — the pointer's question, answered.
-     *
-     * Screen space, y-down, which is the space a pointer event arrives in, so one call serves a UI
-     * widget and a world sprite alike. Groups and invisible nodes are never hit; "topmost" is
-     * surface order, then `layer`, then most recently created.
+     * Screen space, y-down. Groups and invisible nodes never hit.
      */
     nodeAt(screenPoint: Vec3Like, opts?: PickOptions): NodeId;
     screenPositionOf(id: NodeId, out?: MutableVec3): MutableVec3 | null;
@@ -388,14 +362,8 @@ export interface IRenderer {
     screenToWorld(point: Vec3Like, out?: MutableVec3): MutableVec3;
 
     /**
-     * A snapshot of the whole scene, for a debugger, an inspector panel, or editor selection UI.
-     *
-     * Dev and tooling only: it allocates a fresh object per node, so nothing may call it per frame
-     * or branch game logic on it — the narrow queries exist for that. It is on the interface
-     * because enumeration is otherwise impossible from outside, every per-node query walking down
-     * from a handle the caller already holds.
-     *
-     * Returns an empty snapshot before `init` and after `destroy`, never `null`.
+     * A snapshot of the whole scene, for a debugger, inspector panel, or editor selection UI.
+     * Tooling only: it allocates per node. Empty before `init` and after `destroy`, never `null`.
      */
     inspect(opts?: InspectOptions): SceneSnapshot;
 

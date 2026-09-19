@@ -1,10 +1,3 @@
-// The ring of unacknowledged input, and the horizon state a replay starts from.
-//
-// Edges-only breaks replay-sufficiency, and the fix is to fold at the prune: the press that established a
-// hold may have been pruned long before the replay's start tick, and neither `since()` nor core's snapshot
-// can say it was held. A "last edge per action" map does not fix it — it holds the most recent edge, which
-// is frequently after the replay's start.
-
 import type { ActionStates } from '@platform/core';
 import { createActionStates } from '@platform/core';
 import type { InputFrame } from '@platform/protocol';
@@ -19,12 +12,7 @@ export interface RingEntry {
     epoch: number;
 }
 
-/**
- * Restates `from`'s held buttons and non-neutral axes into `into`, then closes the tick.
- *
- * A rebuilt fold asserts held state rather than a transition, and edges are one tick wide — so the
- * `advanceTick` is part of the operation, not a caller's afterthought.
- */
+/** Folds `from`'s held state into `into` and closes the tick; replays need held state. */
 export function assertHeld(from: ActionStates, into: ActionStates): void {
     for (const action of from.heldActions()) into.applyEdge({ action, on: 'press' });
     for (const { action, value } of from.axisValues()) {
@@ -41,8 +29,7 @@ export class InputRing {
 
     push(frame: InputFrame, leadAtSendTicks: number, epoch: number): void {
         if (this.#entries.length >= RING_TICKS) {
-            // Deliberately not `stalled`, which refuses input: that would turn a burst of ordinary play
-            // into dead controls. What is lost is replay history, which costs the MVP nothing.
+            // Not `stalled`: that refuses input, turning a burst of play into dead controls.
             const dropped = this.#entries.shift();
             if (dropped) this.#fold(dropped);
             this.#droppedToOverflow++;
@@ -50,13 +37,7 @@ export class InputRing {
         this.#entries.push({ frame, leadAtSendTicks, epoch });
     }
 
-    /**
-     * Drops everything at or below `seq` — resolved, applied or refused — folding each into the horizon.
-     *
-     * Returns the earliest entry pruned, because that is the frame `earliestHeadroom` describes; returning
-     * the entry at `seq` would pair the compensation with the wrong instant. A refused frame still folds
-     * in, because the client sent it and its own `ActionStates` acted on it.
-     */
+    /** Drops everything at or below `seq` into the horizon; returns the earliest entry pruned. */
     ack(seq: number): RingEntry | undefined {
         let earliest: RingEntry | undefined;
         while (this.#entries.length > 0) {
@@ -74,14 +55,14 @@ export class InputRing {
         return this.#entries.filter((e) => e.frame.tick >= tick).map((e) => e.frame);
     }
 
-    /** Every retained frame, oldest-first, into a caller-owned array — a replay reads this per frame. */
+    /** Every retained frame, oldest-first, into a caller-owned array; read per frame by replay. */
     frames(out: InputFrame[] = []): InputFrame[] {
         out.length = 0;
         for (const entry of this.#entries) out.push(entry.frame);
         return out;
     }
 
-    /** Valid for any tick in `[horizonTick, horizonValidUntil)` — an interval, never an equality. */
+    /** Valid for any tick in `[horizonTick, horizonValidUntil)`, an interval not an equality. */
     get heldAtHorizon(): ActionStates {
         return this.#heldAtHorizon;
     }
@@ -108,12 +89,7 @@ export class InputRing {
         return this.#entries[0]?.frame.seq;
     }
 
-    /**
-     * Rebuilds the horizon, since the old one names a tick in abandoned numbering.
-     *
-     * Correct by construction: what is physically held did not change because the session's clock did, so
-     * the caller seeds from the live `ActionStates`.
-     */
+    /** Rebuilds the horizon after a clock epoch change; caller seeds from live `ActionStates`. */
     reset(live?: ActionStates): void {
         this.#entries.length = 0;
         this.#horizonTick = -1;
@@ -122,7 +98,7 @@ export class InputRing {
     }
 
     #fold(entry: RingEntry): void {
-        // The boundary comes first: `pressed`/`released` from the previous folded frame are one tick wide.
+        // Boundary first: `pressed`/`released` from the previous folded frame are one tick wide.
         this.#heldAtHorizon.advanceTick();
         for (const action of entry.frame.actions) {
             this.#heldAtHorizon.applyEdge(action);

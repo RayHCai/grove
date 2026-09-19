@@ -1,10 +1,5 @@
-// A complete `IRenderer` with no DOM and no GPU, not a stub: everything backend-independent comes
-// from `RendererShell` and `RendererCore`, the same classes the Pixi backend uses, so the contract
-// suite exercises the real code paths.
-//
-// What differs lives in `NullSink`: there are no display objects, and sizes come from the manifest
-// or a deterministic formula because a headless backend can neither decode a PNG nor measure a
-// font.
+// A complete `IRenderer` with no DOM and no GPU, sharing `RendererShell`/`RendererCore` with Pixi.
+// Sizes come from the manifest or a formula: a headless backend cannot decode a PNG.
 
 import type { Size } from '@platform/math';
 import type {
@@ -35,12 +30,7 @@ const DEFAULT_TEXT_SIZE = 16;
 /** Per-character advance as a fraction of the font size. See {@link measureTextHeadless}. */
 const HEADLESS_CHAR_ADVANCE = 0.5;
 
-/**
- * Deterministic stand-in for text measurement.
- *
- * Not a real font's metrics and not meant to be: stable across runs and monotonic in the text
- * length and the style size is all a test can legitimately depend on.
- */
+/** Deterministic stand-in for text measurement: stable across runs, monotonic in length. */
 function measureTextHeadless(text: string, style: TextStyle | undefined): Size {
     const size = style?.size ?? DEFAULT_TEXT_SIZE;
     const lines = text.split('\n');
@@ -93,12 +83,7 @@ class NullSink implements SceneSink {
     }
 }
 
-/**
- * A headless `IRenderer`.
- *
- * Also exposes `isCulled` and `drawOrderOf`, which are not on `IRenderer`: the contract suite needs
- * a backend-independent way to ask about cull state and draw order.
- */
+/** A headless `IRenderer`, plus `isCulled`/`drawOrderOf` for the contract suite. */
 export class NullRenderer extends RendererShell {
     #sink: NullSink | null = null;
 
