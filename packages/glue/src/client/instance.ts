@@ -1,9 +1,5 @@
-// One session: the seams this machine has in, a joinable client out.
-//
 // It dials nothing and builds no renderer — a `Transport` and an `IRenderer` arrive already made,
-// which is what lets a session be driven over a loopback pair with no socket and no GPU at all.
-// `GameInstance` is the shape this mirrors: construction composes, `start()` runs, `close()` tears
-// down in the one order that does not leak.
+// which lets a session run over a loopback pair with no socket and no GPU.
 
 import type { ClientHUDSink, FailureReason, SessionState } from '@platform/client';
 import type { GameClient } from '@platform/client';
@@ -14,9 +10,7 @@ import type { CreateClientOptions } from '@platform/engine/host';
 export interface ClientInstanceOptions extends CreateClientOptions {
     /**
      * Every session state change, and the reason when one is a failure.
-     *
-     * Taken as an option rather than registered afterwards because `start()` may reach `failed`
-     * synchronously — a listener attached after it would never hear the only transition there was.
+     * An option rather than a later registration: `start()` may reach `failed` synchronously.
      */
     onState?: (state: SessionState, failure: FailureReason | undefined) => void;
     /**
@@ -27,12 +21,8 @@ export interface ClientInstanceOptions extends CreateClientOptions {
 }
 
 /**
- * A composed session, and the two verbs a host drives it with.
- *
- * Construction wires the client and its state listener but sends nothing: `start()` is what joins,
- * so a host may hold a built session it has not committed to. What this owns over `createClient` is
- * the ordering — the listener registered before the join, and a teardown that unsubscribes before
- * it destroys, since `GameClient.destroy` does not clear the lifecycle's own subscribers.
+ * A composed session, and the two verbs a host drives it with. Construction sends nothing.
+ * What it owns over `createClient` is ordering: listener before join, unsubscribe before destroy.
  */
 export class ClientInstance {
     readonly client: GameClient;
@@ -80,10 +70,7 @@ export class ClientInstance {
 
     /**
      * Tears the session down, in the one order that leaves nothing behind. Idempotent.
-     *
-     * The unsubscribe comes first because `GameClient.destroy` does not clear the lifecycle's
-     * listeners, so a host that only destroyed would keep being told about a session it has
-     * dropped — and its handler would run against state it has already torn down.
+     * Unsubscribe first: `GameClient.destroy` does not clear the lifecycle's own listeners.
      */
     close(): void {
         if (this.#closed) return;

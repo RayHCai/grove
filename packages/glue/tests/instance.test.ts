@@ -1,8 +1,5 @@
-// One instance, driven the way a host drives it: a project in, a session that reaches `live` out.
-//
-// The classes below carry no decorators. That is not a simplification — vitest's transform does not
-// lower TC39 decorators, and what this suite is about is the ORDER glue puts things in, not what a
-// handler does once it is dispatched.
+// The classes below carry no decorators: vitest's transform does not lower TC39 decorators, and
+// this suite is about the ORDER glue puts things in, not what a handler does once dispatched.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { ManualFrameSource, ScriptedInputDevice } from '@platform/client';
@@ -80,11 +77,7 @@ interface Harness {
     dispose(): void;
 }
 
-/**
- * Turns the microtask queue six times, enough for an identified join's promise chain.
- *
- * Not a macrotask flush: nothing on a timer or in I/O runs here.
- */
+/** Turns the microtask queue six times, enough for an identified join's promise chain. */
 async function flushMicrotasks(): Promise<void> {
     for (let i = 0; i < 6; i++) await Promise.resolve();
 }

@@ -6,51 +6,32 @@ import { transportError } from './errors.js';
 
 /**
  * The wire codec, injected at the composition root and uniform across a process's connections.
- *
  * Every implementation must pass the shared conformance suite before it may be injected.
  */
 export interface Codec {
     /** Validate against this codec's admissible set, then encode. */
     encode(message: Message): EncodedFrame;
-    /** Decode, rejecting a malformed frame and pollution keys before any endpoint sees the value. */
+    /** Decode, rejecting a malformed frame and pollution keys before an endpoint sees the value. */
     decode(frame: Frame): Message;
-    /** Wire byte count — UTF-8 for JSON, not a string's UTF-16 `.length`, since only the codec knows. */
+    /** Wire byte count — UTF-8 for JSON, not a string's UTF-16 `.length`; only the codec knows. */
     byteLength(frame: Frame): number;
 }
 
 /**
- * Nesting depth refused on both directions, because the gap between them is exploitable:
- * `JSON.parse` handles hundreds of thousands of levels while a walk over its result is heap-bounded.
+ * Nesting depth refused on both directions: `JSON.parse` handles hundreds of thousands of levels
+ * while a walk over its result is heap-bounded, and the gap between them is exploitable.
  */
 const MAX_DEPTH = 128;
 
 /**
  * Byte ceiling on a frame this codec will decode, checked before it is parsed.
- *
- * MAX_DEPTH bounds nesting and this bounds size; neither implies the other, and a peer chooses both.
- * `JSON.parse` allocates a graph several times the wire bytes, so an unbounded frame is an
- * unbounded allocation no depth or cardinality check downstream can undo — the parse has already
- * happened by the time anything else looks.
- *
- * 4 MiB is far above any envelope on this wire: the largest is a join snapshot, and a world big
- * enough to exceed this has a scaling problem a cap is the wrong place to discover. It is a
- * conservative default rather than a tuned one, and it is the codec's because only the codec knows
- * how its bytes relate to the value.
+ * `MAX_DEPTH` bounds nesting; `JSON.parse` allocates a graph several times the wire bytes.
  */
 export const MAX_FRAME_BYTES = 4 * 1024 * 1024;
 
 /**
  * Object keys no message may carry, because they poison a downstream recursive merge.
- *
- * `JSON.parse` creates an OWN `__proto__` key rather than walking the prototype chain, so the value
- * survives to whatever merges it next. Rejected on decode, never stripped: deleting a key would
- * alter the frame, which is the silent-transform failure in miniature.
- *
- * Rejected on ENCODE too, and that symmetry is the point — otherwise a frame this codec produced is
- * one its own `decode` refuses, and the peer blames a hostile sender for a field a creator named.
- *
- * Exported because a layer above may answer the same key differently — dropping it rather than
- * refusing the frame — and two copies of the set would drift apart.
+ * Rejected rather than stripped, and on ENCODE too, so a frame this codec makes it accepts.
  */
 export const RESERVED_KEYS: ReadonlySet<string> = new Set([
     '__proto__',
@@ -64,7 +45,7 @@ export const RESERVED_KEYS: ReadonlySet<string> = new Set([
  */
 const MAX_NODES = 1_000_000;
 
-/** Where in the message a rejection happened, so the throw names the field rather than the frame. */
+/** Where in the message a rejection happened, so a throw names the field, not the frame. */
 function at(path: string): string {
     return path === '' ? 'the message root' : path;
 }
@@ -93,10 +74,8 @@ function leafPath(frame: Pending | null, key: string): string {
 }
 
 /**
- * Validates a leaf against the JSON wire's admissible set; `undefined` means "not a leaf, recurse".
- *
- * Takes the parent frame and key rather than the built path, so the string costs nothing until a
- * message is actually rejected. A null frame is the message root.
+ * Validates a leaf against the JSON wire's admissible set; `undefined` means "recurse".
+ * Takes the parent frame and key, so the path string costs nothing until a rejection.
  */
 function admitLeaf(
     value: unknown,
@@ -175,16 +154,7 @@ interface Pending {
 
 /**
  * Validates against the JSON wire's admissible set and returns a copy.
- *
- * Not a `stringify` replacer, which cannot see a dropped `undefined` in an object — the key simply
- * vanishes — and cannot distinguish a cycle from depth.
- *
- * ITERATIVE, with the container chain in `stack` rather than on the call stack: a hostile or merely
- * generated payload nesting a few thousand deep would otherwise overflow while still being
- * well-formed and small enough to pass any byte cap.
- *
- * The ancestor set is the chain currently on `stack`, not every visited node, so a DAG is legal and
- * arrives as two independent copies exactly as a socket would deliver it; only a true cycle throws.
+ * ITERATIVE: a payload nesting thousands deep would overflow while passing any byte cap.
  */
 function admit(root: unknown): JsonLike {
     const rootLeaf = admitLeaf(root, null, '');
@@ -271,7 +241,8 @@ function admit(root: unknown): JsonLike {
         setChild(frame, key, copy);
         open.add(child);
         // The one path string an encode still builds eagerly: a container's own path is the prefix
-        // every descendant's would be built from, so it cannot wait for a throw that may never come.
+        // every descendant's would be built from, so it cannot wait for a throw that may never
+        // come.
         stack.push({
             source: child,
             copy,
@@ -285,9 +256,8 @@ function admit(root: unknown): JsonLike {
 }
 
 /**
- * Own enumerable string keys, which is what `JSON.stringify` serializes — a symbol key is skipped
- * silently by stringify, so it is rejected only when it appears as a VALUE. Array indices come from
- * `length` rather than `Object.keys` so holes are visited and normalized.
+ * Own enumerable string keys, which is what `JSON.stringify` serializes; a symbol key is rejected
+ * only as a VALUE. Array indices come from `length`, so holes are visited and normalized.
  */
 function keysOf(container: object): readonly string[] {
     if (!Array.isArray(container)) return Object.keys(container);
@@ -305,17 +275,8 @@ function setChild(frame: Pending, key: string, value: JsonLike): void {
 type JsonLike = null | boolean | number | string | JsonLike[] | { [key: string]: JsonLike };
 
 /**
- * Rejects a decoded frame carrying a pollution key, a value `encode` would have refused, or nesting
- * past MAX_DEPTH.
- *
- * ITERATIVE, and deliberately NOT a `JSON.parse` reviver: a reviver is the more elegant shape, but
- * the parser calls it recursively and that recursion overflows around 5,000 levels while
- * `JSON.parse` alone handles hundreds of thousands — a well-formed ~60 KB frame under any byte cap
- * could kill the process on the untrusted path, needing no malformed input at all.
- *
- * Rejecting after the parse rather than during it is safe: `JSON.parse` creates `__proto__` as an
- * OWN data property, so a parsed-but-rejected frame has poisoned nothing — the hazard is a
- * downstream recursive merge, and there is no downstream when this throws.
+ * Rejects a decoded frame with a pollution key, a value `encode` would refuse, or over-nesting.
+ * NOT a `JSON.parse` reviver: the parser calls one recursively and overflows near 5,000 levels.
  */
 function admitDecoded(root: unknown): void {
     if (typeof root === 'number' && !Number.isFinite(root)) {
@@ -362,11 +323,8 @@ function admitDecoded(root: unknown): void {
 }
 
 /**
- * Counts UTF-8 bytes without `Buffer` or a `TextEncoder` allocation, since `src` declares no `node`
- * types and this is on the per-frame path backpressure reads.
- *
- * An unpaired surrogate counts as 3, matching what `TextEncoder` and `Buffer.byteLength` do when
- * they substitute U+FFFD, so the count is what a real socket would put on the wire.
+ * Counts UTF-8 bytes without `Buffer` or a `TextEncoder`, since `src` declares no `node` types.
+ * An unpaired surrogate counts as 3, matching the U+FFFD substitution a real socket would send.
  */
 function utf8ByteLength(text: string): number {
     let bytes = 0;
@@ -394,7 +352,8 @@ function utf8ByteLength(text: string): number {
 /** The default codec: JSON, string frames, UTF-8 byte length. */
 export const jsonCodec: Codec = {
     encode(message: Message): EncodedFrame {
-        // The one place a frame is minted: `encode` is by definition the authority the brand denotes.
+        // The one place a frame is minted: `encode` is by definition the authority the brand
+        // denotes.
         return JSON.stringify(admit(message)) as EncodedFrame;
     },
 
@@ -418,8 +377,8 @@ export const jsonCodec: Codec = {
         try {
             parsed = JSON.parse(frame);
         } catch (cause) {
-            // Chained, not swallowed: the parser's own message names the byte offset, and a consumer
-            // debugging a mismatched peer needs it.
+            // Chained, not swallowed: the parser's own message names the byte offset, and a
+            // consumer debugging a mismatched peer needs it.
             transportError(
                 'malformed-frame',
                 `Frame is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`,

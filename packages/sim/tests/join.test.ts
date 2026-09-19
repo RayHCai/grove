@@ -1,5 +1,4 @@
-// Connection and join. Fixtures are compiled by the build (see
-// src/testkit/fixtures.ts); this file carries no decorator syntax.
+// Fixtures are compiled by the build; this file carries no decorator syntax.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';

@@ -1,10 +1,5 @@
-// One game instance in this process: a validated project and the seams a host supplies in, a running
-// world out.
-//
-// It is the in-process half of what `apps/grove/game-instance` does in Rust — the clock, the sockets and the
-// store around `@platform/sim`'s deterministic advance. It opens no listener itself: a `Transport`
-// arrives from whatever the caller is listening on, which is what lets a world be driven over a
-// loopback pair with no I/O at all.
+// The in-process half of what `apps/grove/game-instance` does in Rust. It opens no listener: a
+// `Transport` arrives from whatever the caller is listening on.
 
 import type { BreakerTrip, KVStore } from '@platform/core';
 import { MemoryKVStore, PERSISTENCE_SCOPE } from '@platform/core';
@@ -26,37 +21,26 @@ export interface InstanceOptions {
     scripts?: ScriptRegistry<ScriptId>;
     /** The code every joiner must be running, and where they fetch it. */
     bundle?: BundleRef;
-    /** Where `@serverState` outlives a session. Omitted, a memory store that dies with the process. */
+    /** Where `@serverState` outlives a session. Omitted, a memory store dying with the process. */
     kv?: KVStore;
-    /** The wire codec, uniform across this process's connections. Defaults to transport's JSON one. */
+    /** The wire codec, uniform across this process's connections. Defaults to transport's JSON. */
     codec?: Codec;
     /**
      * Wall-clock seconds. Injected so a test can turn the world by hand.
-     *
-     * The default is the real clock: the world is stepped against elapsed time rather than against
-     * the interval's own cadence, so a late timer catches up instead of running the game slow.
+     * The world steps against elapsed time, so a late timer catches up instead of running slow.
      */
     now?: () => number;
-    /**
-     * Pumps a loopback pair at the top of every wake.
-     *
-     * Omitted networked, where each socket delivers itself. Present for the single-process
-     * arrangement — local play, or a test driving both ends on one hand-turned clock.
-     */
+    /** Pumps a loopback pair each wake; omitted networked, where every socket delivers itself. */
     deliver?: () => void;
     /** A handler the breaker gave up on. The dev channel, deliberately not an envelope. */
     onBreakerTrip?: (trip: BreakerTrip) => void;
-    /** Where this world's diagnostics go. Without one, an operator has no record of why a session died. */
+    /** Where this world's diagnostics go; without one there is no record of why a session died. */
     onLog?: (line: string) => void;
 }
 
 /**
- * A booted world, and the two verbs a host drives it with.
- *
- * Construction runs the whole boot: validate, resolve every attachment's class, build the templates,
- * instantiate the placed world, and run each Game `@onStart` to its first await. Only then will
- * `accept` admit anything — a connection taken earlier is answered with a snapshot of a world still
- * being assembled, and a joiner's baseline is the one thing no later delta repairs.
+ * A booted world, and the two verbs a host drives it with. Construction runs the whole boot,
+ * and only then does `accept` admit: an earlier joiner's baseline is what no delta repairs.
  */
 export class GameInstance {
     readonly sim: Sim;
@@ -64,9 +48,9 @@ export class GameInstance {
     readonly #codec: Codec;
     readonly #kv: KVStore;
     readonly #log: (line: string) => void;
-    /** The clock `pump()` reads when the caller names none — injected, so a test turns it by hand. */
+    /** The clock `pump()` reads when the caller names none — injected, so a test turns it. */
     readonly #now: () => number;
-    /** The sockets the sim's connection ids name — the half of a session the sim deliberately holds none of. */
+    /** The sockets the sim's connection ids name — the half of a session the sim holds none of. */
     readonly #transports = new Map<ConnectionId, Transport>();
     /** Disposers from each transport's `onMessage` / `onClose`, run once when it goes. */
     readonly #disposers = new Map<ConnectionId, Array<() => void>>();
@@ -91,8 +75,9 @@ export class GameInstance {
         this.#log = onLog ?? ((): void => {});
         this.#now = now ?? ((): number => Date.now() / 1000);
 
-        // The store reaches the world twice over, and deliberately: as the creator's `storage` seam,
-        // which a handler awaits, and as the load-and-save protocol this class runs for `@serverState`.
+        // The store reaches the world twice over, and deliberately: as the creator's `storage`
+        // seam, which a handler awaits, and as the load-and-save protocol this class runs for
+        // `@serverState`.
         this.sim = createSim(project, {
             ...forwarded,
             kv: this.#kv,
@@ -126,12 +111,7 @@ export class GameInstance {
         return this.#driver.shedCount;
     }
 
-    /**
-     * Starts the tick loop, on an interval that pumps.
-     *
-     * The interval is this class's rather than the driver's own `start`, so every wake also runs the
-     * batch loop that answers the sim's loads and saves.
-     */
+    /** Starts the tick loop on an interval that pumps, so every wake also runs the batch loop. */
     start(): this {
         if (this.#shutdown || this.#timer !== undefined) return this;
         this.#timer = setInterval(() => this.pump(), 1000 / this.sim.config.simRate);
@@ -145,15 +125,8 @@ export class GameInstance {
     }
 
     /**
-     * Offers one established connection to the world, under the identity the HOST resolved.
-     *
-     * The id is never taken from a frame: whatever the host trusts is what the game trusts. It must
-     * be a per-game id rather than an account key, because `player.id` reaches every other peer.
-     *
-     * The id it returns names a socket this class now holds; it is NOT an admission. The sim sees the
-     * connection at the top of the next tick and may refuse it there — at the unjoined cap, or under
-     * an identity another unjoined session already holds — and answers with a close this class acts
-     * on. `null` means only that this instance is already shut down.
+     * Offers one established connection, under the identity the HOST resolved — never from a frame.
+     * Must be per-game rather than an account key, since `player.id` reaches every other peer.
      */
     accept(transport: Transport, playerId?: string): ConnectionId | null {
         if (this.#shutdown) {
@@ -181,10 +154,8 @@ export class GameInstance {
     }
 
     /**
-     * Changes the timestep mid-session, on the world AND on the clock that drives it.
-     *
-     * Both, always: the sim retunes core and tells every client, and the driver holds the cadence —
-     * so a rate changed on one alone runs the world at a speed nothing agrees on.
+     * Changes the timestep mid-session, on the world AND the clock that drives it.
+     * Both, always: a rate changed on one alone runs the world at a speed nothing agrees on.
      */
     setSimRate(simRate: number): void {
         this.sim.setSimRate(simRate);
@@ -196,11 +167,8 @@ export class GameInstance {
     }
 
     /**
-     * Stops the clock, releases every session and settles once every departing player's save has
-     * landed.
-     *
-     * `allSettled` rather than `all`, since a store that rejects must release the drain rather than
-     * hold the shutdown open on the one write that will never land. Idempotent.
+     * Stops the clock, releases every session, settles once every departing save has landed.
+     * `allSettled`, so a store that rejects releases the drain rather than holding shutdown open.
      */
     close(): Promise<void> {
         if (this.#shutdown) return this.#drain;
@@ -235,7 +203,7 @@ export class GameInstance {
         this.#apply(this.sim.tick(batch));
     }
 
-    /** Everything one output batch orders, in the order it must happen: write, then close, then store. */
+    /** Everything one output batch orders, in the order it must happen: write, close, store. */
     #apply(out: OutputBatch): void {
         for (const line of out.log) this.#log(line.line);
 
@@ -270,14 +238,15 @@ export class GameInstance {
         for (const save of out.saves) this.#save(save.hostKey, save.fields);
     }
 
-    /** Reads a player's record and hands it back on a later tick, which is the whole of the load protocol. */
+    /** Reads a player's record and hands it back on a later tick — the whole load protocol. */
     #load(connectionId: ConnectionId, hostKey: string): void {
         void this.#kv
             .get(PERSISTENCE_SCOPE, hostKey)
             .then((stored) => {
                 // `{}` for a store that held nothing — and for one holding a value no reader could
-                // use, which is the same answer core's own cache gave it — so the leave still writes
-                // what this session produced. `null` is reserved for the read below that FAILED.
+                // use, which is the same answer core's own cache gave it — so the leave still
+                // writes what this session produced. `null` is reserved for the read below that
+                // FAILED.
                 this.#records.push({ connectionId, fields: asFields(stored) ?? {} });
             })
             // Answered with nothing rather than left unanswered: a store that cannot be read is a
@@ -306,11 +275,8 @@ export class GameInstance {
     }
 
     /**
-     * Closes one socket and tells the sim it is gone.
-     *
-     * Reported here rather than left to `transport.onClose`, because the disposers below unregister
-     * that handler: without this line the sim keeps the session, its `Player` is never released, and
-     * every later broadcast is built for a peer nothing is listening on.
+     * Closes one socket and tells the sim it is gone. Reported here because the disposers
+     * unregister `transport.onClose`: without it the `Player` is never released.
      */
     #closeConnection(connectionId: ConnectionId): void {
         const transport = this.#transports.get(connectionId);
@@ -330,7 +296,7 @@ export class GameInstance {
     }
 }
 
-/** Anything but a plain object is another writer's value or a corrupted one, and reads as no record. */
+/** Anything but a plain object is another writer's value or corrupt, and reads as no record. */
 function asFields(stored: unknown): { [field: string]: JsonValue } | null {
     if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return null;
     return stored as { [field: string]: JsonValue };

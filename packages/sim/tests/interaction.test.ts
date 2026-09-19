@@ -1,5 +1,4 @@
-// The interaction arm: what the authority does with a HUD press and a pointer hit it cannot
-// recompute, and what it refuses. Fixtures are compiled by the build.
+// Fixtures are compiled by the build.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime, entityKey } from '@platform/core';

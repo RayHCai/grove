@@ -21,9 +21,7 @@ export interface AckReport {
 }
 
 /**
- * Per-connection admission state: the resolution frontier, the headroom samples riding its acks,
- * and the rate limiters.
- *
+ * Per-connection admission state: the resolution frontier, its acks' headroom, the rate limiters.
  * The frontier is not a high-water mark — either half of the resolved rule alone passes under one.
  */
 export class AdmissionState {
@@ -32,11 +30,11 @@ export class AdmissionState {
     readonly #resolved = new Set<number>();
     /** seq → `frame.tick - serverTickOnArrival`, for whichever ack resolves it. */
     readonly #headroom = new Map<number, number>();
-    /** A seq above the frontier that has not arrived, and the latest tick it can name — datable because seq and tick advance together. */
+    /** A seq above the frontier that has not arrived, and the latest tick it can name. */
     readonly #gapTickBound = new Map<number, number>();
     #highestSeen = -1;
 
-    /** Action names this connection has ever named, bounded so a peer cannot grow core's fold without limit. */
+    /** Action names this connection has named, bounded so a peer cannot grow core's fold. */
     readonly #actionNames = new Set<string>();
 
     #tokens = INPUT_BUCKET_FRAMES;
@@ -69,7 +67,7 @@ export class AdmissionState {
         return this.#resolved.size;
     }
 
-    /** Whether this seq already arrived or settled above the frontier, which the frontier itself cannot say. */
+    /** Whether this seq arrived or settled above the frontier, which the frontier cannot say. */
     seen(seq: number): boolean {
         return this.#headroom.has(seq) || this.#resolved.has(seq);
     }
@@ -91,7 +89,7 @@ export class AdmissionState {
         if (seq > this.#highestSeen) this.#highestSeen = seq;
     }
 
-    /** Restarts the stale-hold clock, at join too: a player joining at tick 500 must not be born `holdStaleTicks` silent. */
+    /** Restarts the stale-hold clock, at join too: a joiner must not be born already silent. */
     noteTraffic(serverTick: number): void {
         this.#lastInputTick = serverTick;
     }
@@ -116,9 +114,7 @@ export class AdmissionState {
 
     /**
      * Advances the frontier as far as it is contiguous and reports the ack.
-     *
-     * The headroom is the earliest input this ack resolved — the tail, not the mean, because a lead
-     * sized to the mean drops the tail and a player feels that as occasional unresponsiveness.
+     * The headroom is the earliest input it resolved — the tail, since a mean-sized lead drops it.
      */
     takeAck(): AckReport {
         let earliest: number | undefined;
@@ -160,7 +156,7 @@ export class AdmissionState {
         return true;
     }
 
-    /** Whether this connection may still name `action` — the first use of a new name claims a slot. */
+    /** Whether this connection may still name `action`; a new name claims a slot. */
     admitsAction(action: string): boolean {
         if (this.#actionNames.has(action)) return true;
         if (this.#actionNames.size >= MAX_ACTION_NAMES) return false;
@@ -169,14 +165,12 @@ export class AdmissionState {
     }
 }
 
-/** One peer's session: who the host says it is, the Player it was allocated, and its admission bookkeeping. */
+/** One peer's session: who the host says it is, its Player, and its admission bookkeeping. */
 export class Session {
     readonly connectionId: string;
     /**
-     * The stable player id the host named this peer, or null when it named none.
-     *
-     * Never a wire field: the leave path writes the record back, so one here would be a
-     * read-and-overwrite capability over any saved player.
+     * The stable player id the host named this peer, or null.
+     * Never a wire field: the leave path writes the record back, so one here would be a capability.
      */
     readonly identity: string | null;
     readonly admission = new AdmissionState();
@@ -189,15 +183,18 @@ export class Session {
 
     /** Null until the first valid `JoinRequest` allocates it. */
     player: Player | null = null;
-    /** The `JoinRequest` still owed a `Welcome`, held rather than flagged because only it carries the `clientSentMs` to echo. */
+    /** The `JoinRequest` still owed a `Welcome`; held because only it carries `clientSentMs`. */
     pendingJoin: JoinRequest | null = null;
-    /** The `JoinRequest` held until the host answers this session's load, so the read costs one turn rather than a second request. */
+    /** The `JoinRequest` held until the host answers the load, so the read costs one turn. */
     awaitingRecord: JoinRequest | null = null;
     /** True while a persisted read is outstanding, so a second request cannot race it. */
     admitting = false;
-    /** A `TimeSync` awaiting the next send, so the tick its reply names is one the world has reached. */
+    /** A `TimeSync` awaiting the next send, so its reply names a tick the world has reached. */
     pendingTimeSync: TimeSync | null = null;
-    /** The tick this session opened on, which the join deadline counts from — a tick rather than a clock reading, so a host whose wall time jumps cannot lengthen or collapse the deadline. */
+    /**
+     * The tick this session opened on, which the join deadline counts from — a tick rather than a
+     * clock reading, so a host whose wall time jumps cannot move the deadline.
+     */
     readonly openedAtTick: number;
     closed = false;
 
@@ -211,20 +208,20 @@ export class Session {
         return this.player !== null;
     }
 
-    /** The Player of a connection that is both live and joined, or null — the one predicate every walk over the registry needs. */
+    /** The Player of a connection both live and joined, or null — the predicate every walk uses. */
     get livePlayer(): Player | null {
         return this.closed ? null : this.player;
     }
 
-    /** What this connection's Player is keyed by: the host's id when it named one, else the connection's. */
+    /** What this connection's Player is keyed by: the host's id when named, else its own. */
     get playerId(): string {
         return this.identity ?? this.connectionId;
     }
 
-    /** Structural ops still held over from before this connection's snapshot, which it must skip. */
+    /** Structural ops held over from before this connection's snapshot, which it must skip. */
     structuralSkip = 0;
 
-    /** Whether this connection is owed the current send: joined, live, and no longer awaiting a `Welcome`. */
+    /** Whether this connection is owed the current send: joined, live, not awaiting a `Welcome`. */
     get wantsBroadcast(): boolean {
         return this.livePlayer !== null && this.pendingJoin === null;
     }

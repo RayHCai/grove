@@ -80,7 +80,7 @@ import { ManifestStore } from './manifest.js';
 import { SessionRecords } from './persisted.js';
 import { buildSnapshot } from './snapshot.js';
 
-/** What this world is running, proved against every joiner's claim before a `Player` is allocated. */
+/** What this world is running, proved against every joiner's claim before a `Player` exists. */
 export interface ProjectIdentity {
     projectId: ProjectId;
     projectHash: string;
@@ -90,7 +90,7 @@ export interface ProjectIdentity {
     bundleUrl: string;
 }
 
-/** A world that declares no project — every field empty, which is what a client declaring none sends, so agreement rather than absence is what passes. */
+/** A world declaring no project — every field empty, so agreement rather than absence passes. */
 const UNIDENTIFIED: ProjectIdentity = {
     projectId: '',
     projectHash: '',
@@ -98,7 +98,7 @@ const UNIDENTIFIED: ProjectIdentity = {
     bundleUrl: '',
 };
 
-/** The class → id edge core needs, declared structurally rather than imported because `@platform/scripting` imports core. */
+/** The class → id edge core needs, declared structurally since scripting imports core. */
 export interface ScriptIndex {
     idOf(klass: abstract new (...args: never[]) => object): ScriptId | undefined;
 }
@@ -115,17 +115,13 @@ export interface SimConfig extends Partial<EngineConfig> {
     templates?: GameManifest['templates'];
     /** The placed world, parents before children — instantiated before the first tick. */
     entities?: GameManifest['entities'];
-    /** Names a script class on the wire; without it no `attach` op is journaled at all, since the op names an id. */
+    /** Names a script class on the wire; without it no `attach` op is journaled at all. */
     scripts?: ScriptIndex;
     /** What this build is. Omitted, every joiner declaring nothing is admitted and nothing else. */
     project?: ProjectIdentity;
     /**
      * The creator-facing storage seam a `ServerScript` awaits — NOT where `@serverState` is
-     * checkpointed, which rides the batch as a load and a save.
-     *
-     * A handler awaits it, so it stays a promise-returning seam rather than a batch field; a host
-     * with no store in this process supplies one over its own transport. Omitted, core's
-     * `MemoryKVStore` stands in and dies with the world.
+     * checkpointed, which rides the batch. Omitted, core's `MemoryKVStore` dies with the world.
      */
     kv?: KVStore;
 }
@@ -134,48 +130,36 @@ export interface SimOptions {
     config?: SimConfig;
     /**
      * The codec a `Welcome` is MEASURED against when deciding whether to chunk it.
-     *
-     * The sim encodes nothing for the wire — the host does — so this must be the codec the host
-     * encodes with, or a snapshot sized here fits a frame the host cannot produce.
+     * Must be the codec the host encodes with, or a snapshot fits a frame it cannot produce.
      */
     codec?: Codec;
-    /**
-     * An in-process sink for this world's diagnostics, beside the lines every batch carries.
-     *
-     * Every line reaches `OutputBatch.log` whatever this is; a host sharing the process can take
-     * them here instead of unpacking them.
-     */
+    /** An in-process sink for this world's diagnostics, beside the lines every batch carries. */
     log?: LogSink;
-    /** Called when the breaker disables a script's handler or callback — the dev channel, deliberately not an envelope. */
+    /** Called when the breaker disables a handler — a dev channel, deliberately not an envelope. */
     onBreakerTrip?: (trip: BreakerTrip) => void;
 }
 
 /**
  * The authority's deterministic advance: one input batch in, one output batch out.
- *
- * It holds the one core `Runtime` and everything between a DECODED inbound frame and an outbound
- * envelope — the narrowing, admission, the tick-keyed input buffer, the step, and the drain of
- * core's three replication channels. It opens no socket, reads no clock and touches no store: the
- * time it stamps and the records it seeds both arrive in the batch, which is what lets the host be
- * another process in another language and lets this same advance run in a browser.
+ * It opens no socket, reads no clock and touches no store — everything arrives in the batch.
  */
 export class Sim {
-    /** Live sessions, keyed by the host's connection id — the collection a transport does not hold. */
+    /** Live sessions, keyed by the host's connection id — what a transport does not hold. */
     readonly #sessions = new Map<ConnectionId, Session>();
     readonly #rt: Runtime;
     readonly #loop: Loop;
     readonly #codec: Codec;
-    /** The load-time config. `simRate` is live on the runtime instead, since `setSimRate` retunes it. */
+    /** The load-time config. `simRate` is live on the runtime, since `setSimRate` retunes it. */
     readonly #config: EngineConfig;
     readonly #bounds: WireBounds;
     readonly #regions: WireRegion[];
-    /** Live, not captured: templates come into use mid-session and connected peers are owed them. */
+    /** Live, not captured: templates come into use mid-session and peers are owed them. */
     readonly #visuals: ManifestStore;
     readonly #project: ProjectIdentity;
     readonly #buffer = new InputBuffer();
     /** Roster ops awaiting the next send — core's journal has no arm for either. */
     readonly #roster: RosterOps = { joins: [], leaves: [] };
-    /** Structural ops over this send's budget, kept in order for the next one — the only state that survives a send set. */
+    /** Structural ops over this send's budget, kept in order — the only state surviving a send. */
     readonly #spill: WireStructuralOp[] = [];
     readonly #started: Promise<void>;
     /** `@serverState` that outlives a session, seeded by the host and captured back at a leave. */
@@ -186,7 +170,7 @@ export class Sim {
     #closes: CloseOrder[] = [];
     #loads: LoadOrder[] = [];
     #saves: SaveOrder[] = [];
-    /** Lines since the last batch took them — buffered rather than emitted, so construction's survive to the first tick. */
+    /** Lines since the last batch; buffered, so construction's survive to the first tick. */
     #log: LogLine[] = [];
 
     /** Marks and ops dropped as unrepresentable, cumulative. */
@@ -277,10 +261,8 @@ export class Sim {
         };
 
         // Not awaited: a start handler awaiting a timer cannot complete until the loop steps, so
-        // awaiting this would deadlock the world against whatever drives it. The rejection is caught
-        // rather than left floating, because a host that never reads `started` — and a V8 isolate
-        // with no event loop to surface an unhandled rejection into — would lose a Game `@onStart`
-        // that threw with nothing anywhere to say so.
+        // this would deadlock the world. The rejection is caught rather than left floating — an
+        // isolate with no event loop would otherwise lose a Game `@onStart` that threw.
         this.#started = startGame(this.#rt);
         void this.#started.catch((error: unknown) => {
             this.#rt.log.warn(
@@ -300,7 +282,7 @@ export class Sim {
         return this.#rt;
     }
 
-    /** A copy, with the live `simRate`: the load-time value is stale the moment `setSimRate` runs. */
+    /** A copy, with the live `simRate`: the load-time value is stale once `setSimRate` runs. */
     get config(): EngineConfig {
         return { ...this.#config, simRate: this.#rt.simRate };
     }
@@ -310,12 +292,7 @@ export class Sim {
         return this.#dropped;
     }
 
-    /**
-     * Marks whose host died between the write and the send that would have carried them.
-     *
-     * Expected in any world that destroys anything, so it reads as churn rather than as a defect —
-     * a rate worth watching, never a count worth alerting on.
-     */
+    /** Marks whose host died between the write and the send; churn to watch, never to alert on. */
     get staleMarks(): number {
         return this.#stale;
     }
@@ -336,13 +313,8 @@ export class Sim {
     }
 
     /**
-     * One fixed step: take the batch's arrivals, advance the world by exactly one tick, and report
-     * everything the host must act on.
-     *
-     * The tick index is the sim's own and always contiguous — core's timers and tweens advance one
-     * unit per `step()` whatever index they are handed, so a host that skipped indices would
-     * compress every `after`, `every`, `sleep` and tween by the gap. Falling behind is therefore the
-     * host's to shed in wall-clock, never in ticks.
+     * One fixed step: take the arrivals, advance one tick, report what the host must act on.
+     * The tick index is contiguous, so a skip compresses every `after` and tween by the gap.
      */
     tick(batch: InputBatch): OutputBatch {
         if (this.#closed) return this.#takeOutput();
@@ -361,11 +333,8 @@ export class Sim {
     }
 
     /**
-     * Releases the world: every session leaves inline, so the batch this returns carries the last
-     * save each of them is owed.
-     *
-     * Inline rather than by waiting for the host to report each socket closed, because after a
-     * shutdown there is no next batch to report them in. Idempotent, and every later tick is inert.
+     * Releases the world: every session leaves inline, so this batch carries the last save each is
+     * owed — after a shutdown there is no next batch. Idempotent; later ticks are inert.
      */
     close(): OutputBatch {
         if (this.#closed) return this.#takeOutput();
@@ -395,7 +364,7 @@ export class Sim {
         }
     }
 
-    /** Changes the timestep mid-session and tells every client, which treats it as a resync trigger — core retunes neither a pending timer nor the lag ring. */
+    /** Changes the timestep mid-session and tells every client, which treats it as a resync. */
     setSimRate(simRate: number): void {
         assertRate('simRate', simRate);
         this.#rt.setSimRate(simRate);
@@ -431,7 +400,7 @@ export class Sim {
         if (to.length > 0) this.#sends.push({ to, envelope, class: cls });
     }
 
-    /** Core's diagnostics and this package's denials leave through one sink, buffered until a batch takes them. */
+    /** Core's diagnostics and this package's denials leave through one sink, buffered per batch. */
     #sink(forward: LogSink | undefined): LogSink {
         return {
             warn: (message: string): void => {
@@ -528,7 +497,7 @@ export class Sim {
         }
     }
 
-    /** The join sequence, in the order the checks must run: version, identity, then — once the persisted record is cached — capacity. */
+    /** The join sequence in check order: version, identity, then capacity once the record is in. */
     #join(session: Session, request: JoinRequest): void {
         if (session.joined) {
             if (request.protocolVersion !== PROTOCOL_VERSION) this.#reject(session, 'version');
@@ -565,8 +534,8 @@ export class Sim {
     #admit(session: Session, request: JoinRequest): void {
         if (session.closed || this.#closed || session.joined) return;
 
-        // Tested here rather than at the request: an identified join waits on the persisted read and
-        // the roster can fill while it does.
+        // Tested here rather than at the request: an identified join waits on the persisted read
+        // and the roster can fill while it does.
         const roster = this.#rt.playerManager?.players.length ?? 0;
         if (roster >= this.#config.maxPlayers) {
             this.#reject(session, 'full');
@@ -590,7 +559,7 @@ export class Sim {
         this.#roster.joins.push(readPlayerSnapshot(player));
     }
 
-    /** Whether a joiner is running what this world is running; a `bundleHash` of `''` is the one legal asymmetry. */
+    /** Whether a joiner runs what this world runs; a `bundleHash` of `''` is the one asymmetry. */
     #identityMatches(request: JoinRequest): boolean {
         if (request.projectId !== this.#project.projectId) return false;
         if (request.projectHash !== this.#project.projectHash) return false;
@@ -641,21 +610,21 @@ export class Sim {
         for (const call of frame.requests) session.requests.push(call);
     }
 
-    /** Spends an input token for a frame the bucket meters, closing a session that has sustained a breach. */
+    /** Spends an input token, closing a session that has sustained a breach. */
     #takeInputToken(session: Session): boolean {
         if (session.admission.takeToken()) return true;
         if (session.admission.overRateBreachLimit) this.#closeFor(session, 'rate-breach');
         return false;
     }
 
-    /** Orders the host to close a session and releases it here, so this tick's step already skips it. */
+    /** Orders the host to close a session and releases it here, so this step already skips it. */
     #closeFor(session: Session, reason: string, detail?: string): void {
         this.#deny('close', session, reason, detail);
         this.#closes.push({ connectionId: session.connectionId, reason });
         this.#release(session);
     }
 
-    /** One tick: refill every session's tokens, step the world, then date whatever gaps the window has outrun. */
+    /** One tick: refill every session's tokens, step the world, then date the gaps it outran. */
     #stepOnce(): void {
         const simRate = this.#rt.simRate;
         for (const session of this.#sessions.values()) session.admission.refill(simRate);
@@ -667,11 +636,11 @@ export class Sim {
         }
     }
 
-    /** Closes a session that has not joined inside the deadline — the one denial needing no frame at all. */
+    /** Closes a session that has not joined in time — the one denial needing no frame at all. */
     #sweepJoinDeadline(): void {
         const deadline = joinDeadlineTicks(this.#rt.simRate);
-        // Collected, then closed: closing mutates the registry, and a sweep that did it mid-iteration
-        // would be relying on that being safe rather than stating it.
+        // Collected, then closed: closing mutates the registry, and a sweep that did it
+        // mid-iteration would be relying on that being safe rather than stating it.
         const expired: Session[] = [];
         for (const session of this.#sessions.values()) {
             if (session.joined || session.closed) continue;
@@ -712,12 +681,13 @@ export class Sim {
             const player = session.livePlayer;
             if (player === null) continue;
             // Per session, for the reason the host's write loop is: a snapshot walk or an encode is
-            // creator-influenced, and one peer's throw would otherwise take this send's whole journal
-            // down with it — ops that are already drained and would never be produced again.
+            // creator-influenced, and one peer's throw would otherwise take this send's whole
+            // journal down with it — ops that are already drained and would never be produced
+            // again.
             try {
                 if (session.wantsBroadcast) {
-                    // Reliable first: the client holds a transform envelope until the state envelope
-                    // for that tick has been applied.
+                    // Reliable first: the client holds a transform envelope until the state
+                    // envelope for that tick has been applied.
                     this.#send(
                         [session.connectionId],
                         stateEnvelopeFor(session, player, set),
@@ -777,8 +747,8 @@ export class Sim {
             sendRate: this.#config.sendRate,
             bounds: this.#bounds,
             regions: this.#regions,
-            // Echoed byte-identically: only the client differences its own stamps, so a server stamp
-            // differenced against a client one would yield RTT plus an unknown clock offset.
+            // Echoed byte-identically: only the client differences its own stamps, so a server
+            // stamp differenced against a client one would yield RTT plus an unknown clock offset.
             clientSentMs: request.clientSentMs,
             serverSentMs: nowMs,
             snapshot: buildSnapshot(this.#rt, player),
@@ -802,7 +772,7 @@ export class Sim {
         );
     }
 
-    /** The host reported a session gone: release it, whether it closed itself or was closed here. */
+    /** The host reported a session gone: release it, however it came to close. */
     #drop(connectionId: ConnectionId): void {
         const session = this.#sessions.get(connectionId);
         if (session !== undefined) this.#release(session);
@@ -830,7 +800,8 @@ export class Sim {
         const record = this.#rt.hosts.get(playerKey(player.id))?.record;
         leavePlayer(this.#rt, player.id);
         // Only a host-named peer, since only a host-named peer can ever read it back: a connection
-        // id is minted fresh per socket, so writing one durably leaks an entry per join/leave cycle.
+        // id is minted fresh per socket, so writing one durably leaks an entry per join/leave
+        // cycle.
         if (record !== undefined && session.identity !== null && this.#records.has(record.hostId)) {
             this.#saves.push(this.#records.capture(record));
         }
@@ -838,7 +809,7 @@ export class Sim {
     }
 }
 
-/** One envelope's encoded size, or infinity for one the codec refuses — which is over any budget. */
+/** One envelope's encoded size, or infinity for one the codec refuses — over any budget. */
 function measure(envelope: ServerToClient, codec: Codec): number {
     try {
         return codec.byteLength(codec.encode(envelope as unknown as Message));
@@ -867,7 +838,7 @@ function asClientEnvelope(message: unknown): ClientToServer | undefined {
     }
 }
 
-/** Every field, checked — not `Partial<JoinRequest>`, which claims the narrowing without doing it. */
+/** Every field, checked — not `Partial<JoinRequest>`, which claims the narrowing without it. */
 function isJoinRequest(message: object): message is JoinRequest {
     const m = message as Record<string, unknown>;
     return (
@@ -880,7 +851,7 @@ function isJoinRequest(message: object): message is JoinRequest {
     );
 }
 
-/** An identity field: a string this server will compare, short enough to compare. Empty is legal and meaningful. */
+/** An identity field: a string short enough to compare. Empty is legal and meaningful. */
 function isIdentityString(value: unknown): value is string {
     return typeof value === 'string' && value.length <= MAX_IDENTITY_LENGTH;
 }
@@ -941,19 +912,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Whether a payload's whole graph fits inside `MAX_REQUEST_PAYLOAD_NODES`, carries no reserved key
- * and holds no non-finite number.
- *
- * The last two are the codec's decode-side rules, restated here rather than relied on: a handler is
- * handed this object whole and the ordinary thing to do with it is merge it, so a `__proto__` that
- * reached one would poison the prototype every player in the session shares. An out-of-process host
- * hands the sim bytes it only checked were JSON, so the guarantee has to hold on this side of the
- * seam or it holds for one host and not the other.
- *
- * Iterative rather than recursive, for the reason the codec's own walk is: a frame nesting a few
- * thousand deep is well-formed and small, and would overflow the stack before any cap read it. The
- * node count is what bounds this walk, and depth can never exceed it — a peer-chosen graph the
- * handler is handed whole is the one place a cardinality cap alone would not.
+ * Whether a payload's graph fits `MAX_REQUEST_PAYLOAD_NODES`, carries no reserved key and holds
+ * no non-finite number — the codec's decode rules, restated, since a handler is handed it whole.
  */
 function isAdmissiblePayload(payload: Record<string, unknown>): boolean {
     const stack: unknown[] = [payload];
@@ -1015,7 +975,7 @@ function sanitizeName(name: string): string {
     return capped === '' ? 'player' : capped;
 }
 
-/** Math's `Bounds` is an interface, so it has no implicit index signature and is copied field by field rather than spread. */
+/** Math's `Bounds` is an interface, so it has no index signature and is copied field by field. */
 function toWireBounds(bounds: Bounds): WireBounds {
     return { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom };
 }

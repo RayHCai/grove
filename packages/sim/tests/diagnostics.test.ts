@@ -1,6 +1,3 @@
-// What an operator has after a session dies: one greppable line per denial, through core's LogSink
-// seam, plus the counter that says the sim is falling behind.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LogSink } from '@platform/core';
 import { clearRuntime } from '@platform/core';

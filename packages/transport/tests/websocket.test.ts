@@ -24,10 +24,8 @@ const HEARTBEAT_INTERVAL_MS = 5000;
 const MAX_MISSED_HEARTBEATS = 3;
 
 /**
- * A socket whose events the test drives.
- *
- * `close()` only moves to CLOSING, exactly as a real socket does — the close EVENT is a separate,
- * later task, and every ordering guarantee below depends on that being modelled honestly.
+ * A socket whose events the test drives. `close()` only moves to CLOSING, as a real one does —
+ * the close EVENT is a separate, later task, and the ordering guarantees depend on that.
  */
 class FakeSocket implements WebSocketLike {
     readyState: number;
@@ -612,7 +610,8 @@ describe('websocket — close rides the FIFO', () => {
     });
 
     it('fires onClose after every frame ahead of it, whatever order the handlers registered in', () => {
-        // onClose first is the hostile order: the marker is eligible before the frames have a taker.
+        // onClose first is the hostile order: the marker is eligible before the frames have a
+        // taker.
         const { socket, transport } = harness();
         const order: string[] = [];
         transport.onClose(() => order.push('close'));

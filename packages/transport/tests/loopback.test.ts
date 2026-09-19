@@ -38,8 +38,8 @@ describe('loopbackPair — delivery is pumped, one tick out', () => {
     });
 
     it('holds a request and its answer one tick apart in each direction', () => {
-        // The round trip a local playtest exercises: input at tick 1 is seen by the server at tick 2,
-        // and its answer reaches the client at tick 3.
+        // The round trip a local playtest exercises: input at tick 1 is seen by the server at tick
+        // 2, and its answer reaches the client at tick 3.
         const pair = loopbackPair();
         const onServer = collect(pair.server);
         const onClient = collect(pair.client);
@@ -113,9 +113,9 @@ describe('loopbackPair — value semantics', () => {
     });
 
     it('is unaffected by the sender mutating the value after send', () => {
-        // Without this, local mode would let the server hand the client a live reference into its own
-        // state, a game developed single-player would silently depend on it, and it would rubber-band
-        // the instant it was networked.
+        // Without this, local mode would let the server hand the client a live reference into its
+        // own state, a game developed single-player would silently depend on it, and it would
+        // rubber-band the instant it was networked.
         const pair = loopbackPair();
         const seen = collect(pair.client);
         const sent: { hp: number; tags: string[] } = { hp: 10, tags: ['a'] };
@@ -218,8 +218,8 @@ describe('loopbackPair — encode-once fan-out', () => {
     });
 
     it('propagates a decode failure on delivery rather than swallowing it', () => {
-        // A frame that will not decode can only be a composition-root bug in loopback — the sender's
-        // own codec produced it — so it must surface, not vanish.
+        // A frame that will not decode can only be a composition-root bug in loopback — the
+        // sender's own codec produced it — so it must surface, not vanish.
         const pair = loopbackPair();
         pair.server.onMessage(() => {});
         pair.client.sendEncoded('{not json' as EncodedFrame);
@@ -237,9 +237,9 @@ describe('loopbackPair — encode-once fan-out', () => {
 
 describe('loopbackPair — retention', () => {
     it('flushes frames that arrived before a handler registered, in order', () => {
-        // deliver() can run before an end has called onMessage; the join sequence races wiring order.
-        // Discarding them would lose join messages depending on which end wired first — a bug that
-        // surfaces only under specific timing and only sometimes.
+        // deliver() can run before an end has called onMessage; the join sequence races wiring
+        // order. Discarding them would lose join messages depending on which end wired first — a
+        // bug that surfaces only under specific timing and only sometimes.
         const pair = loopbackPair();
         pair.client.send('a');
         pair.client.send('b');
@@ -303,8 +303,8 @@ describe('loopbackPair — retention', () => {
     });
 
     it('keeps frames behind a throwing handler queued for the next drain', () => {
-        // A creator's handler throwing is an ordinary event; it must not eat the frames that had not
-        // been delivered yet.
+        // A creator's handler throwing is an ordinary event; it must not eat the frames that had
+        // not been delivered yet.
         const pair = loopbackPair();
         const seen: Message[] = [];
         pair.server.onMessage((m) => {
@@ -405,8 +405,8 @@ describe('loopbackPair — ordered close, no re-entrancy, sealed both ways', () 
     });
 
     it('drops a peer send into a closed end rather than queueing it forever', () => {
-        // The peer does not learn of the close until it drains the marker, and in that window a peer
-        // send would otherwise land in an inbox nothing will ever drain.
+        // The peer does not learn of the close until it drains the marker, and in that window a
+        // peer send would otherwise land in an inbox nothing will ever drain.
         const pair = loopbackPair();
         pair.server.close(); // the server end is closed; the client has not drained its marker yet
         expect(() => pair.client.send('into the void')).not.toThrow();
@@ -420,7 +420,8 @@ describe('loopbackPair — ordered close, no re-entrancy, sealed both ways', () 
     });
 
     it('delivers frames already queued when a handler closes mid-drain', () => {
-        // Strict FIFO: the frames arrived before the close decision, so they are ahead of the marker.
+        // Strict FIFO: the frames arrived before the close decision, so they are ahead of the
+        // marker.
         const pair = loopbackPair();
         const order: string[] = [];
         pair.server.onMessage((m) => {
@@ -489,8 +490,8 @@ describe('loopbackPair — latency is a knob whose default is the one-tick delay
     });
 
     it('delivers within the same deliver() at latency 0', () => {
-        // What buys the diagnosis: a desync that survives latency 0 is a simulation bug, and one that
-        // vanishes is a prediction bug.
+        // What buys the diagnosis: a desync that survives latency 0 is a simulation bug, and one
+        // that vanishes is a prediction bug.
         const pair = loopbackPair({ latency: 0 });
         const order: string[] = [];
         pair.server.onMessage((m) => {
@@ -506,8 +507,8 @@ describe('loopbackPair — latency is a knob whose default is the one-tick delay
     });
 
     it('still delivers nothing outside deliver(), even at latency 0', () => {
-        // Zero latency is not synchronous delivery: a handler still cannot be re-entered from inside
-        // the sender's own stack.
+        // Zero latency is not synchronous delivery: a handler still cannot be re-entered from
+        // inside the sender's own stack.
         const pair = loopbackPair({ latency: 0 });
         const seen = collect(pair.server);
         pair.client.send('a');
@@ -597,8 +598,8 @@ describe('loopbackPair — latency is a knob whose default is the one-tick delay
 
 describe('loopbackPair — the pump is not re-entrant', () => {
     it('refuses a deliver() from inside a handler', () => {
-        // Nested pumping ages both queues twice in one tick, so a frame arrives earlier than latency
-        // promises. The host loop owns the tick.
+        // Nested pumping ages both queues twice in one tick, so a frame arrives earlier than
+        // latency promises. The host loop owns the tick.
         const pair = loopbackPair();
         pair.server.onMessage(() => pair.deliver());
         pair.client.send('a');
@@ -608,8 +609,8 @@ describe('loopbackPair — the pump is not re-entrant', () => {
     });
 
     it('keeps counting deliver() calls when a handler tries to pump', () => {
-        // The bug the guard exists for: at latency 2 a nested pump delivered 'b' at tick 2 instead of
-        // tick 3. Now the nested call fails and the schedule is intact.
+        // The bug the guard exists for: at latency 2 a nested pump delivered 'b' at tick 2 instead
+        // of tick 3. Now the nested call fails and the schedule is intact.
         const pair = loopbackPair({ latency: 2 });
         const arrivedAt: Record<string, number> = {};
         let tick = 0;
@@ -644,8 +645,8 @@ describe('loopbackPair — the pump is not re-entrant', () => {
 describe('loopbackPair — an end exposes only the Transport surface', () => {
     it('hides the pump members from a consumer holding one end', () => {
         // `link` could re-point a live pair at a third end and `receive` could enqueue a frame that
-        // never passed encode, both past the EncodedFrame brand. A TypeScript `private` is erased and
-        // would not have stopped either.
+        // never passed encode, both past the EncodedFrame brand. A TypeScript `private` is erased
+        // and would not have stopped either.
         const pair = loopbackPair();
         for (const member of ['link', 'receive', 'age', 'drain', 'deliverable']) {
             expect(member in pair.client).toBe(false);
@@ -716,8 +717,8 @@ describe('loopbackPair — retention is capped', () => {
     });
 
     it('releases the retained count as frames are delivered', () => {
-        // The cap bounds what is UNDELIVERED, so a connection that wires late and then keeps up must
-        // not accumulate credit against it.
+        // The cap bounds what is UNDELIVERED, so a connection that wires late and then keeps up
+        // must not accumulate credit against it.
         const pair = loopbackPair({ maxRetainedBytes: 512 });
         for (let i = 0; i < 4; i++) pair.client.send({ payload: 'x'.repeat(50) });
         pair.deliver();
@@ -738,8 +739,8 @@ describe('loopbackPair — retention is capped', () => {
         };
         const pair = loopbackPair({ codec, maxRetainedBytes: 4096 });
         pair.client.send({ a: 1 });
-        // An emoji is 4 bytes and 2 UTF-16 units, so a count off the string length would under-charge
-        // a real payload.
+        // An emoji is 4 bytes and 2 UTF-16 units, so a count off the string length would
+        // under-charge a real payload.
         expect(codec.byteLength).toHaveBeenCalled();
     });
 

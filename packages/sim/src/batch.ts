@@ -10,19 +10,14 @@ export type ConnectionId = string;
 /** A connection the host has established and authenticated, offered to the sim for this tick. */
 export interface OpenedConnection {
     connectionId: ConnectionId;
-    /**
-     * Who the HOST resolved this peer to be, or null when it resolved nobody.
-     *
-     * The sim never derives it from a frame: it becomes `player.id`, so it is what persisted
-     * `@serverState` is keyed by and what every other peer sees.
-     */
+    /** Who the HOST resolved this peer to be, or null. Never from a frame: it is `player.id`. */
     identity: string | null;
 }
 
-/** One decoded frame, attributed to the connection it arrived on rather than to anything it claims. */
+/** One decoded frame, attributed to the connection it arrived on, not to anything it claims. */
 export interface InboundFrame {
     connectionId: ConnectionId;
-    /** Decoded but NOT narrowed: the sim owns the narrowing, since it owns what each field bounds. */
+    /** Decoded but NOT narrowed: the sim owns that, since it owns what each field bounds. */
     message: unknown;
 }
 
@@ -30,24 +25,20 @@ export interface InboundFrame {
 export interface LoadedRecord {
     connectionId: ConnectionId;
     /**
-     * The fields the store held — `{}` for a host it holds nothing for, and `null` only when the read
-     * FAILED.
-     *
-     * The two are not the same answer: a store that held nothing is a new player whose state must be
-     * saved at the leave, while a store that could not be read is a degraded session whose save this
-     * session's initializers must not overwrite.
+     * The fields the store held — `{}` for a host it holds none for, `null` only on a FAILED read.
+     * Nothing held means a new player; unreadable means a degraded session.
      */
     fields: { [field: string]: JsonValue } | null;
 }
 
-/** One tick's arrivals, and the two facts about the outside world the advance is allowed to know. */
+/** One tick's arrivals, and the two facts about the outside world the advance may know. */
 export interface InputBatch {
     /**
      * Host wall-clock in milliseconds, stamped into `Welcome` and `TimeSyncReply` and differenced
      * against nothing — a client compares only its own two stamps.
      */
     nowMs: number;
-    /** Whether this tick closes a send interval; the cadence is the host's, counted on its clock. */
+    /** Whether this tick closes a send interval; the cadence is the host's, on its own clock. */
     drain: boolean;
     /** Connections accepted since the last tick, in accept order. */
     opened: OpenedConnection[];
@@ -59,10 +50,7 @@ export interface InputBatch {
     records: LoadedRecord[];
     /**
      * Host keys whose {@link SaveOrder} has landed in the store.
-     *
-     * The sim holds a saved record until this arrives, so a player who leaves and rejoins inside one
-     * session reads their own values back without a second round trip; released here, so a long
-     * session is not sized by every player it ever saw.
+     * A saved record is held until this arrives, so a leave-then-rejoin needs no round trip.
      */
     saved: string[];
 }
@@ -72,16 +60,11 @@ export function idleBatch(nowMs: number, drain = false): InputBatch {
     return { nowMs, drain, opened: [], frames: [], closed: [], records: [], saved: [] };
 }
 
-/**
- * One envelope and who receives it, in the order the host must write it.
- *
- * `to` is a list because a transform envelope is byte-identical for every peer, which is the whole
- * of the shared subset and the only thing worth encoding once.
- */
+/** One envelope and who receives it, in the order the host must write it; `to` is a list. */
 export interface Send {
     to: ConnectionId[];
     envelope: ServerToClient;
-    /** Droppable frames are superseded by the next of their kind, so a backed-up host may discard one. */
+    /** Droppable frames are superseded by the next of their kind; a backed-up host may drop it. */
     class: 'reliable' | 'droppable';
 }
 
@@ -99,7 +82,7 @@ export interface LoadOrder {
     hostKey: string;
 }
 
-/** A departing player's `@serverState`, written through by the host because only it holds a store. */
+/** A departing player's `@serverState`, written through by the host, which holds the store. */
 export interface SaveOrder {
     hostKey: string;
     fields: { [field: string]: JsonValue };
@@ -121,10 +104,7 @@ export interface SimDiagnostics {
 
 /**
  * The rates the world is running at as of this batch.
- *
- * On every batch rather than only on a change, because the seam is a value and not a stream: a host
- * that learned a retune from one batch it happened to read would keep driving at the old rate for
- * as long as it missed one.
+ * On every batch, not only on a change: a host that missed one would keep the old rate.
  */
 export interface BatchRates {
     simRate: number;

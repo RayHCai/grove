@@ -1,14 +1,11 @@
-// Real time into ticks, for the in-process host. The Rust host at `apps/grove/game-instance` owns the same
-// policy over its own clock; this is the copy the tests, the playground and local dev run on.
-//
-// It drives nothing itself: `pump` reports the ticks real time owes and the caller runs them, which
-// is what keeps the batch loop — the part that answers the sim's loads and saves — on one side of the
-// seam rather than behind a callback the driver owns.
+// Real time into ticks for the in-process host; `apps/grove/game-instance` owns the same policy.
+// It drives nothing itself: `pump` reports the ticks owed and the caller runs them, which keeps
+// the batch loop on one side of the seam rather than behind a callback the driver owns.
 
-/** Slack on the accumulator's `>= dt` test: a host advancing by exactly `1 / simRate` rounds short, and a wake owing one tick would step zero times. */
+/** Slack on the accumulator's `>= dt` test: exactly `1 / simRate` rounds short and steps zero. */
 const STEP_EPSILON = 1e-9;
 
-/** Wall-clock one wake may catch up before it sheds, sized so a backgrounded tab drains without shedding. */
+/** Wall-clock one wake may catch up before shedding; sized so a backgrounded tab drains. */
 export const MAX_CATCHUP_MS = 250;
 
 /** Ticks one wake may step before it sheds the rest as wall-clock. */
@@ -36,7 +33,7 @@ export class HostError extends Error {
     }
 }
 
-/** Throws unless `rate` is a positive finite number — nothing upstream validates a resolved default. */
+/** Throws unless `rate` is positive and finite — nothing upstream validates a resolved default. */
 export function assertRate(name: string, rate: number): void {
     if (!Number.isFinite(rate) || rate <= 0) {
         throw new HostError(
@@ -104,7 +101,7 @@ export class Driver {
         return this.#shedCount;
     }
 
-    /** Retunes both rates; the cadence lives here rather than on the tick index so a mid-session change cannot desync it. */
+    /** Retunes both rates; the cadence lives here, so a mid-session change cannot desync it. */
     setRates(simRate: number, sendRate: number): void {
         assertRate('simRate', simRate);
         assertRate('sendRate', sendRate);
@@ -145,8 +142,8 @@ export class Driver {
             if (drain) sends += 1;
         }
 
-        // Conditioned on leftover backlog: a wake that needed exactly the cap and drained cleanly has
-        // a legitimate fractional remainder that zeroing would discard.
+        // Conditioned on leftover backlog: a wake that needed exactly the cap and drained cleanly
+        // has a legitimate fractional remainder that zeroing would discard.
         const shed = steps === cap && this.#accumulator >= owed;
         if (shed) {
             this.#accumulator = 0;
