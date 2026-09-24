@@ -8,9 +8,12 @@ import type {
     WorkspacePath,
     WorkspaceSave,
 } from '@grove/api-contract';
+import type { ProjectManifest } from '@platform/project';
 import type { Api } from '../api/client';
+import { PROJECT_PATH, readProject, stamp } from '../project/manifest';
+import { scanScripts } from '../project/scripts';
 import { bytesOf, draftFromBytes, isText, type DraftFile, type Pending } from './files';
-import { templateFiles } from './template';
+import { DEFAULT_TEMPLATE, seedFrom } from './templates';
 
 /** The title a game gets when the editor made it rather than a creator naming one. */
 const FIRST_TITLE = 'Untitled game';
@@ -26,6 +29,10 @@ export interface OpenGame {
     /** The set the service last saved, which is what a reload is measured against. */
     saved: WorkspaceFile[];
     files: DraftFile[];
+    /** The manifest, which is one of those files — the settings gear's, and a build's. */
+    project: ProjectManifest;
+    /** The file the workbench opens on; a game whose template said nothing opens on its first. */
+    openPath: string | undefined;
     /** Whether the files above are a template nothing has stored yet. */
     seeded: boolean;
 }
@@ -33,7 +40,7 @@ export interface OpenGame {
 /**
  * The three steps behind the loading screen: who is signed in, which game, and what is in it.
  *
- * A game with nothing saved is seeded from the template **in memory** and left unsaved. Opening an
+ * A game with nothing saved is seeded from a template **in memory** and left unsaved. Opening an
  * editor is not a reason to write to somebody's game, so the first save is the creator's.
  */
 export async function openGame(api: Api, report: (step: OpenStep) => void): Promise<OpenGame> {
@@ -48,17 +55,51 @@ export async function openGame(api: Api, report: (step: OpenStep) => void): Prom
     report('files');
     const workspace = await api.workspace(game.gameId);
     if (workspace.files.length === 0) {
+        const seed = await seedFrom(DEFAULT_TEMPLATE, game.gameId);
         return {
             account,
             game,
             revision: workspace.revision,
             saved: [],
-            files: templateFiles(),
+            files: seed.files,
+            project: seed.project,
+            openPath: DEFAULT_TEMPLATE.openPath,
             seeded: true,
         };
     }
 
-    return { account, game, ...(await contentsOf(api, game.gameId, workspace)), seeded: false };
+    const held = await contentsOf(api, game.gameId, workspace);
+    return {
+        account,
+        game,
+        ...held,
+        project: await projectOf(held.files, game.gameId),
+        openPath: undefined,
+        seeded: false,
+    };
+}
+
+/**
+ * The manifest a stored game holds, or one made for a game saved before it had any.
+ *
+ * A game with sources and no manifest is given the default template's settings and the classes its
+ * own code declares — the alternative is refusing to open a game over a file the creator never
+ * typed. It is left for the first save to store, like anything else that changed.
+ */
+async function projectOf(files: readonly DraftFile[], projectId: string): Promise<ProjectManifest> {
+    const held = files.find((file) => file.path === PROJECT_PATH)?.text;
+    if (held !== undefined) return readProject(held);
+
+    const sources = files.flatMap((file) =>
+        file.text === undefined || file.path === PROJECT_PATH
+            ? []
+            : [{ path: file.path, text: file.text }],
+    );
+    return stamp(
+        { ...DEFAULT_TEMPLATE.project, projectId },
+        scanScripts(sources).modules,
+        new Map(sources.map((source) => [source.path, source.text])),
+    );
 }
 
 /**
@@ -70,8 +111,14 @@ export async function openGame(api: Api, report: (step: OpenStep) => void): Prom
 export async function reloadGame(
     api: Api,
     game: GameId,
-): Promise<{ revision: number; saved: WorkspaceFile[]; files: DraftFile[] }> {
-    return contentsOf(api, game, await api.workspace(game));
+): Promise<{
+    revision: number;
+    saved: WorkspaceFile[];
+    files: DraftFile[];
+    project: ProjectManifest;
+}> {
+    const held = await contentsOf(api, game, await api.workspace(game));
+    return { ...held, project: await projectOf(held.files, game) };
 }
 
 async function contentsOf(

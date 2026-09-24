@@ -8,13 +8,17 @@ import 'monaco-editor/languages/definitions/typescript/register';
 import {
     ModuleKind,
     ModuleResolutionKind,
-    ScriptTarget,
     getTypeScriptWorker,
     typescriptDefaults,
 } from 'monaco-editor/languages/features/typescript/register';
-import type { Diagnostic } from 'monaco-editor/languages/features/typescript/register';
+import type {
+    Diagnostic,
+    ScriptTarget,
+} from 'monaco-editor/languages/features/typescript/register';
 import { fonts, readThemeColors } from '@grove/ui';
 import type { Theme, ThemeColors } from '@grove/ui';
+import { GLOBALS_DTS, GLOBALS_PATH } from '../project/prelude';
+import { engineTypeLibs } from './types';
 
 /** One file as the workbench holds it: where it lives, what it is called, and what is in it. */
 export interface EditorFile {
@@ -67,6 +71,9 @@ export interface EditorHandle {
 
 const THEME_NAME = 'grove';
 const TRANSPARENT = '#00000000';
+
+/** The worker's own TypeScript numbers this target; the enum monaco re-declares stops at ES2020. */
+const ES2022 = 9 as ScriptTarget;
 
 /** The scheme every model lives under, so one path is one uri and one uri is one path. */
 const WORKSPACE = 'inmemory://grove/';
@@ -176,15 +183,28 @@ function messageOf(message: Diagnostic['messageText']): string {
  */
 export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): EditorHandle {
     typescriptDefaults.setCompilerOptions({
-        target: ScriptTarget.ESNext,
+        // ES2022, not ESNext: TypeScript emits a standard decorator verbatim for a target that
+        // claims to have them, and no browser does — a `@onStart` would reach the run unlowered.
+        target: ES2022,
         module: ModuleKind.ESNext,
         moduleResolution: ModuleResolutionKind.NodeJs,
+        // No DOM: a game is not a page, and two engine names — `Storage` and `Animation` — would
+        // collide outright with that library's.
+        lib: ['es2023'],
         strict: true,
         // The workbench is also the compiler a local run uses, and `getEmitOutput` against a
         // program told not to emit hands back nothing.
         noEmit: false,
         allowNonTsExtensions: true,
+        // The engine's own declarations are shipped as built, and checking them again here would
+        // report the engine's own faults inside somebody's game.
+        skipLibCheck: true,
     });
+    // Replaces rather than adds, so a second mount holds one copy of each declaration.
+    typescriptDefaults.setExtraLibs([
+        ...engineTypeLibs(),
+        { content: GLOBALS_DTS, filePath: GLOBALS_PATH },
+    ]);
     applyTheme(theme);
 
     const models = new Map<string, monaco.editor.ITextModel>();
@@ -225,9 +245,9 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
         theme: THEME_NAME,
         ariaLabel: file?.name ?? 'Code',
         fontFamily: fonts.mono,
-        fontSize: 14,
-        // VS Code's macOS ratio at 14px, taken as the one value on every platform.
-        lineHeight: 21,
+        fontSize: 11,
+        // VS Code's macOS ratio, taken as the one value on every platform.
+        lineHeight: 17,
         fontLigatures: true,
         letterSpacing: 0,
         cursorStyle: 'line',
@@ -245,8 +265,8 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
         overviewRulerBorder: false,
         overviewRulerLanes: 0,
         hideCursorInOverviewRuler: true,
-        scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
-        padding: { top: 12, bottom: 12 },
+        scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+        padding: { top: 8, bottom: 8 },
         automaticLayout: true,
         tabSize: 4,
         guides: { bracketPairs: 'active', indentation: true },

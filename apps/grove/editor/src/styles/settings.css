@@ -1,0 +1,21 @@
+.settings-panel__body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 8px 12px;
+}
+.settings-panel__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+.settings-panel__field .pg-field__control {
+    width: 100%;
+}
+.settings-panel__note {
+    font-size: 11px;
+    color: var(--pg-ink-muted);
+}

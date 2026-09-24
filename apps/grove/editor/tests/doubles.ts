@@ -15,14 +15,18 @@ import type {
     WorkspacePath,
     WorkspaceSave,
 } from '@grove/api-contract';
+import { PROJECT_FORMAT_VERSION } from '@platform/project';
+import type { ProjectManifest } from '@platform/project';
 import type { Api } from '../src/api/client';
 import { ApiError } from '../src/api/client';
 import { asProjectFile, treeOf } from '../src/project/files';
 import type { ProjectFile, ProjectNode } from '../src/project/files';
-import { bytesOf, isText } from '../src/workspace/files';
+import { projectDraft } from '../src/project/manifest';
+import { scanScripts } from '../src/project/scripts';
+import { bytesOf, draftFromText, isText } from '../src/workspace/files';
 import type { DraftFile } from '../src/workspace/files';
 import type { OpenGame } from '../src/workspace/session';
-import { templateFiles } from '../src/workspace/template';
+import { DEFAULT_TEMPLATE } from '../src/workspace/templates';
 
 export const PLAYER_ID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479' as PlayerId;
 export const GAME_ID = '9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f' as GameId;
@@ -43,7 +47,57 @@ export const GAME: Game = {
     createdAt: '2026-09-01T09:00:00.000Z',
 };
 
-export function project(files: readonly DraftFile[] = templateFiles()): ProjectFile[] {
+/** The file the default template opens on, which most of these suites type into. */
+export const TEMPLATE_PATH = DEFAULT_TEMPLATE.openPath;
+
+/**
+ * The default template's manifest, stamped by hand.
+ *
+ * A digest is the editor's to compute and is asynchronous; a fixture pins one so a suite can build
+ * an opened game without awaiting anything.
+ */
+export const PROJECT: ProjectManifest = {
+    ...DEFAULT_TEMPLATE.project,
+    formatVersion: PROJECT_FORMAT_VERSION,
+    projectId: GAME_ID,
+    contentHash: 'a-fixture-hash',
+    scriptModules: scanScripts(
+        DEFAULT_TEMPLATE.files().flatMap((file) =>
+            file.text === undefined ? [] : [{ path: file.path, text: file.text }],
+        ),
+    ).modules,
+};
+
+/** What a game seeded from the default template holds: its sources, and the manifest beside them. */
+export function templateDrafts(): DraftFile[] {
+    return [...DEFAULT_TEMPLATE.files(), projectDraft(PROJECT)];
+}
+
+/** A game that is plain TypeScript: no script class, and so nothing for a world to instantiate. */
+export const PLAIN_PROJECT: ProjectManifest = {
+    ...PROJECT,
+    templates: [],
+    gameScripts: [],
+    scriptModules: [],
+};
+
+/**
+ * A few files across two folders, which is what the tree and the tab strip are driven with.
+ *
+ * Its own set rather than the template's: what a template holds is a product decision that moves,
+ * and a suite about folder order should not be rewritten every time it does.
+ */
+export function sampleFiles(): DraftFile[] {
+    return [
+        draftFromText('src/main.ts', 'export const start = 1;\n'),
+        draftFromText('src/sprout.ts', 'export const grow = 2;\n'),
+        draftFromText('src/garden.ts', 'export const plot = 3;\n'),
+        draftFromText('hud/hud.ts', 'export const draw = 4;\n'),
+        draftFromText('game.config.ts', 'export const config = {};\n'),
+    ];
+}
+
+export function project(files: readonly DraftFile[] = sampleFiles()): ProjectFile[] {
     return files.map(asProjectFile);
 }
 
@@ -53,7 +107,7 @@ export function projectTree(files?: readonly DraftFile[]): ProjectNode[] {
 
 export function fileAt(path: string): ProjectFile {
     const found = project().find((file) => file.path === path);
-    if (found === undefined) throw new Error(`${path} is not in the template`);
+    if (found === undefined) throw new Error(`${path} is not in the sample`);
     return found;
 }
 
@@ -64,7 +118,9 @@ export function opened(over: Partial<OpenGame> = {}): OpenGame {
         game: GAME,
         revision: 0,
         saved: [],
-        files: templateFiles(),
+        files: templateDrafts(),
+        project: PROJECT,
+        openPath: DEFAULT_TEMPLATE.openPath,
         seeded: true,
         ...over,
     };

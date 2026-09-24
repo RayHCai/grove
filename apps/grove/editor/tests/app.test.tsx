@@ -47,7 +47,7 @@ describe('the first load', () => {
         expect(host.querySelector('header')).not.toBeNull();
         expect(host.querySelector('nav')?.getAttribute('aria-label')).toBe('Editor');
         const asides = [...host.querySelectorAll('aside')].map((a) => a.getAttribute('aria-label'));
-        expect(asides).toEqual(['Explorer', 'Grove AI']);
+        expect(asides).toEqual(['Explorer', 'Grove AI', 'Project settings']);
         expect(workbench(host)?.querySelector('[role="tabpanel"]')?.id).toBe('editor-tabpanel');
         expect(host.querySelector('#editor-title')?.textContent).toBe('Editor');
         expect(host.querySelector('#play-title')?.textContent).toBe('Play');
@@ -61,7 +61,9 @@ describe('the first load', () => {
         const host = await openEditor(api);
 
         const names = [...host.querySelectorAll('.tree__name')].map((name) => name.textContent);
-        expect(names).toContain('main.ts');
+        expect(names).toContain('player.ts');
+        // The manifest is seeded beside the sources and is the gear's, not the tree's.
+        expect(names).not.toContain('project.json');
         expect(host.querySelector('.topbar__state')?.textContent).toBe('Unsaved changes');
         // Opening an editor writes nothing: the first save is the creator's.
         expect(api.saves).toEqual([]);
@@ -76,6 +78,16 @@ describe('the first load', () => {
         const names = [...host.querySelectorAll('.tree__name')].map((name) => name.textContent);
         expect(names).toEqual(['src', 'main.ts']);
         expect(host.querySelector('.topbar__state')?.textContent).toBe('Up to date');
+    });
+
+    it('says what is wrong with a manifest it cannot read rather than opening over it', async () => {
+        const api = fakeApi();
+        // A file from a newer editor: the format policy refuses forward, never repairs.
+        await stored(api, [draftFromText('project.json', '{"formatVersion":99}')]);
+        const host = await mount(<App api={api} />);
+        await until(() => host.querySelector('[role="alert"]') !== null);
+
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain('formatVersion');
     });
 
     it('makes a game for a creator who has none', async () => {
@@ -178,6 +190,54 @@ describe('reading the session off the cookie', () => {
         expect(went[0]).toContain('/sign-in?return=');
     });
 
+    it('leaves for the platform when the session check is refused, whatever the body said', async () => {
+        // A 401 no `ErrorBody` came with: the client can only name it after its status.
+        const went: string[] = [];
+        const api = fakeApi({ signedIn: true });
+        const refusing = {
+            ...api,
+            session: async () => {
+                throw new ApiError(401, 'internal', 'the API answered 401');
+            },
+        };
+        await openedWith(refusing as FakeApi, went);
+        await until(() => went.length > 0);
+        expect(went[0]).toContain('/sign-in?return=');
+    });
+
+    it('leaves for the platform when the auth service itself is broken', async () => {
+        const went: string[] = [];
+        const api = fakeApi({ signedIn: true });
+        const broken = {
+            ...api,
+            session: async () => {
+                throw new ApiError(500, 'internal', 'internal error');
+            },
+        };
+        await openedWith(broken as FakeApi, went);
+        await until(() => went.length > 0);
+        expect(went[0]).toContain('/sign-in?return=');
+    });
+
+    it('stays put and offers a retry when nothing could be reached at all', async () => {
+        // Sending the tab into a network that is down would take the Try again with it.
+        const went: string[] = [];
+        const api = fakeApi({ signedIn: true });
+        const offline = {
+            ...api,
+            session: async () => {
+                throw new ApiError(0, 'unreachable', 'the Grove API could not be reached');
+            },
+        };
+        const host = await openedWith(offline as FakeApi, went);
+        await until(() => host.querySelector('[role="alert"]') !== null);
+
+        expect(went).toHaveLength(0);
+        expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+            'the Grove API could not be reached',
+        );
+    });
+
     it('says so rather than bouncing off the platform a second time', async () => {
         const went: string[] = [];
         await openedWith(fakeApi({ signedIn: false }), went);
@@ -208,22 +268,234 @@ describe('reading the session off the cookie', () => {
         expect(third).toHaveLength(1);
     });
 
-    it('goes back to the platform when the session is ended from the top bar', async () => {
+    it('opens the sign-in beside a lapse rather than taking the workbench with it', async () => {
         const went: string[] = [];
+        const tabs: string[] = [];
+        const said: string[] = [];
         const api = fakeApi({ signedIn: true });
-        const host = await openedWith(api, went);
+        const host = await mount(
+            <App
+                api={api}
+                navigate={(url) => went.push(url)}
+                openTab={(url) => {
+                    tabs.push(url);
+                    return true;
+                }}
+                notify={(message) => said.push(message)}
+            />,
+        );
         await until(() => workbench(host) !== null);
         await untilSettled(host);
 
+        api.save = async () => {
+            throw new ApiError(401, 'unauthorized', 'sign in first');
+        };
         await act(async () => {
             [...host.querySelectorAll('button')]
-                .find((each) => each.textContent === 'Sign out')
+                .find((each) => each.textContent === 'Save')
                 ?.click();
         });
+        await until(() => tabs.length > 0);
+
+        expect(tabs[0]).toContain('/sign-in?return=');
+        expect(said[0]).toContain('Sign in on the new tab');
+        // This tab never moved: the unsaved work is still in it.
+        expect(went).toEqual([]);
+        expect(workbench(host)).not.toBeNull();
+    });
+
+    it('says where to sign in when the browser refuses the tab', async () => {
+        const said: string[] = [];
+        const api = fakeApi({ signedIn: true });
+        const host = await mount(
+            <App
+                api={api}
+                navigate={() => undefined}
+                openTab={() => false}
+                notify={(message) => said.push(message)}
+            />,
+        );
+        await until(() => workbench(host) !== null);
+        await untilSettled(host);
+
+        api.save = async () => {
+            throw new ApiError(401, 'unauthorized', 'sign in first');
+        };
+        await act(async () => {
+            [...host.querySelectorAll('button')]
+                .find((each) => each.textContent === 'Save')
+                ?.click();
+        });
+        await until(() => said.length > 1);
+
+        expect(said[1]).toContain('could not be opened');
+        expect(said[1]).toContain('/sign-in?return=');
+    });
+
+    it('carries a way back that is this editor, so signing in lands where it started', async () => {
+        const went: string[] = [];
+        await openedWith(fakeApi({ signedIn: false }), went);
         await until(() => went.length > 0);
 
-        expect(api.signedIn).toBe(false);
-        expect(workbench(host)).toBeNull();
+        const back = new URL(String(new URL(went[0] ?? '').searchParams.get('return')));
+        expect(back.origin).toBe(window.location.origin);
+        // Nothing of the session rides on it: the cookie is what the browser brings back.
+        expect(back.search).toBe('');
+    });
+
+    it('leaves for the platform when a session lapses between the check and the first read', async () => {
+        const went: string[] = [];
+        const api = fakeApi({ signedIn: true });
+        const lapsing = {
+            ...api,
+            me: async () => {
+                throw new ApiError(401, 'unauthorized', 'sign in first');
+            },
+        };
+        await openedWith(lapsing as FakeApi, went);
+        await until(() => went.length > 0);
         expect(went[0]).toContain('/sign-in?return=');
+    });
+
+    it('leaves for the platform when the session check is refused, whatever the body said', async () => {
+        // A 401 no `ErrorBody` came with: the client can only name it after its status.
+        const went: string[] = [];
+        const api = fakeApi({ signedIn: true });
+        const refusing = {
+            ...api,
+            session: async () => {
+                throw new ApiError(401, 'internal', 'the API answered 401');
+            },
+        };
+        await openedWith(refusing as FakeApi, went);
+        await until(() => went.length > 0);
+        expect(went[0]).toContain('/sign-in?return=');
+    });
+
+    it('leaves for the platform when the auth service itself is broken', async () => {
+        const went: string[] = [];
+        const api = fakeApi({ signedIn: true });
+        const broken = {
+            ...api,
+            session: async () => {
+                throw new ApiError(500, 'internal', 'internal error');
+            },
+        };
+        await openedWith(broken as FakeApi, went);
+        await until(() => went.length > 0);
+        expect(went[0]).toContain('/sign-in?return=');
+    });
+
+    it('stays put and offers a retry when nothing could be reached at all', async () => {
+        // Sending the tab into a network that is down would take the Try again with it.
+        const went: string[] = [];
+        const api = fakeApi({ signedIn: true });
+        const offline = {
+            ...api,
+            session: async () => {
+                throw new ApiError(0, 'unreachable', 'the Grove API could not be reached');
+            },
+        };
+        const host = await openedWith(offline as FakeApi, went);
+        await until(() => host.querySelector('[role="alert"]') !== null);
+
+        expect(went).toHaveLength(0);
+        expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+            'the Grove API could not be reached',
+        );
+    });
+
+    it('says so rather than bouncing off the platform a second time', async () => {
+        const went: string[] = [];
+        await openedWith(fakeApi({ signedIn: false }), went);
+        await until(() => went.length > 0);
+
+        // The platform sent this tab straight back, still holding nothing.
+        const again = await openedWith(fakeApi({ signedIn: false }), went);
+        await until(() => again.querySelector('[role="alert"]') !== null);
+
+        expect(went).toHaveLength(1);
+        expect(again.querySelector('[role="alert"]')?.textContent).toContain(
+            'signing in did not take',
+        );
+    });
+
+    it('forgets it was ever sent away once the cookie answers', async () => {
+        const went: string[] = [];
+        await openedWith(fakeApi({ signedIn: false }), went);
+        await until(() => went.length > 0);
+
+        const back = await openedWith(fakeApi({ signedIn: true }), went);
+        await until(() => workbench(back) !== null);
+
+        // Sent away once more, it goes: the flag is spent, not stuck.
+        const third: string[] = [];
+        await openedWith(fakeApi({ signedIn: false }), third);
+        await until(() => third.length > 0);
+        expect(third).toHaveLength(1);
+    });
+
+    it('opens the sign-in beside a lapse rather than taking the workbench with it', async () => {
+        const went: string[] = [];
+        const tabs: string[] = [];
+        const said: string[] = [];
+        const api = fakeApi({ signedIn: true });
+        const host = await mount(
+            <App
+                api={api}
+                navigate={(url) => went.push(url)}
+                openTab={(url) => {
+                    tabs.push(url);
+                    return true;
+                }}
+                notify={(message) => said.push(message)}
+            />,
+        );
+        await until(() => workbench(host) !== null);
+        await untilSettled(host);
+
+        api.save = async () => {
+            throw new ApiError(401, 'unauthorized', 'sign in first');
+        };
+        await act(async () => {
+            [...host.querySelectorAll('button')]
+                .find((each) => each.textContent === 'Save')
+                ?.click();
+        });
+        await until(() => tabs.length > 0);
+
+        expect(tabs[0]).toContain('/sign-in?return=');
+        expect(said[0]).toContain('Sign in on the new tab');
+        // This tab never moved: the unsaved work is still in it.
+        expect(went).toEqual([]);
+        expect(workbench(host)).not.toBeNull();
+    });
+
+    it('says where to sign in when the browser refuses the tab', async () => {
+        const said: string[] = [];
+        const api = fakeApi({ signedIn: true });
+        const host = await mount(
+            <App
+                api={api}
+                navigate={() => undefined}
+                openTab={() => false}
+                notify={(message) => said.push(message)}
+            />,
+        );
+        await until(() => workbench(host) !== null);
+        await untilSettled(host);
+
+        api.save = async () => {
+            throw new ApiError(401, 'unauthorized', 'sign in first');
+        };
+        await act(async () => {
+            [...host.querySelectorAll('button')]
+                .find((each) => each.textContent === 'Save')
+                ?.click();
+        });
+        await until(() => said.length > 1);
+
+        expect(said[1]).toContain('could not be opened');
+        expect(said[1]).toContain('/sign-in?return=');
     });
 });

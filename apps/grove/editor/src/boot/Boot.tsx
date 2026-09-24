@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Panel, Tilestrip, Wordmark } from '@grove/ui';
-import { ApiError } from '../api/client';
+import { ProjectFormatError } from '@platform/project';
+import { ApiError, isLapsedSession } from '../api/client';
 import type { Api } from '../api/client';
 import { EditorShell } from '../shell/EditorShell';
+import type { EditorShellProps } from '../shell/EditorShell';
 import { openGame } from '../workspace/session';
 import type { OpenGame } from '../workspace/session';
 import { LoadingScreen } from './LoadingScreen';
@@ -27,10 +29,23 @@ export interface BootProps {
     api: Api;
     /** How this tab leaves for the platform; a test hands in its own rather than navigating. */
     navigate?: ((url: string) => void) | undefined;
+    /**
+     * How a second tab is opened, answering whether one was. The browser blocks a window nothing
+     * clicked for, and a sign-in that never opened has to be said out loud rather than waited for.
+     */
+    openTab?: ((url: string) => boolean) | undefined;
+    /** How the creator is told something they have to act on; a test hands in its own. */
+    notify?: ((message: string) => void) | undefined;
+    /** How a local world's renderer is built; a test hands in one that needs no GPU. */
+    createRenderer?: EditorShellProps['createRenderer'];
 }
 
 function messageOf(failure: unknown): string {
-    return failure instanceof ApiError ? failure.message : 'the editor could not open your game';
+    if (failure instanceof ApiError) return failure.message;
+    // A manifest this build cannot read is the one failure a creator can act on: it names the
+    // member at fault, and a file from a newer editor says so rather than reading as a crash.
+    if (failure instanceof ProjectFormatError) return `this game's settings: ${failure.message}`;
+    return 'the editor could not open your game';
 }
 
 /** Session storage is gone in a private window and throws in a few of them; neither is fatal here. */
@@ -66,7 +81,13 @@ function forget(key: string): void {
  * There is no signing in here: a password is the platform's business, and somebody the service does
  * not recognise is sent there rather than asked for one.
  */
-export function Boot({ api, navigate }: BootProps): React.JSX.Element {
+export function Boot({
+    api,
+    navigate,
+    openTab,
+    notify,
+    createRenderer,
+}: BootProps): React.JSX.Element {
     const [phase, setPhase] = useState<Phase>({ at: 'loading', step: 'session' });
     // StrictMode runs the effect below twice, and the second run would make a second game for a
     // creator who had none.
@@ -86,6 +107,28 @@ export function Boot({ api, navigate }: BootProps): React.JSX.Element {
         go(signInUrl(new URL(window.location.href)));
     }
 
+    /**
+     * A session that lapsed while the workbench was open.
+     *
+     * This tab stays where it is. There is unsaved work in it, and navigating away to sign in is
+     * exactly what would lose it — so the sign-in goes in a second tab, and coming back and saving
+     * again is all that is left to do. The browser may refuse a tab nothing clicked for, which is
+     * why the address is said out loud when it does.
+     */
+    function signInBeside(): void {
+        const url = signInUrl(new URL(window.location.href));
+        const tell = notify ?? ((message: string) => window.alert(message));
+        const opened = openTab ?? ((at: string) => window.open(at, '_blank', 'noopener') !== null);
+
+        // Said before the tab opens: an alert is the one thing here a blocked popup cannot swallow.
+        tell(
+            'Your Grove session has ended. Sign in on the new tab, then save again — nothing on this screen is lost.',
+        );
+        if (!opened(url)) {
+            tell(`The sign-in tab could not be opened. Sign in at ${url}, then save again.`);
+        }
+    }
+
     async function open(): Promise<void> {
         try {
             const opened = await openGame(api, (step) => setPhase({ at: 'loading', step }));
@@ -93,7 +136,7 @@ export function Boot({ api, navigate }: BootProps): React.JSX.Element {
         } catch (failure) {
             // A session that lapsed between the check and the first read is not a failure to
             // report; it is the platform's sign-in.
-            if (failure instanceof ApiError && failure.code === 'unauthorized') {
+            if (isLapsedSession(failure)) {
                 leave();
                 return;
             }
@@ -109,6 +152,14 @@ export function Boot({ api, navigate }: BootProps): React.JSX.Element {
                 return;
             }
         } catch (failure) {
+            // Every refusal the service named while answering for the session is the same answer:
+            // this browser is not carrying one the editor can work behind, whatever the body said.
+            // A service nobody could reach named nothing, and is the one failure left to report —
+            // sending the tab into a network that is down would take the Try again with it.
+            if (failure instanceof ApiError && failure.code !== 'unreachable') {
+                leave();
+                return;
+            }
             setPhase({ at: 'failed', message: messageOf(failure) });
             return;
         }
@@ -162,5 +213,12 @@ export function Boot({ api, navigate }: BootProps): React.JSX.Element {
         );
     }
 
-    return <EditorShell api={api} opened={phase.opened} onSignedOut={leave} />;
+    return (
+        <EditorShell
+            api={api}
+            opened={phase.opened}
+            onSessionLapsed={signInBeside}
+            createRenderer={createRenderer}
+        />
+    );
 }

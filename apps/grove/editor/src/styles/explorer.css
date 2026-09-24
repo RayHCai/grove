@@ -5,8 +5,8 @@
     padding-bottom: 8px;
 }
 .explorer-panel__project {
-    padding: 8px 12px 4px;
-    font-size: 11px;
+    padding: 8px 8px 4px;
+    font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -32,10 +32,10 @@
 .tree__row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    height: 24px;
-    padding-right: 12px;
-    font-size: 13px;
+    gap: 4px;
+    height: 20px;
+    padding-right: 8px;
+    font-size: 11px;
     color: var(--pg-ink);
     white-space: nowrap;
     transition: background-color var(--pg-dur-fast) var(--pg-ease);
@@ -50,8 +50,8 @@
 
 .tree__twisty {
     flex: none;
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     color: var(--pg-ink-muted);
     transition: transform var(--pg-dur) var(--pg-ease);
 }
@@ -73,8 +73,8 @@
 .explorer-panel__tools {
     display: flex;
     gap: 4px;
-    padding: 0 8px 8px;
+    padding: 0 4px 8px;
 }
 .explorer-panel__new {
-    padding: 0 12px 8px;
+    padding: 0 8px 8px;
 }

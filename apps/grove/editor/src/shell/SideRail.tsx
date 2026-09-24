@@ -1,8 +1,8 @@
 import type { Ref } from 'react';
-import { FilesIcon, IconButton, SparkIcon, ThemeToggle } from '@grove/ui';
+import { FilesIcon, IconButton, SettingsIcon, SparkIcon, ThemeToggle, cx } from '@grove/ui';
 
 /** The panels the rail discloses, one at a time. */
-export type PanelId = 'files' | 'ai';
+export type PanelId = 'files' | 'ai' | 'settings';
 
 export interface SideRailProps {
     panel: PanelId | null;
@@ -11,22 +11,31 @@ export interface SideRailProps {
     buttonRefs?: Readonly<Record<PanelId, Ref<HTMLButtonElement>>> | undefined;
 }
 
+// Settings sits at the foot rather than in the stack: it is the project's own dialog, not another
+// view of the game's files.
 const views = [
-    { id: 'files', label: 'Explorer', controls: 'explorer-panel', Glyph: FilesIcon },
-    { id: 'ai', label: 'Grove AI', controls: 'grove-ai-panel', Glyph: SparkIcon },
+    { id: 'files', label: 'Explorer', controls: 'explorer-panel', Glyph: FilesIcon, foot: false },
+    { id: 'ai', label: 'Grove AI', controls: 'grove-ai-panel', Glyph: SparkIcon, foot: false },
+    {
+        id: 'settings',
+        label: 'Settings',
+        controls: 'settings-panel',
+        Glyph: SettingsIcon,
+        foot: true,
+    },
 ] as const;
 
-/** The rail beside the workspace: the view disclosures on top, the theme toggle at the foot. */
+/** The rail beside the workspace: the view disclosures on top, settings and the theme at the foot. */
 export function SideRail({ panel, onToggle, buttonRefs }: SideRailProps): React.JSX.Element {
     return (
         <nav aria-label="Editor" className="rail">
-            {views.map(({ id, label, controls, Glyph }) => (
+            {views.map(({ id, label, controls, Glyph, foot }) => (
                 <IconButton
                     key={id}
                     ref={buttonRefs?.[id]}
                     label={label}
                     variant="ghost"
-                    className="rail__view"
+                    className={cx('rail__view', foot && 'rail__foot')}
                     aria-expanded={panel === id}
                     aria-controls={controls}
                     onClick={() => onToggle(id)}
