@@ -19,7 +19,7 @@
         "@platform/scripting": "workspace:*",
         "@platform/sim": "workspace:*",
         "esbuild": "^0.28.2",
-        "fastify": "^5.12.1",
+        "fastify": "^5.12.5",
         "fastify-type-provider-zod": "^7.0.0",
         "ioredis": "^6.0.0",
         "zod": "^4.5.4"
