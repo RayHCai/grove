@@ -14,7 +14,7 @@ path = "src/main.rs"
 # The isolate. deno_core is the whole reason this half is Rust: it gives a per-session V8 isolate
 # with its own heap limit and a terminate_execution a watchdog can reach, which a Node subprocess
 # does not.
-deno_core = "0.411"
+deno_core = "0.412"
 
 tokio = { workspace = true }
 axum = { workspace = true, features = ["ws"] }
