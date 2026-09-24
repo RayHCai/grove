@@ -24,6 +24,16 @@ by another, and a codec written twice is a codec that drifts. Its claims carry `
 request cannot name a game its token did not, and `aud`, so the credential a browser holds for a
 game process is not also one the data plane accepts.
 
+`./client` is a third subpath, for the opposite reason `./tokens` is one: `@grove/editor` and
+`@grove/platform` each held a byte-identical `fetch` wrapper — the CSRF header, the credentials, the
+JSON body, and one shared answer to "did the session lapse" — and a wrapper written twice is exactly
+the kind of copy this package exists to prevent. It reaches only the global `fetch`, so it is behind
+no more of a wall than the shapes themselves are.
+
+The password floor and ceiling are here too, as `PASSWORD_MIN` and `PASSWORD_MAX`: the one rule a
+sign-up form's hint and the server's own validation both state, so a form that mirrors the floor and
+forgets the ceiling is a form this package no longer lets happen.
+
 The correlation header is here for the same reason, though it is neither a shape nor a signature:
 `libs/go-grove/contract` declares the same name and the same bound, and one half of the fleet keeping
 an id the other would have replaced is a chain that breaks at whichever hop is stricter.

@@ -42,12 +42,16 @@ export {
     TaskMessage,
     TaskStatus,
     TaskStatusUpdate,
+    databaseOf,
     isTerminal,
     streamOf,
 } from './tasks.js';
 export {
     AssetUpload,
     AssetUploadRequest,
+    BuildArtifact,
+    BuildManifest,
+    BuildOutputName,
     FileKind,
     MAX_ASSET_BYTES,
     MAX_SOURCE_BYTES,
@@ -62,9 +66,11 @@ export {
     WorkspaceFile,
     WorkspacePath,
     WorkspaceSave,
+    buildManifestKey,
     buildPrefix,
     encodeManifest,
     manifestKey,
     objectKey,
 } from './workspace.js';
 export { REQUEST_ID_HEADER, REQUEST_ID_MAX_LENGTH, validRequestId } from './request-id.js';
+export { PASSWORD_MAX, PASSWORD_MIN } from './password.js';
