@@ -175,7 +175,7 @@ function add(into: GcTally, from: GcTally): void {
 }
 
 export class Meter {
-    // eslint-disable-next-line @typescript-eslint/no-empty-function -- the class holds no state
+    /** A no-op: every `GcWatch` is closed by the measurement that opened it, so nothing outlives a call. */
     dispose(): void {}
 
     /** Sweeps the heap and lets the sweep's own entries drain before a watch is opened. */

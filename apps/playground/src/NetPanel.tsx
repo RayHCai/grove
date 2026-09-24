@@ -1,11 +1,6 @@
-// POLLED, NOT PER FRAME: `stats()` allocates and the client publishes no change event, so
-// reading it per frame would couple React's render rate to the wire.
-
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { GameStats } from './use-game';
-
-/** Poll rates offered in the UI, in Hz. `0` freezes. Mirrors the Inspector's control. */
-const RATES = [0, 2, 4, 10] as const;
+import { RateSelect, usePolled } from './use-polled';
 
 export interface NetPanelProps {
     /** Reads the current session stats, or returns `null` before the client exists. */
@@ -15,21 +10,8 @@ export interface NetPanelProps {
 }
 
 export function NetPanel({ read, state }: NetPanelProps): React.JSX.Element {
-    const [stats, setStats] = useState<GameStats | null>(null);
     const [rate, setRate] = useState<number>(4);
-
-    // Read through a ref so a fresh closure each render does not re-arm the interval.
-    const readRef = useRef(read);
-    readRef.current = read;
-
-    const sample = useCallback(() => setStats(readRef.current()), []);
-
-    useEffect(() => {
-        sample();
-        if (rate === 0) return;
-        const timer = setInterval(sample, 1000 / rate);
-        return () => clearInterval(timer);
-    }, [rate, sample]);
+    const { value: stats } = usePolled<GameStats | null>(read, rate, null);
 
     return (
         <section className="loop">
@@ -37,17 +19,7 @@ export function NetPanel({ read, state }: NetPanelProps): React.JSX.Element {
                 <strong>session</strong>
                 <span className="loop__mode">{state}</span>
 
-                <select
-                    aria-label="session poll rate"
-                    value={rate}
-                    onChange={(e) => setRate(Number(e.target.value))}
-                >
-                    {RATES.map((hz) => (
-                        <option key={hz} value={hz}>
-                            {hz === 0 ? 'frozen' : `${hz}/s`}
-                        </option>
-                    ))}
-                </select>
+                <RateSelect label="session poll rate" rate={rate} onChange={setRate} />
             </header>
 
             {stats === null ? (
