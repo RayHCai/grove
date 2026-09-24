@@ -39,8 +39,6 @@ body {
     flex: none;
 }
 
-/* ---- header ---- */
-
 .siteheader {
     flex: none;
     /* Not sticky: the nav is a panel dropping a solid block, and a sticky one would drag that
@@ -69,7 +67,7 @@ body {
 
 /* A menu line rather than a chip: it inverts on hover the way a selected row does. */
 .sitenav__link {
-    padding: 2px 10px;
+    padding: var(--pg-sp-1) var(--pg-sp-3);
     color: var(--pg-ink);
     font-size: 22px;
     text-decoration: none;
@@ -102,8 +100,6 @@ body {
     font-size: 21px;
 }
 
-/* ---- footer ---- */
-
 .sitefooter {
     flex: none;
     /* Modest: the front page and the sign-in flow are each meant to fit one screen. */
@@ -126,8 +122,6 @@ body {
     color: var(--pg-sand);
     font-size: 21px;
 }
-
-/* ---- the landing page ---- */
 
 /* One screenful and no more: the hero is centred in whatever the header and footer leave. */
 .landing {
@@ -225,8 +219,6 @@ body {
     font-size: 21px;
 }
 
-/* ---- the sign-in flow ---- */
-
 .authpage {
     display: flex;
     flex: 1;
@@ -296,8 +288,6 @@ body {
     box-shadow: none;
 }
 
-/* ---- the signed-in zone ---- */
-
 .zone {
     display: flex;
     flex: 1;
@@ -361,8 +351,6 @@ body {
     gap: var(--pg-sp-5);
 }
 
-/* ---- a creator's games ---- */
-
 .gamelist {
     display: flex;
     flex-direction: column;
@@ -411,8 +399,6 @@ body {
     margin-top: var(--pg-sp-4);
 }
 
-/* ---- the profile cards ---- */
-
 .card {
     display: flex;
     flex-direction: column;
@@ -437,8 +423,7 @@ body {
     font-size: 21px;
 }
 
-/* ---- the first load, and a gate acting ---- */
-
+/* Covers both the first load and a route gate deciding, which look the same to a reader. */
 .waiting {
     display: flex;
     flex: 1;
@@ -459,8 +444,6 @@ body {
     color: var(--pg-ink-muted);
     font-size: 21px;
 }
-
-/* ---- short windows ---- */
 
 /*
  * The sign-in flow owes a short window one screenful too, and a form cannot be made shorter by
@@ -490,8 +473,6 @@ body {
     }
 }
 
-/* ---- windows too narrow for the hero's two columns ---- */
-
 /*
  * The headline owes its one line more than the buttons owe their place beside it, so the pair
  * drops under the words as soon as holding both would wrap it.
@@ -506,8 +487,6 @@ body {
         align-items: stretch;
     }
 }
-
-/* ---- narrow windows ---- */
 
 @media (max-width: 640px) {
     .landing {
