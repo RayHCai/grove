@@ -56,29 +56,8 @@ func checkPlacement(req contract.PlacementRequest) (string, bool) {
 	if req.Revision < 1 {
 		return "revision must be positive", false
 	}
-	if problem, ok := checkBundles(req.Bundles); !ok {
+	if problem, ok := checkBundleSet(req.Bundles); !ok {
 		return problem, false
-	}
-	return "", true
-}
-
-// checkBundles refuses a start this service could only pass on for a box to fail.
-func checkBundles(bundles contract.BundleSet) (string, bool) {
-	for _, ref := range []contract.BundleRef{bundles.Server, bundles.Client} {
-		if ref.Hash == "" || ref.URL == "" || ref.ByteLength < 1 {
-			return "each bundle must name a hash, a url and a length", false
-		}
-	}
-	// A set whose halves are swapped would have a box run the browser's code as the authority.
-	if bundles.Server.Side != contract.SideServer || bundles.Client.Side != contract.SideClient {
-		return "each bundle must name the side it is under", false
-	}
-	if bundles.SimConfig.Hash == "" || bundles.SimConfig.URL == "" ||
-		bundles.SimConfig.ByteLength < 1 {
-		return "simConfig must name a hash, a url and a length", false
-	}
-	if bundles.SyncedHash == "" {
-		return "bundles must name a syncedHash", false
 	}
 	return "", true
 }

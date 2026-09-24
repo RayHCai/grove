@@ -4,7 +4,6 @@ package api
 
 import (
 	"context"
-	"crypto/subtle"
 	"log/slog"
 	"net"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 	"github.com/RayHCai/grove/apps/grove/server-manager/internal/fleet"
 	"github.com/RayHCai/grove/apps/grove/server-manager/internal/joins"
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
-	"github.com/RayHCai/grove/libs/go-grove/token"
 )
 
 // Large enough for a box reporting every instance it runs, small enough that a wrong caller cannot
@@ -85,29 +83,12 @@ func (s *Server) Handler() http.Handler {
 	// Outside the gate: a supervisor polls these before the process has any credential to check.
 	root.HandleFunc("GET /health", httpx.Health)
 	root.HandleFunc("GET /ready", httpx.Ready(s.ready, s.log))
-	root.Handle("/v1/", httpx.Chain(v1, requireFleet(s.secret)))
+	// A different secret from GAME_TOKEN_SECRET, and deliberately so: that one signs a browser's
+	// join ticket, where this service is reachable only from inside the fleet and never sees one.
+	root.Handle("/v1/", httpx.Chain(v1, httpx.FleetBearer(s.secret, s.log)))
 	root.HandleFunc("/", httpx.NotFound)
 
 	return httpx.Chain(root, httpx.RequestID(), httpx.Recover(s.log), httpx.RequestLog(s.log))
-}
-
-// requireFleet admits only a caller holding the shared fleet bearer.
-//
-// A different secret from GAME_TOKEN_SECRET, and deliberately so: that one signs a browser's join
-// ticket, where this service is reachable only from inside the fleet and never sees one.
-func requireFleet(secret []byte) httpx.Middleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			presented, ok := token.Bearer(r)
-			// Constant time, so a caller cannot learn the secret one leading byte per request.
-			if !ok || subtle.ConstantTimeCompare([]byte(presented), secret) != 1 {
-				httpx.WriteError(w, http.StatusUnauthorized, httpx.CodeUnauthorized,
-					"fleet credential required")
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
 }
 
 // nothingToWaitFor is this service's readiness probe, and it never fails. An empty registry

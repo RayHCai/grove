@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 
 	"github.com/RayHCai/grove/apps/grove/game-manager/internal/config"
@@ -22,7 +21,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel()}))
+	log := env.Logger(cfg.Env, os.Stdout)
 
 	// The store is chosen here and nowhere else, which is what makes it a seam rather than a
 	// dependency every handler grew its own opinion about.
