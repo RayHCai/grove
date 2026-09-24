@@ -59,9 +59,22 @@ class ScriptedBundle {
                 return this.#bytes;
             },
             hash: (): Promise<string> => Promise.resolve(this.#digest),
+            // A client chunk holding one class, which is the least a module has to export to be
+            // run: the load answers the index a mirror resolves an `attach` through.
             evaluate: (): Promise<unknown> => {
                 this.evaluated += 1;
-                return Promise.resolve({});
+                return Promise.resolve({
+                    side: 'client',
+                    scripts: [
+                        {
+                            id: 'runner',
+                            location: 'synced',
+                            ctor: class Runner {
+                                readonly kind = 'runner';
+                            },
+                        },
+                    ],
+                });
             },
         };
     }

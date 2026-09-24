@@ -78,8 +78,8 @@ export interface MirrorView {
     entries(): IterableIterator<[NetId, EntityId]>;
 }
 
-/** A creator script class, as the host holds one. */
-export type ScriptClass = new () => object;
+/** A creator script class, as the host holds one — core's shape, so an attach needs no cast. */
+export type ScriptClass = AnyScriptClass;
 
 /** The bundle's classes by wire id; structural, so `ScriptRegistry` fits with no dependency. */
 export interface ScriptIndex {
@@ -431,7 +431,7 @@ export class Mirror {
             this.counters.droppedAttach++;
             return;
         }
-        this.#rt.wiring?.attachToEntity(local, klass as AnyScriptClass, attachment.props);
+        this.#rt.wiring?.attachToEntity(local, klass, attachment.props);
     }
 
     #destroy(netId: NetId, delta: MirrorDelta): void {

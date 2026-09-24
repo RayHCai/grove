@@ -44,7 +44,7 @@ A message not in one of the two unions is not on the wire, and this table is tha
 | `interaction`     | `ClientToServer` | one frame per tick, `tick` + batched `events[]`; no `seq`, so no ack      |
 | `request`         | `ClientToServer` | one frame per tick, `tick` + batched `requests[]`; no `seq`, so no ack    |
 
-`Envelope` is both unions; `EnvelopeKind` is every `kind`. The unions are **disjoint**, so neither end can
+`Envelope` is both unions. The unions are **disjoint**, so neither end can
 accept a frame it minted.
 
 **Payload types.** `WireSingleStructuralOp` (nine arms: `spawn`, `destroy`, `reparent`, `tag`,
@@ -56,7 +56,7 @@ union `WireStructuralOp` and `WireStructuralOpKind`; `WireScriptAttachment`, `En
 `Leaderboard`, `Inventory`, `Team`); `RenderManifest`, `WireAssetRef`, `WireAssetKind`, `TemplateVisual`
 (`SpriteTemplateVisual` | `GroupTemplateVisual`), `TemplateChild` (`SpriteTemplateChild` |
 `GroupTemplateChild`); `InputAction`, `InputPhase`; `Interaction` (four arms: `press`, `click`,
-`hover-enter`, `hover-exit`) and `InteractionKind`; `GameRequest`.
+`hover-enter`, `hover-exit`); `GameRequest`.
 
 ## 3. Three type-level rules
 

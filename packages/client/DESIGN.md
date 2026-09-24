@@ -17,25 +17,25 @@ Deps: `core`, `math`, `protocol`, `renderer`, `transport`. Never `server`. No Re
 
 ## Layout
 
-| File                                   | Owns                                                                                              |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [src/client.ts](src/client.ts)         | `GameClient` — frame order, receive/dispatch, input flush, liveness, resync                       |
-| [src/mirror.ts](src/mirror.ts)         | `Mirror` — the runtime, the paths that write it from the wire, its pass table                     |
-| [src/prediction.ts](src/prediction.ts) | `Prediction` — baseline, rewind, replay, scope, correction                                        |
-| [src/passes.ts](src/passes.ts)         | The client's `TickPasses`: the input fold, and the scope the rest honour                          |
-| [src/index-map.ts](src/index-map.ts)   | `MirrorIndex` — bidirectional `netId ↔ EntityId`                                                  |
-| [src/clock.ts](src/clock.ts)           | `ClientClock` — tick accumulator, lead loop, nudge, epoch, behind-check                           |
-| [src/ring.ts](src/ring.ts)             | `InputRing` — unacked frames, fold-at-prune horizon                                               |
-| [src/bindings.ts](src/bindings.ts)     | `BindingTable` — raw event → action edges, axis quantizer, held codes                             |
-| [src/input.ts](src/input.ts)           | Seams: `RawInputEvent`, `InputDevice`, `FrameSource` + scripted implementations                   |
-| [src/handshake.ts](src/handshake.ts)   | Join/time-sync builders, envelope narrowing, welcome validation, snapshot reassembly, reject text |
-| [src/bundle.ts](src/bundle.ts)         | `BundleSource` seam, and the fetch → bound → hash → compare → evaluate order                      |
-| [src/lifecycle.ts](src/lifecycle.ts)   | `Lifecycle` — `SessionState`, `FailureReason`, input gating                                       |
-| [src/bridge.ts](src/bridge.ts)         | `RenderBridge` — `EntityId ↔ NodeId`, manifest, dirty-set push, interpolation, camera             |
-| [src/hud-sink.ts](src/hud-sink.ts)     | `ClientHUDSink` — core's HUD seam: widget records and the open screen stack                       |
-| [src/request.ts](src/request.ts)       | A `request()` payload as wire fields, with what the wire cannot carry dropped                     |
-| [src/constants.ts](src/constants.ts)   | Engine constants, each stating its unit                                                           |
-| [src/browser/](src/browser/)           | DOM adapters behind the `./browser` subpath                                                       |
+| File                                   | Owns                                                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| [src/client.ts](src/client.ts)         | `GameClient` — frame order, receive/dispatch, input flush, liveness, resync                        |
+| [src/mirror.ts](src/mirror.ts)         | `Mirror` — the runtime, the paths that write it from the wire, its pass table                      |
+| [src/prediction.ts](src/prediction.ts) | `Prediction` — baseline, rewind, replay, scope, correction                                         |
+| [src/passes.ts](src/passes.ts)         | The client's `TickPasses`: the input fold, and the scope the rest honour                           |
+| [src/index-map.ts](src/index-map.ts)   | `MirrorIndex` — bidirectional `netId ↔ EntityId`                                                   |
+| [src/clock.ts](src/clock.ts)           | `ClientClock` — tick accumulator, lead loop, nudge, epoch, behind-check                            |
+| [src/ring.ts](src/ring.ts)             | `InputRing` — unacked frames, fold-at-prune horizon                                                |
+| [src/bindings.ts](src/bindings.ts)     | `BindingTable` — raw event → action edges, axis quantizer, held codes                              |
+| [src/input.ts](src/input.ts)           | Seams: `RawInputEvent`, `InputDevice`, `FrameSource` + scripted implementations                    |
+| [src/handshake.ts](src/handshake.ts)   | Join/time-sync builders, envelope narrowing, welcome validation, snapshot reassembly, reject text  |
+| [src/bundle.ts](src/bundle.ts)         | `BundleSource` seam, the fetch → bound → hash → compare → evaluate order, and the chunk it answers |
+| [src/lifecycle.ts](src/lifecycle.ts)   | `Lifecycle` — `SessionState`, `FailureReason`, input gating                                        |
+| [src/bridge.ts](src/bridge.ts)         | `RenderBridge` — `EntityId ↔ NodeId`, manifest, dirty-set push, interpolation, camera              |
+| [src/hud-sink.ts](src/hud-sink.ts)     | `ClientHUDSink` — core's HUD seam: widget records and the open screen stack                        |
+| [src/request.ts](src/request.ts)       | A `request()` payload as wire fields, with what the wire cannot carry dropped                      |
+| [src/constants.ts](src/constants.ts)   | Engine constants, each stating its unit                                                            |
+| [src/browser/](src/browser/)           | DOM adapters behind the `./browser` subpath                                                        |
 
 Two exports: `.` (no DOM) and `./browser` (`createRafFrameSource`, `createPerformanceClock`,
 `createDomInputDevice`, `createCanvasInputDevice`, `canvasPoint`, `pollGamepads`,
@@ -128,6 +128,19 @@ The url is scheme-checked with the renderer's `isAllowedAssetUrl` against `REMOT
 policy `WireAssetRef.url` gets, and unlike an asset a refusal **fails the session**: there is no placeholder
 for missing code. The bytes are bounded at `MAX_BUNDLE_BYTES` before the digest, and `evaluate` is handed the
 bytes that were hashed, never the url again — a second fetch is a second answer.
+
+The load **answers the classes it evaluated**, which is what the whole sequence is for: a load that
+verified the bytes and dropped what they exported would leave every `attach` resolving to nothing, and
+the session would join and then render an empty world. The module is narrowed structurally rather than
+cast — it is the peer's code, and a class that turned out uncallable would throw inside the frame loop
+instead of here. Four things are refused: the `server` half, which would put authority classes on a
+client tick; a `server`-located class inside the client half, which is the same leak one entry at a
+time; two classes under one id, since which one an `attach` resolved to would then depend on the order
+a bundler emitted them in; and an entry whose `ctor` is not a function. The index outranks
+`GameClientOptions.scripts` — a host that also supplied classes compiled them itself, and where the two
+disagree the ones the server named the hash of are what every other peer is running. It survives a
+resync beside the hash, for the same reason the hash does: the code is in this process, and a re-join
+declaring the hash without holding the classes would be the empty world again.
 
 The session therefore has a pre-`live` state. `#onWelcome` measures the RTT **before** branching, since the
 lead seeds from it and folding a download into it would size the lead to the download; then it either opens

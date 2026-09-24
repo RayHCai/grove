@@ -69,6 +69,19 @@ export interface Correction {
 
 const NO_CORRECTION: Correction = { x: 0, y: 0, z: 0, remaining: 0 };
 
+/** The point a track is drawn at, `alpha` of the way from one sample to the next. */
+function trackPosition(
+    from: Sample,
+    to: Sample,
+    alpha: number,
+): { x: number; y: number; z: number } {
+    return {
+        x: lerp(from.x, to.x, alpha),
+        y: lerp(from.y, to.y, alpha),
+        z: lerp(from.z, to.z, alpha),
+    };
+}
+
 export class RenderBridge {
     readonly #renderer: IRenderer;
     readonly #view: MirrorView;
@@ -237,15 +250,13 @@ export class RenderBridge {
     /** Where `local` is on screen now, whichever path owns it, so a camera follows what is seen. */
     drawnPosition(local: EntityId): { x: number; y: number; z: number } {
         const track = this.#trackFor(local);
-        if (track !== undefined) {
-            const { from, to } = track;
-            const alpha = progress(from.time, to.time, this.#renderTime);
-            return {
-                x: lerp(from.x, to.x, alpha),
-                y: lerp(from.y, to.y, alpha),
-                z: lerp(from.z, to.z, alpha),
-            };
-        }
+        if (track === undefined) return this.#simulatedPosition(local);
+        const { from, to } = track;
+        return trackPosition(from, to, progress(from.time, to.time, this.#renderTime));
+    }
+
+    /** Where the simulation puts `local`, carrying whatever correction is still being paid off. */
+    #simulatedPosition(local: EntityId): { x: number; y: number; z: number } {
         const rt = this.#view.runtime;
         const offset = this.#corrections.get(local) ?? NO_CORRECTION;
         return {
@@ -411,11 +422,7 @@ export class RenderBridge {
             const { from, to } = track;
             const alpha = progress(from.time, to.time, this.#renderTime);
             const scale = lerp(from.scale, to.scale, alpha);
-            into.position = {
-                x: lerp(from.x, to.x, alpha),
-                y: lerp(from.y, to.y, alpha),
-                z: lerp(from.z, to.z, alpha),
-            };
+            into.position = trackPosition(from, to, alpha);
             into.rotation = lerpDegrees(from.rotation, to.rotation, alpha);
             into.scale = { x: scale, y: scale, z: 1 };
             into.alpha = lerp(from.alpha, to.alpha, alpha);
@@ -426,12 +433,7 @@ export class RenderBridge {
 
         const rt = this.#view.runtime;
         const scale = rt.transforms.scale(local);
-        const offset = this.#corrections.get(local) ?? NO_CORRECTION;
-        into.position = {
-            x: rt.transforms.posX(local) + offset.x,
-            y: rt.transforms.posY(local) + offset.y,
-            z: rt.transforms.posZ(local) + offset.z,
-        };
+        into.position = this.#simulatedPosition(local);
         into.rotation = rt.transforms.rotation(local);
         into.scale = { x: scale, y: scale, z: 1 };
         into.alpha = rt.transforms.opacity(local);

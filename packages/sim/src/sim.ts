@@ -41,7 +41,7 @@ import type {
     WireStructuralOp,
 } from '@platform/protocol';
 import { PROTOCOL_VERSION } from '@platform/protocol';
-import type { Codec, JsonValue, Message } from '@platform/transport';
+import type { Codec, JsonValue } from '@platform/transport';
 import { RESERVED_KEYS, jsonCodec } from '@platform/transport';
 import type {
     CloseOrder,
@@ -56,7 +56,7 @@ import type {
 import { Session } from './session.js';
 import type { RosterOps } from './replicate.js';
 import { drainOnce, readPlayerSnapshot, stateEnvelopeFor, transformEnvelope } from './replicate.js';
-import { splitSnapshot } from './chunk.js';
+import { encodedSize, splitSnapshot } from './chunk.js';
 import {
     MAX_ACTIONS_PER_FRAME,
     MAX_ACTION_NAME_LENGTH,
@@ -499,19 +499,19 @@ export class Sim {
 
     /** The join sequence in check order: version, identity, then capacity once the record is in. */
     #join(session: Session, request: JoinRequest): void {
-        if (session.joined) {
-            if (request.protocolVersion !== PROTOCOL_VERSION) this.#reject(session, 'version');
-            else if (!this.#identityMatches(request)) this.#reject(session, 'identity');
-            else session.pendingJoin = request;
-            return;
-        }
-
         if (request.protocolVersion !== PROTOCOL_VERSION) {
             this.#reject(session, 'version');
             return;
         }
         if (!this.#identityMatches(request)) {
             this.#reject(session, 'identity');
+            return;
+        }
+
+        // A joined session re-sending is a resync; the two checks above still gate it, but the
+        // admission below has already run for this connection.
+        if (session.joined) {
+            session.pendingJoin = request;
             return;
         }
         if (session.admitting) return;
@@ -756,7 +756,7 @@ export class Sim {
         };
 
         // Measured rather than counted, so a world that fits pays one encode and nothing else.
-        if (measure(welcome, this.#codec) <= MAX_FRAME_PAYLOAD_BYTES) {
+        if (encodedSize(welcome, this.#codec) <= MAX_FRAME_PAYLOAD_BYTES) {
             this.#send([session.connectionId], welcome, 'reliable');
             return;
         }
@@ -806,15 +806,6 @@ export class Sim {
             this.#saves.push(this.#records.capture(record));
         }
         this.#roster.leaves.push(player.id);
-    }
-}
-
-/** One envelope's encoded size, or infinity for one the codec refuses — over any budget. */
-function measure(envelope: ServerToClient, codec: Codec): number {
-    try {
-        return codec.byteLength(codec.encode(envelope as unknown as Message));
-    } catch {
-        return Number.POSITIVE_INFINITY;
     }
 }
 

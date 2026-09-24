@@ -19,8 +19,13 @@ import type { Entity } from './entity.js';
 import { cameraKey, entityKey, playerKey, screenKey, GAME_KEY } from './hosts.js';
 import type { HostKind } from './hosts.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- attach accepts any host-typed class
-type AnyScriptClass = new (props?: ScriptProps) => BaseScript<any>;
+/**
+ * What core requires of a script class, as against the `AnyScriptClass` one arrives as: an attach
+ * instantiates it and writes `host` onto the result. The two meet here, which is the one place an
+ * authored class is taken on trust.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- attach accepts any host-typed class
+type AttachedScriptClass = new (props?: ScriptProps) => BaseScript<any>;
 
 export class Wiring {
     readonly #rt: Runtime;
@@ -30,7 +35,7 @@ export class Wiring {
     }
 
     /** Attaches to an entity and journals it; a class with no bundle id attaches locally only. */
-    attachToEntity(id: EntityId, klass: AnyScriptClass, props?: ScriptProps): object {
+    attachToEntity(id: EntityId, klass: AttachedScriptClass, props?: ScriptProps): object {
         const entity = this.#rt.entityManager.facade(id);
         const instance = this.#attach(
             'entity',
@@ -52,20 +57,20 @@ export class Wiring {
         return instance;
     }
 
-    attachToPlayer(player: Player, klass: AnyScriptClass, props?: ScriptProps): object {
+    attachToPlayer(player: Player, klass: AttachedScriptClass, props?: ScriptProps): object {
         return this.#attach('player', playerKey(player.id), player, klass, player, props);
     }
 
-    attachToGame(game: object, klass: AnyScriptClass, props?: ScriptProps): object {
+    attachToGame(game: object, klass: AttachedScriptClass, props?: ScriptProps): object {
         return this.#attach('game', GAME_KEY, game, klass, undefined, props);
     }
 
-    attachToCamera(camera: Camera, klass: AnyScriptClass, props?: ScriptProps): object {
+    attachToCamera(camera: Camera, klass: AttachedScriptClass, props?: ScriptProps): object {
         const player = camera.player;
         return this.#attach('camera', cameraKey(player.id), camera, klass, player, props);
     }
 
-    attachToScreen(screen: HUDScreen, klass: AnyScriptClass, props?: ScriptProps): object {
+    attachToScreen(screen: HUDScreen, klass: AttachedScriptClass, props?: ScriptProps): object {
         return this.#attach(
             'screen',
             screenKey(screen.name),
@@ -76,7 +81,7 @@ export class Wiring {
         );
     }
 
-    attachMovement(avatar: Entity, klass: AnyScriptClass): object {
+    attachMovement(avatar: Entity, klass: AttachedScriptClass): object {
         // BaseMovement.tick's stage order is the contract both endpoints replay, so an override
         // desyncs prediction. Counted, not compared: importing that class drags in a decorated
         // module.
@@ -100,7 +105,7 @@ export class Wiring {
         kind: HostKind,
         hostKey: string,
         host: object,
-        klass: AnyScriptClass,
+        klass: AttachedScriptClass,
         localPlayer: Player | undefined,
         props?: ScriptProps,
     ): object {
@@ -211,7 +216,7 @@ export class Wiring {
         }
     }
 
-    #reject(klass: AnyScriptClass, kind: HostKind, location: ScriptLocation): void {
+    #reject(klass: AttachedScriptClass, kind: HostKind, location: ScriptLocation): void {
         if (location === 'synced' && (kind === 'camera' || kind === 'screen')) {
             throw new LoadError(
                 `SyncedScript on a ${kind} host has no authoritative copy to reconcile`,
@@ -234,7 +239,10 @@ export class Wiring {
     }
 }
 
-/** Object keys a prop may not name: assigning one rewrites the instance rather than a field. */
+/**
+ * Object keys a prop may not name: assigning one rewrites the instance rather than a field.
+ * The same three transport's codec refuses, restated: importing its set would be a value import.
+ */
 const RESERVED_PROPS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** Writes each configured prop onto the instance; authoritative for any field it names. */

@@ -19,7 +19,11 @@ import type {
 } from './manifest.js';
 import type { ScriptProps } from './props.js';
 
-/** A creator script class, as a host holds one. Props are optional, so a props-free class fits. */
+/**
+ * A creator script class, as a host holds one. Props are optional, so a props-free class fits.
+ * Opaque in its return because this package may not name core's `BaseScript`; core widens it at
+ * the one attach site, which is where an authored class is taken on trust.
+ */
 export type ScriptClass = new (props?: ScriptProps) => object;
 
 /** Resolves an attached script id to the class the host loaded. `undefined` drops it. */

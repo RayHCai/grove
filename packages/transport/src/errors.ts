@@ -21,7 +21,7 @@ export type TransportErrorCode =
     | 'frame-too-deep'
     /**
      * A frame exceeds the decode byte cap, refused before it is parsed. Depth and byte count bound
-     * different things: a shallow frame can still be huge, and parsing is what allocates.
+     * different things: a shallow frame can still be huge.
      */
     | 'frame-too-large'
     /** Frames retained for a handler that never registered exceeded the cap. */

@@ -9,8 +9,11 @@ export interface ProjectClaim {
     projectHash: string;
 }
 
-export function projectClaim(manifest: ProjectManifest): ProjectClaim {
+export function projectClaim(project: ProjectManifest | ProjectClaim): ProjectClaim {
+    // A claim already: a host that never authored the world cannot derive one, and the player
+    // origin is exactly that — it is handed two strings with its ticket and holds no manifest.
+    if (!('contentHash' in project)) return project;
     // `contentHash` IS `projectHash` on the wire: the handshake compares a digest of what was
     // authored, and the two names are one value.
-    return { projectId: manifest.projectId, projectHash: manifest.contentHash };
+    return { projectId: project.projectId, projectHash: project.contentHash };
 }

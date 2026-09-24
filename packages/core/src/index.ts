@@ -99,6 +99,7 @@ export {
     clearRuntime,
     loadGame,
     startGame,
+    endGame,
     joinPlayer,
     leavePlayer,
     pressWidget,

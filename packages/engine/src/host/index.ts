@@ -5,6 +5,7 @@ export { createSim } from './create-sim.js';
 export type { BundleRef, CreateSimOptions } from './create-sim.js';
 export { createClient } from './create-client.js';
 export type { CreateClientOptions } from './create-client.js';
+export type { ProjectClaim } from './identity.js';
 
 // The authoring shape, so a host can name what it loads and hands to `createSim`. Types only: the
 // values @platform/project holds are the validator and the two narrowings, and `createSim` is the

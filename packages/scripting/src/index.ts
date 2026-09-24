@@ -3,6 +3,18 @@
 export type { ScriptClass, ScriptEntry, ScriptChunkModule, ScriptSide } from './registry.js';
 export { ScriptRegistry, locationsFor } from './registry.js';
 
+export {
+    AMBIENT_DTS,
+    ENGINE_MODULE,
+    ENGINE_TYPES,
+    ENGINE_VALUES,
+    engineNamesIn,
+    engineTypesIn,
+    preludeFor,
+    typePreludeFor,
+    usesFreeName,
+} from './prelude.js';
+
 export type { Redirect } from './policy.js';
 export {
     TRANSCENDENTALS,
