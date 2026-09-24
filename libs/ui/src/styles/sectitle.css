@@ -10,7 +10,7 @@
     background: var(--pg-plate);
     box-shadow: var(--pg-lift) var(--pg-lift) 0 var(--pg-plate-lift);
     color: var(--pg-plate-ink);
-    font: normal 13px/1.6 var(--pg-font-brand);
+    font: normal var(--pg-plate-text) / 1.6 var(--pg-font-brand);
     letter-spacing: 1px;
 }
 .pg-sectitle__sub {

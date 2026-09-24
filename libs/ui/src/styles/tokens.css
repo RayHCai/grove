@@ -57,6 +57,23 @@
     --pg-shadow-sm: 3px 3px 0 var(--pg-lift-ink);
     --pg-shadow-md: var(--pg-lift) var(--pg-lift) 0 var(--pg-lift-ink);
 
+    /* The metrics a control is drawn from, so a denser surface restates the scale once rather than
+       overriding every rule that draws one. */
+    --pg-ctl-h: 34px;
+    --pg-ctl-h-sm: 28px;
+    --pg-ctl-pad: 10px 14px;
+    --pg-ctl-pad-sm: 7px 10px;
+    --pg-ctl-text: 12px;
+    --pg-ctl-text-sm: 10px;
+    --pg-icon: 16px;
+    --pg-field-h: 40px;
+    --pg-field-text: 22px;
+    --pg-field-label: 11px;
+    --pg-plate-text: 13px;
+    --pg-mark-text: 16px;
+    --pg-text: 21px;
+    --pg-text-sm: 19px;
+
     --pg-sp-1: 4px;
     --pg-sp-2: 8px;
     --pg-sp-3: 12px;
@@ -75,8 +92,6 @@
     /* Everything steps and nothing eases: a sprite has no in-between frames to show. */
     --pg-ease: steps(4, end);
     --pg-step-1: steps(1, end);
-
-    /* ---- Pixel Grove construction ---- */
 
     /* The chunky outline, and how far the solid block behind a surface is dropped. */
     --pg-bw: 3px;

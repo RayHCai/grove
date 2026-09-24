@@ -11,12 +11,12 @@
     align-items: center;
     justify-content: center;
     --pg-face: var(--pg-surface);
-    min-height: 34px;
-    padding: 10px 14px;
+    min-height: var(--pg-ctl-h);
+    padding: var(--pg-ctl-pad);
     border: none;
     background: none;
     color: var(--pg-ink);
-    font: normal 12px/1 var(--pg-font-brand);
+    font: normal var(--pg-ctl-text) / 1 var(--pg-font-brand);
     letter-spacing: 1px;
     text-decoration: none;
     white-space: nowrap;
@@ -73,8 +73,8 @@
     flex: none;
 }
 .pg-btn__icon > svg {
-    width: 16px;
-    height: 16px;
+    width: var(--pg-icon);
+    height: var(--pg-icon);
 }
 
 .pg-btn:active {
@@ -109,9 +109,9 @@
 }
 
 .pg-btn--sm {
-    min-height: 28px;
-    padding: 7px 10px;
-    font-size: 10px;
+    min-height: var(--pg-ctl-h-sm);
+    padding: var(--pg-ctl-pad-sm);
+    font-size: var(--pg-ctl-text-sm);
 }
 
 .pg-btn[disabled],
@@ -138,16 +138,14 @@
     transform: none;
 }
 
-/* ---- the square one ---- */
-
 .pg-iconbtn {
     position: relative;
     z-index: 0;
     display: inline-grid;
     place-items: center;
     --pg-face: var(--pg-surface);
-    width: 34px;
-    height: 34px;
+    width: var(--pg-ctl-h);
+    height: var(--pg-ctl-h);
     padding: 0;
     border: none;
     background: none;
@@ -176,8 +174,8 @@
         var(--pg-edge) border-box;
 }
 .pg-iconbtn > svg {
-    width: 16px;
-    height: 16px;
+    width: var(--pg-icon);
+    height: var(--pg-icon);
 }
 .pg-iconbtn:active {
     transform: translate(2px, 2px);
@@ -211,8 +209,8 @@
 }
 
 .pg-iconbtn--sm {
-    width: 28px;
-    height: 28px;
+    width: var(--pg-ctl-h-sm);
+    height: var(--pg-ctl-h-sm);
 }
 
 .pg-iconbtn[aria-pressed='true'],
