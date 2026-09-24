@@ -2,9 +2,8 @@
 //! object: the handler owns only the checks a stream cannot make for itself — the name is a
 //! SHA-256, the declared length is under the ceiling, the type is bounded.
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
@@ -85,59 +84,25 @@ async fn deadline_between_chunks(request: Request, next: middleware::Next) -> Re
         .await
 }
 
-/// Where a caller's correlation id arrives and where this service echoes the one it chose: the one
-/// header `libs/api-contract` and `libs/go-grove/contract` both declare, in the case `http` keeps.
-const REQUEST_ID_HEADER: &str = "x-request-id";
-
-/// Wide enough for a uuid, a 32-hex trace id or a w3c traceparent, and narrow enough that a caller
-/// cannot spend a megabyte of every log line on a header nobody bounded.
-const REQUEST_ID_MAX_LEN: usize = 64;
-
 /// Joins one request to the caller that made it: the id it presented when that is one token this
 /// service can log unchanged, and a fresh one when it is not. Put back on the request as well as
 /// the answer, so a handler reads the id the caller will quote.
 async fn correlate(mut request: Request, next: middleware::Next) -> Response {
     let id = request
         .headers()
-        .get(REQUEST_ID_HEADER)
+        .get(request_id::HEADER)
         .and_then(|presented| presented.to_str().ok())
-        .filter(|presented| valid_request_id(presented))
-        .map_or_else(new_request_id, str::to_owned);
+        .filter(|presented| request_id::valid(presented))
+        .map_or_else(request_id::mint, str::to_owned);
 
     let value = HeaderValue::from_str(&id).expect("a checked request id is a header value");
     request
         .headers_mut()
-        .insert(REQUEST_ID_HEADER, value.clone());
+        .insert(request_id::HEADER, value.clone());
 
     let mut response = next.run(request).await;
-    response.headers_mut().insert(REQUEST_ID_HEADER, value);
+    response.headers_mut().insert(request_id::HEADER, value);
     response
-}
-
-/// Reports whether a presented id is one token a log, an echo header and an outbound call can all
-/// carry unchanged. A caller sends this, so it is bounded before it is ever written down.
-fn valid_request_id(candidate: &str) -> bool {
-    !candidate.is_empty()
-        && candidate.len() <= REQUEST_ID_MAX_LEN
-        && candidate
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-}
-
-/// Mints one from the clock and a counter rather than a uuid crate, because what this needs is a
-/// token two logs can be joined on and not a name unique across the world.
-fn new_request_id() -> String {
-    static COUNTER: AtomicU32 = AtomicU32::new(0);
-
-    // A clock set before 1970 reads as zero rather than failing the request the id is for.
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|since| since.as_nanos() as u64)
-        .unwrap_or(0);
-    format!(
-        "{nanos:016x}{:08x}",
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    )
 }
 
 /// A wrong path answers in the shape a wrong body does, which is the whole point of a code a caller
@@ -428,7 +393,7 @@ mod tests {
     fn echoed(response: &Response) -> &str {
         response
             .headers()
-            .get(REQUEST_ID_HEADER)
+            .get(request_id::HEADER)
             .expect("every answer carries the id it was served under")
             .to_str()
             .unwrap()
@@ -444,7 +409,7 @@ mod tests {
         let response = answer(
             root.path(),
             Request::get("/health")
-                .header(REQUEST_ID_HEADER, "known-id")
+                .header(request_id::HEADER, "known-id")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -457,18 +422,18 @@ mod tests {
     #[tokio::test]
     async fn replaces_an_id_too_long_for_a_log_line_rather_than_writing_it_down() {
         let root = tempfile::tempdir().unwrap();
-        let presented = "a".repeat(REQUEST_ID_MAX_LEN + 1);
+        let presented = "a".repeat(request_id::MAX_LEN + 1);
         let response = answer(
             root.path(),
             Request::get("/health")
-                .header(REQUEST_ID_HEADER, &presented)
+                .header(request_id::HEADER, &presented)
                 .body(Body::empty())
                 .unwrap(),
         )
         .await;
 
         assert_ne!(echoed(&response), presented);
-        assert!(valid_request_id(echoed(&response)));
+        assert!(request_id::valid(echoed(&response)));
     }
 
     #[tokio::test]
@@ -480,7 +445,7 @@ mod tests {
         )
         .await;
 
-        assert!(valid_request_id(echoed(&response)));
+        assert!(request_id::valid(echoed(&response)));
     }
 
     /// The layer is on the outer router for these two: a refusal written by a fallback or by the
@@ -491,7 +456,7 @@ mod tests {
         let response = answer(
             root.path(),
             Request::get("/v1/nothing")
-                .header(REQUEST_ID_HEADER, "known-id")
+                .header(request_id::HEADER, "known-id")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -507,7 +472,7 @@ mod tests {
         let response = answer(
             root.path(),
             Request::get(format!("/v1/objects/{}", name_of(BODY)))
-                .header(REQUEST_ID_HEADER, "known-id")
+                .header(request_id::HEADER, "known-id")
                 .body(Body::empty())
                 .unwrap(),
         )

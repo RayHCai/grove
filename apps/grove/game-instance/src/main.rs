@@ -8,7 +8,6 @@ mod config;
 mod isolate;
 mod net;
 mod protocol;
-mod request_id;
 mod session;
 mod store;
 mod ticket;
