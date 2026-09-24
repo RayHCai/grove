@@ -3,11 +3,15 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "The game surface: the canvas a session mounts onto, addressed at the authority that runs it.",
+    "description": "The game surface: the canvas a session mounts onto, addressed at the authority that runs it — including one this page is holding.",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./preview": {
+            "types": "./dist/preview.d.ts",
+            "import": "./dist/preview.js"
         }
     },
     "main": "./dist/index.js",
@@ -22,12 +26,18 @@
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
-        "@platform/protocol": "workspace:*"
+        "@platform/client": "workspace:*",
+        "@platform/glue": "workspace:*",
+        "@platform/project": "workspace:*",
+        "@platform/renderer": "workspace:*",
+        "@platform/scripting": "workspace:*",
+        "@platform/transport": "workspace:*"
     },
     "peerDependencies": {
         "react": ">=19"
     },
     "devDependencies": {
+        "@platform/core": "workspace:*",
         "@types/react": "^19.2.18",
         "@types/react-dom": "^19.2.4",
         "jsdom": "^28.0.1",
