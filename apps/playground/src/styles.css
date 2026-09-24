@@ -114,11 +114,7 @@ body {
     color: var(--muted);
 }
 
-.badge--ready {
-    background: color-mix(in srgb, var(--accent) 22%, transparent);
-    color: var(--accent);
-}
-
+.badge--ready,
 .badge--live {
     background: color-mix(in srgb, var(--accent) 22%, transparent);
     color: var(--accent);
