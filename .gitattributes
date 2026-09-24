@@ -1,0 +1,8 @@
+# `core.autocrlf` is on for Windows checkouts, and a shell script it rewrote is one a Linux container
+# reads a carriage return off the end of every line of. These are bind-mounted into containers as the
+# working copy holds them, so the working copy has to hold LF.
+*.sh text eol=lf
+# Its `deps` command is a shell script in a block scalar, which `sh -c` reads the same way.
+compose.yaml text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf

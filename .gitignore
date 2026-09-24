@@ -1,4 +1,5 @@
 node_modules/
+.pnpm-store/
 dist/
 target/
 .turbo/
@@ -21,3 +22,5 @@ bench/runs/
 !.vscode/extensions.json
 
 .claude/
+# One build tree per task, under @grove/game-builder so the platform packages resolve from it.
+apps/grove/game-builder/.builds/

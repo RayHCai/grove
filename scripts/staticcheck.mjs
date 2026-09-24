@@ -6,7 +6,7 @@ import { runToolchain } from './toolchain.mjs';
 runToolchain({
     bin: 'staticcheck',
     probe: ['-version'],
-    // Kept at or above the toolchain go.work pins: staticcheck reads the standard library with the
+    // Kept at or above the toolchain go.mod pins: staticcheck reads the standard library with the
     // compiler it was built against, and an older one fails to parse a newer one.
     install: 'go install honnef.co/go/tools/cmd/staticcheck@2026.2.1',
 });

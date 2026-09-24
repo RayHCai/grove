@@ -17,7 +17,7 @@
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "clean": "turbo run clean && rm -rf node_modules/.cache .turbo",
-        "prepare": "lefthook install"
+        "prepare": "node scripts/install-hooks.mjs"
     },
     "devDependencies": {
         "@types/node": "^26.1.2",

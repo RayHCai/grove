@@ -3,8 +3,8 @@ packages:
     - apps/*
     - apps/grove/*
     - libs/*
+    - tools/*
     - bench
-    - examples
     - integration
 
 # lefthook's postinstall fetches its platform binary and installs the git hooks; esbuild's fetches
