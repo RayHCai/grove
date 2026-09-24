@@ -1,9 +1,10 @@
 {
     "$schema": "https://turbo.build/schema.json",
     "ui": "tui",
-    // Global for the same reason `tsconfig.base.json` is: `go.work` is the root file that resolves
-    // every service's `require` on libs/go-grove to the tree it is checked out with, not a proxy.
-    "globalDependencies": ["tsconfig.base.json", ".oxlintrc.json", "scripts/*.mjs", "go.work"],
+    // Global for the same reason `tsconfig.base.json` is: `go.mod` is the root file that puts every
+    // service and libs/go-grove in one module, so each resolves the others from the tree it is
+    // checked out with rather than from a proxy.
+    "globalDependencies": ["tsconfig.base.json", ".oxlintrc.json", "scripts/*.mjs", "go.mod"],
     // Hashed, not passed through: it decides whether a missing toolchain is a skip or a failure, so
     // a cached pass produced by a skip must not be replayed for a run that requires the real thing.
     "globalEnv": ["GROVE_REQUIRE_TOOLCHAIN"],

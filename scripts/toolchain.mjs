@@ -8,7 +8,7 @@ const shell = process.platform === 'win32';
 /** True when `bin` answers `probe`; on Windows a missing binary is a non-zero shell. */
 export function installed(bin, probe) {
     // GOTOOLCHAIN=local so the probe answers whether this machine HAS the tool, rather than whether
-    // it can fetch the one go.work pins — an offline machine with Go would otherwise read as having
+    // it can fetch the one go.mod pins — an offline machine with Go would otherwise read as having
     // none.
     const env = { ...process.env, GOTOOLCHAIN: 'local' };
     const result = spawnSync(bin, probe, { stdio: 'ignore', shell, env });
