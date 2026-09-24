@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, TextInput } from '@grove/ui';
+import { PASSWORD_MAX, PASSWORD_MIN } from '@grove/api-contract';
 import { messageOf } from '../api/messages';
 import { Link } from '../router/Link';
 import { replace } from '../router/useRoute';
 import { useSession } from '../session/SessionProvider';
 import { AuthCard } from './AuthCard';
-
-/** The floor the service holds a password to; the field only says it once a password is under it. */
-const MIN_PASSWORD = 12;
 
 export interface ResetPasswordProps {
     /** The key the reset mail linked with, which is a password until it is spent. */
@@ -36,12 +34,12 @@ export function ResetPassword({ token }: ResetPasswordProps): React.JSX.Element 
     }, [token]);
 
     const key = held.current;
-    const tooShort = password.length > 0 && password.length < MIN_PASSWORD;
+    const tooShort = password.length > 0 && password.length < PASSWORD_MIN;
 
     async function submit(): Promise<void> {
         if (key === undefined) return;
         if (tooShort) {
-            setRefusal(`A password is at least ${String(MIN_PASSWORD)} characters.`);
+            setRefusal(`A password is at least ${String(PASSWORD_MIN)} characters.`);
             return;
         }
         setBusy(true);
@@ -101,9 +99,10 @@ export function ResetPassword({ token }: ResetPasswordProps): React.JSX.Element 
                 name="newPassword"
                 autoComplete="new-password"
                 required
-                minLength={MIN_PASSWORD}
+                minLength={PASSWORD_MIN}
+                maxLength={PASSWORD_MAX}
                 aria-invalid={tooShort || undefined}
-                hint={tooShort ? `At least ${String(MIN_PASSWORD)} characters.` : undefined}
+                hint={tooShort ? `At least ${String(PASSWORD_MIN)} characters.` : undefined}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
             />

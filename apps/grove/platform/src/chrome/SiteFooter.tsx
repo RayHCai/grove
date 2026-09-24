@@ -6,7 +6,6 @@ export function SiteFooter(): React.JSX.Element {
         <footer className="sitefooter">
             <Panel face="olive" className="sitefooter__inner">
                 <Wordmark />
-                <p className="sitefooter__note">Made for people who would rather be playing.</p>
             </Panel>
         </footer>
     );

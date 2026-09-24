@@ -1,5 +1,7 @@
 import { ApiError } from './client';
 
+export { isLapsedSession } from './client';
+
 /**
  * What a page puts on screen when a call did not go through.
  *
@@ -19,9 +21,4 @@ export function messageOf(failure: unknown, fallback: string): string {
         default:
             return failure.message;
     }
-}
-
-/** Whether a refusal was the service saying nobody is signed in. */
-export function isLapsedSession(failure: unknown): boolean {
-    return failure instanceof ApiError && failure.code === 'unauthorized';
 }

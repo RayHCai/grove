@@ -1,13 +1,11 @@
 import { useState } from 'react';
 import { Button, TextInput } from '@grove/ui';
+import { PASSWORD_MAX, PASSWORD_MIN } from '@grove/api-contract';
 import { messageOf } from '../api/messages';
 import { Link } from '../router/Link';
 import { go } from '../router/useRoute';
 import { useSession } from '../session/SessionProvider';
 import { AuthCard } from './AuthCard';
-
-/** The floor the service holds a password to; the field only says it once a password is under it. */
-const MIN_PASSWORD = 12;
 
 export interface SignUpProps {
     /** Where the editor asked to be sent back to, if it was the editor that sent somebody here. */
@@ -23,11 +21,11 @@ export function SignUp({ returnTo }: SignUpProps): React.JSX.Element {
     const [refusal, setRefusal] = useState<string | undefined>(undefined);
     const [busy, setBusy] = useState(false);
 
-    const tooShort = password.length > 0 && password.length < MIN_PASSWORD;
+    const tooShort = password.length > 0 && password.length < PASSWORD_MIN;
 
     async function submit(): Promise<void> {
         if (tooShort) {
-            setRefusal(`A password is at least ${String(MIN_PASSWORD)} characters.`);
+            setRefusal(`A password is at least ${String(PASSWORD_MIN)} characters.`);
             return;
         }
         setBusy(true);
@@ -78,9 +76,10 @@ export function SignUp({ returnTo }: SignUpProps): React.JSX.Element {
                 name="password"
                 autoComplete="new-password"
                 required
-                minLength={MIN_PASSWORD}
+                minLength={PASSWORD_MIN}
+                maxLength={PASSWORD_MAX}
                 aria-invalid={tooShort || undefined}
-                hint={tooShort ? `At least ${String(MIN_PASSWORD)} characters.` : undefined}
+                hint={tooShort ? `At least ${String(PASSWORD_MIN)} characters.` : undefined}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
             />

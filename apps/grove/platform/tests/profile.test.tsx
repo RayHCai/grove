@@ -77,7 +77,7 @@ describe('changing the password', () => {
         await submit(need(host, 'button', 'Change password'));
         await until(() => host.querySelector('.card__refusal') !== null);
 
-        expect(host.querySelector('.card__refusal')?.textContent).toContain('at least 12');
+        expect(host.querySelector('.card__refusal')?.textContent).toContain('at least 8');
         expect(api.credentials.password).toBe(PASSWORD);
     });
 });

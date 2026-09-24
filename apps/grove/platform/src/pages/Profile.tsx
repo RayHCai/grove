@@ -1,23 +1,14 @@
 import { useState } from 'react';
 import { Button, Eyebrow, Panel, SectionTitle, TextInput } from '@grove/ui';
-import type { Account } from '@grove/api-contract';
+import { PASSWORD_MAX, PASSWORD_MIN, type Account } from '@grove/api-contract';
 import type { Api } from '../api/client';
 import { isLapsedSession, messageOf } from '../api/messages';
 import { go } from '../router/useRoute';
 import { useSession } from '../session/SessionProvider';
-
-/** The floor the service holds a password to, stated here so the field says it before the refusal. */
-const MIN_PASSWORD = 12;
+import { formatDate } from './date';
 
 /** What one card's last write did. Every card on this page reports in these four states. */
 type Wrote = { at: 'idle' | 'saving' | 'saved' } | { at: 'failed'; message: string };
-
-function joined(iso: string): string {
-    const when = new Date(iso);
-    return Number.isNaN(when.getTime())
-        ? 'date unknown'
-        : when.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-}
 
 export interface ProfileProps {
     account: Account;
@@ -34,7 +25,7 @@ export function Profile({ account }: ProfileProps): React.JSX.Element {
                     <Eyebrow>{account.displayName}</Eyebrow>
                     <SectionTitle
                         as="h1"
-                        subline={`With Grove since ${joined(account.createdAt)}.`}
+                        subline={`With Grove since ${formatDate(account.createdAt, 'long')}.`}
                     >
                         Your profile
                     </SectionTitle>
@@ -124,13 +115,13 @@ function PasswordCard({ api }: { api: Api }): React.JSX.Element {
     const [newPassword, setNewPassword] = useState('');
     const [state, setState] = useState<Wrote>({ at: 'idle' });
 
-    const tooShort = newPassword.length > 0 && newPassword.length < MIN_PASSWORD;
+    const tooShort = newPassword.length > 0 && newPassword.length < PASSWORD_MIN;
 
     async function save(): Promise<void> {
         if (tooShort) {
             setState({
                 at: 'failed',
-                message: `A password is at least ${String(MIN_PASSWORD)} characters.`,
+                message: `A password is at least ${String(PASSWORD_MIN)} characters.`,
             });
             return;
         }
@@ -182,9 +173,10 @@ function PasswordCard({ api }: { api: Api }): React.JSX.Element {
                 name="newPassword"
                 autoComplete="new-password"
                 required
-                minLength={MIN_PASSWORD}
+                minLength={PASSWORD_MIN}
+                maxLength={PASSWORD_MAX}
                 aria-invalid={tooShort || undefined}
-                hint={`At least ${String(MIN_PASSWORD)} characters.`}
+                hint={`At least ${String(PASSWORD_MIN)} characters.`}
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
             />
