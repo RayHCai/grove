@@ -1,0 +1,14 @@
+{
+    "name": "@grove/healthcheck",
+    "version": "0.0.0",
+    "private": true,
+    "description": "The one binary every distroless image answers its container healthcheck with. Go.",
+    "scripts": {
+        "build": "node ../../scripts/go.mjs build -o dist/healthcheck .",
+        "typecheck": "node ../../scripts/go.mjs vet ./... && node ../../scripts/staticcheck.mjs ./...",
+        "test": "node ../../scripts/go.mjs test ./...",
+        "format": "node ../../scripts/go.mjs fmt ./...",
+        "format:check": "node ../../scripts/gofmt-check.mjs",
+        "clean": "rm -rf dist .turbo"
+    }
+}
