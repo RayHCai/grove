@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -41,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel()}))
+	log := env.Logger(cfg.Env, os.Stdout)
 
 	// The three seams are chosen here and nowhere else: what forks a process, what asks one how it
 	// is, and what decides which port it binds.
