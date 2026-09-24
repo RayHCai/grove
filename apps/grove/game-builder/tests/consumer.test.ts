@@ -1,127 +1,163 @@
-// What a build box does with one claimed task: what it reads, what it writes back, and which
+// What a build box does with one claimed task: what it compiles, what it writes back, and which
 // failures leave the message for another box to take.
 
 import { describe, expect, it } from 'vitest';
-import { GameId, Task, TaskId, VersionId } from '@grove/api-contract';
-import type { Manifest, TaskStatusUpdate } from '@grove/api-contract';
+import { BuildManifest } from '@grove/api-contract';
 import { runBuild } from '../src/consumer.js';
 import type { Builder } from '../src/consumer.js';
-import type { Manifests } from '../src/manifests.js';
-import type { Tasks, TaskWritten } from '../src/tasks.js';
+import { readEnv } from '../src/env.js';
+import {
+    CLAIMED,
+    GAME_ID,
+    PLAYER_SOURCE,
+    REVISION,
+    TASK_ID,
+    UNDETERMINED_SOURCE,
+    holding,
+    projectJson,
+    quiet,
+    silent,
+    writing,
+} from './doubles.js';
 
-const TASK_ID = TaskId.parse('8c2e4a60-5d17-4b93-8f0a-1e6d2c4b7a35');
-const GAME_ID = GameId.parse('9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f');
+/** A real compile spawns tsc and two bundlers, which is seconds rather than milliseconds. */
+const COMPILES = 120_000;
 
-const CLAIMED: Task = Task.parse({
-    taskId: TASK_ID,
-    gameId: GAME_ID,
-    kind: 'BUILD',
-    status: 'IN_PROGRESS',
-    manifestRevision: 7,
-    attempts: 1,
-    createdAt: '2026-09-18T09:00:00.000Z',
-    updatedAt: '2026-09-18T09:00:01.000Z',
-    startedAt: '2026-09-18T09:00:01.000Z',
+const env = readEnv({
+    FLEET_SECRET: 'c'.repeat(32),
+    API_URL: 'http://api.grove.internal:4000',
 });
 
-const MANIFEST: Manifest = {
-    gameId: GAME_ID,
-    revision: 7,
-    files: [
-        {
-            path: 'main.ts',
-            kind: 'source',
-            versionId: VersionId.parse('v1'),
-            byteLength: 30,
-            contentType: 'text/typescript',
-        },
-        {
-            path: 'art/tile.png',
-            kind: 'asset',
-            versionId: VersionId.parse('v2'),
-            byteLength: 512,
-            contentType: 'image/png',
-        },
-    ],
-};
-
-/** A log that keeps what it was told, so a stub that only reports can still be asserted on. */
-function quiet(): Builder['log'] & { lines: { level: string; details: object }[] } {
-    const lines: { level: string; details: object }[] = [];
-    const at =
-        (level: string) =>
-        (details: object = {}) => {
-            lines.push({ level, details });
-        };
-    return { lines, info: at('info'), warn: at('warn'), error: at('error') } as never;
+function game(source: string): Record<string, string> {
+    return { 'project.json': projectJson(), 'src/player.ts': source };
 }
-
-/** A task seam that records every update and answers each one from `answers`, in order. */
-function writing(...answers: TaskWritten[]): Tasks & { wrote: TaskStatusUpdate[] } {
-    const wrote: TaskStatusUpdate[] = [];
-    let at = 0;
-    return {
-        wrote,
-        advance: async (_task, update) => {
-            wrote.push(update);
-            const answer = answers[at] ?? { outcome: 'settled', task: CLAIMED };
-            at += 1;
-            return answer;
-        },
-    };
-}
-
-const holding: Manifests = { read: async () => MANIFEST };
-const empty: Manifests = { read: async () => undefined };
 
 describe('a claimed build', () => {
-    it('claims the task, reads its manifest, and settles it as successful', async () => {
-        const tasks = writing({ outcome: 'settled', task: CLAIMED });
-        const log = quiet();
+    it(
+        'compiles the pinned revision and settles it with what it produced',
+        async () => {
+            const tasks = writing();
+            const store = holding(game(PLAYER_SOURCE));
+            const builder: Builder = { tasks, store, env, log: quiet() };
 
-        expect(await runBuild(TASK_ID, { tasks, manifests: holding, log })).toBe('settled');
-        expect(tasks.wrote[0]).toEqual({ status: 'IN_PROGRESS' });
-        expect(tasks.wrote[1]).toEqual({
-            status: 'SUCCESSFUL',
-            detail: { fileCount: 2, byteLength: 542 },
-        });
-    });
+            expect(await runBuild(TASK_ID, builder)).toBe('settled');
+            expect(tasks.wrote[0]).toEqual({ status: 'IN_PROGRESS' });
+            expect(tasks.wrote[1]?.status).toBe('SUCCESSFUL');
 
-    it('reports what it read, which is what stands in for build output for now', async () => {
-        const log = quiet();
-        await runBuild(TASK_ID, { tasks: writing(), manifests: holding, log });
+            // Four files, and the manifest last: everything before it is inert until it names them.
+            expect([...store.stored.keys()]).toEqual([
+                'client.js',
+                'simConfig.json',
+                'server.js',
+                'build.json',
+            ]);
+        },
+        COMPILES,
+    );
 
-        expect(log.lines.at(-1)?.details).toMatchObject({
-            fileCount: 2,
-            byteLength: 542,
-            paths: ['main.ts', 'art/tile.png'],
-        });
-    });
+    it(
+        'writes a build manifest naming the revision it was pinned to',
+        async () => {
+            const store = holding(game(PLAYER_SOURCE));
+            await runBuild(TASK_ID, { tasks: writing(), store, env, log: quiet() });
+
+            const written = BuildManifest.parse(
+                JSON.parse(store.stored.get('build.json')?.toString('utf8') ?? '{}'),
+            );
+            expect(written.gameId).toBe(GAME_ID);
+            expect(written.revision).toBe(REVISION);
+            expect(written.bundles.server.side).toBe('server');
+            expect(written.bundles.client.side).toBe('client');
+        },
+        COMPILES,
+    );
+
+    it(
+        'tells the world where the half a joiner fetches is, and what it hashes to',
+        async () => {
+            const store = holding(game(PLAYER_SOURCE));
+            await runBuild(TASK_ID, { tasks: writing(), store, env, log: quiet() });
+
+            const config = JSON.parse(store.stored.get('simConfig.json')?.toString('utf8') ?? '{}');
+            const built = BuildManifest.parse(
+                JSON.parse(store.stored.get('build.json')?.toString('utf8') ?? '{}'),
+            );
+            // The handshake compares these, so a config naming anything but the stored client half
+            // would admit nobody.
+            expect(config.project.bundleHash).toBe(built.bundles.client.hash);
+            expect(config.project.bundleUrl).toBe(built.bundles.client.url);
+            // What a Rust host reads off this file, which no box may supply instead.
+            expect(config.simRate).toBe(30);
+            expect(config.sendRate).toBe(15);
+        },
+        COMPILES,
+    );
+
+    it(
+        'fails the build on source a SyncedScript may not run, and never retries it',
+        async () => {
+            const tasks = writing();
+            const store = holding(game(UNDETERMINED_SOURCE));
+
+            expect(await runBuild(TASK_ID, { tasks, store, env, log: quiet() })).toBe('settled');
+            expect(tasks.wrote[1]?.status).toBe('FAILED');
+            // Positioned, because the creator has to be able to open the line it names.
+            expect(tasks.wrote[1]?.detail?.diagnostics?.[0]).toMatchObject({
+                severity: 'error',
+                file: 'src/player.ts',
+            });
+            // Nothing was stored: a refusal comes before anything is written.
+            expect(store.stored.size).toBe(0);
+        },
+        COMPILES,
+    );
+
+    it(
+        'fails the build on a manifest that is not a project this build can read',
+        async () => {
+            const tasks = writing();
+            const store = holding({ 'project.json': '{ not json', 'src/player.ts': PLAYER_SOURCE });
+
+            expect(await runBuild(TASK_ID, { tasks, store, env, log: quiet() })).toBe('settled');
+            expect(tasks.wrote[1]?.status).toBe('FAILED');
+        },
+        COMPILES,
+    );
 
     it('is acknowledged when it was already settled, or it comes back forever', async () => {
         const tasks = writing({ outcome: 'refused' });
-        expect(await runBuild(TASK_ID, { tasks, manifests: holding, log: quiet() })).toBe(
-            'settled',
-        );
-        // Nothing was compiled and nothing was written: the claim itself was refused.
+        const builder: Builder = { tasks, store: silent(), env, log: quiet() };
+
+        expect(await runBuild(TASK_ID, builder)).toBe('settled');
+        // Nothing was written past the claim: the claim itself was refused.
         expect(tasks.wrote).toHaveLength(1);
     });
 
     it('is left for another box when the claim could not be written down', async () => {
         const tasks = writing({ outcome: 'unavailable' });
-        expect(await runBuild(TASK_ID, { tasks, manifests: holding, log: quiet() })).toBe('retry');
+        expect(await runBuild(TASK_ID, { tasks, store: silent(), env, log: quiet() })).toBe(
+            'retry',
+        );
     });
 
-    it('is left for another box when the outcome could not be written down', async () => {
-        const tasks = writing({ outcome: 'settled', task: CLAIMED }, { outcome: 'unavailable' });
-        expect(await runBuild(TASK_ID, { tasks, manifests: holding, log: quiet() })).toBe('retry');
+    it('is left for another box when the source could not be read', async () => {
+        const tasks = writing();
+        expect(await runBuild(TASK_ID, { tasks, store: silent(), env, log: quiet() })).toBe(
+            'retry',
+        );
+        // Only the claim: an outcome would be a verdict on a game this box never saw.
+        expect(tasks.wrote).toHaveLength(1);
     });
 
-    it('fails against the box rather than against the source when the manifest is gone', async () => {
-        const tasks = writing({ outcome: 'settled', task: CLAIMED });
-        expect(await runBuild(TASK_ID, { tasks, manifests: empty, log: quiet() })).toBe('settled');
-        expect(tasks.wrote[1]).toMatchObject({ status: 'FAILED' });
-        // No diagnostic, because nothing in their source can make a manifest unreadable.
+    it('gives up rather than rebuilding forever once the attempts are spent', async () => {
+        const spent = { ...CLAIMED, attempts: env.BUILD_ATTEMPTS };
+        const tasks = writing({ outcome: 'settled', task: spent });
+
+        expect(await runBuild(TASK_ID, { tasks, store: silent(), env, log: quiet() })).toBe(
+            'settled',
+        );
+        expect(tasks.wrote[1]?.status).toBe('FAILED');
+        // No diagnostics, because nothing was ever said about the source: this is the fleet.
         expect(tasks.wrote[1]?.detail?.diagnostics).toBeUndefined();
     });
 });

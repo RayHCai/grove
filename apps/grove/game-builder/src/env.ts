@@ -15,11 +15,6 @@ const Env = z.object({
 
     /** The stream builds are claimed from. Absent, and this process has no work to do. */
     REDIS_URL: z.url({ protocol: /^rediss?$/u }).optional(),
-    /** The games bucket a manifest is read from. Absent, and a claimed build can only fail. */
-    GAMES_BUCKET: z.string().min(1).optional(),
-    AWS_REGION: z.string().min(1).default('us-east-1'),
-    /** Set only where something other than AWS answers for the bucket, such as a local MinIO. */
-    S3_ENDPOINT: z.url().optional(),
 
     /**
      * What this box is called inside the consumer group. Two builders sharing a name share their
@@ -27,9 +22,19 @@ const Env = z.object({
      */
     BUILDER_NAME: z.string().min(1).default(''),
 
-    // How long one compile may hold a claim before another box may take it back. Fifteen minutes,
-    // because a compile is minutes rather than seconds.
-    BUILD_TIMEOUT_MS: z.coerce.number().int().positive().default(900_000),
+    // How long one compile may hold a claim before another box may take it back. A creator's game
+    // is a handful of modules, so a build is under a minute and this is the window an infrastructure
+    // failure is reclaimed inside rather than the time a compile is expected to need.
+    BUILD_TIMEOUT_MS: z.coerce.number().int().positive().default(180_000),
+
+    /**
+     * How many boxes may try one build before it is settled as failed.
+     *
+     * A failed build is restarted whole rather than resumed, so without a ceiling a fault that
+     * looks transient and is not becomes a game rebuilt forever. The count is the row's, so it
+     * spans boxes: this is attempts at the task, not attempts by this process.
+     */
+    BUILD_ATTEMPTS: z.coerce.number().int().positive().default(3),
 });
 
 export type Env = z.infer<typeof Env>;
