@@ -14,9 +14,9 @@ body {
 body {
     color: var(--pg-ink);
     font-family: var(--pg-font-ui);
-    /* VT323 draws about two thirds the height of a proportional face at the same size, so 21px
-       here is the 14px of the old body text, not a larger one. */
-    font-size: 21px;
+    /* VT323 draws about two thirds the height of a proportional face at the same size, so the 21px
+       behind this token is the 14px of the old body text, not a larger one. */
+    font-size: var(--pg-text);
     line-height: 1.45;
     /* The pixel faces are meant to look aliased; smoothing them rounds the very steps they are. */
     -webkit-font-smoothing: none;

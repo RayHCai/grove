@@ -15,7 +15,9 @@ import { MinimizeIcon } from '../src/icons/MinimizeIcon.js';
 import { MoonIcon } from '../src/icons/MoonIcon.js';
 import { PauseIcon } from '../src/icons/PauseIcon.js';
 import { PlayIcon } from '../src/icons/PlayIcon.js';
+import { PopoutIcon } from '../src/icons/PopoutIcon.js';
 import { SendIcon } from '../src/icons/SendIcon.js';
+import { SettingsIcon } from '../src/icons/SettingsIcon.js';
 import { SparkIcon } from '../src/icons/SparkIcon.js';
 import { StarIcon } from '../src/icons/StarIcon.js';
 import { StopIcon } from '../src/icons/StopIcon.js';
@@ -37,9 +39,11 @@ const icons = [
     ['BlocksIcon', BlocksIcon],
     ['CloseIcon', CloseIcon],
     ['SendIcon', SendIcon],
+    ['SettingsIcon', SettingsIcon],
     ['LeafIcon', LeafIcon],
     ['MaximizeIcon', MaximizeIcon],
     ['MinimizeIcon', MinimizeIcon],
+    ['PopoutIcon', PopoutIcon],
     ['TerminalIcon', TerminalIcon],
     ['StarIcon', StarIcon],
     ['HeartIcon', HeartIcon],

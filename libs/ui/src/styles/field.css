@@ -2,7 +2,7 @@
     display: block;
     margin-bottom: var(--pg-sp-3);
     color: var(--pg-ink);
-    font: normal 11px/1.4 var(--pg-font-brand);
+    font: normal var(--pg-field-label) / 1.4 var(--pg-font-brand);
     letter-spacing: 1px;
 }
 
@@ -13,14 +13,14 @@
 .pg-field__control {
     display: block;
     width: 100%;
-    min-height: 40px;
+    min-height: var(--pg-field-h);
     padding: 9px 12px;
     border: var(--pg-bw) solid var(--pg-edge);
     background: var(--pg-surface);
     box-shadow: inset var(--pg-lift) var(--pg-lift) 0 var(--pg-surface-2);
     color: var(--pg-ink);
     font-family: var(--pg-font-ui);
-    font-size: 22px;
+    font-size: var(--pg-field-text);
     line-height: 1.2;
 }
 .pg-field__control::placeholder {
@@ -41,7 +41,7 @@
 .pg-field__hint {
     margin-top: var(--pg-sp-2);
     color: var(--pg-ink-muted);
-    font-size: 19px;
+    font-size: var(--pg-text-sm);
 }
 .pg-field__control[readonly] {
     background: var(--pg-surface-2);

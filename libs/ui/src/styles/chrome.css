@@ -16,7 +16,7 @@
     align-items: center;
     gap: var(--pg-sp-3);
     color: inherit;
-    font: normal 16px/1 var(--pg-font-brand);
+    font: normal var(--pg-mark-text) / 1 var(--pg-font-brand);
     letter-spacing: 2px;
     text-decoration: none;
 }
