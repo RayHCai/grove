@@ -17,7 +17,8 @@ what stands behind each one is chosen where the process starts. `Records` answer
 credential names, who owns a game, what is in that game's workspace, what is queued for it, and every
 write that makes any of it true; `Fleet` answers where a joining player should dial; `Storage` is the
 games bucket a creator's files and manifests live in; `TaskQueue` announces a queued task on the
-stream the service that runs that kind reads; `Mailer` carries a password reset link to an address.
+stream the service that runs that kind reads, in that kind's own Redis database — one connection per
+kind, since `SELECT` pins a connection to one; `Mailer` carries a password reset link to an address.
 
 `main.ts` reads the environment and attaches what it found: `Records` is Postgres through Prisma when
 `DATABASE_URL` names one, `Storage` is S3 through the AWS SDK when `GAMES_BUCKET` names a bucket, and
@@ -71,7 +72,7 @@ password and hands back the session it replaces, and `GET /v1/players/:playerId`
 and id every other signed-in caller may read, and never the address. `POST /v1/games` makes one for whoever asked, and `GET /v1/games` lists what
 they own, newest first, up to a hundred.
 
-A password is 12 to 128 characters. A display name and a game title are NFKC-folded and trimmed
+A password is 8 to 128 characters. A display name and a game title are NFKC-folded and trimmed
 before anything sees them, then held to 1–64 and 1–120, and both refuse control and
 direction-override characters: a display name reaches creator-authored game code through every
 leaderboard row, and a name that renders as something other than what it is belongs to nobody.
@@ -114,6 +115,17 @@ versioning keeps every prior byte-set addressable, so the manifests are the hist
 once, names every path the game held at that instant and the exact version at it, and is what a
 build pins to and a rollback points at.
 
+`manifests/` and `build/` are siblings rather than one inside the other, because they sit on
+opposite sides of the compiler: a manifest is a build's **input** and is written by the save, where
+a build's output is written by the build. Most revisions have the first and no second — a creator
+saves fifty times and publishes twice — and a manifest the build produced could only name whatever
+was current when a box got round to the job, which is the race pinning a build to a revision exists
+to close. What the output prefix does carry is `build/<revision>/build.json`, a `BuildManifest`
+naming what that build produced: the version, the bundle set, and the `projectId`/`projectHash` a
+joiner has to claim. It is written before the task is settled, so a settled build always has one and
+a lost row is recoverable; the row a creator's editor polls holds the same bytes, because the
+allocator reads them on the path of every join and a bucket round trip does not belong there.
+
 `PUT /v1/games/:gameId/workspace` is the save, and it carries what **changed**: the text of each
 source written to, the path of each asset uploaded beside it, and the paths removed. A path it never
 mentions is one nobody touched. It names `baseRevision`, and the statement that checks that also
@@ -127,16 +139,22 @@ records nothing — a ticket the editor never used must not leave a row behind �
 names the path afterwards reads back from the bucket what actually landed, so the version and the
 length are facts rather than the editor's claim. An asset named and never uploaded is a `400` saying
 which. In the same transaction that bumps the revision, each asset earns an `ASSET_UPLOAD` task
-pinned to the revision that landed it; a save of source alone creates none.
+pinned to the revision that landed it; a save of source alone creates none. Settling one of those
+tasks successfully is what writes `GameFile.validatedVersionId`, and it is written against the
+version the task named rather than against the path: an asset counts as verified only while that
+column equals the `versionId` the row holds, so re-uploading over a verified key leaves a verdict
+naming bytes the game no longer has.
 
 `GET /v1/games/:gameId/files/*` hands one file back at the version the rows name, which is how an
 editor reads a game it did not just write: what this game holds is what it may read.
 
 `POST /v1/games/:gameId/versions` publishes what is saved. It carries no body: the manifest is
 already frozen, so the route writes a `BUILD` task pinned to that revision and pushes its id onto a
-stream. Revision zero is a `409` — there is a manifest to build only once one save has happened. A
-second publish of a manifest already queued gets the first task back rather than a second build of
-identical bytes.
+stream. Revision zero is a `409` — there is a manifest to build only once one save has happened. So
+is a game holding an asset whose verification has not reached the bytes it holds, and the refusal
+names the paths: a build box is the one thing in the fleet that evaluates a creator's code, and it
+may not be handed bytes nothing has looked at. A second publish of a manifest already queued gets
+the first task back rather than a second build of identical bytes.
 
 `PATCH /v1/games/:gameId` is where a creator says who may reach their game: `private`, `unlisted` or
 `public`. A game is created private, because a world nobody has finished must not become playable by
@@ -155,10 +173,13 @@ What it sends a player at is the newest build that **finished**, never the newes
 revision that failed to compile, or is still compiling, is one no box can be asked to run, and a
 game that has never had one is a `409`. That version travels the whole way down: the placement call
 names it so the fleet joins a world running that code rather than one still draining on the version
-before it, and the answer carries it back beside the bundle set, so the browser fetches the half it
-needs rather than whatever this service built most recently. A placement that came back on another
-version is refused here as a fleet fault — a browser handed the wrong bundle set is refused at the
-handshake and, where it declared no hash, admitted into a world holding none of its own scripts.
+before it, and the answer carries back the `projectId` and `projectHash` a joiner has to claim —
+without which the handshake refuses it before a `Player` exists. No bundle refs go with them: what
+code to run is the `Welcome`'s to name, and the session verifies those bytes itself, so a second
+copy here would be this service's guess at what the world a player landed in is running. A placement
+that came back on another version is refused here as a fleet fault: it would mean naming an identity
+the world it placed does not hold, and a joiner declaring the wrong one is turned away at the
+handshake.
 
 ## Tasks
 
@@ -179,6 +200,22 @@ backwards — so a redelivered attempt that tries to walk a settled task back is
 outcome overwritten. A creator's editor reads its own through
 `GET /v1/games/:gameId/tasks/:taskId`, which is scoped to the game the way every other creator-facing
 route is: a task id alone says nothing about who queued it.
+
+## What a build box may reach
+
+`@grove/game-builder` holds no bucket credential, so every byte it touches goes through three routes
+behind the fleet bearer. `GET /v1/fleet/games/:gameId/revisions/:revision/manifest` hands back the
+snapshot that revision froze; `.../files/*` hands back one file at the version **that manifest**
+named, never what is current at the key, so an edit made after the publish cannot reach a compiler;
+and `PUT /v1/fleet/games/:gameId/revisions/:revision/build/:name` stores one flat name under
+`build/<revision>/`. A name is one segment, so there is no spelling of it that reaches another
+game, another revision, or a key outside the prefix.
+
+The address in the answer is computed here from `GAMES_CDN_URL` and the digest is taken of the bytes
+that landed, because both are what a joining browser is later held to: a worker that supplied its
+own would be choosing where the code a player runs comes from. Bodies in that scope are bytes and
+never values — the JSON parser is overridden along with the rest — since a build manifest parsed and
+re-serialised here would be stored under a hash that is not the one it was written as.
 
 ## The fleet's history
 
@@ -213,10 +250,11 @@ internet, and a value that fell back to something would be a choice nobody made.
 | `FLEET_SECRET`           | the bearer this service presents to the fleet's own services, at least 32 characters — a third key, a third blast radius                                                                                          |
 | `SERVER_MANAGER_URL`     | where a placement is asked for, once per join                                                                                                                                                                     |
 | `GAMES_BUCKET`           | the bucket every game's files, manifests and build output live in; absent, a save says it has nowhere to put a file                                                                                               |
+| `GAMES_CDN_URL`          | where the edge serves that bucket from, which is what a build's output is addressed by; only `build/` and `assets/` are reachable through it                                                                      |
 | `AWS_REGION`             | the bucket's region, `us-east-1` by default                                                                                                                                                                       |
-| `S3_ENDPOINT`            | set only where something other than AWS answers for the bucket, such as a local MinIO                                                                                                                             |
+| `S3_ENDPOINT`            | set only where something other than AWS answers for the bucket, such as a local LocalStack                                                                                                                        |
 | `ASSET_UPLOAD_TTL_S`     | how long an asset's presigned PUT is good for, 15 minutes by default                                                                                                                                              |
-| `REDIS_URL`              | where a queued task is announced; absent, the row is still written and the sweeper is what re-announces it                                                                                                        |
+| `REDIS_URL`              | where a queued task is announced, in the database its kind names; absent, the row is still written and the sweeper is what re-announces it                                                                        |
 | `TASK_SWEEP_INTERVAL_MS` | how often the sweeper looks for work nothing was told about, 30 seconds by default                                                                                                                                |
 | `TASK_SWEEP_AFTER_MS`    | how long a task may sit unclaimed before its push is assumed lost, 60 seconds by default                                                                                                                          |
 | `TRUSTED_PROXIES`        | comma-separated peers whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed: addresses, CIDR blocks, `loopback` or `uniquelocal` — one that does not name the real peer leaves the production cookie unset |

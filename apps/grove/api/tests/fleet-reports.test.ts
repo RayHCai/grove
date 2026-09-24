@@ -17,6 +17,7 @@ const env = readEnv({
     GAME_TOKEN_SECRET: 'b'.repeat(32),
     FLEET_SECRET: BEARER,
     TRUSTED_PROXIES: 'loopback',
+    GAMES_CDN_URL: 'https://cdn.grove.example',
     PLATFORM_ORIGIN: 'https://grove.example',
     EDITOR_ORIGIN: 'https://editor.grove.example',
     SERVER_MANAGER_URL: 'http://server-manager.grove.internal:4003',

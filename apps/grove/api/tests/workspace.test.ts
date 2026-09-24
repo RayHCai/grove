@@ -38,6 +38,7 @@ const env = readEnv({
     GAME_TOKEN_SECRET: 'b'.repeat(32),
     FLEET_SECRET: 'c'.repeat(32),
     TRUSTED_PROXIES: 'loopback',
+    GAMES_CDN_URL: 'https://cdn.grove.example',
     PLATFORM_ORIGIN: 'https://grove.example',
     EDITOR_ORIGIN: 'https://editor.grove.example',
     SERVER_MANAGER_URL: 'http://server-manager.grove.internal:4003',
@@ -110,7 +111,9 @@ function bucket(): FakeStorage {
             return { outcome: 'written', version };
         },
         head: async (key) => current.get(key),
-        get: async (key, versionId) => versions.get(key)?.get(versionId),
+        // No version asked for is whatever is current at the key, which is what the bucket answers.
+        get: async (key, versionId) =>
+            versions.get(key)?.get(versionId ?? current.get(key)?.versionId ?? ''),
         remove: async (key) => {
             current.delete(key);
         },

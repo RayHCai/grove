@@ -14,7 +14,10 @@ import {
     GameId,
     PlayerId,
     VersionId,
+    type BuildManifest,
     type BundleSet,
+    type Task,
+    type TaskId,
     type WorkspaceFile,
 } from '@grove/api-contract';
 import type { Records, SavePlan } from '../src/records.js';
@@ -414,6 +417,13 @@ function plan(
     return { baseRevision, accountId, upserts, deletes: deletes as SavePlan['deletes'], freeze };
 }
 
+/** The one task a save of a single asset queued; a save that queued none is a broken fixture. */
+function taskOf(tasks: readonly Task[]): TaskId {
+    const task = tasks[0];
+    if (task === undefined) throw new Error('no asset task was queued');
+    return task.taskId;
+}
+
 describe("a game's workspace", () => {
     const main: WorkspaceFile = {
         path: 'main.ts',
@@ -532,6 +542,59 @@ describe("a game's workspace", () => {
             manifestRevision: 1,
             status: 'NOT_STARTED',
         });
+    });
+
+    it('holds an asset unverified until the task that is a verdict on it succeeds', async () => {
+        const { owner, gameId } = await owned();
+        const saved = await records.saveWorkspace(gameId, plan(owner, 0, [main, art]));
+        if (saved.outcome !== 'saved') throw new Error(`expected saved, got ${saved.outcome}`);
+
+        expect(await records.unvalidatedAssets(gameId, 10)).toEqual(['art/tile.png']);
+
+        const task = taskOf(saved.tasks);
+        await records.advanceTask(task, { status: 'IN_PROGRESS' });
+        // Still unverified while it is being looked at: only an outcome is a verdict.
+        expect(await records.unvalidatedAssets(gameId, 10)).toEqual(['art/tile.png']);
+
+        await records.advanceTask(task, { status: 'SUCCESSFUL' });
+        expect(await records.unvalidatedAssets(gameId, 10)).toEqual([]);
+    });
+
+    it('leaves a refused asset unverified, so no build of the game holding it is queued', async () => {
+        const { owner, gameId } = await owned();
+        const saved = await records.saveWorkspace(gameId, plan(owner, 0, [art]));
+        if (saved.outcome !== 'saved') throw new Error(`expected saved, got ${saved.outcome}`);
+
+        await records.advanceTask(taskOf(saved.tasks), { status: 'FAILED' });
+        expect(await records.unvalidatedAssets(gameId, 10)).toEqual(['art/tile.png']);
+    });
+
+    it('takes the verdict away when the bytes at the path are replaced', async () => {
+        const { owner, gameId } = await owned();
+        const first = await records.saveWorkspace(gameId, plan(owner, 0, [art]));
+        if (first.outcome !== 'saved') throw new Error('the first save did not land');
+        await records.advanceTask(taskOf(first.tasks), { status: 'SUCCESSFUL' });
+        expect(await records.unvalidatedAssets(gameId, 10)).toEqual([]);
+
+        // The same path, different bytes. A verdict that survived this would be one vouching for
+        // an upload nothing ever looked at, which is the whole of what the gate is for.
+        const replaced = { ...art, versionId: VersionId.parse('a.second.version') };
+        await records.saveWorkspace(gameId, plan(owner, 1, [replaced]));
+        expect(await records.unvalidatedAssets(gameId, 10)).toEqual(['art/tile.png']);
+    });
+
+    it('will not let a verdict on old bytes vouch for the ones that replaced them', async () => {
+        const { owner, gameId } = await owned();
+        const first = await records.saveWorkspace(gameId, plan(owner, 0, [art]));
+        if (first.outcome !== 'saved') throw new Error('the first save did not land');
+
+        const replaced = { ...art, versionId: VersionId.parse('a.second.version') };
+        await records.saveWorkspace(gameId, plan(owner, 1, [replaced]));
+
+        // The first upload's worker comes back and settles, having looked at bytes the game no
+        // longer holds.
+        await records.advanceTask(taskOf(first.tasks), { status: 'SUCCESSFUL' });
+        expect(await records.unvalidatedAssets(gameId, 10)).toEqual(['art/tile.png']);
     });
 
     it('queues nothing at all for a save of source alone', async () => {
@@ -666,6 +729,23 @@ describe('a playable version', () => {
         gameId = created.game.gameId;
     });
 
+    /** The build manifest a successful build writes, as the task row echoes it. */
+    function built(revision: number, hash = HASH): BuildManifest {
+        return {
+            gameId,
+            revision,
+            projectId: 'my-game',
+            projectHash: hash,
+            bundles: bundles(hash),
+        };
+    }
+
+    /** What `playableVersionOf` answers for that build — the manifest, less the game it names. */
+    function version(revision: number, hash = HASH) {
+        const { gameId: _gameId, ...rest } = built(revision, hash);
+        return rest;
+    }
+
     /** Queues a build of `revision` and settles it however this case needs. */
     async function build(revision: number, update: Parameters<Records['advanceTask']>[1]) {
         const queued = await records.queueTask(gameId, owner, 'BUILD', revision);
@@ -682,26 +762,41 @@ describe('a playable version', () => {
     });
 
     it('is the newest build that succeeded, and never the newest one queued', async () => {
-        await build(1, { status: 'SUCCESSFUL', detail: { bundles: bundles() } });
+        await build(1, { status: 'SUCCESSFUL', detail: { build: built(1) } });
         // A later revision that failed leaves the earlier one playable: a creator who breaks their
         // game does not take the version everybody is already playing down with it.
         await build(2, { status: 'FAILED', detail: { message: 'it did not compile' } });
 
-        expect(await records.playableVersionOf(gameId)).toEqual({
-            revision: 1,
-            bundles: bundles(),
+        expect(await records.playableVersionOf(gameId)).toEqual(version(1));
+    });
+
+    it('carries the identity a joiner has to claim, not just the code', async () => {
+        await build(1, { status: 'SUCCESSFUL', detail: { build: built(1) } });
+
+        // The handshake compares these before a `Player` exists, so a version that reached the
+        // allocator without them is a join nothing could ever be admitted through.
+        expect(await records.playableVersionOf(gameId)).toMatchObject({
+            projectId: 'my-game',
+            projectHash: HASH,
         });
+    });
+
+    it('refuses a build manifest that names another revision than the task it settled', async () => {
+        // A worker that settled the wrong task. Answering anyway would send every player of this
+        // game at code the row it came from was never pinned to.
+        await build(3, { status: 'SUCCESSFUL', detail: { build: built(9) } });
+        expect(await records.playableVersionOf(gameId)).toBeUndefined();
     });
 
     it('is ordered by the revision rather than by which build finished last', async () => {
         const later = 'b'.repeat(64);
-        await build(4, { status: 'SUCCESSFUL', detail: { bundles: bundles(later) } });
-        await build(2, { status: 'SUCCESSFUL', detail: { bundles: bundles() } });
+        await build(4, { status: 'SUCCESSFUL', detail: { build: built(4, later) } });
+        await build(2, { status: 'SUCCESSFUL', detail: { build: built(2) } });
 
         expect(await records.playableVersionOf(gameId)).toMatchObject({ revision: 4 });
     });
 
-    it('is nothing for a build that registered no bundle set', async () => {
+    it('is nothing for a build that wrote no manifest', async () => {
         // A worker that settled outside its own contract. Answering the revision anyway would send
         // a player at a version naming no code, which fails on a box instead of here.
         await build(1, { status: 'SUCCESSFUL', detail: { diagnostics: [] } });

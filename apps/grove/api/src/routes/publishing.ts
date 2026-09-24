@@ -5,9 +5,13 @@ import type { TaskQueue } from '../queue.js';
 import type { Records } from '../records.js';
 import { requireCsrfToken, requireGameOwner, requireSession } from '../session.js';
 
+/** How many unverified assets a refusal names before the list stops being something to read. */
+const NAMED_ASSETS = 10;
+
 /**
- * Turning the saved draft into a version. A publish carries no body: it writes a build row and
- * pushes its id. The row goes first — a lost push is work a sweeper still finds.
+ * Turning the saved draft into a version. A publish carries no body: it checks that every asset has
+ * been verified, then writes a build row and pushes its id. The row goes first — a lost push is
+ * work a sweeper still finds.
  */
 export function publishingRoutes(records: Records, queue: TaskQueue): FastifyPluginAsyncZod {
     return async (app) => {
@@ -44,6 +48,20 @@ export function publishingRoutes(records: Records, queue: TaskQueue): FastifyPlu
                     return reply
                         .code(409)
                         .send({ code: 'conflict', message: 'save before publishing' });
+                }
+
+                // Every asset has to have been verified before anything compiles the game holding
+                // it: a build reads the bytes a manifest names, and a build box is the one place
+                // in the fleet that evaluates a creator's code at all.
+                const unverified = await records.unvalidatedAssets(
+                    request.params.gameId,
+                    NAMED_ASSETS,
+                );
+                if (unverified.length > 0) {
+                    return reply.code(409).send({
+                        code: 'conflict',
+                        message: `these assets are still being verified: ${unverified.join(', ')}`,
+                    });
                 }
 
                 const queued = await records.queueTask(
