@@ -4,9 +4,6 @@ Grove's theme, tokens and core components: **Pixel Grove** in an app-grade React
 retro handheld, with pixel type, chunky borders and stepped sprite motion. It owns no app layout,
 no data and no routing; an app composes these components inside a grid of its own.
 
-`apps/design-playground` holds the direction this kit is the implementation of; where the two
-disagree, the playground page is the claim to check.
-
 ## The language
 
 - **Colour.** The Grove palette (parchment, cream, sand, moss, olive, rust, char, sun) mapped to
@@ -43,7 +40,12 @@ disagree, the playground page is the claim to check.
   its own dropped block. `prefers-reduced-motion: reduce` turns every animation and
   transition off outright.
 - **Spacing.** `--pg-sp-1` through `--pg-sp-8` (4, 8, 12, 16, 24, 32, 48, 80px); controls are 34px
-  tall, or 28px in their small size.
+  tall, or 28px in their small size. Every metric a control is drawn from is a token of its own —
+  `--pg-ctl-h`, `--pg-ctl-h-sm`, `--pg-ctl-pad`, `--pg-ctl-pad-sm`, `--pg-ctl-text`,
+  `--pg-ctl-text-sm`, `--pg-icon`, `--pg-field-h`, `--pg-field-text`, `--pg-field-label`,
+  `--pg-plate-text`, `--pg-mark-text`, `--pg-text` and `--pg-text-sm` — so an app dense enough to
+  want a smaller scale restates those on a root of its own rather than overriding the rules that
+  read them or scaling the page with a transform.
 
 ## What it owns
 
