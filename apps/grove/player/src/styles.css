@@ -1,0 +1,52 @@
+/*
+ * This origin's own layout rules. The palette, the type and the button are @grove/ui's — the same
+ * kit the platform and the editor draw from — and everything else on screen is the game's.
+ */
+
+html,
+body,
+#root {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    background: var(--pg-bg);
+    color: var(--pg-ink);
+    font-family: var(--pg-font-ui);
+    font-size: var(--pg-text);
+}
+
+.player {
+    position: relative;
+    height: 100%;
+}
+
+/* The stage fills the page and the loading screen sits over it, rather than replacing it: the
+   session builds its renderer inside this element, and swapping the two would tear it down. */
+.grove-stage {
+    height: 100%;
+}
+
+.grove-stage canvas {
+    display: block;
+}
+
+.player__loading {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: var(--pg-bg);
+}
+
+.player--refused {
+    display: grid;
+    place-items: center;
+    padding: var(--pg-sp-6);
+    text-align: center;
+}
+
+.player--refused .pg-btn {
+    margin-top: var(--pg-sp-5);
+}
