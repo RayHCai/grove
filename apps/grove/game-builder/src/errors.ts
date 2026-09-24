@@ -22,12 +22,6 @@ export function installErrorHandler(app: FastifyInstance): void {
         const status = error.statusCode ?? 500;
         if (status >= 500) request.log.error({ err: error }, 'unhandled');
 
-        // The limiter throws its refusal through here, and at thirty builds a minute a caller meets
-        // it while asking for something perfectly well formed.
-        if (status === 429) {
-            return reply.code(429).send({ code: 'rate_limited', message: error.message });
-        }
-
         return reply.code(status).send({
             code: status >= 500 ? 'internal' : 'invalid_request',
             message: status >= 500 ? 'internal error' : error.message,

@@ -10,8 +10,8 @@ describe('the environment', () => {
 
         expect(Object.keys(env).toSorted()).toEqual([
             'API_URL',
-            'AWS_REGION',
             'BUILDER_NAME',
+            'BUILD_ATTEMPTS',
             'BUILD_TIMEOUT_MS',
             'FLEET_SECRET',
             'GAME_BUILDER_HOST',
@@ -20,7 +20,8 @@ describe('the environment', () => {
         ]);
         expect(env.GAME_BUILDER_HOST).toBe('127.0.0.1');
         expect(env.GAME_BUILDER_PORT).toBe(4002);
-        expect(env.BUILD_TIMEOUT_MS).toBe(900_000);
+        expect(env.BUILD_TIMEOUT_MS).toBe(180_000);
+        expect(env.BUILD_ATTEMPTS).toBe(3);
     });
 
     it('refuses a bearer short enough to be guessed', () => {
@@ -29,11 +30,9 @@ describe('the environment', () => {
         );
     });
 
-    it('leaves the stream and the bucket absent rather than defaulting either', () => {
-        // A default here would be a box quietly claiming work out of somebody else's Redis, or
-        // reading manifests out of a bucket nobody meant it to touch.
+    it('leaves the stream absent rather than defaulting it', () => {
+        // A default here would be a box quietly claiming work out of somebody else's Redis.
         const env = readEnv(REQUIRED);
         expect(env.REDIS_URL).toBeUndefined();
-        expect(env.GAMES_BUCKET).toBeUndefined();
     });
 });
