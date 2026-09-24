@@ -30,7 +30,7 @@ serde_json = { version = "1", features = ["raw_value"] }
 redis = { version = "1.7", features = ["tokio-comp"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "webpki-roots", "http2"] }
 hmac = "0.12"
-sha2 = "0.10"
+sha2 = "0.11"
 subtle = "2.6"
 base64 = "0.22"
 anyhow = "1"
