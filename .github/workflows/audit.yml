@@ -52,7 +52,7 @@ jobs:
 
             # setup-go reads go.mod's `toolchain` line ahead of its `go` line, so the scan
             # runs on the toolchain the services ship, not whatever 1.24.x the runner cached.
-            - uses: actions/setup-go@v6
+            - uses: actions/setup-go@v7
               with:
                   go-version-file: go.mod
                   # No go.sum exists to hash — the Go half takes no third-party dependency.
