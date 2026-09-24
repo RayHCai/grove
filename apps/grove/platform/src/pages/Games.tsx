@@ -4,16 +4,10 @@ import type { Game } from '@grove/api-contract';
 import { isLapsedSession, messageOf } from '../api/messages';
 import { go } from '../router/useRoute';
 import { useSession } from '../session/SessionProvider';
+import { formatDate } from './date';
 
 /** The title a game gets when somebody made one without naming it. */
 const UNTITLED = 'Untitled game';
-
-function madeOn(iso: string): string {
-    const when = new Date(iso);
-    return Number.isNaN(when.getTime())
-        ? 'date unknown'
-        : when.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
 
 type Listing =
     { at: 'loading' } | { at: 'listed'; games: Game[] } | { at: 'failed'; message: string };
@@ -211,7 +205,7 @@ export function Games(): React.JSX.Element {
                                 <div className="gamecard__body">
                                     <h2 className="gamecard__title">{game.title}</h2>
                                     <p className="gamecard__meta">
-                                        <Tag>Made {madeOn(game.createdAt)}</Tag>
+                                        <Tag>Made {formatDate(game.createdAt, 'short')}</Tag>
                                         {index === 0 && <Badge icon="sprout">Newest</Badge>}
                                     </p>
                                 </div>

@@ -76,8 +76,8 @@ export function fakeApi(over: Partial<FakeApi> = {}): FakeApi {
             if (email === api.credentials.email) {
                 throw new ApiError(409, 'conflict', 'that address already has an account');
             }
-            if (password.length < 12) {
-                throw new ApiError(400, 'invalid_request', 'password is 12 to 128 characters');
+            if (password.length < 8) {
+                throw new ApiError(400, 'invalid_request', 'password is 8 to 128 characters');
             }
             api.account = { ...api.account, email, displayName };
             api.credentials = { email, password };

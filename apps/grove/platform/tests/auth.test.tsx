@@ -147,7 +147,7 @@ describe('signing up', () => {
         await submit(need(host, 'button', 'Create account'));
         await until(() => host.querySelector('[role="alert"]') !== null);
 
-        expect(host.querySelector('[role="alert"]')?.textContent).toContain('at least 12');
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain('at least 8');
         expect(api.account.displayName).toBe(ACCOUNT.displayName);
     });
 });
