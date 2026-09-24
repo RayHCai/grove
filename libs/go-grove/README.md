@@ -9,7 +9,13 @@ about a field name.
 
 `env` accumulates every problem with a process's configuration and reports them in one error, the
 way the TypeScript services print `z.prettifyError`. A service with three unset variables does not
-need three restarts to learn that.
+need three restarts to learn that. It also holds the three decisions every service's `config`
+package would otherwise each make for itself: `SecretMinLen`, the floor key material is held to and
+the one `apps/grove/api/src/env.ts` states; `Addr`, which joins a host and a port into what a
+listener binds; and `Logger`, the one construction the fleet logs through — JSON where an aggregator
+parses it, text where a person reads it, debug everywhere but production. One logger rather than one
+per `main`, because `httpx` tags every request and panic line with `requestId` and a service that
+dropped that field into an unparsed format is one the fleet's logs cannot be joined across.
 
 `httpx` is the one error body, the JSON codec on either side of a handler, the wraps around it, and
 the listener that drains what is in flight on the way down. Its status-to-code mapping is the one in
@@ -17,7 +23,9 @@ the listener that drains what is in flight on the way down. Its status-to-code m
 `internal error` rather than handing a caller this end's internals. The outermost wrap reads
 `X-Request-Id`, bounds it to one token a log can hold, mints a fresh one where the caller's is not,
 echoes it back, and tags the request and panic lines with `requestId`; `Forward` puts the same id on
-an outbound call, so a service reached that way logs under the one its caller did. `Ready` answers
+an outbound call, so a service reached that way logs under the one its caller did. `FleetBearer` is
+the gate the `/v1` routes sit behind, comparing the shared fleet secret in constant time, so the two
+services holding it answer a wrong credential the same way. `Ready` answers
 the readiness poll against a probe the service supplies, since what readiness means is the service's
 to say, and reports 503 when the probe fails. The listener sets read, write and idle deadlines, so no
 caller holds a connection for free, and a route that legitimately takes longer sets its own with
