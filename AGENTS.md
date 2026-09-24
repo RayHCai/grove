@@ -60,8 +60,8 @@ another name:
 - **One line per change.** A behaviour change is a clause; a whole feature is rarely more than a sentence and a
   table row. If you need a paragraph, the design changed — say so in the response, not in prose padding.
 - **No documented behaviour changed → no edit.** Say that instead of manufacturing one.
-- **Packages with no `DESIGN.md`** (`engine`, `math`, `project`, `scripting`) keep their contract in
-  `README.md` — update that; don't add a `DESIGN.md` uninvited.
+- **Packages with no `DESIGN.md`** (`engine`, `glue`, `math`, `project`, `scripting`) keep their
+  contract in `README.md` — update that; don't add a `DESIGN.md` uninvited.
 
 ## Tests
 
@@ -90,11 +90,49 @@ means both files; widening one means widening its suite in the same commit.
 
 ## Build
 
-Requires Node 24 — pinned to 24.16.0 in `.node-version` and `mise.toml`; `engines` in `package.json`
-states only the `>=24` floor, which is why the Node-26 determinism leg runs the TypeScript suite
-without an engine warning. If `node -v` disagrees with the pin, prefix commands with `mise exec --`,
-which needs a mise nothing in the repo installs. Below the floor `pnpm` prints one `[WARN]
-Unsupported engine` line and carries on, so a mismatch surfaces as whatever the older runtime
-cannot do.
+Requires Node 24, pinned to 24.16.0 in `.node-version` — which `fnm`, `nvm`, `volta` and
+`actions/setup-node` all read, so the pin needs no tool this repository installs. `engines` in
+`package.json` states only the `>=24` floor, which is why the Node-26 determinism leg runs the
+TypeScript suite without an engine warning. Below the floor `pnpm` prints one `[WARN] Unsupported
+engine` line and carries on, so a mismatch surfaces as whatever the older runtime cannot do.
 
 `pnpm run lint | format:check | typecheck | build | test`
+
+Go and Rust ride those same gates: every native package carries a `package.json` whose scripts shell
+to `scripts/go.mjs` or `scripts/cargo.mjs`, which skip with a line where the toolchain is absent and
+fail where `GROVE_REQUIRE_TOOLCHAIN` names it. The Go half is **one module**, rooted at `go.mod`, so
+`go build ./...` from the repository root is every Go package in the tree.
+
+None of that needs Docker. Standing the product **up** does: `compose.yaml` at the root is the local
+runtime, in three layers — the stores alone, `--profile app` for the services, `--profile fleet` for
+one box end to end — and `readme.md` holds the commands and what each one is reached at.
+
+## Subagent Policy
+
+Use subagents selectively.
+
+Prefer working directly when:
+
+- the task is sequential or tightly coupled
+- the task involves a small number of files
+- you need to maintain detailed context across implementation steps
+- the work can be completed with normal repository exploration and tool calls
+
+Use a subagent when:
+
+- the work is genuinely independent from the main task
+- the task requires isolated context
+- the task involves a large, parallelizable investigation
+- parallel execution provides a meaningful speed or quality benefit
+
+When delegating:
+
+- Prefer one subagent over multiple subagents.
+- Use Sonnet for routine exploration, implementation, and verification unless the task genuinely requires
+  Opus-level reasoning.
+- Do not spawn subagents solely to double-check work that you can verify yourself.
+- Do not recursively spawn additional subagents unless clearly necessary.
+- Keep subagent tasks narrowly scoped and give them a concrete deliverable.
+
+For large refactors or architectural work, prefer maintaining the primary reasoning and implementation context
+in the main agent rather than delegating tightly coupled work.

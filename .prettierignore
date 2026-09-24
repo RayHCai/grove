@@ -25,3 +25,6 @@ libs/api-contract/fixtures/wire
 
 # Prisma's generated client: written by a tool, and it carries its own formatting header.
 apps/grove/api/src/generated
+
+# SVG is XML; prettier has no parser for it without a plugin this repo does not install.
+*.svg
