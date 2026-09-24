@@ -113,6 +113,35 @@ describe('a client request goes to the authority', () => {
         expect(h.client.state).toBe('live');
     });
 
+    it('drops a getter field without ever reading it, at the top level and nested', async () => {
+        const h = await harness();
+        let reads = 0;
+        const counted = (): number => {
+            reads += 1;
+            return 10;
+        };
+        h.ask('buy', {
+            item: 'shield',
+            get price() {
+                return counted();
+            },
+            nested: {
+                ok: 1,
+                get bad() {
+                    return counted();
+                },
+            },
+        });
+        h.run(2);
+
+        // The codec refuses a getter outright, so encoding must not be what runs a creator's.
+        expect(reads).toBe(0);
+        expect(h.requests()[0]?.requests).toStrictEqual([
+            { name: 'buy', data: { item: 'shield' } },
+        ]);
+        expect(h.client.state).toBe('live');
+    });
+
     it('spreads a burst across frames rather than minting one the authority refuses whole', async () => {
         const h = await harness();
         // Creator code makes these in a loop, where a human cannot make 17 clicks in a frame. An

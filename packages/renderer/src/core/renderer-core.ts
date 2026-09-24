@@ -115,6 +115,10 @@ export class RendererCore {
     readonly #scratchWorld: Bounds = bounds();
     /** Reused by `nodeAt`, which a pointer event may call several times a frame. */
     readonly #pickScratch: number[] = [];
+    readonly #scratchPick: Bounds = bounds();
+    readonly #scratchOrigin: MutableVec3 = vec3();
+    readonly #scratchTopLeft: MutableVec3 = vec3();
+    readonly #scratchBottomRight: MutableVec3 = vec3();
     readonly #scratchIndices: number[] = [];
     readonly #dirtyOut: number[] = [];
     readonly #resolvedOut: number[] = [];
@@ -256,13 +260,8 @@ export class RendererCore {
         const index = this.nodes.indexOf(id);
         this.xf.initSlot(index);
 
-        if (desc.position !== undefined) this.#writePosition(index, desc.position);
-        if (desc.visible !== undefined) this.xf.setVisible(index, desc.visible);
-        if (desc.rotation !== undefined) this.xf.setRotation(index, finiteOr(desc.rotation, 0));
-        if (desc.scale !== undefined) this.#writeScale(index, desc.scale);
-        if (desc.alpha !== undefined) this.xf.setAlpha(index, finiteOr(desc.alpha, 1));
-        if (desc.anchor !== undefined) this.#writeAnchor(index, desc.anchor);
-        if (desc.tint !== undefined) this.xf.setTint(index, finiteOr(desc.tint, 0xffffff));
+        this.#writeTransformFields(index, desc);
+        // Create-only: culling is a property of the node, not of a frame's patch.
         if (desc.neverCull !== undefined) this.xf.setNeverCull(index, desc.neverCull);
         if (parentIndex >= 0) this.xf.link(index, parentIndex);
 
@@ -320,19 +319,30 @@ export class RendererCore {
         }
     }
 
+    /** The transform fields a create and a patch both carry, written only where one is present. */
+    #writeTransformFields(
+        index: number,
+        fields: Pick<
+            NodePatch,
+            'position' | 'rotation' | 'scale' | 'anchor' | 'alpha' | 'visible' | 'tint'
+        >,
+    ): void {
+        if (fields.position !== undefined) this.#writePosition(index, fields.position);
+        if (fields.rotation !== undefined) this.xf.setRotation(index, finiteOr(fields.rotation, 0));
+        if (fields.scale !== undefined) this.#writeScale(index, fields.scale);
+        if (fields.anchor !== undefined) this.#writeAnchor(index, fields.anchor);
+        if (fields.alpha !== undefined) this.xf.setAlpha(index, finiteOr(fields.alpha, 1));
+        if (fields.visible !== undefined) this.xf.setVisible(index, fields.visible);
+        if (fields.tint !== undefined) this.xf.setTint(index, finiteOr(fields.tint, 0xffffff));
+    }
+
     /** Applies every field a patch sets, for a slot whose record is already in hand. */
     #applyPatchAt(
         index: number,
         record: NodeRecord,
         patch: Omit<NodePatch, 'id' | 'parent'>,
     ): void {
-        if (patch.position !== undefined) this.#writePosition(index, patch.position);
-        if (patch.rotation !== undefined) this.xf.setRotation(index, finiteOr(patch.rotation, 0));
-        if (patch.scale !== undefined) this.#writeScale(index, patch.scale);
-        if (patch.anchor !== undefined) this.#writeAnchor(index, patch.anchor);
-        if (patch.alpha !== undefined) this.xf.setAlpha(index, finiteOr(patch.alpha, 1));
-        if (patch.visible !== undefined) this.xf.setVisible(index, patch.visible);
-        if (patch.tint !== undefined) this.xf.setTint(index, finiteOr(patch.tint, 0xffffff));
+        this.#writeTransformFields(index, patch);
         if (patch.layer !== undefined) {
             record.layer = finiteOr(patch.layer, 0);
             this.#sink.setLayer(index, record.layer);
@@ -597,14 +607,22 @@ export class RendererCore {
         const record = this.nodes.recordAt(index);
         if (record === null) return null;
         this.xf.resolve();
+        return this.#screenBoundsAt(index, record, bounds());
+    }
 
+    /**
+     * `screenBoundsOf` for a slot already in hand, written into `out`.
+     * The caller has resolved and holds the record, which is what keeps `nodeAt`'s loop off the
+     * public path — that one re-does the lookup and allocates, once per live node.
+     */
+    #screenBoundsAt(index: number, record: NodeRecord, out: Bounds): Bounds {
         if (!isCameraTransformed(record.surface)) {
             // UI: the anchor origin plus the design-px offset, already in screen space (y-down).
-            const origin = this.#uiScreenPosition(index, vec3());
+            const origin = this.#uiScreenPosition(index, this.#scratchOrigin);
             const local = this.localBoundsAt(index, this.#scratchLocal);
             const scale = this.fitScale();
             return boundsSet(
-                bounds(),
+                out,
                 origin.x + local.left * scale,
                 origin.x + local.right * scale,
                 // Local bounds are y-up; screen is y-down, so `top` takes the -local.top side.
@@ -614,10 +632,13 @@ export class RendererCore {
         }
 
         const world = this.worldBoundsAt(index, this.#scratchWorld);
-        const topLeft = this.worldToScreen({ x: world.left, y: world.top }, vec3());
-        const bottomRight = this.worldToScreen({ x: world.right, y: world.bottom }, vec3());
+        const topLeft = this.worldToScreen({ x: world.left, y: world.top }, this.#scratchTopLeft);
+        const bottomRight = this.worldToScreen(
+            { x: world.right, y: world.bottom },
+            this.#scratchBottomRight,
+        );
         // y-down after projection: `bottom > top`.
-        return boundsSet(bounds(), topLeft.x, bottomRight.x, topLeft.y, bottomRight.y);
+        return boundsSet(out, topLeft.x, bottomRight.x, topLeft.y, bottomRight.y);
     }
 
     /**
@@ -649,8 +670,7 @@ export class RendererCore {
                 if (record.ordinal === bestOrdinal && index < bestIndex) continue;
             }
 
-            const box = this.screenBoundsOf(this.nodes.idAt(index));
-            if (box === null) continue;
+            const box = this.#screenBoundsAt(index, record, this.#scratchPick);
             if (screenPoint.x < box.left || screenPoint.x > box.right) continue;
             // Screen bounds are y-down, so `top` is the smaller number.
             if (screenPoint.y < box.top || screenPoint.y > box.bottom) continue;
@@ -885,12 +905,10 @@ export class RendererCore {
     /** The `uiAnchor` of a node's surface root, defaulting to `'top-left'`. */
     #anchorOf(index: number): UiAnchor {
         let root = index;
-        for (
-            let parent = this.xf.parent(root);
-            parent !== NO_PARENT;
-            parent = this.xf.parent(root)
-        ) {
+        let parent = this.xf.parent(root);
+        while (parent !== NO_PARENT) {
             root = parent;
+            parent = this.xf.parent(root);
         }
         return this.nodes.recordAt(root)?.uiAnchor ?? 'top-left';
     }

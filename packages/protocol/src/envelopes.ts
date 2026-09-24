@@ -23,9 +23,6 @@ export type ClientToServer = JoinRequest | InputFrame | InteractionFrame | Reque
 /** Either direction, for code that handles a frame before it knows which way it came. */
 export type Envelope = ServerToClient | ClientToServer;
 
-/** The discriminant every envelope carries. */
-export type EnvelopeKind = Envelope['kind'];
-
 /** Client → server, the first frame on a connection. */
 export type JoinRequest = {
     kind: 'join-request';
@@ -379,9 +376,6 @@ export type Interaction =
     | { kind: 'click'; netId: NetId }
     | { kind: 'hover-enter'; netId: NetId }
     | { kind: 'hover-exit'; netId: NetId };
-
-/** The `kind` of an interaction, for exhaustiveness checks over the arm. */
-export type InteractionKind = Interaction['kind'];
 
 /** Client → server, at most one per tick. The asks a client cannot perform itself. */
 export type RequestFrame = {

@@ -33,7 +33,11 @@ export class HostError extends Error {
     }
 }
 
-/** Throws unless `rate` is positive and finite — nothing upstream validates a resolved default. */
+/**
+ * Throws unless `rate` is positive and finite — nothing upstream validates a resolved default.
+ * The same rule `@platform/sim` holds, restated: this module takes no dependency, and a caller
+ * branches on `HostError` rather than on sim's code.
+ */
 export function assertRate(name: string, rate: number): void {
     if (!Number.isFinite(rate) || rate <= 0) {
         throw new HostError(

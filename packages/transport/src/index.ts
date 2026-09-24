@@ -15,6 +15,7 @@ export type {
     Transport,
     TransportOptions,
 } from './transport.js';
+export { DEFAULT_MAX_RETAINED_BYTES } from './transport.js';
 
 export type { Codec } from './codec.js';
 export { MAX_FRAME_BYTES, RESERVED_KEYS, jsonCodec } from './codec.js';

@@ -370,7 +370,7 @@ export const jsonCodec: Codec = {
         if (bytes > MAX_FRAME_BYTES) {
             transportError(
                 'frame-too-large',
-                `Frame is ${bytes} bytes, over the ${MAX_FRAME_BYTES}-byte decode cap. Refused before parsing, because parsing is what allocates.`,
+                `Frame is ${bytes} bytes, over the ${MAX_FRAME_BYTES}-byte decode cap.`,
             );
         }
         let parsed: unknown;

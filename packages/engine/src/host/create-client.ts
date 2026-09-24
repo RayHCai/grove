@@ -7,10 +7,16 @@ import { defined } from '@platform/math';
 import type { ProjectManifest, ScriptId } from '@platform/project';
 import type { ScriptRegistry } from '@platform/scripting';
 import { projectClaim } from './identity.js';
+import type { ProjectClaim } from './identity.js';
 
 export interface CreateClientOptions extends Omit<GameClientOptions, 'project' | 'scripts'> {
-    /** What this client is playing, proved against the server's before a `Player` is allocated. */
-    project?: ProjectManifest;
+    /**
+     * What this client is playing, proved against the server's before a `Player` is allocated.
+     *
+     * A bare claim as well as a whole manifest, because a host that never authored the world
+     * cannot derive one: the player origin is handed two strings with its ticket and nothing else.
+     */
+    project?: ProjectManifest | ProjectClaim;
     /** The client chunk's classes, by the id an attachment names — what prediction has to run. */
     scripts?: ScriptRegistry<ScriptId>;
     /** The bundle this process has already verified; `''` until it has loaded one. */

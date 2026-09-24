@@ -77,7 +77,7 @@ one constant because every factory defaults to it), `latency` (loopback only, de
 it constructs a socket.
 
 `Connect` (`(url, opts?) => Promise<Transport>`) is the networked seam endpoints compile against, and
-`connectWebSocket` implements it. `ConnectOptions.token` reaches no wire: the reconnect token rides
+`connectWebSocket` implements it. No reconnect credential rides these options: the token rides
 `JoinRequest.token`, which protocol owns, and one credential with two channels is a second thing to
 keep in agreement. `ConnectWebSocketOptions.protocols` is not that second channel — it rides the
 upgrade request, so it is the only thing this layer carries for an authority that decides admission
