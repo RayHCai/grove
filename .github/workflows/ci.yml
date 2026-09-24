@@ -96,7 +96,7 @@ jobs:
             # Without a Terraform on `PATH`, `@grove/infra` skips its own validate and fmt gates, so
             # every `.tf` file would land on main read by nothing. Unwrapped, so the exit code the
             # scripts read is Terraform's own rather than the wrapper's.
-            - uses: hashicorp/setup-terraform@v3
+            - uses: hashicorp/setup-terraform@v4
               with:
                   terraform_version: 1.14.3
                   terraform_wrapper: false
