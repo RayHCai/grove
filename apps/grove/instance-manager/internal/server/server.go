@@ -51,7 +51,7 @@ func New(
 	root.HandleFunc("GET /health", httpx.Health)
 	// A box that can accept a start request and then fail every one of them should be given none.
 	root.HandleFunc("GET /ready", httpx.Ready(ready, l))
-	root.Handle("/v1/", httpx.Chain(scope, fleetBearer(fleetSecret, l)))
+	root.Handle("/v1/", httpx.Chain(scope, httpx.FleetBearer(fleetSecret, l)))
 	root.HandleFunc("/", httpx.NotFound)
 
 	return httpx.Chain(root, httpx.RequestID(), httpx.Recover(l), httpx.RequestLog(l))

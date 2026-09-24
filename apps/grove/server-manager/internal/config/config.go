@@ -3,8 +3,6 @@ package config
 
 import (
 	"fmt"
-	"net"
-	"strconv"
 	"time"
 
 	"github.com/RayHCai/grove/libs/go-grove/env"
@@ -56,10 +54,10 @@ func Load(r *env.Reader) (Config, error) {
 	// local interface would leave the registry hearing from nothing but itself.
 	host := r.String("SERVER_MANAGER_HOST", "0.0.0.0")
 	port := r.Port("SERVER_MANAGER_PORT", 4003)
-	c.Addr = net.JoinHostPort(host, strconv.Itoa(port))
+	c.Addr = env.Addr(host, port)
 
 	c.Env = r.OneOf("GROVE_ENV", "development", "development", "test", "production")
-	c.FleetSecret = r.Secret("FLEET_SECRET", 32)
+	c.FleetSecret = r.Secret("FLEET_SECRET", env.SecretMinLen)
 	// Two missed beats at the agent's default interval. A false positive costs one interval of
 	// placement on one box and ends no session, so the window is set to find a dead box quickly
 	// rather than to be sure — and the box clears it by beating.

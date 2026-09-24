@@ -4,17 +4,12 @@ package config
 import (
 	"fmt"
 	"log/slog"
-	"net"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 	"github.com/RayHCai/grove/libs/go-grove/env"
 )
-
-// The floor @grove/api and @grove/game-instance both hold their secrets to.
-const secretMinLen = 32
 
 // Config is everything one box is told about itself.
 type Config struct {
@@ -53,7 +48,7 @@ func Read(r *env.Reader) (Config, error) {
 		// across the fleet network, and a box no one can address holds no sessions.
 		Host:              r.String("INSTANCE_MANAGER_HOST", "0.0.0.0"),
 		Port:              r.Port("INSTANCE_MANAGER_PORT", 4004),
-		FleetSecret:       r.Secret("FLEET_SECRET", secretMinLen),
+		FleetSecret:       r.Secret("FLEET_SECRET", env.SecretMinLen),
 		ServerManagerURL:  r.URL("SERVER_MANAGER_URL"),
 		GameManagerURL:    r.URL("GAME_MANAGER_URL"),
 		HostID:            r.Required("HOST_ID"),
@@ -66,7 +61,7 @@ func Read(r *env.Reader) (Config, error) {
 		// still start, and the directory is made on the first child it writes down.
 		StateDir:        r.String("INSTANCE_STATE_DIR", "/var/lib/grove"),
 		BundleDir:       r.String("BUNDLE_CACHE_DIR", "/var/lib/grove/bundles"),
-		GameTokenSecret: r.Secret("GAME_TOKEN_SECRET", secretMinLen),
+		GameTokenSecret: r.Secret("GAME_TOKEN_SECRET", env.SecretMinLen),
 	}
 	if err := r.Err(); err != nil {
 		return Config{}, err
@@ -94,13 +89,10 @@ func Read(r *env.Reader) (Config, error) {
 
 // Addr is what the listener binds.
 func (c Config) Addr() string {
-	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
+	return env.Addr(c.Host, c.Port)
 }
 
 // LogLevel is debug everywhere a person is watching, and info where a log aggregator is.
 func (c Config) LogLevel() slog.Level {
-	if c.Env == "production" {
-		return slog.LevelInfo
-	}
-	return slog.LevelDebug
+	return env.LogLevel(c.Env)
 }

@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -26,7 +25,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	log := logger(cfg.Env)
+	log := env.Logger(cfg.Env, os.Stdout)
 
 	queue, err := lineFor(cfg)
 	if err != nil {
@@ -112,11 +111,4 @@ func lineFor(cfg config.Config) (joins.Queue, error) {
 		return joins.NewMemory(cfg.JoinQueueDepth), nil
 	}
 	return joins.NewRedis(cfg.JoinQueueURL, cfg.JoinQueueKey, cfg.JoinQueueDepth, cfg.JoinDeadline)
-}
-
-func logger(groveEnv string) *slog.Logger {
-	if groveEnv == "production" {
-		return slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	}
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
