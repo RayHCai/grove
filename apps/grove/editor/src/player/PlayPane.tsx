@@ -1,11 +1,11 @@
 import { useRef, useSyncExternalStore } from 'react';
 import type { Ref } from 'react';
 import {
-    Button,
     IconButton,
     MaximizeIcon,
     MinimizeIcon,
     Panel,
+    PopoutIcon,
     VisuallyHidden,
     cx,
 } from '@grove/ui';
@@ -19,6 +19,13 @@ export interface PlayPaneProps {
     frameRef?: Ref<HTMLIFrameElement> | undefined;
     /** Starts the same run in a window of its own, at whatever size the creator gives it. */
     onOpenWindow?: (() => void) | undefined;
+    /**
+     * A stage of the caller's own, shown instead of the frame.
+     *
+     * A game the engine drives runs in this page rather than in a sandbox, because the world and
+     * the session are both here — so the stage it plays on is a React tree, not a document.
+     */
+    children?: React.ReactNode;
     className?: string | undefined;
 }
 
@@ -43,6 +50,7 @@ export function PlayPane({
     dispatch,
     frameRef,
     onOpenWindow,
+    children,
     className,
 }: PlayPaneProps): React.JSX.Element {
     const stageRef = useRef<HTMLDivElement>(null);
@@ -80,34 +88,40 @@ export function PlayPane({
                 <span role="status" className={`play-status play-status--${status}`}>
                     {statusText[status]}
                 </span>
-                {onOpenWindow !== undefined && (
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="play-popout"
-                        onClick={onOpenWindow}
-                    >
-                        Full page
-                    </Button>
-                )}
             </div>
             <div ref={stageRef} className="play-stage">
-                {/* A frame with no src is still a tab stop; a loaded game restores its own focusability. */}
-                <iframe
-                    ref={frameRef}
-                    className="play-frame"
-                    title="Game preview"
-                    sandbox="allow-scripts"
-                    tabIndex={-1}
-                />
-                <IconButton
-                    size="sm"
-                    className="play-fullscreen"
-                    label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-                    onClick={toggleFullscreen}
-                >
-                    {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
-                </IconButton>
+                {/* One or the other, never both: the frame is a whole document, and leaving it
+                    mounted under a live world would keep the last run's page alive behind it. */}
+                {children ?? (
+                    // A frame with no src is still a tab stop; a loaded game restores its own focusability.
+                    <iframe
+                        ref={frameRef}
+                        className="play-frame"
+                        title="Game preview"
+                        sandbox="allow-scripts"
+                        tabIndex={-1}
+                    />
+                )}
+                <div className="play-tools">
+                    {onOpenWindow !== undefined && (
+                        <IconButton
+                            size="sm"
+                            className="play-popout"
+                            label="Full page"
+                            onClick={onOpenWindow}
+                        >
+                            <PopoutIcon />
+                        </IconButton>
+                    )}
+                    <IconButton
+                        size="sm"
+                        className="play-fullscreen"
+                        label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                        onClick={toggleFullscreen}
+                    >
+                        {fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
+                    </IconButton>
+                </div>
             </div>
         </Panel>
     );

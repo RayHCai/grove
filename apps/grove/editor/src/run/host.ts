@@ -1,5 +1,13 @@
 import { runDocument, windowDocument } from './document';
 
+/**
+ * The module a sandboxed run starts from.
+ *
+ * A game the engine drives has no entry at all — the manifest names its scripts and the world
+ * instantiates them — so this is what a plain TypeScript project is run through, and nothing else.
+ */
+export const RUN_ENTRY = 'src/main.ts';
+
 export type LogLevel = 'log' | 'warn' | 'error';
 
 /** One line the console pane prints, in the order the run produced it. */

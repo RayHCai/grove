@@ -136,11 +136,32 @@ describe('PlayPane', () => {
         );
         expect(button?.getAttribute('aria-label')).toBe('Enter fullscreen');
         expect(button?.getAttribute('title')).toBe('Enter fullscreen');
-        expect(host.querySelector('iframe')?.nextElementSibling).toBe(button);
+        const tools = host.querySelector('iframe')?.nextElementSibling;
+        expect(tools?.className).toBe('play-tools');
+        expect(tools?.lastElementChild).toBe(button);
         const reference = await mount(<MaximizeIcon />);
         expect(button?.querySelector('svg')?.outerHTML).toBe(
             reference.querySelector('svg')?.outerHTML,
         );
+    });
+
+    it('opens the run in a window of its own from the tool beside it', async () => {
+        const onOpenWindow = vi.fn();
+        const host = await mount(
+            <PlayPane status="idle" dispatch={vi.fn()} onOpenWindow={onOpenWindow} />,
+        );
+        const popout = host.querySelector<HTMLButtonElement>('.play-tools .play-popout');
+        expect(popout?.getAttribute('aria-label')).toBe('Full page');
+        expect(popout?.nextElementSibling).toBe(fullscreenButton(host));
+        expect(host.querySelector('.pane__header .play-popout')).toBeNull();
+
+        await click(popout);
+        expect(onOpenWindow).toHaveBeenCalledOnce();
+    });
+
+    it('offers no full page where the caller has no window to open one in', async () => {
+        const host = await mount(<PlayPane status="idle" dispatch={vi.fn()} />);
+        expect(host.querySelector('.play-popout')).toBeNull();
     });
 
     it('asks the stage for fullscreen and flips the label once the document reports it', async () => {

@@ -3,17 +3,22 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "The game editor: signs a creator in, opens their game out of object storage, saves and publishes it, and runs it locally in a sandboxed frame.",
+    "description": "The game editor: signs a creator in, opens their game out of object storage, saves and publishes it, and compiles it here into a local version of the game.",
     "scripts": {
         "dev": "pnpm --filter @grove/ui build && vite",
         "build": "vite build",
-        "typecheck": "tsc -p tsconfig.test.json",
+        "typecheck": "tsc -p tsconfig.test.json && tsc -p tsconfig.creator.json",
         "test": "vitest run --passWithNoTests",
-        "clean": "rm -rf dist .turbo"
+        "clean": "rm -rf dist .turbo",
+        "try": "pnpm --filter @grove/ui build && vite --open /try.html"
     },
     "dependencies": {
         "@grove/api-contract": "workspace:*",
+        "@grove/player": "workspace:*",
         "@grove/ui": "workspace:*",
+        "@platform/engine": "workspace:*",
+        "@platform/project": "workspace:*",
+        "@platform/scripting": "workspace:*",
         "monaco-editor": "^0.56.0",
         "react": "^19.2.8",
         "react-dom": "^19.2.8"

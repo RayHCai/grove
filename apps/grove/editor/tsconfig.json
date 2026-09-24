@@ -15,5 +15,8 @@
         "types": ["vite/client"]
     },
     "include": ["src/**/*.ts", "src/**/*.tsx"],
+    // A creator's program is checked on its own, by tsconfig.creator.json: the globals it is
+    // written against would otherwise be this app's globals too.
+    "exclude": ["src/creator/**"],
     "references": []
 }

@@ -16,7 +16,9 @@ import {
     touched,
 } from '../src/workspace/files';
 import { openGame, reloadGame, saveGame, saveOf } from '../src/workspace/session';
-import { ENTRY_PATH, templateFiles } from '../src/workspace/template';
+import { PROJECT_PATH } from '../src/project/manifest';
+import { scanScripts } from '../src/project/scripts';
+import { DEFAULT_TEMPLATE } from '../src/workspace/templates';
 import { fakeApi, GAME, GAME_ID, project, stored } from './doubles';
 
 const SOURCE = 'export const pip = 1;\n';
@@ -126,10 +128,11 @@ describe('opening a game', () => {
         expect(open.seeded).toBe(true);
         expect(open.revision).toBe(0);
         expect(open.saved).toEqual([]);
-        expect(open.files.map((file) => file.path)).toEqual(
-            templateFiles().map((file) => file.path),
-        );
-        expect(open.files.some((file) => file.path === ENTRY_PATH)).toBe(true);
+        expect(open.files.map((file) => file.path)).toEqual([
+            ...DEFAULT_TEMPLATE.files().map((file) => file.path),
+            PROJECT_PATH,
+        ]);
+        expect(open.openPath).toBe(DEFAULT_TEMPLATE.openPath);
     });
 
     it('reads a saved game back by path rather than seeding over it', async () => {
@@ -239,10 +242,24 @@ describe('the tree the explorer lists', () => {
     });
 });
 
-describe('the template', () => {
-    it('opens on an entry that imports its neighbours', () => {
-        const entry = templateFiles().find((file) => file.path === ENTRY_PATH);
-        expect(entry?.text).toContain("from './sprout'");
-        expect(entry?.text).toContain('console.log');
+describe('the default template', () => {
+    it('opens on a player written against the engine, with no import in sight', () => {
+        const opening = DEFAULT_TEMPLATE.files().find(
+            (file) => file.path === DEFAULT_TEMPLATE.openPath,
+        );
+        expect(opening?.text).toContain('extends TopDownMovement');
+        expect(opening?.text).toContain('@onPlayerJoin');
+        // The engine is a global here; the compile is what puts an import above it.
+        expect(opening?.text).not.toMatch(/^import /mu);
+    });
+
+    it('declares the game script its manifest attaches', () => {
+        const attached = DEFAULT_TEMPLATE.project.gameScripts.map((each) => each.script);
+        const declared = scanScripts(
+            DEFAULT_TEMPLATE.files().flatMap((file) =>
+                file.text === undefined ? [] : [{ path: file.path, text: file.text }],
+            ),
+        ).modules.flatMap((module) => module.scripts.map((script) => script.id));
+        expect(declared).toEqual(expect.arrayContaining(attached));
     });
 });
