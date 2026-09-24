@@ -12,8 +12,6 @@ function bar(over: Partial<TopBarProps> = {}): Promise<HTMLElement> {
             dirty={false}
             state={{ at: 'idle' }}
             onSave={vi.fn()}
-            onPublish={vi.fn()}
-            onSignOut={vi.fn()}
             {...over}
         />,
     );
@@ -47,11 +45,12 @@ describe('TopBar', () => {
         expect(host.querySelector('[role="group"]')).toBeNull();
     });
 
-    it('names the person signed in rather than a profile nobody holds', async () => {
+    it('names the person signed in rather than a profile nobody holds, and ends on them', async () => {
         const host = await bar();
         const profile = host.querySelector<HTMLButtonElement>('.topbar__profile');
         expect(profile?.getAttribute('aria-label')).toBe('Rowan');
         expect(profile?.hasAttribute('aria-disabled')).toBe(false);
+        expect(host.querySelector('header')?.lastElementChild).toBe(profile);
     });
 
     it('says what a save last did, and says it in the wording of each outcome', async () => {
@@ -60,9 +59,6 @@ describe('TopBar', () => {
         expect(status(await bar({ state: { at: 'saving' } }))).toBe('Saving…');
         expect(status(await bar({ state: { at: 'saved', revision: 4 } }))).toBe(
             'Saved as revision 4',
-        );
-        expect(status(await bar({ state: { at: 'published', revision: 4 } }))).toBe(
-            'Published revision 4',
         );
     });
 
@@ -79,25 +75,18 @@ describe('TopBar', () => {
         expect(button(dirty, 'Save')?.hasAttribute('aria-disabled')).toBe(false);
     });
 
-    it('refuses both buttons while one of them is still in flight', async () => {
-        const host = await bar({ dirty: true, state: { at: 'publishing' } });
+    it('refuses the save while one is still in flight', async () => {
+        const host = await bar({ dirty: true, state: { at: 'saving' } });
         expect(button(host, 'Save')?.getAttribute('aria-disabled')).toBe('true');
-        expect(button(host, 'Publish')?.getAttribute('aria-disabled')).toBe('true');
     });
 
-    it('hands the three actions to the caller', async () => {
+    it('hands the save to the caller', async () => {
         const onSave = vi.fn();
-        const onPublish = vi.fn();
-        const onSignOut = vi.fn();
-        const host = await bar({ dirty: true, onSave, onPublish, onSignOut });
+        const host = await bar({ dirty: true, onSave });
 
-        for (const label of ['Save', 'Publish', 'Sign out']) {
-            await act(async () => {
-                button(host, label)?.click();
-            });
-        }
+        await act(async () => {
+            button(host, 'Save')?.click();
+        });
         expect(onSave).toHaveBeenCalledOnce();
-        expect(onPublish).toHaveBeenCalledOnce();
-        expect(onSignOut).toHaveBeenCalledOnce();
     });
 });

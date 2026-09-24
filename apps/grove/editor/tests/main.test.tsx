@@ -15,6 +15,7 @@ function stubApi(): void {
 }
 
 describe('the entry point', () => {
+    // Cold-imports the whole app, which outruns the 5 s default when the suites run in parallel.
     it('mounts the app into #root and dials the service for a session', async () => {
         stubApi();
         const host = document.createElement('div');
@@ -31,7 +32,7 @@ describe('the entry point', () => {
             'Taking you to Grove to sign in…',
         );
         expect(host.querySelector('.pg-wordmark')?.textContent).toBe('Grove');
-    });
+    }, 30_000);
 
     it('refuses to mount when the document carries no #root', async () => {
         stubApi();

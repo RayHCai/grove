@@ -32,12 +32,12 @@
 .tab__button {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     height: 100%;
-    padding: 0 4px 0 12px;
+    padding: 0 4px 0 8px;
     border: 0;
     background: transparent;
-    font: 600 13px/1 var(--pg-font-ui);
+    font: 600 11px/1 var(--pg-font-ui);
     color: var(--pg-ink-muted);
     white-space: nowrap;
     cursor: pointer;
@@ -53,9 +53,9 @@
 .tab__close {
     display: grid;
     place-items: center;
-    width: 20px;
-    height: 20px;
-    margin-right: 6px;
+    width: 16px;
+    height: 16px;
+    margin-right: 4px;
     padding: 0;
     border: 0;
     background: transparent;
@@ -118,7 +118,7 @@
     display: grid;
     place-items: center;
     margin: 0;
-    font-size: 13px;
+    font-size: 11px;
     color: var(--pg-ink-muted);
     text-align: center;
     pointer-events: none;

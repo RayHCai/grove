@@ -1,12 +1,10 @@
 import { Button, IconButton, UserIcon, VisuallyHidden, Wordmark } from '@grove/ui';
 
-/** Where the last save or publish got to, which is the only thing the top bar reports. */
+/** Where the last save got to, which is the only thing the top bar reports. */
 export type SaveState =
     | { at: 'idle' }
     | { at: 'saving' }
-    | { at: 'publishing' }
     | { at: 'saved'; revision: number }
-    | { at: 'published'; revision: number }
     | { at: 'failed'; message: string };
 
 export interface TopBarProps {
@@ -16,20 +14,14 @@ export interface TopBarProps {
     dirty: boolean;
     state: SaveState;
     onSave: () => void;
-    onPublish: () => void;
-    onSignOut: () => void;
 }
 
 function wording(state: SaveState, dirty: boolean): string {
     switch (state.at) {
         case 'saving':
             return 'Saving…';
-        case 'publishing':
-            return 'Publishing…';
         case 'saved':
             return `Saved as revision ${String(state.revision)}`;
-        case 'published':
-            return `Published revision ${String(state.revision)}`;
         case 'failed':
             return state.message;
         default:
@@ -44,10 +36,7 @@ export function TopBar({
     dirty,
     state,
     onSave,
-    onPublish,
-    onSignOut,
 }: TopBarProps): React.JSX.Element {
-    const busy = state.at === 'saving' || state.at === 'publishing';
     return (
         <header className="topbar">
             <VisuallyHidden as="h1">Grove editor</VisuallyHidden>
@@ -62,25 +51,14 @@ export function TopBar({
             <Button
                 size="sm"
                 className="topbar__save"
-                aria-disabled={busy || !dirty || undefined}
+                aria-disabled={state.at === 'saving' || !dirty || undefined}
                 onClick={onSave}
             >
                 Save
             </Button>
-            <Button
-                variant="primary"
-                size="sm"
-                aria-disabled={busy || undefined}
-                onClick={onPublish}
-            >
-                Publish
-            </Button>
             <IconButton label={displayName} variant="ghost" className="topbar__profile">
                 <UserIcon />
             </IconButton>
-            <Button variant="ghost" size="sm" onClick={onSignOut}>
-                Sign out
-            </Button>
         </header>
     );
 }

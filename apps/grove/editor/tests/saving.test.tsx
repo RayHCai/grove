@@ -1,5 +1,5 @@
-// Saving and publishing from the workbench: what is sent, what is left alone, what saves without
-// being asked, and what a refusal puts on screen.
+// Saving from the workbench: what is sent, what is left alone, what saves without being asked,
+// and what a refusal puts on screen.
 
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -11,7 +11,8 @@ import { EditorShell } from '../src/shell/EditorShell';
 import { SAVE_DEBOUNCE_MS } from '../src/workspace/autosave';
 import { draftFromText } from '../src/workspace/files';
 import { openGame } from '../src/workspace/session';
-import { fakeApi, opened, stored } from './doubles';
+import { PROJECT_PATH } from '../src/project/manifest';
+import { fakeApi, opened, stored, TEMPLATE_PATH } from './doubles';
 import type { FakeApi } from './doubles';
 import { mount, until, untilSettled } from './helpers';
 
@@ -22,10 +23,10 @@ interface Workbench {
     syncFiles: Mock;
 }
 
-async function shell(api: FakeApi = fakeApi()): Promise<HTMLElement> {
+async function shell(api: FakeApi = fakeApi(), lapsed: () => void = vi.fn()): Promise<HTMLElement> {
     const host = await mount(
         <ThemeProvider>
-            <EditorShell api={api} opened={opened()} onSignedOut={vi.fn()} />
+            <EditorShell api={api} opened={opened()} onSessionLapsed={lapsed} />
         </ThemeProvider>,
     );
     await untilSettled(host);
@@ -37,7 +38,7 @@ async function reopened(api: FakeApi): Promise<HTMLElement> {
     const open = await openGame(api, vi.fn());
     const host = await mount(
         <ThemeProvider>
-            <EditorShell api={api} opened={open} onSignedOut={vi.fn()} />
+            <EditorShell api={api} opened={open} onSessionLapsed={vi.fn()} />
         </ThemeProvider>,
     );
     await untilSettled(host);
@@ -100,11 +101,8 @@ describe('saving', () => {
         expect(state(host)).toBe('Saved as revision 1');
         expect(api.saves).toHaveLength(1);
         expect(api.saves[0]?.sources.map((source) => source.path)).toEqual([
-            'src/main.ts',
-            'src/sprout.ts',
-            'src/garden.ts',
-            'hud/hud.ts',
-            'game.config.ts',
+            TEMPLATE_PATH,
+            PROJECT_PATH,
         ]);
     });
 
@@ -114,11 +112,11 @@ describe('saving', () => {
         await press(host, 'Save');
         await until(() => state(host) === 'Saved as revision 1');
 
-        await type('src/main.ts', 'console.log("grown");');
+        await type(TEMPLATE_PATH, 'const a = 3;');
         await press(host, 'Save');
         await until(() => state(host) === 'Saved as revision 2');
 
-        expect(api.saves[1]?.sources.map((source) => source.path)).toEqual(['src/main.ts']);
+        expect(api.saves[1]?.sources.map((source) => source.path)).toEqual([TEMPLATE_PATH]);
         expect(api.saves[1]?.deletes).toEqual([]);
     });
 
@@ -169,6 +167,75 @@ describe('saving', () => {
         await until(() => state(host)?.includes('reloaded') === true);
         expect(state(host)).toContain('revision 7');
         expect(host.querySelector('.topbar__state')?.className).toContain('--failed');
+    });
+});
+
+describe('a session that lapses with the workbench open', () => {
+    it('says so and leaves the work standing rather than navigating away', async () => {
+        const api = fakeApi();
+        const lapsed = vi.fn();
+        const host = await shell(api, lapsed);
+        vi.spyOn(api, 'save').mockRejectedValue(new ApiError(401, 'unauthorized', 'sign in first'));
+
+        await press(host, 'Save');
+        await until(() => state(host) !== 'Saving…');
+
+        expect(lapsed).toHaveBeenCalledTimes(1);
+        expect(state(host)).toBe('your Grove session ended; sign in again, then save');
+        // The point of the second tab: what was typed is still here to save once they are back.
+        expect(host.querySelector('main.workspace')).not.toBeNull();
+    });
+
+    it('reads a refusal no body named by its status, which a proxy is what sends', async () => {
+        const api = fakeApi();
+        const lapsed = vi.fn();
+        const host = await shell(api, lapsed);
+        // What `refusal()` makes of a 401 carrying no ErrorBody at all.
+        vi.spyOn(api, 'save').mockRejectedValue(
+            new ApiError(401, 'internal', 'the API answered 401'),
+        );
+
+        await press(host, 'Save');
+        await until(() => state(host) !== 'Saving…');
+        expect(lapsed).toHaveBeenCalledTimes(1);
+    });
+
+    it('tells them once, not once per autosave', async () => {
+        const api = fakeApi();
+        const lapsed = vi.fn();
+        const host = await shell(api, lapsed);
+        vi.spyOn(api, 'save').mockRejectedValue(new ApiError(401, 'unauthorized', 'sign in first'));
+
+        await press(host, 'Save');
+        await until(() => state(host) !== 'Saving…');
+        await press(host, 'Save');
+        await until(() => state(host) !== 'Saving…');
+
+        expect(lapsed).toHaveBeenCalledTimes(1);
+    });
+
+    it('tells them again when a later session lapses after one that saved', async () => {
+        const api = fakeApi();
+        const lapsed = vi.fn();
+        const host = await shell(api, lapsed);
+        const refusing = vi
+            .spyOn(api, 'save')
+            .mockRejectedValue(new ApiError(401, 'unauthorized', 'sign in first'));
+
+        await press(host, 'Save');
+        await until(() => state(host) !== 'Saving…');
+
+        // They signed in on the other tab and saved, which spends the alert.
+        refusing.mockRestore();
+        await press(host, 'Save');
+        await until(() => state(host)?.startsWith('Saved') === true);
+
+        vi.spyOn(api, 'save').mockRejectedValue(new ApiError(401, 'unauthorized', 'sign in first'));
+        await type(TEMPLATE_PATH, 'const a = 3;');
+        await press(host, 'Save');
+        await until(() => state(host) !== 'Saving…');
+
+        expect(lapsed).toHaveBeenCalledTimes(2);
     });
 });
 
@@ -227,43 +294,5 @@ describe('saving without being asked', () => {
         const dirty = new Event('beforeunload', { cancelable: true });
         window.dispatchEvent(dirty);
         expect(dirty.defaultPrevented).toBe(true);
-    });
-});
-
-describe('publishing', () => {
-    it('pushes what changed before it asks for a build', async () => {
-        const api = fakeApi();
-        const host = await shell(api);
-
-        await press(host, 'Publish');
-        await until(() => state(host) !== 'Publishing…');
-
-        expect(api.saves).toHaveLength(1);
-        expect(api.publishes).toHaveLength(1);
-        expect(state(host)).toBe('Published revision 1');
-    });
-
-    it('publishes the saved manifest without saving again when nothing has changed', async () => {
-        const api = fakeApi();
-        const host = await shell(api);
-        await press(host, 'Save');
-        await until(() => state(host) === 'Saved as revision 1');
-
-        await press(host, 'Publish');
-        await until(() => state(host) !== 'Publishing…');
-        expect(api.saves).toHaveLength(1);
-        expect(api.publishes).toHaveLength(1);
-    });
-
-    it('reports what the service refused rather than claiming a version', async () => {
-        const api = fakeApi();
-        const host = await shell(api);
-        vi.spyOn(api, 'publish').mockRejectedValue(
-            new ApiError(501, 'internal', 'no task store is attached'),
-        );
-
-        await press(host, 'Publish');
-        await until(() => state(host) !== 'Publishing…');
-        expect(state(host)).toBe('no task store is attached');
     });
 });
