@@ -1,12 +1,7 @@
-// POLLED, NOT PER FRAME: `inspect()` allocates an object per node, so calling it 60 times a
-// second would make the debugger the most expensive thing on screen.
-
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { IRenderer, NodeId, NodeSnapshot, SceneSnapshot } from '@platform/renderer';
 import { NO_NODE } from '@platform/renderer';
-
-/** Poll rates offered in the UI, in Hz. `0` freezes — useful for reading a busy tree. */
-const RATES = [0, 2, 4, 10] as const;
+import { RateSelect, usePolled } from './use-polled';
 
 export interface InspectorProps {
     /** `null` before the renderer is ready; the panel then shows its empty state. */
@@ -14,33 +9,17 @@ export interface InspectorProps {
 }
 
 export function Inspector({ renderer }: InspectorProps): React.JSX.Element {
-    const [snapshot, setSnapshot] = useState<SceneSnapshot | null>(null);
     const [rate, setRate] = useState<number>(4);
     const [selected, setSelected] = useState<NodeId | null>(null);
     // Cheaper than bounds on a big scene, and the flag is what `skipBounds` exists for.
     const [showBounds, setShowBounds] = useState(true);
 
-    // Read through a ref so changing the rate does not also have to re-create the callback.
-    const rendererRef = useRef(renderer);
-    rendererRef.current = renderer;
-
-    const sample = useCallback(() => {
-        const live = rendererRef.current;
-        setSnapshot(live === null ? null : live.inspect({ skipBounds: !showBounds }));
-    }, [showBounds]);
-
-    useEffect(() => {
-        if (renderer === null) {
-            setSnapshot(null);
-            return;
-        }
-        // Sample once immediately, so the panel is never blank for a whole interval.
-        sample();
-        if (rate === 0) return;
-
-        const timer = setInterval(sample, 1000 / rate);
-        return () => clearInterval(timer);
-    }, [renderer, rate, sample]);
+    const { value: snapshot, resample } = usePolled<SceneSnapshot | null>(
+        () => (renderer === null ? null : renderer.inspect({ skipBounds: !showBounds })),
+        rate,
+        null,
+        [renderer, showBounds],
+    );
 
     const node = selected === null ? undefined : snapshot?.nodes.get(selected);
     // A selected node that has since been destroyed: keep the id visible but say it is gone,
@@ -67,18 +46,8 @@ export function Inspector({ renderer }: InspectorProps): React.JSX.Element {
                     bounds
                 </label>
 
-                <select
-                    aria-label="poll rate"
-                    value={rate}
-                    onChange={(e) => setRate(Number(e.target.value))}
-                >
-                    {RATES.map((hz) => (
-                        <option key={hz} value={hz}>
-                            {hz === 0 ? 'frozen' : `${hz}/s`}
-                        </option>
-                    ))}
-                </select>
-                <button type="button" onClick={sample}>
+                <RateSelect label="poll rate" rate={rate} onChange={setRate} />
+                <button type="button" onClick={resample}>
                     sample
                 </button>
             </header>
