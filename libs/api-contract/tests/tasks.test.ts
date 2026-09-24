@@ -2,7 +2,14 @@
 // stream carries it.
 
 import { describe, expect, it } from 'vitest';
-import { Task, TaskStatusUpdate, isTerminal, streamOf, type TaskStatus } from '../src/tasks.js';
+import {
+    Task,
+    TaskStatusUpdate,
+    databaseOf,
+    isTerminal,
+    streamOf,
+    type TaskStatus,
+} from '../src/tasks.js';
 
 const TASK_ID = '5b2f7cbe-6d1a-4f7d-9d4a-1b8d2c3e4f50';
 const GAME_ID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
@@ -40,32 +47,38 @@ describe('a task', () => {
         expect(Task.safeParse({ ...queued, kind: 'ASSET_UPLOAD' }).success).toBe(false);
     });
 
-    it('carries the bundle set a build registered, and the warnings it still had', () => {
+    it('carries the manifest a build wrote, and the warnings it still had', () => {
         const settled = {
             ...queued,
             status: 'SUCCESSFUL',
             startedAt: '2026-09-18T12:00:01.000Z',
             finishedAt: '2026-09-18T12:00:44.000Z',
             detail: {
-                bundles: {
-                    server: {
-                        side: 'server',
-                        hash: BUNDLE_HASH,
-                        url: `https://cdn.grove.example/b/${BUNDLE_HASH}`,
-                        byteLength: 81_920,
+                build: {
+                    gameId: GAME_ID,
+                    revision: 4,
+                    projectId: 'leaf-harvest',
+                    projectHash: SOURCE_HASH,
+                    bundles: {
+                        server: {
+                            side: 'server',
+                            hash: BUNDLE_HASH,
+                            url: `https://cdn.grove.example/b/${BUNDLE_HASH}`,
+                            byteLength: 81_920,
+                        },
+                        client: {
+                            side: 'client',
+                            hash: SOURCE_HASH,
+                            url: `https://cdn.grove.example/b/${SOURCE_HASH}`,
+                            byteLength: 65_536,
+                        },
+                        simConfig: {
+                            hash: BUNDLE_HASH,
+                            url: `https://cdn.grove.example/b/${BUNDLE_HASH}.json`,
+                            byteLength: 142,
+                        },
+                        syncedHash: SOURCE_HASH,
                     },
-                    client: {
-                        side: 'client',
-                        hash: SOURCE_HASH,
-                        url: `https://cdn.grove.example/b/${SOURCE_HASH}`,
-                        byteLength: 65_536,
-                    },
-                    simConfig: {
-                        hash: BUNDLE_HASH,
-                        url: `https://cdn.grove.example/b/${BUNDLE_HASH}.json`,
-                        byteLength: 142,
-                    },
-                    syncedHash: SOURCE_HASH,
                 },
                 diagnostics: [
                     {
@@ -123,5 +136,13 @@ describe('a settled task', () => {
 describe('the streams', () => {
     it('are one per kind, so neither service skips what the other queued', () => {
         expect(streamOf('BUILD')).not.toBe(streamOf('ASSET_UPLOAD'));
+    });
+
+    it('sit in a database of their own, so an operator reaches one kind at a time', () => {
+        expect(databaseOf('BUILD')).not.toBe(databaseOf('ASSET_UPLOAD'));
+    });
+
+    it('put asset uploads in zero, where a URL that names no database already lands', () => {
+        expect(databaseOf('ASSET_UPLOAD')).toBe(0);
     });
 });

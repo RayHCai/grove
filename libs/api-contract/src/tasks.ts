@@ -1,7 +1,6 @@
 import { z } from 'zod';
-import { BundleSet } from './game-data.js';
+import { BuildManifest, WorkspacePath } from './workspace.js';
 import { GameId, TaskId } from './ids.js';
-import { WorkspacePath } from './workspace.js';
 
 /**
  * What kind of queued work a task is.
@@ -39,14 +38,20 @@ export type BuildDiagnostic = z.infer<typeof BuildDiagnostic>;
 /**
  * What a worker has to say about the task it settled.
  *
- * Every member is optional because one shape covers both kinds: a build reports diagnostics and the
- * bundle set it registered, and an upload reports the bytes it saw.
+ * Every member is optional because one shape covers both kinds: a build reports diagnostics and what
+ * it produced, and an upload reports the bytes it saw.
  */
 export const TaskDetail = z.object({
     /** A clean build may still carry warnings, so this is present on a success too. */
     diagnostics: z.array(BuildDiagnostic).optional(),
-    /** Present only on a build that succeeded — nothing else registers a bundle set. */
-    bundles: BundleSet.optional(),
+    /**
+     * Present only on a build that succeeded — nothing else produces one.
+     *
+     * The same bytes the build wrote to `build/<revision>/build.json`, echoed here because the
+     * allocator reads it on the path of every join and a bucket round trip does not belong there.
+     * The file is written first, so a settled build always has one to recover from.
+     */
+    build: BuildManifest.optional(),
     fileCount: z.int().nonnegative().optional(),
     byteLength: z.int().nonnegative().optional(),
     /** A failure of the fleet rather than of the source, in words a creator can read. */
@@ -105,4 +110,16 @@ export type TaskMessage = z.infer<typeof TaskMessage>;
 /** One stream per kind: two services read these, and one stream would make each skip the other's. */
 export function streamOf(kind: TaskKind): string {
     return kind === 'BUILD' ? 'grove:tasks:build' : 'grove:tasks:asset-upload';
+}
+
+/**
+ * Which Redis database one kind's stream lives in.
+ *
+ * Separate databases and not only separate keys, so what an operator does to one kind of work
+ * cannot reach the other: a `FLUSHDB`, a `SCAN` or a keyspace subscription is bounded by the
+ * database it was issued against. Asset uploads keep zero, which is where a client whose URL names
+ * no database already lands.
+ */
+export function databaseOf(kind: TaskKind): number {
+    return kind === 'BUILD' ? 1 : 0;
 }

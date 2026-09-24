@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { BundleSet } from './game-data.js';
 import { GameId, SessionId } from './ids.js';
 
 export const PlayRequestParams = z.object({ gameId: GameId });
@@ -17,10 +16,16 @@ export const PlaySession = z.object({
     /** The version the placed session is on, which is not always the newest one built. */
     revision: z.int().positive(),
     /**
-     * The code that session is running, so the browser fetches the half it needs, not the newest.
-     * A client on another version is refused at the handshake, or admitted with no scripts at all.
+     * What the browser has to claim to be admitted, which it cannot learn from the world it is
+     * trying to get into: the authority compares these before it allocates a `Player`, and only
+     * the bundle hash has an empty-string escape.
+     *
+     * No bundle refs beside them, deliberately. What code to run is the `Welcome`'s to say — it
+     * names a url and a hash, and the client fetches and verifies that. A second copy here would
+     * be this service's guess at what the world a player actually landed in is running.
      */
-    bundles: BundleSet,
+    projectId: z.string().min(1).max(128),
+    projectHash: z.string().min(1).max(128),
 });
 
 export type PlaySession = z.infer<typeof PlaySession>;
