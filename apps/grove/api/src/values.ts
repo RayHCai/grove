@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PASSWORD_MAX, PASSWORD_MIN } from '@grove/api-contract';
 
 /**
  * The field shapes the account and game routes share.
@@ -18,7 +19,7 @@ export const Email = z
     .max(254)
     .transform((raw) => raw.trim().toLowerCase());
 
-export const Password = z.string().min(12).max(128);
+export const Password = z.string().min(PASSWORD_MIN).max(PASSWORD_MAX);
 
 export const DisplayName = z
     .string()

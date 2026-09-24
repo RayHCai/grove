@@ -21,6 +21,7 @@ import type { Records } from './records.js';
 import { allocatorRoutes } from './routes/allocator.js';
 import { assetRoutes } from './routes/assets.js';
 import { authRoutes } from './routes/auth.js';
+import { fleetBuildRoutes } from './routes/build.js';
 import { fleetRoutes } from './routes/fleet.js';
 import { gameRoutes, gameSettingsRoutes } from './routes/games.js';
 import { playerRoutes } from './routes/players.js';
@@ -29,6 +30,8 @@ import { socialRoutes } from './routes/social.js';
 import { fleetTaskRoutes, taskRoutes } from './routes/tasks.js';
 import { workspaceRoutes } from './routes/workspace.js';
 import { ExpiringSessionStore } from './session-store.js';
+import { unattachedSocial } from './social.js';
+import type { Social } from './social.js';
 import { unattachedStorage } from './storage.js';
 import type { Storage } from './storage.js';
 
@@ -45,6 +48,7 @@ export async function buildApp(
     storage: Storage = unattachedStorage,
     queue: TaskQueue = unattachedQueue,
     mailer: Mailer = unattachedMailer,
+    social: Social = unattachedSocial,
 ): Promise<FastifyInstance> {
     const app = Fastify({
         logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
@@ -81,6 +85,9 @@ export async function buildApp(
         // reaches this service, so letting it send credentials would be handing them away.
         origin: [env.PLATFORM_ORIGIN, env.EDITOR_ORIGIN],
         credentials: true,
+        // The plugin's own default is GET,HEAD,POST, so a preflight for any write route the
+        // editor makes is refused before it is ever routed here.
+        methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
     });
 
     await app.register(import('@fastify/rate-limit'), { max: 300, timeWindow: '1 minute' });
@@ -121,7 +128,7 @@ export async function buildApp(
         ok: true,
     }));
 
-    // Eleven scopes, eleven sets of hooks. Sibling scopes share nothing, so the fleet's task route
+    // Twelve scopes, twelve sets of hooks. Sibling scopes share nothing, so the fleet's task route
     // can sit beside a creator's without either inheriting the other's gate.
     await app.register(authRoutes(records, mailer, sessions, env), {
         prefix: '/v1/auth',
@@ -129,12 +136,13 @@ export async function buildApp(
     await app.register(playerRoutes(records, sessions), { prefix: '/v1' });
     await app.register(gameRoutes(records), { prefix: '/v1' });
     await app.register(gameSettingsRoutes(records), { prefix: '/v1' });
-    await app.register(socialRoutes, { prefix: '/v1/social' });
+    await app.register(socialRoutes(social), { prefix: '/v1/social' });
     await app.register(workspaceRoutes(records, storage, queue), { prefix: '/v1' });
     await app.register(assetRoutes(records, storage), { prefix: '/v1' });
     await app.register(publishingRoutes(records, queue), { prefix: '/v1' });
     await app.register(taskRoutes(records), { prefix: '/v1' });
     await app.register(fleetTaskRoutes(records, env), { prefix: '/v1' });
+    await app.register(fleetBuildRoutes(storage, env), { prefix: '/v1' });
     await app.register(fleetRoutes(records, env), { prefix: '/v1' });
     await app.register(allocatorRoutes(env, records, fleet), { prefix: '/v1' });
 

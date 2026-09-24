@@ -120,22 +120,33 @@ export function workspaceRoutes(
 
                 const upserts: FileUpsert[] = [];
 
-                // The bytes go first, and a save that turns out stale leaves versions no manifest
-                // names — which the bucket's own expiry collects, and which no read can reach.
+                // Sized before anything is written, so a refusal does not leave the bucket holding
+                // whichever sources happened to come before the oversized one.
                 for (const source of save.sources) {
-                    const body = Buffer.from(source.text, 'utf8');
-                    if (body.byteLength > MAX_SOURCE_BYTES) {
+                    if (Buffer.byteLength(source.text, 'utf8') > MAX_SOURCE_BYTES) {
                         return reply.code(413).send({
                             code: 'invalid_request',
                             message: `${source.path} is too large to save as source`,
                         });
                     }
-                    // oxlint-disable-next-line no-await-in-loop
-                    const written = await storage.put(
-                        objectKey(game, 'source', source.path),
-                        body,
-                        source.contentType,
-                    );
+                }
+
+                // The bytes go first, and a save that turns out stale leaves versions no manifest
+                // names — which the bucket's own expiry collects, and which no read can reach.
+                // At once, because a save touches every script in a game and these are independent
+                // round trips; the outcomes are read back in order, so the refusal is still the
+                // first one by path rather than whichever lost the race.
+                const writes = await Promise.all(
+                    save.sources.map(async (source) => ({
+                        source,
+                        written: await storage.put(
+                            objectKey(game, 'source', source.path),
+                            Buffer.from(source.text, 'utf8'),
+                            source.contentType,
+                        ),
+                    })),
+                );
+                for (const { source, written } of writes) {
                     if (written.outcome === 'unattached') {
                         return reply
                             .code(501)
@@ -158,9 +169,13 @@ export function workspaceRoutes(
 
                 // An asset's bytes never passed through here, so what it landed as is read from the
                 // bucket rather than taken from the editor that claims to have sent it.
-                for (const path of save.assets) {
-                    // oxlint-disable-next-line no-await-in-loop
-                    const landed = await storage.head(objectKey(game, 'asset', path));
+                const landings = await Promise.all(
+                    save.assets.map(async (path) => ({
+                        path,
+                        landed: await storage.head(objectKey(game, 'asset', path)),
+                    })),
+                );
+                for (const { path, landed } of landings) {
                     if (landed === undefined) {
                         return reply.code(400).send({
                             code: 'invalid_request',

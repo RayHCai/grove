@@ -53,8 +53,13 @@ export interface Storage {
      * browser to the bucket, so the editor's word for either is a claim rather than a fact.
      */
     head(key: string): Promise<StoredVersion | undefined>;
-    /** One exact byte-set, named by the version a manifest froze rather than by what is current. */
-    get(key: string, versionId: VersionId): Promise<StoredObject | undefined>;
+    /**
+     * One exact byte-set, named by the version a manifest froze rather than by what is current.
+     *
+     * The version is optional for the one class of key nothing ever overwrites: a build writes
+     * under a prefix its own revision owns, so what is current there is what that build produced.
+     */
+    get(key: string, versionId?: VersionId): Promise<StoredObject | undefined>;
     /** Leaves a delete marker rather than erasing anything, so the history a manifest names survives. */
     remove(key: string): Promise<void>;
     /** A URL the browser PUTs an asset's bytes straight to, which is why this service never sees them. */
@@ -79,7 +84,7 @@ const OBJECT_TIMEOUT_MS = 15_000;
 export function s3Storage(env: Env, bucket: string): Storage {
     const client = new S3Client({
         region: env.AWS_REGION,
-        // Set only where something other than AWS is answering — a local MinIO, a test double —
+        // Set only where something other than AWS is answering — a local LocalStack, a test double —
         // and path style with it, because a bucket name is not a hostname there.
         ...(env.S3_ENDPOINT === undefined
             ? {}

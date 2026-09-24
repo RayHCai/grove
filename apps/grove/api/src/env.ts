@@ -15,8 +15,17 @@ const Env = z.object({
     /** Where a queued task is announced. Absent, and nothing is ever told a build was asked for. */
     REDIS_URL: z.url({ protocol: /^rediss?$/u }).optional(),
 
+    /**
+     * Where the edge serves the games bucket from, which is what a build's output is addressed by.
+     *
+     * Only `build/` and `assets/` are reachable through it, so a creator's source stays inside the
+     * fleet. This service is the one place that knows the address: a worker that made one up would
+     * be choosing where a joining browser fetches code from.
+     */
+    GAMES_CDN_URL: z.url(),
+
     AWS_REGION: z.string().min(1).default('us-east-1'),
-    /** Set only where something other than AWS answers for the bucket, such as a local MinIO. */
+    /** Set only where something other than AWS answers for the bucket, such as a local LocalStack. */
     S3_ENDPOINT: z.url().optional(),
     /** How long an asset's presigned PUT is good for; enough for a slow uplink and a big file. */
     ASSET_UPLOAD_TTL_S: z.coerce.number().int().positive().default(900),
