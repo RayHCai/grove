@@ -1,0 +1,13 @@
+{
+    "$schema": "https://railway.com/railway.schema.json",
+    "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "apps/grove/api/Dockerfile"
+    },
+    "deploy": {
+        "preDeployCommand": ["node node_modules/prisma/build/index.js migrate deploy"],
+        "startCommand": "node dist/main.js",
+        "healthcheckPath": "/health",
+        "restartPolicyType": "ON_FAILURE"
+    }
+}

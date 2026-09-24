@@ -1,0 +1,266 @@
+# Grove on one machine, for development only. Nothing deploys from this file: a deployed process is
+# pointed at a managed Postgres, a managed Redis and a real bucket through its environment, and the
+# fleet is Terraform's.
+#
+# Three layers, because most work needs only the first:
+#
+#   docker compose up                      the stores, for `pnpm dev` on the host
+#   docker compose --profile app up        and the services, from the images that deploy
+#   docker compose --profile fleet up      and one box of the fleet, for a session end to end
+#
+# The browser apps are not here. They deploy to a static host, `pnpm --filter @grove/editor dev`
+# already reloads on an edit, and a container around Vite only adds a poll-based watcher and a second
+# node_modules tree to keep in step with the host's.
+#
+# Every service below runs the same image its production Dockerfile builds, so a failure here is a
+# failure worth reproducing. That is also why each one still needs its environment supplied: an image
+# that behaved differently because it noticed it was local would be the one thing this cannot test.
+#
+# Secrets and the handful of values a developer might move live in `.env`; copy `.env.example` to it.
+
+services:
+    postgres:
+        image: postgres:17-alpine
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER:-grove}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grove}
+            POSTGRES_DB: ${POSTGRES_DB:-grove}
+        ports:
+            - '5432:5432'
+        volumes:
+            - grove-pgdata:/var/lib/postgresql/data
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-grove} -d ${POSTGRES_DB:-grove}']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+    # The task streams and the line of waiting joins. No persistence: a stream holds task ids, and the
+    # rows in Postgres are the record — a restart that lost the messages is what the sweeper
+    # re-announces.
+    redis:
+        image: redis:8-alpine
+        ports:
+            - '6379:6379'
+        healthcheck:
+            test: ['CMD', 'redis-cli', 'ping']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+    # S3, locally, and nothing else: the games bucket reached through `S3_ENDPOINT` is the only AWS API
+    # any code in this repository calls. Adding a service here because a deployment has one buys an
+    # emulator nothing talks to.
+    localstack:
+        image: localstack/localstack:4
+        environment:
+            SERVICES: s3
+            GAMES_BUCKET: ${GAMES_BUCKET:-grove-games}
+            DEBUG: ${LOCALSTACK_DEBUG:-0}
+        ports:
+            - '4566:4566'
+        volumes:
+            - ./docker/localstack/ready.d:/etc/localstack/init/ready.d:ro
+            - grove-localstack:/var/lib/localstack
+        healthcheck:
+            # The init hook makes the bucket, and this is what makes `api` wait for it rather than start
+            # against an endpoint that answers 404 for every key.
+            test:
+                [
+                    'CMD-SHELL',
+                    'curl -fsS http://localhost:4566/_localstack/init | grep -q ''"READY": true''',
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 30
+            start_period: 30s
+
+    # The schema, before anything opens a connection pool against it. Separate from `api` because a
+    # migration is a thing that happened once, not a thing a server does on the way up — which is also
+    # how it is deployed, as a release command rather than a step in the entrypoint.
+    api-migrate:
+        image: grove-api:local
+        profiles: ['app', 'fleet']
+        # The same image as `api`, declared rather than assumed: a service that only names a tag has to
+        # find it already built, and this is the one that runs first.
+        build:
+            context: .
+            dockerfile: apps/grove/api/Dockerfile
+        environment:
+            DATABASE_URL: postgresql://${POSTGRES_USER:-grove}:${POSTGRES_PASSWORD:-grove}@postgres:5432/${POSTGRES_DB:-grove}
+        restart: 'no'
+        command: ['node', 'node_modules/prisma/build/index.js', 'migrate', 'deploy']
+        depends_on:
+            postgres:
+                condition: service_healthy
+
+    api:
+        image: grove-api:local
+        profiles: ['app', 'fleet']
+        build:
+            context: .
+            dockerfile: apps/grove/api/Dockerfile
+        init: true
+        environment:
+            # The image is built `production`; this overrides it because that value alone decides
+            # whether the session cookie carries `Secure`, and nothing here terminates TLS.
+            NODE_ENV: development
+            API_HOST: 0.0.0.0
+            API_PORT: 4000
+            DATABASE_URL: postgresql://${POSTGRES_USER:-grove}:${POSTGRES_PASSWORD:-grove}@postgres:5432/${POSTGRES_DB:-grove}
+            REDIS_URL: redis://redis:6379
+            GAMES_BUCKET: ${GAMES_BUCKET:-grove-games}
+            # A bucket name is not a hostname here, so the SDK is put in path style with it.
+            S3_ENDPOINT: http://localstack:4566
+            # No distribution locally, so build output is addressed straight at the bucket — and at the
+            # address a BROWSER reaches it on, which is the host's and not this network's.
+            GAMES_CDN_URL: http://localhost:4566/${GAMES_BUCKET:-grove-games}
+            AWS_REGION: ${AWS_REGION:-us-east-1}
+            AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+            AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+            SESSION_SECRET: ${SESSION_SECRET}
+            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET}
+            FLEET_SECRET: ${FLEET_SECRET}
+            SERVER_MANAGER_URL: http://server-manager:4003
+            # This network is the only peer in front of the process, so the forwarded headers believed
+            # here are the ones it writes.
+            TRUSTED_PROXIES: loopback,uniquelocal
+            # The Vite dev servers, on the host.
+            PLATFORM_ORIGIN: http://localhost:5175
+            EDITOR_ORIGIN: http://localhost:5176
+        ports:
+            - '4000:4000'
+        depends_on:
+            api-migrate:
+                condition: service_completed_successfully
+            redis:
+                condition: service_healthy
+            localstack:
+                condition: service_healthy
+
+    game-builder:
+        image: grove-game-builder:local
+        profiles: ['app', 'fleet']
+        build:
+            context: .
+            dockerfile: apps/grove/game-builder/Dockerfile
+        init: true
+        environment:
+            NODE_ENV: development
+            GAME_BUILDER_HOST: 0.0.0.0
+            GAME_BUILDER_PORT: 4002
+            FLEET_SECRET: ${FLEET_SECRET}
+            API_URL: http://api:4000
+            REDIS_URL: redis://redis:6379
+            # Two builders sharing a name share their claims. One box locally, but named rather than
+            # left to the container id, which changes on every recreate.
+            BUILDER_NAME: game-builder-local
+        ports:
+            - '4002:4002'
+        depends_on:
+            redis:
+                condition: service_healthy
+
+    asset-upload-service:
+        image: grove-asset-upload-service:local
+        profiles: ['app', 'fleet']
+        build:
+            context: .
+            dockerfile: apps/grove/asset-upload-service/Dockerfile
+        environment:
+            ASSET_UPLOAD_SERVICE_BIND: 0.0.0.0:4005
+            FLEET_SECRET: ${FLEET_SECRET}
+            UPLOAD_ROOT: /var/lib/grove/objects
+            API_URL: http://api:4000
+            REDIS_URL: redis://redis:6379
+            UPLOAD_WORKER_NAME: asset-upload-local
+        ports:
+            - '4005:4005'
+        volumes:
+            # One filesystem, because the rename that publishes an object is atomic only inside one.
+            - grove-objects:/var/lib/grove/objects
+        depends_on:
+            redis:
+                condition: service_healthy
+
+    #
+    # `fleet` is `app` and one box on top of it, which is why every service above carries both names: a
+    # box with no allocator to take a ticket from and no build output to fetch can hold no session.
+
+    game-manager:
+        image: grove-game-manager:local
+        profiles: ['app', 'fleet']
+        build:
+            context: .
+            dockerfile: apps/grove/game-manager/Dockerfile
+        environment:
+            GROVE_ENV: development
+            # Every service here is reached across this network, so loopback — the right default for a
+            # box in a real fleet — is the one thing that cannot be kept.
+            GAME_MANAGER_HOST: 0.0.0.0
+            GAME_MANAGER_PORT: 4001
+            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET}
+        ports:
+            - '4001:4001'
+
+    server-manager:
+        image: grove-server-manager:local
+        profiles: ['app', 'fleet']
+        build:
+            context: .
+            dockerfile: apps/grove/server-manager/Dockerfile
+        environment:
+            GROVE_ENV: development
+            SERVER_MANAGER_HOST: 0.0.0.0
+            SERVER_MANAGER_PORT: 4003
+            FLEET_SECRET: ${FLEET_SECRET}
+            # Nothing here terminates TLS, so a placement handed out as `wss` is one no local player can
+            # dial.
+            INGRESS_SCHEME: ws
+            JOIN_QUEUE_URL: redis://redis:6379
+            API_URL: http://api:4000
+        ports:
+            - '4003:4003'
+        depends_on:
+            redis:
+                condition: service_healthy
+
+    # One box of the fleet: the agent, and the game binary it forks. A second box is
+    # `--scale instance-manager=2` with `HOST_ID` left to the container, which this file cannot do — the
+    # id is issued with the box, and two boxes sharing one are one box to the router.
+    instance-manager:
+        image: grove-local-fleet-box:local
+        profiles: ['fleet']
+        build:
+            context: .
+            dockerfile: docker/local-fleet-box.Dockerfile
+        environment:
+            GROVE_ENV: development
+            INSTANCE_MANAGER_HOST: 0.0.0.0
+            INSTANCE_MANAGER_PORT: 4004
+            FLEET_SECRET: ${FLEET_SECRET}
+            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET}
+            SERVER_MANAGER_URL: http://server-manager:4003
+            GAME_MANAGER_URL: http://game-manager:4001
+            HOST_ID: ${LOCAL_HOST_ID:-6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70}
+            HOST_REGION: ${AWS_REGION:-us-east-1}
+            GAME_INSTANCE_BIN: /usr/local/bin/grove-game-instance
+            INSTANCE_STATE_DIR: /var/lib/grove
+            BUNDLE_CACHE_DIR: /var/lib/grove/bundles
+        ports:
+            - '4004:4004'
+        volumes:
+            # The children this agent started, and the build output it has fetched, one file per content
+            # hash. Kept across a recreate so a restart adopts rather than re-fetches.
+            - grove-fleet-state:/var/lib/grove
+        depends_on:
+            server-manager:
+                condition: service_healthy
+            game-manager:
+                condition: service_healthy
+
+volumes:
+    grove-pgdata:
+    grove-localstack:
+    grove-objects:
+    grove-fleet-state:
