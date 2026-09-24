@@ -18,7 +18,6 @@ use serde_json::value::RawValue;
 use tokio::sync::mpsc;
 
 use crate::protocol::{ConnectionId, SendClass};
-use crate::request_id;
 use crate::session::HostEvent;
 use crate::ticket;
 

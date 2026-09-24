@@ -9,6 +9,7 @@
                 "bundle/**",
                 "Cargo.toml",
                 "package.json",
+                "$TURBO_ROOT$/apps/grove/request-id/**",
                 "$TURBO_ROOT$/apps/grove/Cargo.toml",
                 "$TURBO_ROOT$/apps/grove/Cargo.lock",
                 "$TURBO_ROOT$/apps/grove/rust-toolchain.toml"
@@ -26,6 +27,7 @@
             "inputs": [
                 "src/**",
                 "Cargo.toml",
+                "$TURBO_ROOT$/apps/grove/request-id/**",
                 "$TURBO_ROOT$/apps/grove/Cargo.toml",
                 "$TURBO_ROOT$/apps/grove/Cargo.lock",
                 "$TURBO_ROOT$/apps/grove/rust-toolchain.toml"
@@ -36,6 +38,7 @@
             "inputs": [
                 "src/**",
                 "Cargo.toml",
+                "$TURBO_ROOT$/apps/grove/request-id/**",
                 "$TURBO_ROOT$/apps/grove/Cargo.toml",
                 "$TURBO_ROOT$/apps/grove/Cargo.lock",
                 "$TURBO_ROOT$/apps/grove/rust-toolchain.toml"

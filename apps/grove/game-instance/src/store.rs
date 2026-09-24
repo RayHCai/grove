@@ -9,8 +9,6 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use serde_json::value::RawValue;
 
-use crate::request_id;
-
 /// What one call to the manager may take before it answers as a failure.
 ///
 /// Under the sim's five-second join deadline, so a wedged manager reaches a joining player as the

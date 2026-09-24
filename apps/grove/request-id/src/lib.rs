@@ -1,6 +1,6 @@
 //! The id that joins one request across the services it passes through — the same token the Go
-//! half puts on every hop, restated because this process sits between them: it answers the agent's
-//! probe and calls `@grove/game-manager`, and a chain is only as long as its quietest link.
+//! half puts on every hop, restated for the Rust crates that sit between them: a chain is only as
+//! long as its quietest link.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,7 +10,7 @@ pub const HEADER: &str = "x-request-id";
 
 /// Wide enough for a uuid, a 32-hex trace id or a w3c traceparent, and narrow enough that a caller
 /// cannot spend a megabyte of every log line on a header nobody bounded.
-const MAX_LEN: usize = 64;
+pub const MAX_LEN: usize = 64;
 
 /// Reports whether a presented id is one token a log, an echo header and an outbound call can all
 /// carry unchanged.

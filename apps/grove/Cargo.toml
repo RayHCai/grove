@@ -1,10 +1,10 @@
-# The Rust half of the fleet. Two crates, one lock and one pinned toolchain: a float difference
-# between two toolchains is a desync a playtest cannot reproduce, and a second lockfile is a second
-# place for a transitive dependency to be a different version.
+# The Rust half of the fleet. One lock and one pinned toolchain: a float difference between two
+# toolchains is a desync a playtest cannot reproduce, and a second lockfile is a second place for a
+# transitive dependency to be a different version.
 
 [workspace]
 resolver = "2"
-members = ["game-instance", "asset-upload-service"]
+members = ["game-instance", "asset-upload-service", "request-id"]
 
 [workspace.package]
 version = "0.0.0"
@@ -13,6 +13,10 @@ rust-version = "1.98"
 publish = false
 
 [workspace.dependencies]
+# Held once rather than per crate: this process sits between the Go services and answers their
+# probes, so a chain is only as long as its quietest link.
+grove-request-id = { path = "request-id" }
+
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
 axum = "0.8"
 tower = "0.5"
@@ -38,3 +42,24 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Which lints, stated once here; how strictly, stated by the `-D warnings` each gate passes. Split
+# that way because a contributor's `cargo check` should name a problem without refusing to build,
+# and CI should refuse.
+[workspace.lints.rust]
+# Neither crate needs it, and a raw pointer in a process that holds a V8 heap is the kind of fault
+# that surfaces somewhere else entirely.
+unsafe_code = "forbid"
+# Lower priority than the lints above, which is how Cargo is told a group may be overridden by a
+# name rather than colliding with one.
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+# A debugging aid that reached a release is a line in production logs nobody meant to ship, and
+# these services log through `tracing` so a handler can be found by its request id.
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+# A placeholder that compiles is a route that answers a panic.
+todo = "deny"
+unimplemented = "deny"

@@ -38,6 +38,8 @@ serde_json = { workspace = true }
 redis = { workspace = true }
 reqwest = { workspace = true }
 
+grove-request-id = { workspace = true }
+
 # The hash is the name, so it is the hot loop rather than a checksum on the side.
 sha2 = { workspace = true }
 # The fleet bearer, compared the way `grove-game-instance` compares a signature.
@@ -52,3 +54,6 @@ tempfile = "3"
 # `start_paused` on a test, so a body deadline is asserted rather than waited out.
 tokio = { workspace = true, features = ["test-util"] }
 tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true
