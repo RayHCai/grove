@@ -8,5 +8,12 @@
         "jsx": "react-jsx"
     },
     "include": ["src/**/*.ts", "src/**/*.tsx"],
-    "references": [{ "path": "../../packages/protocol" }]
+    "references": [
+        { "path": "../../packages/client" },
+        { "path": "../../packages/glue" },
+        { "path": "../../packages/project" },
+        { "path": "../../packages/renderer" },
+        { "path": "../../packages/scripting" },
+        { "path": "../../packages/transport" }
+    ]
 }
