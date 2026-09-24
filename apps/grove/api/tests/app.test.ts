@@ -8,6 +8,7 @@ import {
     SessionId,
     TaskId,
     VersionId,
+    WorkspacePath,
 } from '@grove/api-contract';
 import type { PlayableVersion, PublishedVersion, Task, TaskKind } from '@grove/api-contract';
 import { verifySessionToken } from '@grove/api-contract/tokens';
@@ -44,6 +45,7 @@ const env = readEnv({
     SESSION_SECRET: 'a'.repeat(32),
     GAME_TOKEN_SECRET: 'b'.repeat(32),
     TRUSTED_PROXIES: BALANCER,
+    GAMES_CDN_URL: 'https://cdn.grove.example',
     PLATFORM_ORIGIN: 'https://grove.example',
     EDITOR_ORIGIN: 'https://editor.grove.example',
     ...FLEET,
@@ -55,6 +57,7 @@ const deployed = readEnv({
     SESSION_SECRET: 'a'.repeat(32),
     GAME_TOKEN_SECRET: 'b'.repeat(32),
     TRUSTED_PROXIES: 'loopback',
+    GAMES_CDN_URL: 'https://cdn.grove.example',
     PLATFORM_ORIGIN: 'https://grove.example',
     EDITOR_ORIGIN: 'https://editor.grove.example',
     ...FLEET,
@@ -65,6 +68,8 @@ const HASH = 'a'.repeat(64);
 /** The version a build registered, which is what the allocator sends a player at. */
 const PLAYABLE: PlayableVersion = {
     revision: 2,
+    projectId: 'leaf-harvest',
+    projectHash: 'b'.repeat(64),
     bundles: {
         server: {
             side: 'server',
@@ -555,7 +560,7 @@ describe('the allocator', () => {
         });
     });
 
-    it('hands over the version the session is on, and the code that goes with it', async () => {
+    it('hands over the identity a joiner has to claim to be admitted', async () => {
         const app = await buildApp(env, records, placing);
         const { cookie, csrfToken } = await signIn(app);
         const response = await app.inject({
@@ -564,12 +569,27 @@ describe('the allocator', () => {
             headers: { cookie, 'x-csrf-token': csrfToken },
         });
 
-        // Without these the browser has to guess which build its session is running, and a guess
-        // that misses is a client admitted into a world holding none of its scripts.
+        // The authority compares these before it allocates a `Player`, and only the bundle hash
+        // has an empty-string escape — so a browser that arrives without them cannot join at all.
         expect(response.json()).toMatchObject({
             revision: PLAYABLE.revision,
-            bundles: PLAYABLE.bundles,
+            projectId: PLAYABLE.projectId,
+            projectHash: PLAYABLE.projectHash,
         });
+    });
+
+    it('names no bundle, because what code to run is the welcome to say', async () => {
+        const app = await buildApp(env, records, placing);
+        const { cookie, csrfToken } = await signIn(app);
+        const response = await app.inject({
+            method: 'POST',
+            url: `/v1/games/${GAME_ID}/play`,
+            headers: { cookie, 'x-csrf-token': csrfToken },
+        });
+
+        // A second copy here would be this service's guess at what the world a player actually
+        // landed in is running, and the client already verifies the bytes the welcome named.
+        expect(response.json()).not.toHaveProperty('bundles');
     });
 
     it('refuses a game whose build has never finished', async () => {
@@ -757,6 +777,23 @@ describe('publishing', () => {
             headers: { cookie },
         });
         expect(latest.statusCode).toBe(404);
+    });
+
+    it('refuses to publish while an asset is still being verified, and names it', async () => {
+        const queue = announcing();
+        const waiting: Records = {
+            ...withDraft(),
+            unvalidatedAssets: async () => [WorkspacePath.parse('art/hero.png')],
+        };
+        const app = await buildApp(env, waiting, unattachedFleet, undefined, queue);
+
+        const response = await publish(app);
+        expect(response.statusCode).toBe(409);
+        // The path, because a creator told only that something is unverified has nothing to do.
+        expect(response.json().message).toContain('art/hero.png');
+        // Nothing was queued: a build box is the one place that evaluates a creator's code, and it
+        // may not be handed bytes nothing has looked at.
+        expect(queue.pushed).toEqual([]);
     });
 
     it('refuses to publish a game whose editor has never saved', async () => {

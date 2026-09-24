@@ -112,6 +112,13 @@ model Task {
   /// The asset this task is for; null for every kind but ASSET_UPLOAD.
   assetPath String? @db.VarChar(256)
 
+  /// The exact byte-set this task is a verdict about; null for every kind but ASSET_UPLOAD.
+  ///
+  /// Carried on the row rather than read back from the file: a save that replaces an asset moves
+  /// the file's version on, and a verdict written against a path would then vouch for bytes
+  /// nothing ever looked at.
+  assetVersionId String? @db.VarChar(1024)
+
   attempts   Int       @default(0)
   detail     Json?
   createdAt  DateTime  @default(now()) @db.Timestamptz(3)
@@ -176,11 +183,19 @@ model GameFile {
   contentType String   @db.VarChar(128)
   updatedAt   DateTime @updatedAt @db.Timestamptz(3)
 
+  /// The byte-set an asset's verification passed on. The file is validated when this equals
+  /// `versionId` and at no other time: a save that replaces the bytes leaves the old verdict
+  /// behind, naming a version the row no longer holds, which is what makes it stop counting.
+  validatedVersionId String? @db.VarChar(1024)
+
   // Cascade drops the row naming the file, never the object: bucket versioning keeps every prior
   // byte-set addressable, and the manifests are what still name them.
   game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
 
   @@id([gameId, path])
+  // The publish gate's read: one game's assets, so the verdict on each can be compared with the
+  // version it holds. A publish waits on this, so it may not be a scan of every file ever saved.
+  @@index([gameId, kind])
 }
 
 /// What @grove/server-manager concluded about a box, never what the box claimed.

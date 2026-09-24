@@ -1,5 +1,5 @@
 import { Redis } from 'ioredis';
-import { streamOf, type TaskId, type TaskKind } from '@grove/api-contract';
+import { databaseOf, streamOf, type TaskId, type TaskKind } from '@grove/api-contract';
 import type { Env } from './env.js';
 
 /** Only `pushed` names work a consumer will be woken for; the row is written either way. */
@@ -30,20 +30,35 @@ export const unattachedQueue: TaskQueue = {
 /** How long a stream may keep the ids of work already settled, which is a debugging window. */
 const STREAM_LENGTH = 10_000;
 
-/** Redis streams, one per kind. */
+/** Redis streams, one per kind, each in the database that kind's workers read. */
 export function redisQueue(env: Env, url: string): TaskQueue {
-    const redis = new Redis(url, {
-        // The route answers 501 on a push that did not land, so an unbounded retry here would hold
-        // a creator's save open instead of telling them the fleet is not listening.
-        maxRetriesPerRequest: 2,
-        lazyConnect: true,
-    });
+    // One connection per kind, because `SELECT` pins a connection to a database and the kinds no
+    // longer share one. Opened on first push, so a deployment that only ever queues builds holds
+    // one socket rather than one per kind it has.
+    const held = new Map<TaskKind, Redis>();
+
+    const connectionFor = (kind: TaskKind): Redis => {
+        const open = held.get(kind);
+        if (open !== undefined) return open;
+        const redis = new Redis(url, {
+            // An explicit option beats the URL's own path in ioredis, which is what makes the
+            // contract the one place a database number is decided: a connection string that names
+            // a different one cannot quietly win.
+            db: databaseOf(kind),
+            // The route answers 501 on a push that did not land, so an unbounded retry here would
+            // hold a creator's save open instead of telling them the fleet is not listening.
+            maxRetriesPerRequest: 2,
+            lazyConnect: true,
+        });
+        held.set(kind, redis);
+        return redis;
+    };
 
     return {
         push: async (kind, task) => {
             // Trimmed approximately: an exact cap makes every push scan, and what this bounds is
             // memory rather than a guarantee anything depends on.
-            const pushed = await redis
+            const pushed = await connectionFor(kind)
                 .xadd(streamOf(kind), 'MAXLEN', '~', STREAM_LENGTH, '*', 'taskId', task)
                 .catch(() => undefined);
             return pushed === undefined || pushed === null
@@ -52,7 +67,9 @@ export function redisQueue(env: Env, url: string): TaskQueue {
         },
 
         close: async () => {
-            await redis.quit().catch(() => undefined);
+            await Promise.all(
+                [...held.values()].map((redis) => redis.quit().catch(() => undefined)),
+            );
         },
     };
 }

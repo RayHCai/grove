@@ -164,6 +164,15 @@ export interface Records {
     /** One file as the rows name it, which is what a read is allowed to fetch by. */
     fileOf(game: GameId, path: WorkspacePath): Promise<WorkspaceFile | undefined>;
     saveWorkspace(game: GameId, plan: SavePlan): Promise<WorkspaceSaved>;
+    /**
+     * The assets of this game whose verification has not reached the bytes they hold, at most
+     * `limit` of them. Empty is the only state a build may be queued from.
+     *
+     * Named rather than counted, because a creator told a publish was refused has to be told which
+     * file to look at — and a path the editor can highlight is the difference between waiting and
+     * knowing what to re-upload.
+     */
+    unvalidatedAssets(game: GameId, limit: number): Promise<WorkspacePath[]>;
     publishedVersionOf(game: GameId): Promise<PublishedVersion | undefined>;
     /**
      * The newest version anybody can play: the highest revision whose build finished.
@@ -221,6 +230,9 @@ export const unattachedRecords: Records = {
     publishedVersionOf: async () => undefined,
     playableVersionOf: async () => undefined,
     taskOf: async () => undefined,
+    // Empty is what a game with no files holds, and a game with no files is what every read above
+    // just answered: the gate this feeds is open because there is nothing behind it to verify.
+    unvalidatedAssets: async () => [],
     saveWorkspace: async () => ({ outcome: 'missing' }),
     advanceTask: async () => ({ outcome: 'missing' }),
     markPublished: async () => undefined,

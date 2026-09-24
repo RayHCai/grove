@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import {
-    BundleSet,
+    BuildManifest,
     FileKind,
     GameId,
     GameVisibility,
@@ -451,6 +451,7 @@ export function prismaRecords(db: PrismaClient): Records {
                                 kind: 'ASSET_UPLOAD',
                                 manifestRevision: revision,
                                 assetPath: asset.path,
+                                assetVersionId: asset.versionId,
                             },
                         });
                         tasks.push(asTask(row));
@@ -504,11 +505,17 @@ export function prismaRecords(db: PrismaClient): Records {
 
             // A build settled without one is a worker that answered outside its own contract, and
             // sending a player at a version naming no code would fail on the box instead of here.
-            const bundles = BundleSet.safeParse(
-                (row.detail as { bundles?: unknown } | null)?.bundles,
+            const built = BuildManifest.safeParse(
+                (row.detail as { build?: unknown } | null)?.build,
             );
-            if (!bundles.success) return undefined;
-            return { revision: row.manifestRevision, bundles: bundles.data };
+            if (!built.success) return undefined;
+            // The revision the row is pinned to, never the one inside the detail a worker wrote: a
+            // build manifest naming another revision is a worker that settled the wrong task.
+            if (built.data.revision !== row.manifestRevision || built.data.gameId !== game) {
+                return undefined;
+            }
+            const { gameId: _gameId, ...version } = built.data;
+            return version;
         },
 
         markPublished: async (game, version) => {
@@ -581,9 +588,44 @@ export function prismaRecords(db: PrismaClient): Records {
             });
 
             const settled = await db.task.findUniqueOrThrow({ where: { id: task } });
-            return moved.count === 0
-                ? { outcome: 'backwards', task: asTask(settled) }
-                : { outcome: 'advanced', task: asTask(settled) };
+            if (moved.count === 0) return { outcome: 'backwards', task: asTask(settled) };
+
+            // The verdict is written here rather than by the worker, because the worker holds no
+            // database credential and the file it vouched for is not the one it was told about:
+            // the update matches on the version, so a save that replaced the bytes in the meantime
+            // leaves the row unvalidated instead of inheriting somebody else's pass.
+            if (
+                settled.kind === 'ASSET_UPLOAD' &&
+                settled.status === 'SUCCESSFUL' &&
+                settled.assetPath !== null &&
+                settled.assetVersionId !== null
+            ) {
+                await db.gameFile.updateMany({
+                    where: {
+                        gameId: settled.gameId,
+                        path: settled.assetPath,
+                        versionId: settled.assetVersionId,
+                    },
+                    data: { validatedVersionId: settled.assetVersionId },
+                });
+            }
+            return { outcome: 'advanced', task: asTask(settled) };
+        },
+
+        unvalidatedAssets: async (game, limit) => {
+            // Raw, because the question is whether two columns of one row agree and Prisma's filter
+            // language compares a column with a value only. A null verdict and a stale one are the
+            // same answer: neither names the bytes this game holds.
+            const rows = await db.$queryRaw<{ path: string }[]>`
+                SELECT "path"
+                  FROM "GameFile"
+                 WHERE "gameId" = ${game}::uuid
+                   AND "kind" = 'asset'
+                   AND ("validatedVersionId" IS NULL OR "validatedVersionId" <> "versionId")
+                 ORDER BY "path"
+                 LIMIT ${limit}
+            `;
+            return rows.map((row) => WorkspacePath.parse(row.path));
         },
 
         unclaimedTasks: async (kind, before, limit) => {

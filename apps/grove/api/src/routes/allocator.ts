@@ -80,7 +80,10 @@ export function allocatorRoutes(env: Env, records: Records, fleet: Fleet): Fasti
                     // What the session placed is running, so the browser fetches that version's
                     // code rather than whatever this service built most recently.
                     revision: placement.revision,
-                    bundles: version.bundles,
+                    // What a joiner has to claim to be admitted. The code it runs is the Welcome's
+                    // to name, so nothing about a bundle crosses here.
+                    projectId: version.projectId,
+                    projectHash: version.projectHash,
                 });
             },
         );
