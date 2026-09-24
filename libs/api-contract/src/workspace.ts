@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BundleSet } from './game-data.js';
-import { GameId } from './ids.js';
+import { ContentHash, GameId } from './ids.js';
 
 /**
  * One path in a game's workspace: POSIX, relative, and made only of segments a filesystem, a URL
@@ -178,12 +178,43 @@ export type PublishedVersion = z.infer<typeof PublishedVersion>;
 /**
  * The newest version anybody can actually play, which is a different fact from the one above.
  *
- * A publish asks for a build; this is the newest build that finished and registered a bundle set.
+ * A publish asks for a build; this is the newest build that finished and wrote a build manifest.
  * Reading `PublishedVersion` here would send a player at a revision that failed to compile, or at
  * one still compiling — neither of which any box can be asked to run.
  */
-export const PlayableVersion = z.object({ revision: z.int().positive(), bundles: BundleSet });
+export const PlayableVersion = z.object({
+    revision: z.int().positive(),
+    /**
+     * What the authority will claim about itself, and what a joiner has to claim back.
+     *
+     * The handshake compares these before a `Player` is allocated, and only `bundleHash` has an
+     * empty-string escape — so a browser that knows neither cannot join at all, and they travel
+     * with the ticket rather than being learned from the world it is trying to get into.
+     */
+    projectId: z.string().min(1).max(128),
+    projectHash: z.string().min(1).max(128),
+    bundles: BundleSet,
+});
 export type PlayableVersion = z.infer<typeof PlayableVersion>;
+
+/**
+ * What one build produced, written once to `<gameId>/build/<revision>/build.json`.
+ *
+ * The output half of the pair: `manifests/<revision>.json` names the source a build compiled, this
+ * names what came out of it. Sibling prefixes rather than one, because a save writes a manifest on
+ * every revision and only a publish ever produces a build — most revisions have the first and no
+ * second, and a rollback needs both to be findable on their own.
+ *
+ * Written before the task that produced it is settled, so a settled build always has one: the file
+ * is the durable record, and the row a creator's editor polls is the copy on the hot path.
+ */
+export const BuildManifest = PlayableVersion.extend({ gameId: GameId });
+export type BuildManifest = z.infer<typeof BuildManifest>;
+
+/** Where a build says what it produced, beside the chunks it produced. */
+export function buildManifestKey(game: GameId, revision: number): string {
+    return `${buildPrefix(game, revision)}build.json`;
+}
 
 /** Where an asset's bytes are going, asked for before they are sent. */
 export const AssetUploadRequest = z.object({
@@ -205,6 +236,33 @@ export const AssetUpload = z.object({
     maxBytes: z.int().positive(),
 });
 export type AssetUpload = z.infer<typeof AssetUpload>;
+
+/**
+ * One file a build writes beside its manifest, named as a single segment.
+ *
+ * A segment rather than a path, because a build's output is flat and a name carrying a slash is how
+ * a worker would write outside the revision prefix it was handed.
+ */
+export const BuildOutputName = z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u, { error: 'a build output is one flat name' });
+export type BuildOutputName = z.infer<typeof BuildOutputName>;
+
+/**
+ * What one stored build output turned out to be, answered to the worker that wrote it.
+ *
+ * The address is computed where the bucket's edge is configured and never by the worker: a builder
+ * that invented one would be choosing where a joining browser fetches code from.
+ */
+export const BuildArtifact = z.object({
+    name: BuildOutputName,
+    url: z.url(),
+    hash: ContentHash,
+    byteLength: z.int().nonnegative(),
+});
+export type BuildArtifact = z.infer<typeof BuildArtifact>;
 
 /**
  * Where one file's bytes sit in the games bucket.
