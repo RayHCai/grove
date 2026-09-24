@@ -25,25 +25,35 @@ jobs:
         name: ${{ matrix.task.name }}
         runs-on: ubuntu-latest
         timeout-minutes: 20
-        # The toolchains this job installs, so their absence fails here rather than skipping. Not
-        # set on `determinism`, which installs none.
         env:
+            # The toolchains this job installs, so their absence fails here rather than skipping.
+            # Not set on `determinism`, which installs none.
             GROVE_REQUIRE_TOOLCHAIN: go,cargo,staticcheck,terraform
+
+            # What the change reaches, rather than the whole tree — but only on a pull request. A
+            # push to main runs everything, so a package the affected graph failed to reach is red
+            # on main within the minute rather than never. A file in no package is a root change and
+            # selects every package, which is what keeps a `tsconfig.base.json` or a `go.mod` edit
+            # from narrowing the gate to nothing.
+            TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
+            AFFECTED: ${{ github.event_name == 'pull_request' && '--affected' || '' }}
         strategy:
             fail-fast: false
             matrix:
                 task:
+                    # oxlint and prettier read the tree directly rather than through turbo, so
+                    # neither narrows — and neither is slow enough to want to.
                     - name: lint
                       # Warn-tier rules only ratchet if they exit non-zero somewhere.
                       run: pnpm run lint --deny-warnings
                     - name: format
                       run: pnpm run format:check && pnpm -r --if-present run format:check
                     - name: typecheck
-                      run: pnpm run typecheck
+                      run: pnpm run typecheck $AFFECTED
                     - name: build
-                      run: pnpm run build
+                      run: pnpm run build $AFFECTED
                     - name: test
-                      run: pnpm run test
+                      run: pnpm run test $AFFECTED
         steps:
             - uses: actions/checkout@v6
               with:
@@ -68,16 +78,12 @@ jobs:
               with:
                   workspaces: apps/grove
 
-            # Keyed on the go.mod files rather than go.sum: the Go half takes no
-            # third-party dependency, so no go.sum exists to hash. A guard on go.work being present
-            # would turn a lost workspace file into a skipped gate rather than a failing one.
+            # Keyed on go.mod rather than go.sum: the Go half takes no third-party dependency, so no
+            # go.sum exists to hash.
             - uses: actions/setup-go@v6
               with:
-                  go-version-file: go.work
-                  cache-dependency-path: |
-                      go.work
-                      libs/go-grove/go.mod
-                      apps/grove/*/go.mod
+                  go-version-file: go.mod
+                  cache-dependency-path: go.mod
 
             # Installed rather than run through dominikh/staticcheck-action: the gate is the same
             # `pnpm run typecheck` a contributor runs, and an action that runs the linter itself is a
@@ -170,7 +176,7 @@ jobs:
               # The TypeScript half only — this job exists to run one simulation on two V8 builds, and
               # no native service's tests answer a question a second architecture changes. Every native
               # package is named: these runners ship Go and Rust on PATH, so nothing here would skip, and
-              # the toolchains go.work and rust-toolchain.toml pin are one download apiece per leg.
+              # the toolchains go.mod and rust-toolchain.toml pin are one download apiece per leg.
               run: >-
                   pnpm run test --filter='!@grove/game-instance' --filter='!@grove/asset-upload-service'
                   --filter='!@grove/go-grove' --filter='!@grove/game-manager'
@@ -188,34 +194,14 @@ jobs:
 
             - uses: actions/setup-go@v6
               with:
-                  go-version-file: go.work
-                  cache-dependency-path: |
-                      go.work
-                      libs/go-grove/go.mod
-                      apps/grove/*/go.mod
+                  go-version-file: go.mod
+                  cache-dependency-path: go.mod
 
-            # One job rather than a matrix over the modules: `-race` compiles the standard library
-            # from source, and one build cache pays for that once instead of four times.
-            #
-            # `./...` from the workspace root matches no module, so each is entered in turn, and the
-            # loop runs to the end — a race in the first must not hide the state of the other three.
+            # One module, so `./...` from the root is every Go package in the tree and a new service
+            # is covered the day it is added. `-count=1` because a cached pass replays one past
+            # interleaving, and a fresh schedule on every run is the only leverage the detector has.
             - name: race
-              run: |
-                  # Assigned before the loop so a `go list` that fails aborts the step, rather than
-                  # yielding an empty word list that reports every module clean.
-                  modules=$(go list -m -f '{{.Dir}}')
-                  raced=
-                  for module in $modules; do
-                    echo "::group::$module"
-                    # A cached pass replays one past interleaving, and a fresh schedule on
-                    # every run is the only leverage the detector has.
-                    (cd "$module" && go test -race -count=1 -shuffle=on ./...) || raced="$raced $module"
-                    echo "::endgroup::"
-                  done
-                  if [ -n "$raced" ]; then
-                    echo "Races or failures in:$raced"
-                    exit 1
-                  fi
+              run: go test -race -count=1 -shuffle=on ./...
 
     citations:
         name: no design-doc citations
@@ -224,24 +210,12 @@ jobs:
         steps:
             - uses: actions/checkout@v6
 
-            # Grep, not lint: the ban covers comments, test titles, JSX text and JSON alike.
-            # Matched with a trailing digit so this job and the pre-commit hook can name the char.
-            #
-            # Everything tracked minus the places the citation belongs. Listing the trees to scan is
-            # what left integration/, libs/ and bench/ — 65 TypeScript files — outside the gate, and
-            # a new top-level directory joined them silently. AGENTS.md is excluded because the rule
-            # it states is written with the character the rule bans.
+            # The same script the pre-commit hook runs. Driven off everything git tracks rather than
+            # a list of trees to scan, so a new top-level directory is covered the day it appears.
+            # Run here with no paths, which adds the half a partial commit cannot check: that every
+            # citation inside docs/ still names a section of docs/api_design.md.
             - name: Reject section citations outside docs/
-              run: |
-                  if git grep -nE '§ ?[0-9]' -- . \
-                      ':(exclude,glob)**/DESIGN.md' ':(exclude,glob)**/README.md' \
-                      ':(exclude,glob)**/readme.md' ':(exclude,glob)docs/**' \
-                      ':(exclude)AGENTS.md'; then
-                    echo
-                    echo 'Design-doc section citations are banned outside docs/ and DESIGN.md/README.md.'
-                    echo 'State the constraint itself — the numbering drifts and the reader is not holding the doc.'
-                    exit 1
-                  fi
+              run: node scripts/check-citations.mjs
 
     # Single required status check, so branch protection needs only one entry.
     ci-ok:
