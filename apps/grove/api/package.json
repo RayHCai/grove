@@ -41,8 +41,8 @@
     "devDependencies": {
         "@electric-sql/pglite": "^0.5.8",
         "@electric-sql/pglite-socket": "^0.2.11",
-        "@types/node": "^26.1.2",
+        "@types/node": "^26.6.2",
         "typescript": "^7.0.2",
-        "vitest": "^4.1.10"
+        "vitest": "^5.0.1"
     }
 }
