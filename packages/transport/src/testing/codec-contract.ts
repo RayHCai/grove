@@ -298,7 +298,7 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
             }
 
             if (makeLargeFrame !== null) {
-                it('refuses a frame over its byte cap, since parsing is what allocates', () => {
+                it('refuses a frame over its byte cap', () => {
                     const codec = makeCodec();
                     let thrown: unknown;
                     try {

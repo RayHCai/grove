@@ -21,6 +21,8 @@ export class ClientHUDSink implements HUDSink {
     /** Open screens bottom to top, mirroring the order core opened them in. */
     readonly #open: string[] = [];
     readonly #listeners = new Set<() => void>();
+    /** Reused, so a listener subscribing or unsubscribing cannot alter the dispatch it is in. */
+    readonly #dispatching: Array<() => void> = [];
 
     widget(name: string, state: Readonly<HUDWidgetState>): void {
         // Unchanged is not a redraw: `@onUpdate` runs at display rate and rewrites every widget.
@@ -71,12 +73,15 @@ export class ClientHUDSink implements HUDSink {
 
     // Contained, so a UI bug cannot unwind into the handler that wrote the widget.
     #notify(): void {
-        for (const listener of this.#listeners) {
+        this.#dispatching.length = 0;
+        for (const listener of this.#listeners) this.#dispatching.push(listener);
+        for (const listener of this.#dispatching) {
             try {
                 listener();
             } catch {
                 // A listener's throw is the listener's problem; the HUD state is already correct.
             }
         }
+        this.#dispatching.length = 0;
     }
 }

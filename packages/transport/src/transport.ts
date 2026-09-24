@@ -82,15 +82,7 @@ export interface LoopbackOptions extends TransportOptions {
 }
 
 /** Options for the networked factory, which `connectWebSocket` widens with its own. */
-export interface ConnectOptions extends TransportOptions {
-    /**
-     * Rebinds a reconnecting client to its existing `Player`; server-minted and opaque.
-     * Its wire slot is `JoinRequest.token`, which protocol owns, so no backend here sends it.
-     */
-    token?: string;
-    /** The heartbeat's scheduling seam; defaults to a real-time source. */
-    timer?: TimerSource;
-}
+export type ConnectOptions = TransportOptions;
 
 /** Resolves once the socket is OPEN, so a caller never holds an unconnected `Transport`. */
 export type Connect = (url: string, opts?: ConnectOptions) => Promise<Transport>;

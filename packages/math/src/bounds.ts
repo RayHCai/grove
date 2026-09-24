@@ -36,7 +36,7 @@ export function boundsSet(
 }
 
 /** Copies `src` into `out`. Allocation-free. */
-export function boundsCopy(out: Bounds, src: Bounds): Bounds {
+export function boundsCopy(out: Bounds, src: Readonly<Bounds>): Bounds {
     out.left = src.left;
     out.right = src.right;
     out.top = src.top;
@@ -45,12 +45,12 @@ export function boundsCopy(out: Bounds, src: Bounds): Bounds {
 }
 
 /** Horizontal extent. Sign-agnostic. */
-export function boundsWidth(b: Bounds): number {
+export function boundsWidth(b: Readonly<Bounds>): number {
     return Math.abs(b.right - b.left);
 }
 
 /** Vertical extent. Sign-agnostic, so it holds in y-up and y-down alike. */
-export function boundsHeight(b: Bounds): number {
+export function boundsHeight(b: Readonly<Bounds>): number {
     return Math.abs(b.bottom - b.top);
 }
 
@@ -60,7 +60,7 @@ export function boundsEqual(a: Readonly<Bounds>, b: Readonly<Bounds>): boolean {
 }
 
 /** `true` when the two rectangles share any area. Touching edges count as overlapping. */
-export function boundsOverlap(a: Bounds, b: Bounds): boolean {
+export function boundsOverlap(a: Readonly<Bounds>, b: Readonly<Bounds>): boolean {
     const aMinX = Math.min(a.left, a.right);
     const aMaxX = Math.max(a.left, a.right);
     const bMinX = Math.min(b.left, b.right);
@@ -75,14 +75,14 @@ export function boundsOverlap(a: Bounds, b: Bounds): boolean {
 }
 
 /** `true` when `point` falls inside `b`. Edges are inclusive. */
-export function boundsContains(b: Bounds, x: number, y: number): boolean {
+export function boundsContains(b: Readonly<Bounds>, x: number, y: number): boolean {
     const inX = x >= Math.min(b.left, b.right) && x <= Math.max(b.left, b.right);
     const inY = y >= Math.min(b.top, b.bottom) && y <= Math.max(b.top, b.bottom);
     return inX && inY;
 }
 
 /** Grows `b` outward by `margin` into `out`; each edge moves away from the interior. */
-export function boundsExpand(out: Bounds, b: Bounds, margin: number): Bounds {
+export function boundsExpand(out: Bounds, b: Readonly<Bounds>, margin: number): Bounds {
     const xUp = b.right >= b.left ? margin : -margin;
     const yUp = b.top >= b.bottom ? margin : -margin;
     out.left = b.left - xUp;

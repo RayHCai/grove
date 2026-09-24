@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { KVStore } from '@platform/core';
-import { MemoryKVStore, PERSISTENCE_SCOPE, clearRuntime, playerKey } from '@platform/core';
+import {
+    GAME_KEY,
+    MemoryKVStore,
+    PERSISTENCE_SCOPE,
+    clearRuntime,
+    playerKey,
+} from '@platform/core';
 import { PROTOCOL_VERSION } from '@platform/protocol';
 import type { JoinRequest, ServerToClient } from '@platform/protocol';
 import { PROJECT_FORMAT_VERSION, assetId, scriptId, templateId } from '@platform/project';
@@ -290,6 +296,45 @@ function walletOf(instance: GameInstance, id: string): Wallet {
         .map((si) => si.instance)
         .find((i): i is Wallet => i instanceof Wallet)!;
 }
+
+function bankOf(instance: GameInstance): Bank {
+    return [...instance.sim.runtime.instances.forHost(GAME_KEY)]
+        .map((si) => si.instance)
+        .find((i): i is Bank => i instanceof Bank)!;
+}
+
+describe('closing the host ends the world, not only its sessions', () => {
+    it('runs the Game’s @onEnd, which no session teardown would have reached', async () => {
+        const h = hosted();
+        const peer = new Peer(h.instance, 'alice');
+        h.peers.push(peer);
+        peer.join();
+        await h.step(16);
+
+        const bank = bankOf(h.instance);
+        expect(bank.started).toBe(true);
+        expect(bank.ends).toBe(0);
+
+        await h.instance.close();
+
+        expect(bank.ends).toBe(1);
+    });
+
+    it('ends a player’s own hosts once, through the release rather than twice', async () => {
+        const h = hosted();
+        const peer = new Peer(h.instance, 'alice');
+        h.peers.push(peer);
+        peer.join();
+        await h.step(16);
+
+        // Held before the close: releasing the session drops it from the registry, and ending the
+        // world after that is what keeps this at one rather than two.
+        const wallet = walletOf(h.instance, 'alice');
+        await h.instance.close();
+
+        expect(wallet.ends).toBe(1);
+    });
+});
 
 describe('the sim always learns that a socket is gone', () => {
     it('tells it about a peer this half closed itself, so the Player is released', async () => {

@@ -137,6 +137,12 @@ const BASE_LOCATIONS: ReadonlyMap<string, ScriptLocation> = new Map([
     ['ServerScript', 'server'],
     ['ClientScript', 'client'],
     ['SyncedScript', 'synced'],
+    // The movement bases root a hierarchy as surely as the three above: a creator extends one
+    // without ever naming `SyncedScript`, and a walk that no pass located is a walk whose
+    // `Date.now()` nothing refuses and whose class reaches neither chunk.
+    ['BaseMovement', 'synced'],
+    ['TopDownMovement', 'synced'],
+    ['PlatformerMovement', 'synced'],
 ]);
 
 class Resolver {

@@ -183,6 +183,14 @@ export class GameClient {
     #loadingSince: number | undefined;
     /** The bundle already evaluated here; survives a resync and is what the next join reports. */
     #bundleHash: string;
+    /**
+     * The classes the evaluated bundle carried, which outrank the ones a host supplied.
+     *
+     * Survives a resync beside the hash, for the same reason: the code is in this process, and a
+     * re-join that declared the hash without holding the classes would resolve every `attach` to
+     * nothing — a world that joins and then renders empty.
+     */
+    #loaded: ScriptIndex | undefined;
 
     /** Scratch for the tick indices one frame advanced. */
     readonly #ticks: number[] = [];
@@ -544,8 +552,9 @@ export class GameClient {
 
     /** Fetches, verifies and evaluates the bundle, then opens the session — or fails terminally. */
     async #load(source: BundleSource, welcome: Welcome): Promise<void> {
+        let loaded: ScriptIndex;
         try {
-            await loadBundle(source, welcome.bundleUrl, welcome.bundleHash);
+            loaded = await loadBundle(source, welcome.bundleUrl, welcome.bundleHash);
         } catch (error) {
             if (!this.#stillLoading()) return;
             this.#loadingSince = undefined;
@@ -560,6 +569,7 @@ export class GameClient {
         }
         if (!this.#stillLoading()) return;
         this.#bundleHash = welcome.bundleHash;
+        this.#loaded = loaded;
         this.#loadingSince = undefined;
         try {
             this.#openSession(welcome);
@@ -584,7 +594,10 @@ export class GameClient {
             simRate: welcome.simRate,
             bounds: wireBounds(welcome.bounds),
             regions: welcome.regions.map((r) => ({ name: r.name, bounds: wireBounds(r.bounds) })),
-            ...defined({ scripts: this.#opts.scripts }),
+            // The evaluated bundle first: a host that also supplied classes compiled them itself,
+            // and where the two disagree the ones the server named the hash of are the ones every
+            // other peer is running.
+            ...defined({ scripts: this.#loaded ?? this.#opts.scripts }),
         });
         // `sendRate` is the interval the render path buffers over; without it an unpredicted
         // entity holds its pose until the next envelope.

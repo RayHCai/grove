@@ -28,3 +28,7 @@ export type {
     RawInputEvent,
     SessionState,
 } from '@platform/client';
+
+// The pipe a session is composed over. `ClientInstanceOptions` requires one and this half builds
+// none, so a host that pairs a world in its own page needs the type to name what it hands over.
+export type { Transport } from '@platform/transport';

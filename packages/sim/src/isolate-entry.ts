@@ -33,7 +33,6 @@ export interface EncodedBatch extends Omit<OutputBatch, 'sends'> {
 declare global {
     // `var` rather than `let`: only a `var` declaration widens `globalThis`, which is the whole
     // point.
-    // eslint-disable-next-line no-var
     var __grove: IsolateEntry | undefined;
 }
 

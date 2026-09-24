@@ -17,18 +17,19 @@ It owns the standing-up of a game and nothing else. It owns no simulation, no wi
 rendering, no art, and no game rules; it declares no envelope and adds no field to one. If something
 here starts deciding what a game _does_ rather than how it is _started_, it is in the wrong package.
 
-## Two halves, and the one type they share
+## The paths, and the one type they share
 
 ```ts
 import { GameInstance, fileKVStore, listenOn } from '@platform/glue/server';
+import { GameInstance } from '@platform/glue/world'; // the same world, with nothing that listens
 import { ClientInstance, connectTo } from '@platform/glue/client';
 import type { BundleRef } from '@platform/glue';
 ```
 
 | Export                     | Path      | Is                                                            |
 | -------------------------- | --------- | ------------------------------------------------------------- |
-| `GameInstance`             | `/server` | One booted world, and the two verbs a host drives it with     |
-| `Driver`                   | `/server` | Real time into ticks: the accumulator, the cap and the shed   |
+| `GameInstance`             | `/world`  | One booted world, and the two verbs a host drives it with     |
+| `Driver`                   | `/world`  | Real time into ticks: the accumulator, the cap and the shed   |
 | `listenOn(instance, opts)` | `/server` | Bind in front of a world the caller already holds             |
 | `fileKVStore(path)`        | `/server` | `@serverState` that outlives the process, in one JSON file    |
 | `ClientInstance`           | `/client` | One composed session, and the two verbs a host drives it with |
@@ -38,8 +39,15 @@ import type { BundleRef } from '@platform/glue';
 The two halves never meet. One reaches `ws` and `node:fs`, the other reaches a renderer and a
 socket, so each is behind its own subpath for the reason `@platform/client/browser` and
 `@platform/engine/host` are: a browser takes the session model without taking a Node runtime's
-dependencies with it. The bare `.` path carries the one type both halves name and no values at all —
-the server declares a bundle, the client verifies what it fetched against it.
+dependencies with it.
+
+`/world` is the part that reaches neither, split out for the same reason the other two are split:
+an editor previewing a game holds an authority in the browser, and importing one through `/server`
+would drag `ws` and `node:fs` into a page that listens for nobody. `/server` re-exports it, so a
+deployed host still takes one import and gets the world plus what binds in front of it.
+
+The bare `.` path carries the one type both halves name and no values at all — the server declares
+a bundle, the client verifies what it fetched against it.
 
 ## The socket layer is beside each instance, never inside it
 
@@ -105,9 +113,10 @@ that acts on it: it writes the `sends` (one `encode` per envelope, however many 
 a later tick, and writes `saves` through — telling the sim which of them landed, so a rejoin inside
 one session reads its own values back whether or not the store has caught up.
 
-`close()` settles once every write it started has, over `allSettled` rather than `all`: a store that
-rejects must release the drain rather than hold a shutdown open on the one write that will never
-land.
+`close()` releases every session, then calls `endGame` — in that order, so a player's own hosts end
+through their release and what `endGame` reaches is the Game and the hosts no session owned. It
+settles once every write it started has, over `allSettled` rather than `all`: a store that rejects
+must release the drain rather than hold a shutdown open on the one write that will never land.
 
 ## Identity is the host's
 

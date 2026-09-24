@@ -2,13 +2,13 @@
 // `Transport` arrives from whatever the caller is listening on.
 
 import type { BreakerTrip, KVStore } from '@platform/core';
-import { MemoryKVStore, PERSISTENCE_SCOPE } from '@platform/core';
+import { MemoryKVStore, PERSISTENCE_SCOPE, endGame } from '@platform/core';
 import { createSim } from '@platform/engine/host';
 import type { BundleRef } from '@platform/engine/host';
 import type { ProjectManifest, ScriptId } from '@platform/project';
 import type { ScriptRegistry } from '@platform/scripting';
 import type { ConnectionId, InputBatch, LoadedRecord, OutputBatch, Sim } from '@platform/sim';
-import type { Codec, EncodedFrame, JsonValue, Message, Transport } from '@platform/transport';
+import type { Codec, EncodedFrame, JsonValue, Transport } from '@platform/transport';
 import { jsonCodec } from '@platform/transport';
 import { Driver } from './driver.js';
 import type { PumpResult } from './driver.js';
@@ -65,6 +65,8 @@ export class GameInstance {
     #saved: string[] = [];
 
     #nextConnectionId = 1;
+    /** The interval `start()` runs on; undefined for an instance a host pumps itself. */
+    #timer: ReturnType<typeof setInterval> | undefined;
     #shutdown = false;
     #drain: Promise<void> = Promise.resolve();
 
@@ -167,8 +169,9 @@ export class GameInstance {
     }
 
     /**
-     * Stops the clock, releases every session, settles once every departing save has landed.
-     * `allSettled`, so a store that rejects releases the drain rather than holding shutdown open.
+     * Stops the clock, releases every session, ends the world, settles once every departing save
+     * has landed. `allSettled`, so a store that rejects releases the drain rather than holding
+     * shutdown open.
      */
     close(): Promise<void> {
         if (this.#shutdown) return this.#drain;
@@ -176,13 +179,14 @@ export class GameInstance {
         if (this.#timer !== undefined) clearInterval(this.#timer);
         this.#timer = undefined;
         this.#apply(this.sim.close());
+        // After the sessions, not before: releasing one already ends that player's own hosts, so
+        // what is left for `endGame` is the Game and the hosts no session owned.
+        const ended = endGame(this.sim.runtime);
         for (const transport of this.#transports.values()) transport.close();
         this.#forgetAll();
-        this.#drain = Promise.allSettled(this.#saves).then(() => undefined);
+        this.#drain = ended.then(() => Promise.allSettled(this.#saves)).then(() => undefined);
         return this.#drain;
     }
-
-    #timer: ReturnType<typeof setInterval> | undefined;
 
     /** One tick: hand the sim everything that arrived, then act on everything it asks for. */
     #step(drain: boolean): void {
@@ -217,10 +221,10 @@ export class GameInstance {
                 if (transport === undefined) continue;
                 try {
                     if (send.to.length === 1) {
-                        transport.send(send.envelope as unknown as Message);
+                        transport.send(send.envelope);
                         continue;
                     }
-                    encoded ??= this.#codec.encode(send.envelope as unknown as Message);
+                    encoded ??= this.#codec.encode(send.envelope);
                     transport.sendEncoded(encoded);
                 } catch (cause) {
                     // Per connection: without it one peer whose encode throws takes the broadcast
@@ -303,6 +307,6 @@ function asFields(stored: unknown): { [field: string]: JsonValue } | null {
 }
 
 /** The message of an unknown throwable, since a `catch` binding is not an `Error`. */
-function reason(cause: unknown): string {
+export function reason(cause: unknown): string {
     return cause instanceof Error ? cause.message : String(cause);
 }

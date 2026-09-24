@@ -23,8 +23,12 @@ export type TemplateDef = ResolvedTemplate;
 /** One script a template attaches, with the class its id resolved to and its configured props. */
 export type TemplateAttachment = ResolvedAttachment;
 
-/** A script class, as an attach site takes it. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- attach accepts any host-typed class
+/**
+ * A script class as it ARRIVES — from a bundle, or resolved by `@platform/project`, which types a
+ * class opaquely because it may not name `BaseScript`. Loose for that reason alone; what core
+ * requires of one is `AttachedScriptClass`, and `Wiring` is where the two meet.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- an authored class arrives host-typed
 export type AnyScriptClass = new (props?: ScriptProps) => any;
 
 /** Levels one instantiation may nest, and entities it may mint; a child names a template. */

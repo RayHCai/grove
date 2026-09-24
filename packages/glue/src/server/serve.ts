@@ -7,6 +7,7 @@ import type { WebSocket } from 'ws';
 import type { TransportError } from '@platform/transport';
 import { webSocketTransport } from '@platform/transport/websocket';
 import type { GameInstance } from './instance.js';
+import { reason } from './instance.js';
 
 /** Where to bind, and how to decide who a socket is. */
 export interface ListenOptions {
@@ -44,7 +45,8 @@ export function listenOn(instance: GameInstance, opts: ListenOptions): ServedGam
 
     const log = onLog ?? ((): void => {});
     instance.start();
-    const wss = new WebSocketServer(server === undefined ? { port: port! } : { server });
+    // Narrowed rather than asserted: the guard above is what rules out both being absent.
+    const wss = new WebSocketServer(server !== undefined ? { server } : { port });
 
     const listening = new Promise<void>((resolve, reject) => {
         // A shared http server is already listening, so no event is coming for it.
@@ -74,9 +76,7 @@ export function listenOn(instance: GameInstance, opts: ListenOptions): ServedGam
                 log('refused a connection');
             }
         } catch (cause) {
-            log(
-                `could not accept a connection: ${cause instanceof Error ? cause.message : String(cause)}`,
-            );
+            log(`could not accept a connection: ${reason(cause)}`);
             socket.close(1011);
         }
     });

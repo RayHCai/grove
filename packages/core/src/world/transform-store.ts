@@ -67,18 +67,18 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
         const index = entityIndex(id);
         this.#ensure(index + 1);
         if (index >= this.#count) this.#count = index + 1;
-        this.#posX[index] = 0;
-        this.#posY[index] = 0;
-        this.#posZ[index] = 0;
-        this.#rot[index] = 0;
-        this.#scale[index] = 1;
-        this.#opacity[index] = 1;
-        this.#layer[index] = 0;
+        this.#reset(index);
     }
 
     releaseSlot(id: EntityId): void {
         const index = entityIndex(id);
         if (index >= this.#count) return;
+        this.#reset(index);
+        this.#dirty.delete(index);
+    }
+
+    /** The identity transform, which is what both a fresh slot and a released one hold. */
+    #reset(index: number): void {
         this.#posX[index] = 0;
         this.#posY[index] = 0;
         this.#posZ[index] = 0;
@@ -86,7 +86,6 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
         this.#scale[index] = 1;
         this.#opacity[index] = 1;
         this.#layer[index] = 0;
-        this.#dirty.delete(index);
     }
 
     setPosition(id: EntityId, x: number, y: number, z = 0): void {

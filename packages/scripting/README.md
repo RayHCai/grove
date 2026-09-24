@@ -26,10 +26,10 @@ runs after it so it only ever sees lowered output. `apps/playground`'s `tsconfig
 
 ## Two entry points
 
-| Import                          | Runs where                 | Holds                                                 |
-| ------------------------------- | -------------------------- | ----------------------------------------------------- |
-| `@platform/scripting`           | anywhere, browser included | `ScriptRegistry`, the determinism policy, the shim    |
-| `@platform/scripting/toolchain` | Node, at build time        | the analysis, the determinism pass, `tsc`, the linker |
+| Import                          | Runs where                 | Holds                                                           |
+| ------------------------------- | -------------------------- | --------------------------------------------------------------- |
+| `@platform/scripting`           | anywhere, browser included | `ScriptRegistry`, the determinism policy, the prelude, the shim |
+| `@platform/scripting/toolchain` | Node, at build time        | the analysis, the determinism pass, `tsc`, the linker           |
 
 The split is the point: a browser bundle that reaches the registry must not pull a compiler and a
 bundler into its module graph.
@@ -69,6 +69,20 @@ imports in id order, rolldown runs with its cwd at the lowered root so a module 
 relative path rather than someone's home directory, and the text is folded to LF and POSIX
 separators before it is hashed. The same sources hash the same on any machine, through any
 directory.
+
+## The prelude, and why a creator's file has no imports
+
+A Grove script is written with no imports at all: every engine name is a bare global, because the
+editor declares the engine to its checker that way and a creator never types one. Something has to
+put the import back before a compiler reads the file, and `preludeFor` and `typePreludeFor` are what
+do it — the values in one import, the erased types in another, and only the names that file actually
+reaches, since an import of everything would shadow the file's own declarations.
+
+The lists live here rather than in either of the two places that compile a creator's source, because
+a name in one and not the other is a game that typechecks in the workbench and fails to build on a
+box. `@platform/engine` cannot be imported here to check them against — the dependency runs the
+other way — so `@grove/editor`, which holds both these lists and the declarations a creator is
+checked against, is where the two are held to agree.
 
 ## What a chunk exports, and what has to resolve its imports
 
@@ -127,6 +141,10 @@ it; `eval`, `Function` and `import()` because what they run is source no static 
 `SyncedScript` and correct in a `ClientScript`, and no lint config can express "only inside a
 subclass of this class". Resolving that means following `extends` across the project's modules,
 which is what the analysis pass does before anything else runs.
+
+Six names root a hierarchy, not three: `BaseMovement`, `TopDownMovement` and `PlatformerMovement`
+are engine classes a creator extends without ever naming `SyncedScript`, and a walk no pass located
+is a walk whose `Date.now()` nothing refuses and whose class reaches neither chunk.
 
 The 22 names exist in four places — here, `@platform/math`'s barrel, `@platform/engine`'s re-export
 block, and `.oxlintrc.json`'s repo-wide `Math.*` pin — and they agree. A list that drifts is a

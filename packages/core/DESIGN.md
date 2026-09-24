@@ -278,8 +278,9 @@ runs `deliverRequest` in the world it found.
 `loadGame(manifest, opts)` → build world (bounds, regions, assets, template registry, collaborators,
 `passes`) → attach Game scripts (wire + hoist, **no** `@onStart`) → instantiate the placed `entities` →
 `startGame(rt)` drains the first batch of deferred `@onStart`s to each handler's first await →
-`joinPlayer` / `leavePlayer` release and end sessions → `endGame(rt)` runs `@onEnd` at every attached
-instance, because the world ending ends every host under it. `GameManifest` is `@platform/project`'s
+`joinPlayer` / `leavePlayer` release and end sessions → `endGame(rt)` runs `@onEnd` at every still-attached
+instance, because the world ending ends every host under it. A host calls it after releasing its
+sessions, so the hosts a leave already ended are gone from the registry and end exactly once. `GameManifest` is `@platform/project`'s
 validated narrowing rather than a parallel declaration — `role`, `simRate`, `bounds`, `regions`, `assets`,
 `templates`, `entities`, `gameScripts` — so a field added to the authoring shape cannot reach a runtime
 without passing through it; `validate` stays the server's to call. `LoadOptions.scriptIdOf` is the one
