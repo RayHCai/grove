@@ -30,12 +30,6 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.2)(jsdom@28.1.0)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
 
-  apps/design-playground:
-    devDependencies:
-      vite:
-        specifier: ^8.2.0
-        version: 8.2.0(@types/node@26.1.2)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0)
-
   apps/grove/api:
     dependencies:
       '@aws-sdk/client-s3':
@@ -53,9 +47,6 @@ importers:
       '@fastify/csrf-protection':
         specifier: ^8.0.1
         version: 8.0.1
-      '@fastify/multipart':
-        specifier: ^10.1.1
-        version: 10.1.1
       '@fastify/rate-limit':
         specifier: ^11.2.0
         version: 11.2.0
@@ -89,6 +80,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      prisma:
+        specifier: ^7.10.0
+        version: 7.10.0(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
       zod:
         specifier: ^4.5.4
         version: 4.5.4
@@ -102,9 +96,6 @@ importers:
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
-      prisma:
-        specifier: ^7.10.0
-        version: 7.10.0(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -119,9 +110,21 @@ importers:
       '@grove/api-contract':
         specifier: workspace:*
         version: link:../../../libs/api-contract
+      '@grove/player':
+        specifier: workspace:*
+        version: link:../../../libs/player
       '@grove/ui':
         specifier: workspace:*
-        version: link:../ui
+        version: link:../../../libs/ui
+      '@platform/engine':
+        specifier: workspace:*
+        version: link:../../../packages/engine
+      '@platform/project':
+        specifier: workspace:*
+        version: link:../../../packages/project
+      '@platform/scripting':
+        specifier: workspace:*
+        version: link:../../../packages/scripting
       monaco-editor:
         specifier: ^0.56.0
         version: 0.56.0
@@ -156,18 +159,24 @@ importers:
 
   apps/grove/game-builder:
     dependencies:
-      '@aws-sdk/client-s3':
-        specifier: ^3.1136.0
-        version: 3.1136.0
-      '@fastify/rate-limit':
-        specifier: ^11.2.0
-        version: 11.2.0
-      '@fastify/swagger':
-        specifier: ^9.8.1
-        version: 9.8.1
       '@grove/api-contract':
         specifier: workspace:*
         version: link:../../../libs/api-contract
+      '@platform/engine':
+        specifier: workspace:*
+        version: link:../../../packages/engine
+      '@platform/project':
+        specifier: workspace:*
+        version: link:../../../packages/project
+      '@platform/scripting':
+        specifier: workspace:*
+        version: link:../../../packages/scripting
+      '@platform/sim':
+        specifier: workspace:*
+        version: link:../../../packages/sim
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       fastify:
         specifier: ^5.12.1
         version: 5.12.1
@@ -184,9 +193,6 @@ importers:
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.2)(jsdom@28.1.0)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
@@ -221,7 +227,7 @@ importers:
         version: link:../../../libs/api-contract
       '@grove/ui':
         specifier: workspace:*
-        version: link:../ui
+        version: link:../../../libs/ui
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -253,6 +259,15 @@ importers:
 
   apps/grove/player:
     dependencies:
+      '@grove/api-contract':
+        specifier: workspace:*
+        version: link:../../../libs/api-contract
+      '@grove/player':
+        specifier: workspace:*
+        version: link:../../../libs/player
+      '@grove/ui':
+        specifier: workspace:*
+        version: link:../../../libs/ui
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -287,30 +302,6 @@ importers:
       '@grove/go-grove':
         specifier: workspace:*
         version: link:../../../libs/go-grove
-
-  apps/grove/ui:
-    devDependencies:
-      '@types/react':
-        specifier: ^19.2.18
-        version: 19.2.18
-      '@types/react-dom':
-        specifier: ^19.2.4
-        version: 19.2.4(@types/react@19.2.18)
-      jsdom:
-        specifier: ^28.0.1
-        version: 28.1.0
-      react:
-        specifier: ^19.2.8
-        version: 19.2.8
-      react-dom:
-        specifier: ^19.2.8
-        version: 19.2.8(react@19.2.8)
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@types/node@26.1.2)(jsdom@28.1.0)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
 
   apps/playground:
     dependencies:
@@ -407,19 +398,6 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.2)(jsdom@28.1.0)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
 
-  examples:
-    dependencies:
-      '@platform/engine':
-        specifier: workspace:*
-        version: link:../packages/engine
-    devDependencies:
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.10(@types/node@26.1.2)(jsdom@28.1.0)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
-
   integration:
     dependencies:
       '@platform/client':
@@ -486,9 +464,51 @@ importers:
 
   libs/player:
     dependencies:
-      '@platform/protocol':
+      '@platform/client':
         specifier: workspace:*
-        version: link:../../packages/protocol
+        version: link:../../packages/client
+      '@platform/glue':
+        specifier: workspace:*
+        version: link:../../packages/glue
+      '@platform/project':
+        specifier: workspace:*
+        version: link:../../packages/project
+      '@platform/renderer':
+        specifier: workspace:*
+        version: link:../../packages/renderer
+      '@platform/scripting':
+        specifier: workspace:*
+        version: link:../../packages/scripting
+      '@platform/transport':
+        specifier: workspace:*
+        version: link:../../packages/transport
+    devDependencies:
+      '@platform/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: ^19.2.4
+        version: 19.2.4(@types/react@19.2.18)
+      jsdom:
+        specifier: ^28.0.1
+        version: 28.1.0
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.8
+        version: 19.2.8(react@19.2.8)
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@26.1.2)(jsdom@28.1.0)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
+
+  libs/ui:
     devDependencies:
       '@types/react':
         specifier: ^19.2.18
@@ -745,6 +765,8 @@ importers:
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.2)(jsdom@28.1.0)(vite@8.2.0(@types/node@26.1.2)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
+
+  tools/healthcheck: {}
 
 packages:
 
@@ -1126,9 +1148,6 @@ packages:
   '@fastify/ajv-compiler@4.0.6':
     resolution: {integrity: sha512-NtuzM0SfaMJbGlnjr9LWQUN5LzgSrbB8tf/wRZNas+4E1O/Nmzl53e7ruT61HDZyRCJGC6FxIogmNZO1c5ETBA==}
 
-  '@fastify/busboy@3.2.2':
-    resolution: {integrity: sha512-yXSS27qPExaXeuLvMRMXOLtpipzfQYNjG3FkunDWKGfMYjKuhFXko9CVzqxm8jcF+lmtS9Fd89QNdh9XDjnbNg==}
-
   '@fastify/cookie@11.1.2':
     resolution: {integrity: sha512-Dtrpk/YOGUsbRMvP/8ZqPpwnMRv0qSqodFdoQ2B589Obc7jw4s4Qla+cV72Bsm7WsZJnqlYFX/i7uSBq0xzg6g==}
 
@@ -1141,9 +1160,6 @@ packages:
   '@fastify/csrf@8.1.0':
     resolution: {integrity: sha512-vUNZy11syr4mYI+5AqWZOLyYZXPMCYNGHw0Ww8tlmPnwSNWyTYKadKX6XveD5vaiENclcGkvaSnUZZQDRzpOhw==}
 
-  '@fastify/deepmerge@3.2.1':
-    resolution: {integrity: sha512-N5Oqvltoa2r9z1tbx4xjky0oRR60v+T47Ic4J1ukoVQcptLOrIdRnCSdTGmOmajZuHVKlTnfcmrjyqsGEW1ztA==}
-
   '@fastify/error@4.2.0':
     resolution: {integrity: sha512-RSo3sVDXfHskiBZKBPRgnQTtIqpi/7zhJOEmAxCiBcM7d0uwdGdxLlsCaLzGs8v8NnxIRlfG0N51p5yFaOentQ==}
 
@@ -1155,9 +1171,6 @@ packages:
 
   '@fastify/merge-json-schemas@0.2.1':
     resolution: {integrity: sha512-OA3KGBCy6KtIvLf8DINC5880o5iBlDX4SxzLQS8HorJAbqluzLRn80UXU0bxZn7UOFhFgpRJDasfwn9nG4FG4A==}
-
-  '@fastify/multipart@10.1.1':
-    resolution: {integrity: sha512-jyRHgnFVdchZRKjJRf6kGPEiDp3Bg4MLo4d6/krt8Z4RutLrqL5IYWihx8a4tnv7Tu7JfuHcyC+dU9zPzTxiSg==}
 
   '@fastify/proxy-addr@5.1.0':
     resolution: {integrity: sha512-INS+6gh91cLUjB+PVHfu1UqcB76Sqtpyp7bnL+FYojhjygvOPA9ctiD/JDKsyD9Xgu4hUhCSJBPig/w7duNajw==}
@@ -3504,8 +3517,6 @@ snapshots:
       ajv-formats: 3.0.1(ajv@8.20.0)
       fast-uri: 4.1.3
 
-  '@fastify/busboy@3.2.2': {}
-
   '@fastify/cookie@11.1.2':
     dependencies:
       cookie: 2.0.1
@@ -3524,8 +3535,6 @@ snapshots:
 
   '@fastify/csrf@8.1.0': {}
 
-  '@fastify/deepmerge@3.2.1': {}
-
   '@fastify/error@4.2.0': {}
 
   '@fastify/fast-json-stringify-compiler@5.1.0':
@@ -3537,14 +3546,6 @@ snapshots:
   '@fastify/merge-json-schemas@0.2.1':
     dependencies:
       dequal: 2.0.3
-
-  '@fastify/multipart@10.1.1':
-    dependencies:
-      '@fastify/busboy': 3.2.2
-      '@fastify/deepmerge': 3.2.1
-      '@fastify/error': 4.2.0
-      fastify-plugin: 6.0.0
-      secure-json-parse: 4.1.0
 
   '@fastify/proxy-addr@5.1.0':
     dependencies:
