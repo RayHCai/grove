@@ -61,6 +61,12 @@ What happens to a claimed asset is the seam: the task is moved to `IN_PROGRESS` 
 nothing is processed yet. Thumbnailing, transcoding and format validation land behind it without the
 seam moving, and a worker that settles honestly is what lets a creator's editor stop watching.
 
+Settling one successfully is what marks the asset verified in `@grove/api`, and a publish of a game
+holding an unverified asset is refused — so what this service says about one now decides whether the
+game holding it is ever compiled. The verdict is written against the byte-set the task named rather
+than against the path, and `@grove/api` is what keeps that honest: a worker coming back to settle an
+upload whose bytes have since been replaced vouches for nothing.
+
 A message is acknowledged once the outcome is written down. A claim that was refused is work
 somebody already settled — acknowledged, or it comes back forever. A claim or an outcome that could
 not be written at all is left claimed for another worker to take back. Settling is the one call this
@@ -114,6 +120,6 @@ scripts shell to cargo — `typecheck` is `clippy -D warnings`. With no Rust too
 print one `skipped:` line and succeed, so working on the TypeScript half does not require installing
 Rust.
 
-This crate and `@grove/game-instance` are one cargo workspace rooted at `apps/grove`, which is where
-the lock, the pinned toolchain and the release profile live — `cargo` finds all three by walking up
-from here.
+This crate, `@grove/game-instance` and the `request-id` crate they share are one cargo workspace
+rooted at `apps/grove`, which is where the lock, the pinned toolchain and the release profile live —
+`cargo` finds all three by walking up from here.

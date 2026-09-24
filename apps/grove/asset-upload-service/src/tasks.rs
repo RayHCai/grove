@@ -12,9 +12,6 @@ use serde::Serialize;
 /// Settling a task is a row update behind a bearer, not a transcode: it answers or it is down.
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// The correlation id the rest of the fleet carries, so one task is one line across three services.
-const REQUEST_ID_HEADER: &str = "x-request-id";
-
 /// What the status route took.
 ///
 /// `Refused` is `@grove/api` declining to move the task — already settled, or gone — which is the
@@ -79,7 +76,7 @@ impl Tasks for HttpTasks {
             .client
             .patch(format!("{}/v1/tasks/{task}", self.api_url))
             .bearer_auth(&self.fleet_secret)
-            .header(REQUEST_ID_HEADER, task)
+            .header(request_id::HEADER, task)
             .json(&body)
             .send()
             .await;

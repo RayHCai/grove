@@ -14,18 +14,17 @@ isolate. They meet at a single channel of `HostEvent`, and that is what gives a 
 everything that happened to it — a `deno_core` `JsRuntime` is not `Send`, and a tick that could be
 moved mid-step would not be a fixed step at all.
 
-| File            | Holds                                                                            |
-| --------------- | -------------------------------------------------------------------------------- |
-| `main.rs`       | the composition root: config, listener, the drain signal, the session thread     |
-| `config.rs`     | the environment `@grove/instance-manager` spawns this process with               |
-| `ticket.rs`     | join-ticket verification, byte for byte with `libs/api-contract`'s minting       |
-| `net.rs`        | the WebSocket listener, one task per peer, and the frame-size and idle bounds    |
-| `request_id.rs` | the correlation id this process answers under and calls the manager with         |
-| `session.rs`    | the tick loop, the write-out, and the watchdog that kills a runaway span         |
-| `isolate.rs`    | the V8 isolate, the two ops a batch crosses in, the heap limit and the kill path |
-| `clock.rs`      | the accumulator, the step cap and shed, and the send cadence                     |
-| `protocol.rs`   | the batch types, mirroring `packages/sim/src/batch.ts` — two of them encoded     |
-| `store.rs`      | `@serverState` over `@grove/game-manager`, which is the only thing it can reach  |
+| File          | Holds                                                                            |
+| ------------- | -------------------------------------------------------------------------------- |
+| `main.rs`     | the composition root: config, listener, the drain signal, the session thread     |
+| `config.rs`   | the environment `@grove/instance-manager` spawns this process with               |
+| `ticket.rs`   | join-ticket verification, byte for byte with `libs/api-contract`'s minting       |
+| `net.rs`      | the WebSocket listener, one task per peer, and the frame-size and idle bounds    |
+| `session.rs`  | the tick loop, the write-out, and the watchdog that kills a runaway span         |
+| `isolate.rs`  | the V8 isolate, the two ops a batch crosses in, the heap limit and the kill path |
+| `clock.rs`    | the accumulator, the step cap and shed, and the send cadence                     |
+| `protocol.rs` | the batch types, mirroring `packages/sim/src/batch.ts` — two of them encoded     |
+| `store.rs`    | `@serverState` over `@grove/game-manager`, which is the only thing it can reach  |
 
 `Send` and `OutputBatch` mirror the ENCODED variants in `packages/sim/src/isolate-entry.ts`
 (`EncodedSend`, `EncodedBatch`), whose envelopes are already the codec's bytes; every other type in
@@ -112,9 +111,9 @@ scripts shell to cargo — `build` bundles the sim first, `typecheck` is `clippy
 Rust toolchain on `PATH` they print one `skipped:` line and succeed, so working on the TypeScript
 half does not require installing Rust.
 
-This crate and `@grove/asset-upload-service` are one cargo workspace rooted at `apps/grove`, which is
-where the lock, the pinned toolchain and the release profile live — `cargo` finds all three by
-walking up from here. On Windows the crate links against the **static** CRT, because V8 ships
+This crate, `@grove/asset-upload-service` and the `request-id` crate they share are one cargo
+workspace rooted at `apps/grove`, which is where the lock, the pinned toolchain and the release
+profile live — `cargo` finds all three by walking up from here. On Windows the crate links against the **static** CRT, because V8 ships
 prebuilt that way and a process with two CRTs has two allocators in it.
 
 ## What the bundle must publish
