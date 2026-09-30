@@ -1,7 +1,7 @@
 import { act, createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { TextArea } from '../src/components/TextArea.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 describe('TextArea', () => {
     it('is a labelled textarea in a field wearing the area modifier', async () => {

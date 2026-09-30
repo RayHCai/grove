@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider.js';
 import type { ThemePreference } from '../src/theme/ThemeProvider.js';
-import { mountRoot } from './helpers.js';
+import { mountRoot } from '../src/testing.js';
 
 function Probe(): React.JSX.Element {
     const { theme, preference, setPreference } = useTheme();

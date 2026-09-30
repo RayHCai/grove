@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { VisuallyHidden } from '../src/components/VisuallyHidden.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 describe('VisuallyHidden', () => {
     it('is a span carrying the hidden class', async () => {

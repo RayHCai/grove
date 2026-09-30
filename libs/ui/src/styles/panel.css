@@ -1,4 +1,9 @@
-/* The dialog box: the pixel body from base.css, with a face per variant. */
+/*
+ * The dialog box: a face, its 3px edge, and the solid block it drops, with a face per variant.
+ *
+ * Both layers are pseudo-elements sharing one clip-path, because a `border` cannot follow a
+ * stepped corner and a `box-shadow` cannot be clipped to one.
+ */
 .pg-panel {
     position: relative;
     z-index: 0;

@@ -1,13 +1,13 @@
 /* The tileset strip across the very top, inked along its bottom edge like everything else. */
 .pg-tilestrip {
-    height: 8px;
+    height: var(--pg-tile);
     border-bottom: var(--pg-bw) solid var(--pg-edge);
     background: repeating-linear-gradient(
         90deg,
-        var(--pg-moss) 0 8px,
-        var(--pg-olive) 8px 16px,
-        var(--pg-rust) 16px 24px,
-        var(--pg-sun) 24px 32px
+        var(--pg-moss) 0 var(--pg-tile),
+        var(--pg-olive) var(--pg-tile) calc(var(--pg-tile) * 2),
+        var(--pg-rust) calc(var(--pg-tile) * 2) calc(var(--pg-tile) * 3),
+        var(--pg-sun) calc(var(--pg-tile) * 3) calc(var(--pg-tile) * 4)
     );
 }
 
@@ -39,4 +39,20 @@
 }
 .pg-wordmark[href]:active {
     transform: translate(2px, 2px);
+}
+
+/* What a page that threw is left showing: one card, centred, with the way back on it. */
+.pg-crash {
+    display: grid;
+    min-height: 100vh;
+    place-items: center;
+    padding: var(--pg-sp-5);
+}
+.pg-crash__card {
+    display: grid;
+    gap: var(--pg-sp-4);
+    justify-items: start;
+    max-width: 480px;
+    padding: var(--pg-sp-5);
+    font: normal var(--pg-text) / 1.3 var(--pg-font-ui);
 }

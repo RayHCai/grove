@@ -1,7 +1,7 @@
 import { createRef } from 'react';
 import { describe, expect, it } from 'vitest';
 import { Eyebrow } from '../src/components/Eyebrow.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 describe('Eyebrow', () => {
     it('is a paragraph with the eyebrow class and its text', async () => {

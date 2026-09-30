@@ -1,8 +1,8 @@
 import { act, createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { Button } from '../src/components/Button.js';
+import { Button, buttonClass } from '../src/components/Button.js';
 import { PlayIcon } from '../src/icons/PlayIcon.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 async function press(button: HTMLButtonElement | null): Promise<void> {
     await act(async () => {
@@ -85,5 +85,25 @@ describe('Button', () => {
         expect(button?.disabled).toBe(false);
         await press(button);
         expect(onClick).not.toHaveBeenCalled();
+    });
+});
+
+describe('the button look', () => {
+    it('draws a warm variant, and drops the menu cursor when asked', async () => {
+        const host = await mount(
+            <Button variant="warm" cursor={false}>
+                Start
+            </Button>,
+        );
+        expect(host.querySelector('button')?.className).toBe(
+            'pg-btn pg-btn--warm pg-btn--no-cursor',
+        );
+    });
+
+    it('hands the same classes to an element that is not a button', () => {
+        expect(buttonClass()).toBe('pg-btn pg-btn--secondary');
+        expect(buttonClass({ variant: 'primary', size: 'sm' }, 'wide')).toBe(
+            'pg-btn pg-btn--primary pg-btn--sm wide',
+        );
     });
 });

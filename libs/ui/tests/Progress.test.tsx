@@ -1,7 +1,7 @@
 import { createRef } from 'react';
 import { describe, expect, it } from 'vitest';
 import { Progress } from '../src/components/Progress.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 function scale(fill: HTMLElement | null): number {
     const match = /^scaleX\((.+)\)$/.exec(fill?.style.transform ?? '');

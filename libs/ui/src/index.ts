@@ -10,9 +10,9 @@ export type { ThemeToggleProps } from './theme/ThemeToggle.js';
 
 export { Panel } from './components/Panel.js';
 export type { PanelFace, PanelProps, PanelTag } from './components/Panel.js';
-export { Button, isAriaDisabled } from './components/Button.js';
-export type { ButtonProps, ButtonSize, ButtonVariant } from './components/Button.js';
-export { IconButton } from './components/IconButton.js';
+export { Button, ButtonLabel, buttonClass, isAriaDisabled } from './components/Button.js';
+export type { ButtonLook, ButtonProps, ButtonSize, ButtonVariant } from './components/Button.js';
+export { IconButton, iconButtonClass } from './components/IconButton.js';
 export type {
     IconButtonProps,
     IconButtonSize,
@@ -20,8 +20,10 @@ export type {
 } from './components/IconButton.js';
 export { Select } from './components/Select.js';
 export type { SelectOption, SelectProps, SelectSize } from './components/Select.js';
-export { Toggle } from './components/Toggle.js';
-export type { ToggleProps } from './components/Toggle.js';
+export { Menu, MenuItem, menuItemClass } from './components/Menu.js';
+export type { MenuCloseReason, MenuItemProps, MenuProps } from './components/Menu.js';
+export { Splash } from './components/Splash.js';
+export type { SplashProps } from './components/Splash.js';
 export { Badge } from './components/Badge.js';
 export type { BadgeIcon, BadgeProps } from './components/Badge.js';
 export { Tag } from './components/Tag.js';
@@ -29,7 +31,11 @@ export type { TagProps } from './components/Tag.js';
 export { Eyebrow } from './components/Eyebrow.js';
 export type { EyebrowProps, EyebrowTag } from './components/Eyebrow.js';
 export { SectionTitle } from './components/SectionTitle.js';
-export type { SectionTitleProps, SectionTitleTag } from './components/SectionTitle.js';
+export type {
+    SectionTitleProps,
+    SectionTitleTag,
+    SectionTitleVariant,
+} from './components/SectionTitle.js';
 export { TextInput } from './components/TextInput.js';
 export type { TextInputProps } from './components/TextInput.js';
 export { TextArea } from './components/TextArea.js';
@@ -42,9 +48,11 @@ export { Wordmark } from './components/Wordmark.js';
 export type { WordmarkProps } from './components/Wordmark.js';
 export { VisuallyHidden } from './components/VisuallyHidden.js';
 export type { VisuallyHiddenProps, VisuallyHiddenTag } from './components/VisuallyHidden.js';
+export { ErrorBoundary } from './components/ErrorBoundary.js';
+export type { ErrorBoundaryProps } from './components/ErrorBoundary.js';
 
-export { Icon } from './icons/Icon.js';
-export type { IconFrameProps, IconProps } from './icons/Icon.js';
+export { Icon, SpriteIcon, sprite } from './icons/Icon.js';
+export type { IconFrameProps, IconProps, SpriteIconProps } from './icons/Icon.js';
 export { PlayIcon } from './icons/PlayIcon.js';
 export { PauseIcon } from './icons/PauseIcon.js';
 export { StopIcon } from './icons/StopIcon.js';
@@ -61,15 +69,25 @@ export { SendIcon } from './icons/SendIcon.js';
 export { SettingsIcon } from './icons/SettingsIcon.js';
 export { LeafIcon } from './icons/LeafIcon.js';
 export { FileIcon } from './icons/FileIcon.js';
+export { NewFileIcon } from './icons/NewFileIcon.js';
 export { FilesIcon } from './icons/FilesIcon.js';
 export { FolderIcon } from './icons/FolderIcon.js';
 export { MaximizeIcon } from './icons/MaximizeIcon.js';
 export { MinimizeIcon } from './icons/MinimizeIcon.js';
-export { PopoutIcon } from './icons/PopoutIcon.js';
 export { TerminalIcon } from './icons/TerminalIcon.js';
+export { UploadIcon } from './icons/UploadIcon.js';
 export { StarIcon } from './icons/StarIcon.js';
 export { HeartIcon } from './icons/HeartIcon.js';
+export { TrashIcon } from './icons/TrashIcon.js';
+export { PlusIcon } from './icons/PlusIcon.js';
+export { SearchIcon } from './icons/SearchIcon.js';
+export { HomeIcon } from './icons/HomeIcon.js';
+export { EyeIcon } from './icons/EyeIcon.js';
+export { ThumbUpIcon } from './icons/ThumbUpIcon.js';
+export { ThumbDownIcon } from './icons/ThumbDownIcon.js';
 
 export { cx } from './cx.js';
-export { duration, fonts, pixel, readThemeColors, space, vars } from './tokens.js';
+export { messageOf } from './messages.js';
+export { apiUrl, configuredUrl, leaveFor } from './env.js';
+export { fonts, readThemeColors } from './tokens.js';
 export type { HexToken, ThemeColors } from './tokens.js';

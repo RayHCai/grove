@@ -8,6 +8,8 @@ export interface TextInputProps extends ComponentPropsWithRef<'input'> {
     labelHidden?: boolean | undefined;
     /** A line under the control that also describes it. */
     hint?: ReactNode | undefined;
+    /** The flat, smaller metrics a field in a narrow rail takes. */
+    dense?: boolean | undefined;
 }
 
 /** A labelled single-line field: a 1px outlined control under a small muted label, with an optional hint. */
@@ -15,6 +17,7 @@ export function TextInput({
     label,
     labelHidden = false,
     hint,
+    dense = false,
     id,
     className,
     'aria-describedby': describedBy,
@@ -26,7 +29,7 @@ export function TextInput({
     const hasHint = hint !== undefined && hint !== null;
     const described = cx(describedBy, hasHint && hintId);
     return (
-        <div className={cx('pg-field', className)}>
+        <div className={cx('pg-field', dense && 'pg-field--dense', className)}>
             <label
                 className={labelHidden ? 'pg-visually-hidden' : 'pg-field__label'}
                 htmlFor={controlId}

@@ -1,7 +1,7 @@
 import { act, createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { Wordmark } from '../src/components/Wordmark.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 describe('Wordmark', () => {
     it('is a span reading Grove after a hidden leaf icon when it has nowhere to link', async () => {

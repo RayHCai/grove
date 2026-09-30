@@ -1,10 +1,17 @@
 import type { IconProps } from './Icon.js';
-import { Icon } from './Icon.js';
+import { SpriteIcon } from './Icon.js';
+
+const ROWS = [
+    '........',
+    '..#.....',
+    '..##....',
+    '...##...',
+    '...##...',
+    '..##....',
+    '..#.....',
+    '........',
+];
 
 export function ChevronRightIcon(props: IconProps): React.JSX.Element {
-    return (
-        <Icon {...props}>
-            <path d="m6 4 4 4-4 4" />
-        </Icon>
-    );
+    return <SpriteIcon rows={ROWS} {...props} />;
 }

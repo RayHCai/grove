@@ -45,27 +45,55 @@
 }
 
 .pg-btn__label {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 10px;
+    padding-left: 0;
+    transition: padding-left var(--pg-dur) var(--pg-ease);
 }
 
 /*
  * The menu cursor, which appears beside the label only while the option is the one selected.
  * It is drawn on the label rather than added to the DOM, so no component has to render it.
+ *
+ * At rest the cursor takes no room, so the label sits centred in the body. Pointing at the option
+ * opens a slot on the label's left (`--pg-cursor-slot`: the cursor and a gap after it), sliding
+ * the label right, and the cursor blinks in the space that opened. A surface that wants no cursor
+ * on its buttons sets the slot to 0 and hides the cursor.
  */
+.pg-btn {
+    --pg-cursor-slot: 22px;
+}
 .pg-btn__label::before {
     content: '';
-    flex: none;
+    position: absolute;
+    top: 50%;
+    left: 0;
     width: 12px;
     height: 20px;
+    translate: 0 -50%;
     background: currentColor;
     clip-path: var(--pg-arrow);
     opacity: 0;
 }
+.pg-btn:hover .pg-btn__label,
+.pg-btn:focus-visible .pg-btn__label {
+    padding-left: var(--pg-cursor-slot);
+}
+/* The cursor lands once its slot has opened, and is gone the moment the pointer leaves. */
 .pg-btn:hover .pg-btn__label::before,
 .pg-btn:focus-visible .pg-btn__label::before {
     opacity: 1;
+    transition: opacity 0s var(--pg-dur);
+}
+
+/* A toolbar control was never one of a list, so the cursor nudging its label over is noise. */
+.pg-btn--no-cursor {
+    --pg-cursor-slot: 0px;
+}
+.pg-btn--no-cursor .pg-btn__label::before {
+    display: none;
 }
 
 .pg-btn__icon {
@@ -90,6 +118,14 @@
 }
 .pg-btn--primary:hover {
     --pg-face: var(--pg-accent-hover);
+}
+/* Rust rather than moss, for the one thing on a page that already spends the green elsewhere. */
+.pg-btn--warm {
+    --pg-face: var(--pg-warm);
+    color: var(--pg-accent-ink);
+}
+.pg-btn--warm:hover {
+    --pg-face: var(--pg-warm-hover);
 }
 .pg-btn--secondary:hover {
     --pg-face: var(--pg-surface-2);
@@ -124,6 +160,10 @@
 .pg-btn[disabled]::before,
 .pg-btn[aria-disabled='true']::before {
     transform: none;
+}
+.pg-btn[disabled] .pg-btn__label,
+.pg-btn[aria-disabled='true'] .pg-btn__label {
+    padding-left: 0;
 }
 .pg-btn[disabled] .pg-btn__label::before,
 .pg-btn[aria-disabled='true'] .pg-btn__label::before {

@@ -1,0 +1,51 @@
+/*
+ * A menu hanging off a control: a flat box in the 3px edge dropping the solid block.
+ *
+ * Hidden rather than unmounted, and visibility waits out the fade on the way down, so the rows stop
+ * taking clicks only once they can no longer be seen. Where it hangs is the page's to set.
+ */
+.pg-menu {
+    position: absolute;
+    z-index: var(--pg-z-menu);
+    display: flex;
+    flex-direction: column;
+    min-width: 168px;
+    padding: var(--pg-sp-1);
+    border: var(--pg-bw) solid var(--pg-edge);
+    background: var(--pg-surface);
+    box-shadow: var(--pg-shadow-md);
+    opacity: 0;
+    visibility: hidden;
+    transition:
+        opacity var(--pg-dur) var(--pg-ease),
+        visibility 0s linear var(--pg-dur);
+}
+.pg-menu[data-open] {
+    opacity: 1;
+    visibility: visible;
+    transition:
+        opacity var(--pg-dur) var(--pg-ease),
+        visibility 0s;
+}
+.pg-menu__item {
+    display: block;
+    width: 100%;
+    padding: var(--pg-sp-2) var(--pg-sp-3);
+    border: none;
+    background: none;
+    color: var(--pg-ink);
+    font: normal var(--pg-text) / 1.2 var(--pg-font-ui);
+    text-align: left;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+        background-color var(--pg-dur-fast) var(--pg-ease),
+        color var(--pg-dur-fast) var(--pg-ease);
+}
+.pg-menu__item:hover,
+.pg-menu__item:focus-visible {
+    background: var(--pg-plate);
+    color: var(--pg-plate-ink);
+    outline: none;
+}

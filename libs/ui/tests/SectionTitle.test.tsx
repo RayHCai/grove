@@ -1,7 +1,7 @@
 import { createRef } from 'react';
 import { describe, expect, it } from 'vitest';
 import { SectionTitle } from '../src/components/SectionTitle.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 describe('SectionTitle', () => {
     it('is an h2 and nothing else', async () => {
@@ -35,5 +35,16 @@ describe('SectionTitle', () => {
         expect(sub?.tagName).toBe('P');
         expect(sub?.className).toBe('pg-sectitle__sub');
         expect(sub?.textContent).toBe('Fresh from the community garden.');
+    });
+});
+
+describe('a label SectionTitle', () => {
+    it('is the same heading with the label look', async () => {
+        const host = await mount(
+            <SectionTitle as="h3" variant="label">
+                The world
+            </SectionTitle>,
+        );
+        expect(host.querySelector('h3')?.className).toBe('pg-sectitle pg-sectitle--label');
     });
 });

@@ -5,17 +5,6 @@
  * eased transform is the one thing that reads as not-pixel however chunky the borders are.
  */
 
-@keyframes pg-rise {
-    from {
-        opacity: 0;
-        transform: translateY(14px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
 @keyframes pg-blink {
     0%,
     49% {
@@ -68,15 +57,15 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-    /* The entrance: four frames up, staggered by whoever is choreographing the page. */
-    .pg-rise {
-        animation: pg-rise 0.5s var(--pg-ease) both;
-    }
-
-    /* The menu cursor blinks only while the option is the selected one. */
-    .pg-btn:hover .pg-btn__label::before,
-    .pg-btn:focus-visible .pg-btn__label::before {
+    /*
+     * The menu cursor blinks only while the option is the selected one, once its slot has opened.
+     * A locked option is never selected: the blink animates opacity, which would outrank the
+     * `opacity: 0` that button.css gives its cursor, so it has to be kept off here instead.
+     */
+    .pg-btn:not([disabled], [aria-disabled='true']):hover .pg-btn__label::before,
+    .pg-btn:not([disabled], [aria-disabled='true']):focus-visible .pg-btn__label::before {
         animation: pg-blink 0.8s var(--pg-step-1) infinite;
+        animation-delay: var(--pg-dur);
     }
 
     /* An item drop never sits still. */
