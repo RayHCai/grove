@@ -7,6 +7,15 @@ packages:
     - bench
     - integration
 
+# Here rather than in .npmrc, which pnpm 11 reads for registry and auth settings alone.
+# Three days, so resolutionMode: highest never takes a compromised publish the day it lands.
+minimumReleaseAge: 4320
+resolutionMode: highest
+autoInstallPeers: true
+strictPeerDependencies: false
+# Turbo runs every task as its own `pnpm run`, and a nested install from each races the others.
+verifyDepsBeforeRun: false
+
 # lefthook's postinstall fetches its platform binary and installs the git hooks; esbuild's fetches
 # the bundler that rolls the sim into the one script @grove/game-instance evaluates in an isolate.
 # Prisma's fetches the schema engine every migration runs through, and without it @prisma/engines
@@ -16,3 +25,15 @@ allowBuilds:
     esbuild: true
     prisma: true
     '@prisma/engines': true
+
+# Both arrive under @grove/api through prisma, which pins them below the version that fixes them,
+# so there is no prisma release to upgrade to and no direct dependency to bump. Same export maps as
+# the versions they replace.
+#
+# deepmerge-ts: stack exhaustion on recursive object graphs, GHSA-ggr8-5vv4-36mx, fixed in 8.
+# @prisma/config pins 7.1.5 exactly and merges this repo's own config files with it.
+# mysql2: an auth-plugin downgrade that leaks the password in the clear, GHSA-3f6p-5ww8-9rcr, fixed
+# in 3.22. prisma ships every driver and the datasource here is postgresql, so nothing loads it.
+overrides:
+    deepmerge-ts: ^8.0.0
+    mysql2: ^3.22.0
