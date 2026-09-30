@@ -8,8 +8,8 @@ export type { CreateClientOptions } from './create-client.js';
 export type { ProjectClaim } from './identity.js';
 
 // The authoring shape, so a host can name what it loads and hands to `createSim`. Types only: the
-// values @platform/project holds are the validator and the two narrowings, and `createSim` is the
-// one caller that needs them — a host that mints ids or writes a file imports that package.
+// values @platform/project holds are the validator and the three narrowings, and `createSim` is the
+// one caller that needs them; a host that mints ids or writes a file imports that package.
 export type {
     AssetId,
     AssetKind,

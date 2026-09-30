@@ -1,5 +1,5 @@
 // The narrowings are @platform/project's and the boot is @platform/sim's, so what lives here is the
-// ORDER — validate, resolve the attached classes, then build the world — since the returned sim
+// ORDER (validate, resolve the attached classes, then build the world), since the returned sim
 // must not be able to take a connection into a world that is not there yet.
 
 import type { KVStore } from '@platform/core';
@@ -35,7 +35,7 @@ export interface CreateSimOptions extends Omit<SimOptions, 'config'> {
 export function createSim(project: ProjectManifest, opts: CreateSimOptions = {}): Sim {
     const { scripts, bundle, kv, ...forwarded } = opts;
     // A type is a compile-time claim and a saved project is bytes someone wrote, so this checks
-    // rather than casts — and it is why the validator is not part of what a creator imports.
+    // rather than casts, and it is why the validator is not part of what a creator imports.
     const manifest = validate(project);
     const resolve: ScriptResolver = (id) => scripts?.resolve(id);
     const world = toGameManifest(manifest, { role: 'server', scripts: resolve });

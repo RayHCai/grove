@@ -17,14 +17,14 @@ export interface CreateClientOptions extends Omit<GameClientOptions, 'project' |
      * cannot derive one: the player origin is handed two strings with its ticket and nothing else.
      */
     project?: ProjectManifest | ProjectClaim;
-    /** The client chunk's classes, by the id an attachment names — what prediction has to run. */
+    /** The client chunk's classes, by the id an attachment names: what prediction has to run. */
     scripts?: ScriptRegistry<ScriptId>;
     /** The bundle this process has already verified; `''` until it has loaded one. */
     bundleHash?: string;
 }
 
 /**
- * Builds a session for `project` over the supplied seams. It does not join — `start()` is the
+ * Builds a session for `project` over the supplied seams. It does not join; `start()` is the
  * host's, so a lifecycle listener can be registered before the first state change.
  */
 export function createClient(opts: CreateClientOptions): GameClient {
@@ -32,7 +32,7 @@ export function createClient(opts: CreateClientOptions): GameClient {
     return new GameClient({
         ...forwarded,
         // No project declared is a real answer rather than a missing one, and the client's own
-        // all-empty default already says it — so an absent manifest is left to say it.
+        // all-empty default already says it, so an absent manifest is left to say it.
         ...defined({
             project:
                 project === undefined

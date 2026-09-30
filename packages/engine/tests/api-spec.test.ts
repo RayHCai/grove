@@ -52,7 +52,7 @@ function engineBlock(source: string): string {
     throw new Error('api_spec.ts has an unterminated @platform/engine block');
 }
 
-/** Names the spec declares as VALUES, at the block's own indent only — members sit deeper. */
+/** Names the spec declares as VALUES, at the block's own indent only; members sit deeper. */
 function specValues(block: string): string[] {
     const names = new Set<string>();
     for (const line of block.split('\n')) {

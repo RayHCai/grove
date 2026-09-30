@@ -1,4 +1,4 @@
-// Both ends are built from the SAME manifest and registry — the single-process local-play case.
+// Both ends are built from the SAME manifest and registry: the single-process local-play case.
 
 import { describe, expect, it } from 'vitest';
 import { ClientScript, ServerScript } from '@platform/core';
@@ -107,7 +107,7 @@ class Rules extends ServerScript {
     }
 }
 
-/** On the coin template, client-located — the mirror attaches it and the authority's is inert. */
+/** On the coin template, client-located; the mirror attaches it and the authority's is inert. */
 class Sparkle extends ClientScript {
     constructor() {
         super();
@@ -228,7 +228,7 @@ async function session(
     const run = (n: number): void => {
         for (let i = 0; i < n; i++) {
             now += TICK;
-            // Delivery first, then the tick — the order every host runs, and reversing it costs
+            // Delivery first, then the tick: the order every host runs, and reversing it costs
             // every input a tick of latency while reporting nothing.
             pair.deliver();
             authority.tick();

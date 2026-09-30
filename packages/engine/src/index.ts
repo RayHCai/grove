@@ -35,15 +35,11 @@ export {
     hypot,
 } from '@platform/math';
 
-// The full runtime API from core.
 export {
-    // Script bases
     BaseScript,
     ServerScript,
     ClientScript,
     SyncedScript,
-
-    // Decorators
     onStart,
     onEnd,
     onUpdate,
@@ -61,8 +57,6 @@ export {
     onPress,
     onRequest,
     serverState,
-
-    // Runtime objects and consts
     Entity,
     Player,
     Game,
@@ -70,29 +64,19 @@ export {
     HUD,
     HUDScreen,
     Asset,
-
-    // Ambient consts
     game,
     hud,
     random,
     assets,
     sound,
     music,
-
-    // Time
     sleep,
     every,
     after,
-
-    // Motion helpers
     oscillate,
     orbit,
     tween,
-
-    // Request
     request,
-
-    // Data wrappers
     StatefulWrapper,
     Countdown,
     Storage,
@@ -100,15 +84,12 @@ export {
     Leaderboard,
     Inventory,
     Team,
-
-    // Movement
     BaseMovement,
     TopDownMovement,
     PlatformerMovement,
 } from '@platform/core';
 
 export type {
-    // Types
     Ctx,
     FindQuery,
     Cursor,
