@@ -1,7 +1,7 @@
 // The boilerplate a creator never sees: the engine is declared to the workbench as globals, and
 // the import that makes those names real is put back at compile time, above the file.
 //
-// One list, in both directions — `src/creator/globals.d.ts` is what the checker reads, and
+// One list, in both directions: `src/creator/globals.d.ts` is what the checker reads, and
 // `@platform/scripting`'s `ENGINE_VALUES` is what a compiled module imports. The build service
 // compiles from the same list, so what typechecks on screen is what compiles on a build box.
 
