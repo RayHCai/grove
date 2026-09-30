@@ -41,7 +41,7 @@ type value struct {
 	null    bool
 }
 
-// conn is one connection, which is one command at a time — RESP carries no request id, so a reply
+// conn is one connection, which is one command at a time: RESP carries no request id, so a reply
 // belongs to whoever sent the command before it.
 type conn struct {
 	raw net.Conn
@@ -171,22 +171,30 @@ func (c *conn) line() ([]byte, error) {
 // is a refusal to start rather than a failure on the first join.
 type dialer struct {
 	addr     string
+	user     string
 	password string
 	db       string
 }
 
-// parseRedisURL reads redis://[:password@]host[:port][/db], which is the spelling a hosted cache
-// hands out.
+// parseRedisURL reads redis://[[user]:password@]host[:port][/db], the spelling a hosted cache hands out.
 func parseRedisURL(raw string) (dialer, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return dialer{}, fmt.Errorf("parse %q: %w", raw, err)
+		// The url.Error's own text quotes the url, and with it the password.
+		var bad *url.Error
+		if errors.As(err, &bad) {
+			err = bad.Err
+		}
+		return dialer{}, fmt.Errorf("parse the url: %w", err)
+	}
+	if parsed.Scheme == "rediss" {
+		return dialer{}, errors.New("scheme must be redis: this client speaks no TLS, so a rediss:// cache needs a plaintext endpoint")
 	}
 	if parsed.Scheme != "redis" {
 		return dialer{}, fmt.Errorf("scheme must be redis, got %q", parsed.Scheme)
 	}
 	if parsed.Hostname() == "" {
-		return dialer{}, fmt.Errorf("no host in %q", raw)
+		return dialer{}, errors.New("no host in the url")
 	}
 
 	port := parsed.Port()
@@ -197,6 +205,10 @@ func parseRedisURL(raw string) (dialer, error) {
 	d := dialer{addr: net.JoinHostPort(parsed.Hostname(), port)}
 	if parsed.User != nil {
 		d.password, _ = parsed.User.Password()
+		// "default" is the user a bare password authenticates as, and naming it would break a pre-ACL server.
+		if user := parsed.User.Username(); user != "default" {
+			d.user = user
+		}
 	}
 	if db := strings.TrimPrefix(parsed.Path, "/"); db != "" {
 		if _, err := strconv.Atoi(db); err != nil {
@@ -217,7 +229,11 @@ func (d dialer) dial(deadline time.Time) (*conn, error) {
 	// Both before the connection is handed out, so nothing can run unauthenticated or against a
 	// database this service was not pointed at.
 	if d.password != "" {
-		if _, err := c.do(deadline, "AUTH", d.password); err != nil {
+		auth := []string{"AUTH", d.password}
+		if d.user != "" {
+			auth = []string{"AUTH", d.user, d.password}
+		}
+		if _, err := c.do(deadline, auth...); err != nil {
 			c.raw.Close()
 			return nil, err
 		}

@@ -11,7 +11,7 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 )
 
-// RetainWindows is how many staleness windows a box may be gone before its row is dropped — an hour
+// RetainWindows is how many staleness windows a box may be gone before its row is dropped: an hour
 // at the default, which is longer than any reboot and short enough that the map stops growing.
 const RetainWindows = 120
 
@@ -49,6 +49,8 @@ type reservation struct {
 	// Set once the box's own beat counts the session, after which holding its slot here as well
 	// would spend that slot twice and report the box full at half its capacity.
 	reported bool
+	// Set until Started or Release: while Agent.Start runs, a beat not naming the session is early.
+	starting bool
 }
 
 // Placement is the box one join landed on and the ids it carries, before an Ingress names a URL.
@@ -113,7 +115,7 @@ func (reg *Registry) Beat(hb contract.HostHeartbeat, addr string, at time.Time) 
 		reg.note(h, contract.FleetRegistered, at, "")
 	case previous.Incarnation != hb.Incarnation:
 		// Recorded as its own kind rather than as a return, because the worlds the previous life
-		// was running went with it — a box back inside the staleness window never looked absent.
+		// was running went with it; a box back inside the staleness window never looked absent.
 		h.Reported = h.Liveness(at, reg.staleAfter)
 		reg.note(h, contract.FleetRestarted, at, "")
 	default:
@@ -149,11 +151,13 @@ func (reg *Registry) settle(hb contract.HostHeartbeat) {
 		}
 		port, taken := portOf(hb.Instances, res.sessionID)
 		if !taken {
-			delete(reg.pending, key)
+			if !res.starting {
+				delete(reg.pending, key)
+			}
 			continue
 		}
 		// Kept rather than dropped, so two players joining a game the box is still starting are
-		// still handed one session — but no longer counted against the slot the box now counts.
+		// still handed one session, but no longer counted against the slot the box now counts.
 		res.reported = true
 		res.port = port
 		reg.pending[key] = res
@@ -209,7 +213,7 @@ func (reg *Registry) Place(req contract.PlacementRequest, ordered []Host, at tim
 
 	// A box already running this world wins over an emptier one, and the ranking never gets a say:
 	// a world is one its players share, and MostFree would send the second player to the box with
-	// the most free slots — which is never the box already spending one on this game.
+	// the most free slots, which is never the box already spending one on this game.
 	if running, ok := reg.serving(key, req.Region, at); ok {
 		return running, true
 	}
@@ -240,6 +244,7 @@ func (reg *Registry) Place(req contract.PlacementRequest, ordered []Host, at tim
 			hostID:     host.ID,
 			instanceID: placed.InstanceID,
 			sessionID:  placed.SessionID,
+			starting:   true,
 		}
 		return placed, true
 	}
@@ -257,6 +262,7 @@ func (reg *Registry) Started(gameID string, revision int, sessionID string, port
 	key := world{gameID: gameID, revision: revision}
 	if res, ok := reg.pending[key]; ok && res.sessionID == sessionID {
 		res.port = port
+		res.starting = false
 		reg.pending[key] = res
 	}
 }
@@ -362,8 +368,8 @@ func (reg *Registry) reservedByHost() map[string]int {
 	return byHost
 }
 
-// portOf says whether the beat accounts for the session in any state — a box still starting the
-// process has not dropped the work — and on what port it bound it.
+// portOf says whether the beat accounts for the session in any state (a box still starting the
+// process has not dropped the work) and on what port it bound it.
 func portOf(instances []contract.InstanceReport, sessionID string) (int, bool) {
 	for _, inst := range instances {
 		if inst.SessionID == sessionID {
@@ -402,7 +408,7 @@ func (reg *Registry) Targets(req contract.DeploymentRequest, at time.Time) []Hos
 	for _, h := range reg.hosts {
 		// Freshness rather than placeability, which is the narrower question: a suspected box still
 		// holds worlds a version has to reach, and the attempt is what settles the suspicion either
-		// way. A box that said it was leaving is the one exception — its worlds are already ending.
+		// way. A box that said it was leaving is the one exception: its worlds are already ending.
 		if !h.Fresh(at, reg.staleAfter) || h.Leaving {
 			continue
 		}

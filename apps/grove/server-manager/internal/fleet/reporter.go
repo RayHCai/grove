@@ -1,17 +1,14 @@
 // What this service tells @grove/api about the fleet, so the history outlives the process holding it.
 //
 // The registry is the routing answer and is rebuilt from beats in one interval, which is why it can
-// afford to live in memory. What it cannot rebuild is what the fleet *did* — a box that failed at
-// 3am left no trace on any later beat — and that is the whole of what goes over this seam.
+// afford to live in memory. What it cannot rebuild is what the fleet *did* (a box that failed at
+// 3am left no trace on any later beat), and that is the whole of what goes over this seam.
 
 package fleet
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -85,7 +82,7 @@ func (r *Reporter) Attached() bool {
 // Send posts one report: the whole fleet, and every transition nobody has taken yet.
 //
 // Events are drained before the post and put back when it fails, so a receiver that was down gets
-// the history rather than a hole in it. The snapshot needs no such care — the next one supersedes it.
+// the history rather than a hole in it. The snapshot needs no such care; the next one supersedes it.
 func (r *Reporter) Send(ctx context.Context) error {
 	now := r.opts.Now()
 	events := r.opts.Fleet.Drain()
@@ -104,28 +101,9 @@ func (r *Reporter) Send(ctx context.Context) error {
 }
 
 func (r *Reporter) post(ctx context.Context, report contract.FleetReport) error {
-	body, err := json.Marshal(report)
-	if err != nil {
-		return fmt.Errorf("encode fleet report: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("build fleet report: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+string(r.opts.FleetSecret))
-	httpx.Forward(req)
-
-	res, err := r.opts.Client.Do(req)
-	if err != nil {
+	fleet := httpx.FleetClient{Client: r.opts.Client, Secret: r.opts.FleetSecret}
+	if _, err := fleet.PostJSON(ctx, r.url, report, nil, maxReportAnswerBytes); err != nil {
 		return fmt.Errorf("post fleet report: %w", err)
-	}
-	defer res.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, maxReportAnswerBytes))
-
-	if res.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("fleet report answered %d", res.StatusCode)
 	}
 	return nil
 }

@@ -22,7 +22,7 @@ type Host struct {
 	// Where the beat came from. Taken from the connection rather than a field, because a box that
 	// named its own address could point joining players at another one.
 	Addr string
-	// When this service heard the beat, never when the box says it sent one — a skewed clock on one
+	// When this service heard the beat, never when the box says it sent one; a skewed clock on one
 	// box must not make it look healthy here.
 	LastSeenAt time.Time
 	// Sessions placed here that the Capacity above cannot have counted yet, filled in when the box

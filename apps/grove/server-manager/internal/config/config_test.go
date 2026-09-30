@@ -12,14 +12,14 @@ func complete() map[string]string {
 	return map[string]string{"FLEET_SECRET": strings.Repeat("f", 32)}
 }
 
-func TestLoadFillsTheDefaults(t *testing.T) {
-	cfg, err := Load(env.FromMap(complete()))
+func TestReadFillsTheDefaults(t *testing.T) {
+	cfg, err := Read(env.FromMap(complete()))
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("Read: %v", err)
 	}
 
-	if cfg.Addr != "0.0.0.0:4003" {
-		t.Errorf("addr: got %q, want 0.0.0.0:4003", cfg.Addr)
+	if cfg.Addr() != "0.0.0.0:4003" {
+		t.Errorf("addr: got %q, want 0.0.0.0:4003", cfg.Addr())
 	}
 	// Two missed beats at the agent's default interval, not three.
 	if cfg.StaleAfter != 20*time.Second {
@@ -46,7 +46,7 @@ func TestLoadFillsTheDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadRefusesAnEnvironmentItCannotRouteOn(t *testing.T) {
+func TestReadRefusesAnEnvironmentItCannotRouteOn(t *testing.T) {
 	cases := []struct {
 		name    string
 		change  func(map[string]string)
@@ -133,6 +133,12 @@ func TestLoadRefusesAnEnvironmentItCannotRouteOn(t *testing.T) {
 			change:  func(m map[string]string) { m["AGENT_TIMEOUT"] = "0s" },
 			mention: "AGENT_TIMEOUT",
 		},
+		{
+			// Refused at boot rather than on the first report, which is fifteen seconds of looking fine.
+			name:    "a history receiver that is not a url",
+			change:  func(m map[string]string) { m["API_URL"] = "api:3000" },
+			mention: "API_URL",
+		},
 	}
 
 	for _, tc := range cases {
@@ -140,7 +146,7 @@ func TestLoadRefusesAnEnvironmentItCannotRouteOn(t *testing.T) {
 			vars := complete()
 			tc.change(vars)
 
-			_, err := Load(env.FromMap(vars))
+			_, err := Read(env.FromMap(vars))
 			if err == nil {
 				t.Fatal("the environment was accepted")
 			}
@@ -153,15 +159,33 @@ func TestLoadRefusesAnEnvironmentItCannotRouteOn(t *testing.T) {
 
 // A deployment that has no terminator in front of it says so, rather than handing out a url the
 // browser refuses.
-func TestLoadTakesTheInsecureSchemeOnlyWhenAsked(t *testing.T) {
+func TestReadTakesTheInsecureSchemeOnlyWhenAsked(t *testing.T) {
 	vars := complete()
 	vars["INGRESS_SCHEME"] = "ws"
 
-	cfg, err := Load(env.FromMap(vars))
+	cfg, err := Read(env.FromMap(vars))
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("Read: %v", err)
 	}
 	if cfg.IngressScheme != "ws" {
 		t.Errorf("ingress scheme: got %q, want ws", cfg.IngressScheme)
+	}
+}
+
+// A platform that assigns PORT is heard on it unless this service's own variable says otherwise.
+func TestReadTakesThePlatformPort(t *testing.T) {
+	vars := complete()
+	vars["PORT"] = "8080"
+	cfg, err := Read(env.FromMap(vars))
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if cfg.Addr() != "0.0.0.0:8080" {
+		t.Errorf("addr: got %q, want 0.0.0.0:8080", cfg.Addr())
+	}
+
+	vars["SERVER_MANAGER_PORT"] = "4103"
+	if cfg, _ := Read(env.FromMap(vars)); cfg.Addr() != "0.0.0.0:4103" {
+		t.Errorf("addr: got %q, want the service's own port", cfg.Addr())
 	}
 }

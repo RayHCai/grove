@@ -73,7 +73,7 @@ func TestALeavingBeatIsNotAFailure(t *testing.T) {
 }
 
 // A box back inside the staleness window never looked absent, so the restart is invisible without
-// the incarnation — and the worlds its previous life was running are gone either way.
+// the incarnation, and the worlds its previous life was running are gone either way.
 func TestANewIncarnationIsARestart(t *testing.T) {
 	reg := NewRegistry(staleAfter)
 	reg.Beat(living(hostA, firstLife), "192.0.2.1", epoch)

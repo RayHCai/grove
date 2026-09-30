@@ -19,11 +19,11 @@ var ErrEmpty = errors.New("no join waiting")
 // operator can read while players are waiting in it.
 type Queue interface {
 	// Push puts one encoded job at the back of the line, and answers false when the line is
-	// already at its depth, having added nothing — a line that accepted past its cap and then
+	// already at its depth, having added nothing; a line that accepted past its cap and then
 	// refused its caller would leave a job for a worker to pop and answer nobody.
 	Push(ctx context.Context, job []byte) (bool, error)
 	// Pop takes the front of the line, blocking until one arrives, until ctx ends, or until its own
-	// bounded wait runs out — the last answering ErrEmpty.
+	// bounded wait runs out, the last answering ErrEmpty.
 	Pop(ctx context.Context) ([]byte, error)
 	// Close releases whatever the line is held in.
 	Close()
@@ -105,7 +105,7 @@ func NewRedis(rawURL, key string, depth int, wait time.Duration) (*Redis, error)
 //
 // LLEN before LPUSH, so a refused join leaves nothing behind. Two pushers that read the same length
 // can overshoot the cap between them by as many as are in flight, which costs a few joins more in
-// the line — where pushing first and refusing after would leave the line above its cap behind
+// the line, where pushing first and refusing after would leave the line above its cap behind
 // entries no caller is waiting on, and refuse every join after that until a worker drained them.
 func (r *Redis) Push(ctx context.Context, job []byte) (bool, error) {
 	deadline, ok := ctx.Deadline()
@@ -146,7 +146,7 @@ func (r *Redis) Pop(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 
-	// Redis reads this as whole seconds, and zero means wait forever — which would leave a worker
+	// Redis reads this as whole seconds, and zero means wait forever, which would leave a worker
 	// no way back to its context.
 	seconds := int(r.wait.Seconds())
 	if seconds < 1 {

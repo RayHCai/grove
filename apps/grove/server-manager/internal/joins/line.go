@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	// ErrBusy is this process failing to keep up, which is not the fleet being full — telling a
+	// ErrBusy is this process failing to keep up, which is not the fleet being full; telling a
 	// player there is no capacity while the fleet has slots free is the one wrong answer here.
 	ErrBusy = errors.New("the join line is full")
 	// ErrNoCapacity is the fleet's own answer, and the only one a player is shown as a full game.
@@ -50,7 +50,7 @@ type Options struct {
 // Line is the order joins are answered in.
 //
 // One worker, deliberately: the placement decision is already one critical section in the registry,
-// so a second worker would buy no throughput and would take the ordering away — the arrival order
+// so a second worker would buy no throughput and would take the ordering away: the arrival order
 // this exists to impose would become the order the runtime happened to grant a mutex in.
 type Line struct {
 	queue    Queue

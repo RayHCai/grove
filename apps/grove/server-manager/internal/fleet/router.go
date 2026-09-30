@@ -74,7 +74,7 @@ func (r Router) start(ctx context.Context, req contract.PlacementRequest, placed
 	if err != nil {
 		r.Registry.Release(req.GameID, placed.SessionID)
 		// A box that filled is the fleet being busy and not a fault, so it is logged as the one
-		// and not the other — an operator paging on every full box would page on every full fleet.
+		// and not the other; an operator paging on every full box would page on every full fleet.
 		if errors.Is(err, ErrHostFull) {
 			r.Log.InfoContext(ctx, "the chosen box was full",
 				"hostId", placed.Host.ID, "gameId", req.GameID, "revision", req.Revision)

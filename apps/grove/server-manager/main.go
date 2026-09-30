@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load(env.New())
+	cfg, err := config.Read(env.New())
 	if err != nil {
 		// Straight to stderr, because which handler the logger takes is itself config's answer.
 		fmt.Fprintln(os.Stderr, err)
@@ -36,9 +36,8 @@ func main() {
 	// The map behind the mutex is the seam a datastore lands on: a second replica of this service
 	// must share one registry rather than each holding half the fleet.
 	registry := fleet.NewRegistry(cfg.StaleAfter)
-	// One agent for both callers: a redeploy fans out over it and a join starts one world through
-	// it, and both reach a box the same way.
-	agent := fleet.HTTPAgent{Client: &http.Client{}, Secret: cfg.FleetSecret}
+	// Both callers bound their own call; the timeout is the backstop for a redeploy and a start alike.
+	agent := fleet.HTTPAgent{Client: &http.Client{Timeout: cfg.AgentTimeout}, Secret: cfg.FleetSecret}
 	line := joins.New(joins.Options{
 		Queue: queue,
 		Placer: fleet.Router{
@@ -90,10 +89,10 @@ func main() {
 		HostTimeout:   cfg.AgentTimeout,
 	})
 
-	serveErr := httpx.Serve(context.Background(), cfg.Addr, server.Handler(), log)
+	serveErr := httpx.Serve(context.Background(), cfg.Addr(), server.Handler(), log)
 
 	// Stopped only once the listener has drained, because every handler still inside that drain is
-	// waiting on this worker — and the line is released once the worker has certainly stopped
+	// waiting on this worker, and the line is released once the worker has certainly stopped
 	// reading it, rather than out from under a pop still in flight.
 	stop()
 	<-answered
