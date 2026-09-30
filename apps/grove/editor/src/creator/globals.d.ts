@@ -1,7 +1,7 @@
 // What a creator's file is checked against, and the reason none of them carries an import: every
 // name @platform/engine exports is declared here as a global, so the API is reachable by writing
 // it. The compile puts the imports back (`src/project/prelude.ts`), which is the only place they
-// exist — a creator never sees one, and never has to keep one in step with the code below it.
+// exist; a creator never sees one, and never has to keep one in step with the code below it.
 //
 // It is shipped to the workbench as text and checked by `tsconfig.creator.json`, so an engine
 // export that is renamed fails this package's typecheck rather than the creator's file.
@@ -13,7 +13,7 @@ declare global {
     export import lerp = Engine.lerp;
 
     // The 22 transcendentals @platform/math reimplements. A synced script may not reach `Math.sin`
-    // at all — no two engines approximate it the same way — so these are the ones that exist here.
+    // at all (no two engines approximate it the same way), so these are the ones that exist here.
     export import sin = Engine.sin;
     export import cos = Engine.cos;
     export import tan = Engine.tan;
@@ -128,7 +128,7 @@ declare global {
      *
      * Declared here rather than taken from the DOM library, which a creator's program is compiled
      * without: `window`, `document` and the rest exist on one end only, and the two names this
-     * engine and that library share — `Storage` and `Animation` — would collide outright.
+     * engine and that library share (`Storage` and `Animation`) would collide outright.
      */
     const console: {
         log(...values: unknown[]): void;
