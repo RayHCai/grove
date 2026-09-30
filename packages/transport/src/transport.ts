@@ -9,23 +9,23 @@ import type { Codec } from './codec.js';
  */
 export const DEFAULT_MAX_RETAINED_BYTES = 1024 * 1024;
 
-/** The JSON value space — what `jsonCodec` carries, and the floor every codec must accept. */
+/** The JSON value space: what `jsonCodec` carries, and the floor every codec must accept. */
 export type JsonValue =
     null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 /**
- * What the endpoints send and receive, untrusted on receive — the transport narrows nothing.
+ * What the endpoints send and receive, untrusted on receive; the transport narrows nothing.
  * Declare envelopes as `type`: an `interface` has no index signature and is not assignable.
  */
 export type Message = JsonValue;
 
-/** What crosses the wire — a string under `jsonCodec`, `Uint8Array` under a binary codec. */
+/** What crosses the wire: a string under `jsonCodec`, `Uint8Array` under a binary codec. */
 export type Frame = string | Uint8Array;
 
 declare const ENCODED_BY_CODEC: unique symbol;
 
 /**
- * A frame minted by `Codec.encode` — the only authority that can assert the brand.
+ * A frame minted by `Codec.encode`, the only authority that can assert the brand.
  * `sendEncoded` skips the far end's `encode`, so a foreign frame fails at the call site.
  */
 export type EncodedFrame = Frame & { readonly [ENCODED_BY_CODEC]: true };
@@ -37,7 +37,7 @@ export interface TimerSource {
     clearInterval(handle: unknown): void;
 }
 
-/** One end of one ESTABLISHED connection — holding a `Transport` means connected. */
+/** One end of one ESTABLISHED connection; holding a `Transport` means connected. */
 export interface Transport {
     /** Encode via the injected codec and hand the frame to the peer; a silent no-op after close. */
     send(message: Message): void;
@@ -48,9 +48,12 @@ export interface Transport {
      */
     sendEncoded(frame: EncodedFrame): void;
 
+    /** Bytes sent from this end the peer has not taken yet: what a host sheds droppable frames by. */
+    readonly bufferedBytes: number;
+
     /**
      * Register the peer-message handler; returns a disposer. Frames that arrived before it
-     * are retained and flushed here. One handler per end — a second live registration throws.
+     * are retained and flushed here. One handler per end: a second live registration throws.
      */
     onMessage(handler: (message: Message) => void): () => void;
 

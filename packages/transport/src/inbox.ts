@@ -58,7 +58,7 @@ export class FrameInbox {
     readonly #entries: Queued[] = [];
     /**
      * Where the undelivered entries start. A head index rather than `shift()`, which stops being
-     * cheap past V8's trimmable regime — and a 100k-frame backlog is reachable at the byte cap.
+     * cheap past V8's trimmable regime, and a 100k-frame backlog is reachable at the byte cap.
      */
     #head = 0;
 
@@ -66,11 +66,16 @@ export class FrameInbox {
     #onClose: (() => void) | undefined;
     /** Latched so `onClose` fires exactly once even if a marker is somehow queued twice. */
     #closeFired = false;
-    /** Bytes of undelivered frames — the quantity the cap bounds while unhandled. */
+    /** Bytes of undelivered frames, the quantity the cap bounds while unhandled. */
     #queuedBytes = 0;
 
     constructor(policy: InboxPolicy) {
         this.#policy = policy;
+    }
+
+    /** Bytes of frames queued and not yet delivered. */
+    get queuedBytes(): number {
+        return this.#queuedBytes;
     }
 
     registerMessage(handler: (message: Message) => void): () => void {
@@ -79,7 +84,7 @@ export class FrameInbox {
         }
         this.#onMessage = handler;
         // The join sequence races wiring order, so frames that arrived with no handler were
-        // retained rather than dropped — flush them now, in order.
+        // retained rather than dropped; flush them now, in order.
         this.drain();
         return () => {
             if (this.#onMessage === handler) this.#onMessage = undefined;
@@ -107,7 +112,7 @@ export class FrameInbox {
             this.#onMessage === undefined &&
             this.#queuedBytes + bytes > this.#policy.maxRetainedBytes
         ) {
-            // Dropped rather than queued — the whole point of a cap is that memory stops growing.
+            // Dropped rather than queued: the whole point of a cap is that memory stops growing.
             this.#policy.onOverflow(this.#queuedBytes, bytes);
             return;
         }
@@ -132,7 +137,7 @@ export class FrameInbox {
         }
     }
 
-    /** True while anything is eligible and a handler exists — the `latency: 0` loop's test. */
+    /** True while anything is eligible and a handler exists, the `latency: 0` loop's test. */
     get deliverable(): boolean {
         const next = this.#entries[this.#head];
         if (next === undefined || next.due > 0) return false;

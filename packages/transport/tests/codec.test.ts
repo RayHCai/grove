@@ -6,23 +6,23 @@ import { runCodecContract } from '../src/testing/codec-contract.js';
 import type { Message } from '../src/transport.js';
 
 // The same call runs against the binary codec in `@platform/protocol` when it lands.
-runCodecContract(() => jsonCodec, { name: 'jsonCodec — Codec contract' });
+runCodecContract(() => jsonCodec, { name: 'jsonCodec: Codec contract' });
 
-describe('jsonCodec — JSON specifics', () => {
+describe('jsonCodec: JSON specifics', () => {
     it('produces string frames', () => {
         expect(typeof jsonCodec.encode({ kind: 'spawn' })).toBe('string');
     });
 
     it('produces the frame JSON.stringify would, for an admissible value', () => {
         // Not a reimplementation of JSON: the validated copy stringifies identically, so a peer
-        // running a stock JSON.parse — a debugging proxy, a log tail — reads it unchanged.
+        // running a stock JSON.parse (a debugging proxy, a log tail) reads it unchanged.
         const value = { kind: 'spawn', id: 'e42', at: [1, -2.5], meta: null };
         expect(jsonCodec.encode(value)).toBe(JSON.stringify(value));
     });
 
     it('rejects a binary frame on decode', () => {
         // A Uint8Array means the peer is running a different codec, which one codec per process
-        // rules out — so this is a composition-root bug, reported as a malformed frame.
+        // rules out, so this is a composition-root bug, reported as a malformed frame.
         expect(() => jsonCodec.decode(new Uint8Array([1, 2]))).toThrow(
             expect.objectContaining({ code: 'malformed-frame' }),
         );
@@ -158,7 +158,7 @@ describe('jsonCodec — JSON specifics', () => {
 
     it('rejects a reserved key on encode, rather than emitting a frame decode refuses', () => {
         // Without this the codec produced `{"constructor":"wizard"}` and its own decode threw
-        // pollution-key — a peer-fault code for a field a creator named, which closes the
+        // pollution-key: a peer-fault code for a field a creator named, which closes the
         // connection and blames the wrong end.
         for (const key of ['__proto__', 'constructor', 'prototype']) {
             expect(() => jsonCodec.encode({ [key]: 1 })).toThrow(
@@ -188,8 +188,7 @@ describe('jsonCodec — JSON specifics', () => {
     it('refuses a shared-reference graph that expands past the node budget', () => {
         // MAX_DEPTH bounds the ancestor chain, not the work: the copy is per REFERENCE, so sharing
         // one object between two fields at each level doubles per level. 30 objects nested 29 deep
-        // used to exhaust the heap while sitting far inside the depth cap and far under any byte
-        // cap.
+        // would exhaust the heap while sitting far inside the depth cap and far under any byte cap.
         let node: Message = { v: 1 };
         for (let i = 0; i < 29; i++) node = { a: node, b: node };
         expect(() => jsonCodec.encode(node)).toThrow(
@@ -241,7 +240,7 @@ describe('jsonCodec — JSON specifics', () => {
 
 describe('RESERVED_KEYS', () => {
     it('holds the three keys the codec refuses, and reaches consumers through the barrel', () => {
-        // A layer above may answer these keys differently — the server drops rather than refuses —
+        // A layer above may answer these keys differently (the server drops rather than refuses),
         // so the set is shared and the literal exists once.
         expect([...RESERVED_KEYS].toSorted()).toEqual(['__proto__', 'constructor', 'prototype']);
         expect(barrelReservedKeys).toBe(RESERVED_KEYS);

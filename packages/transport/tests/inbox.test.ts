@@ -36,7 +36,7 @@ function frame(value: Message): string {
     return jsonCodec.encode(value) as string;
 }
 
-describe('FrameInbox — one handler per kind', () => {
+describe('FrameInbox: one handler per kind', () => {
     it('refuses a second live onMessage with one message text', () => {
         const { inbox } = harness();
         inbox.registerMessage(() => {});
@@ -84,7 +84,7 @@ describe('FrameInbox — one handler per kind', () => {
     });
 });
 
-describe('FrameInbox — retention and its cap', () => {
+describe('FrameInbox: retention and its cap', () => {
     it('flushes what arrived before registration, in order', () => {
         const { inbox } = harness();
         inbox.enqueue(frame({ tick: 1 }));
@@ -144,7 +144,7 @@ describe('FrameInbox — retention and its cap', () => {
     });
 });
 
-describe('FrameInbox — ageing is opt-in', () => {
+describe('FrameInbox: ageing is opt-in', () => {
     it('holds a frame until as many age() passes as its due', () => {
         const { inbox } = harness();
         const seen: Message[] = [];
@@ -204,7 +204,7 @@ describe('FrameInbox — ageing is opt-in', () => {
     });
 });
 
-describe('FrameInbox — the drain consumes one entry at a time', () => {
+describe('FrameInbox: the drain consumes one entry at a time', () => {
     it('leaves the frames behind a throwing handler queued', () => {
         const { inbox } = harness();
         const seen: Message[] = [];
@@ -280,7 +280,7 @@ describe('FrameInbox — the drain consumes one entry at a time', () => {
     });
 });
 
-describe('FrameInbox — the decode-failure policy decides', () => {
+describe('FrameInbox: the decode-failure policy decides', () => {
     it('propagates when the policy throws, leaving the rest queued', () => {
         const { inbox } = harness({
             onDecodeFailure: (error) => {

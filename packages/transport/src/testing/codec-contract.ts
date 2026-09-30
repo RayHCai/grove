@@ -20,7 +20,7 @@ export interface CodecContractOptions {
     /** A nesting depth every codec must REFUSE, deep enough to overflow a recursive walk. */
     hostileDepth?: number;
     /**
-     * Frames carrying a pollution key, in this codec's own encoding — unproducible through
+     * Frames carrying a pollution key, in this codec's own encoding, unproducible through
      * `encode`, which is the point.
      */
     pollutionFrames?: readonly Frame[] | null;
@@ -191,7 +191,7 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
                 );
             });
 
-            it('accepts the same object graph referenced twice — a DAG is not a cycle', () => {
+            it('accepts the same object graph referenced twice: a DAG is not a cycle', () => {
                 const codec = makeCodec();
                 const shared = { hp: 1 };
                 const decoded = codec.decode(codec.encode({ a: shared, b: shared })) as {
@@ -223,7 +223,7 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
 
                 const polluting = pollutionFrames[0];
                 if (polluting !== undefined) {
-                    it('rejects rather than strips — nothing escapes decode', () => {
+                    it('rejects rather than strips: nothing escapes decode', () => {
                         const codec = makeCodec();
                         // Rejected, so there is no partially-cleaned value to inspect.
                         expect(() => codec.decode(polluting)).toThrow(TransportError);
@@ -255,7 +255,7 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
             if (nonFinite !== null) {
                 it('rejects a frame whose number overflows to non-finite', () => {
                     const codec = makeCodec();
-                    // Well-formed on the wire, but a value `encode` refuses — the asymmetry between
+                    // Well-formed on the wire, but a value `encode` refuses; the asymmetry between
                     // the two directions is what a hostile peer probes for.
                     expect(() => codec.decode(nonFinite)).toThrow(
                         expect.objectContaining({ code: 'unsupported-value' }),
@@ -266,7 +266,7 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
             if (makeDeepFrame !== null) {
                 it('refuses a deeply nested frame instead of exhausting the stack', () => {
                     const codec = makeCodec();
-                    // The frame is well-formed and a few tens of KB — under any byte cap — so a
+                    // The frame is well-formed and a few tens of KB (under any byte cap), so a
                     // size limit does not catch it. A TransportError closes the connection; a
                     // RangeError means the process is the attacker's.
                     expect(() => codec.decode(makeDeepFrame(hostileDepth))).toThrow(TransportError);
@@ -323,8 +323,8 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
 
         describe('the two directions agree', () => {
             // The containment property: whatever `encode` emits, `decode` must accept. Without it
-            // the two admissible sets drift apart — each direction is a separate walk over a
-            // separate rule list — and the codec produces frames its own peer rejects under a code
+            // the two admissible sets drift apart (each direction is a separate walk over a
+            // separate rule list) and the codec produces frames its own peer rejects under a code
             // that blames the sender.
             it('accepts every frame it produced, for each admissible value', () => {
                 for (const { value } of ADMISSIBLE) {
@@ -452,7 +452,7 @@ export function runCodecContract(makeCodec: () => Codec, opts: CodecContractOpti
         describe('byteLength', () => {
             it('reports UTF-8 bytes, not UTF-16 units', () => {
                 const codec = makeCodec();
-                // An emoji is 4 UTF-8 bytes and 2 UTF-16 units, so `.length` is off by 2× — the
+                // An emoji is 4 UTF-8 bytes and 2 UTF-16 units, so `.length` is off by 2×, the
                 // normal case on an international K-12 platform, not the edge.
                 const ascii = codec.encode({ a: 'hello' });
                 const emoji = codec.encode({ a: '😀😀😀😀😀' });

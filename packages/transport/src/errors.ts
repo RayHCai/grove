@@ -7,7 +7,7 @@ export type TransportErrorCode =
     | 'encode-rejected'
     /** A frame is not this codec's output at all: wrong type, truncated, unparseable. */
     | 'malformed-frame'
-    /** A decoded frame carries `__proto__`/`constructor`/`prototype` — rejected, never stripped. */
+    /** A decoded frame carries `__proto__`/`constructor`/`prototype`. Rejected, never stripped. */
     | 'pollution-key'
     /**
      * A frame parsed but carries a value `encode` would refuse, such as `1e999` → `Infinity`.
@@ -37,7 +37,7 @@ export type TransportErrorCode =
     /** A dial never reached OPEN, so no `Transport` was ever handed out and the promise refused. */
     | 'connect-failed'
     /**
-     * An established socket ended without either end asking — an `error` event, or a close code
+     * An established socket ended without either end asking: an `error` event, or a close code
      * neither side wrote. Distinct from a clean close because `onClose` fires for both.
      */
     | 'socket-error'

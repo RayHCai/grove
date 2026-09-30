@@ -11,7 +11,7 @@ function collect(end: Transport): Message[] {
     return seen;
 }
 
-describe('loopbackPair — delivery is pumped, one tick out', () => {
+describe('loopbackPair: delivery is pumped, one tick out', () => {
     it('delivers nothing before deliver()', () => {
         const pair = loopbackPair();
         const seen = collect(pair.server);
@@ -100,7 +100,7 @@ describe('loopbackPair — delivery is pumped, one tick out', () => {
     });
 });
 
-describe('loopbackPair — value semantics', () => {
+describe('loopbackPair: value semantics', () => {
     it('delivers a structurally equal but reference-distinct value', () => {
         const pair = loopbackPair();
         const seen = collect(pair.server);
@@ -167,7 +167,7 @@ describe('loopbackPair — value semantics', () => {
     });
 });
 
-describe('loopbackPair — encode-once fan-out', () => {
+describe('loopbackPair: encode-once fan-out', () => {
     it('delivers N reference-distinct copies from one encode, validating once', () => {
         const codec = {
             encode: vi.fn(jsonCodec.encode),
@@ -218,8 +218,8 @@ describe('loopbackPair — encode-once fan-out', () => {
     });
 
     it('propagates a decode failure on delivery rather than swallowing it', () => {
-        // A frame that will not decode can only be a composition-root bug in loopback — the
-        // sender's own codec produced it — so it must surface, not vanish.
+        // A frame that will not decode can only be a composition-root bug in loopback (the
+        // sender's own codec produced it), so it must surface, not vanish.
         const pair = loopbackPair();
         pair.server.onMessage(() => {});
         pair.client.sendEncoded('{not json' as EncodedFrame);
@@ -235,10 +235,10 @@ describe('loopbackPair — encode-once fan-out', () => {
     });
 });
 
-describe('loopbackPair — retention', () => {
+describe('loopbackPair: retention', () => {
     it('flushes frames that arrived before a handler registered, in order', () => {
         // deliver() can run before an end has called onMessage; the join sequence races wiring
-        // order. Discarding them would lose join messages depending on which end wired first — a
+        // order. Discarding them would lose join messages depending on which end wired first, a
         // bug that surfaces only under specific timing and only sometimes.
         const pair = loopbackPair();
         pair.client.send('a');
@@ -329,7 +329,7 @@ describe('loopbackPair — retention', () => {
     });
 });
 
-describe('loopbackPair — ordered close, no re-entrancy, sealed both ways', () => {
+describe('loopbackPair: ordered close, no re-entrancy, sealed both ways', () => {
     it('delivers a frame sent immediately before close() before the peer onClose', () => {
         const pair = loopbackPair();
         const order: string[] = [];
@@ -470,7 +470,7 @@ describe('loopbackPair — ordered close, no re-entrancy, sealed both ways', () 
     });
 });
 
-describe('loopbackPair — latency is a knob whose default is the one-tick delay', () => {
+describe('loopbackPair: latency is a knob whose default is the one-tick delay', () => {
     it('defaults to one tick', () => {
         const pair = loopbackPair();
         const seen = collect(pair.server);
@@ -596,7 +596,7 @@ describe('loopbackPair — latency is a knob whose default is the one-tick delay
     });
 });
 
-describe('loopbackPair — the pump is not re-entrant', () => {
+describe('loopbackPair: the pump is not re-entrant', () => {
     it('refuses a deliver() from inside a handler', () => {
         // Nested pumping ages both queues twice in one tick, so a frame arrives earlier than
         // latency promises. The host loop owns the tick.
@@ -642,7 +642,7 @@ describe('loopbackPair — the pump is not re-entrant', () => {
     });
 });
 
-describe('loopbackPair — an end exposes only the Transport surface', () => {
+describe('loopbackPair: an end exposes only the Transport surface', () => {
     it('hides the pump members from a consumer holding one end', () => {
         // `link` could re-point a live pair at a third end and `receive` could enqueue a frame that
         // never passed encode, both past the EncodedFrame brand. A TypeScript `private` is erased
@@ -664,9 +664,9 @@ describe('loopbackPair — an end exposes only the Transport surface', () => {
     });
 });
 
-describe('loopbackPair — retention is capped', () => {
+describe('loopbackPair: retention is capped', () => {
     it('throws retention-overflow once frames for an absent handler pass the cap', () => {
-        // Retaining until a handler registers is right; retaining without a cap is a leak — a
+        // Retaining until a handler registers is right; retaining without a cap is a leak: a
         // connection whose join sequence throws before wiring onMessage grows forever.
         const pair = loopbackPair({ maxRetainedBytes: 256 });
         for (let i = 0; i < 100; i++) pair.client.send({ payload: 'x'.repeat(50) });
@@ -778,7 +778,7 @@ describe('loopbackPair — retention is capped', () => {
     });
 });
 
-describe('loopbackPair — sendEncoded takes only a codec-minted frame', () => {
+describe('loopbackPair: sendEncoded takes only a codec-minted frame', () => {
     it('accepts a frame from the injected codec', () => {
         const pair = loopbackPair();
         const seen = collect(pair.server);
@@ -788,9 +788,8 @@ describe('loopbackPair — sendEncoded takes only a codec-minted frame', () => {
     });
 
     it('rejects a hand-built frame at the type level', () => {
-        // The soundness of sendEncoded rests on the frame having come from the process codec, which
-        // used to be a convention the caller had to remember: a bare string type-checked and failed
-        // at the FAR end's decode, off the call site.
+        // The soundness of sendEncoded rests on the frame having come from the process codec, so
+        // the brand makes that a compile error here rather than a decode failure at the FAR end.
         const pair = loopbackPair();
         // @ts-expect-error a bare string is not an EncodedFrame
         expect(() => pair.client.sendEncoded('{"a":1}')).not.toThrow();
@@ -799,7 +798,7 @@ describe('loopbackPair — sendEncoded takes only a codec-minted frame', () => {
     });
 });
 
-describe('loopbackPair — one handler per end', () => {
+describe('loopbackPair: one handler per end', () => {
     it('throws on a second onMessage while one is live', () => {
         // Two consumers of one connection would silently split its frames between them.
         const pair = loopbackPair();
