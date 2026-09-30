@@ -13,9 +13,9 @@ rust-version = "1.98"
 publish = false
 
 [workspace.dependencies]
-# Held once rather than per crate: this process sits between the Go services and answers their
-# probes, so a chain is only as long as its quietest link.
-grove-request-id = { path = "request-id" }
+# Held once rather than per crate: both services sit between the Go half and answer its probes,
+# so a chain is only as long as its quietest link.
+grove-request-id = { path = "request-id", features = ["service"] }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
 axum = "0.8"
@@ -25,9 +25,9 @@ futures-util = { version = "0.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 
-# The asset stream this fleet queues work on, and the one HTTP call a worker makes back to
-# @grove/api to settle it.
-redis = { version = "1.7", features = ["tokio-comp"] }
+# The asset stream this fleet queues work on, over the `rediss://` a managed cache only answers and
+# redialled when the link drops, and the one HTTP call a worker makes back to @grove/api to settle it.
+redis = { version = "1.7", features = ["tokio-rustls-comp", "tls-rustls-webpki-roots", "connection-manager"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "webpki-roots", "http2"] }
 hmac = "0.12"
 sha2 = "0.10"
@@ -37,7 +37,7 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Both crates are latency budgets rather than throughput ones, so the optimiser is worth the build
+# Both services are latency budgets rather than throughput ones, so the optimiser is worth the build
 # time. Profiles only apply from a workspace root, which is why this sits here and not in a member.
 [profile.release]
 lto = "thin"
@@ -47,7 +47,7 @@ codegen-units = 1
 # that way because a contributor's `cargo check` should name a problem without refusing to build,
 # and CI should refuse.
 [workspace.lints.rust]
-# Neither crate needs it, and a raw pointer in a process that holds a V8 heap is the kind of fault
+# No crate here needs it, and a raw pointer in a process that holds a V8 heap is the kind of fault
 # that surfaces somewhere else entirely.
 unsafe_code = "forbid"
 # Lower priority than the lints above, which is how Cargo is told a group may be overridden by a

@@ -6,7 +6,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// The API rather than the CLI, because `esbuild/bin/esbuild` is a launcher script only on Windows —
+// The API rather than the CLI, because `esbuild/bin/esbuild` is a launcher script only on Windows;
 // everywhere else it is the platform binary itself, which `node` cannot read.
 import { build } from 'esbuild';
 

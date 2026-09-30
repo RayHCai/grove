@@ -1,7 +1,7 @@
 //! The seam, in Rust. Every type mirrors one in `packages/sim/src/batch.ts` field for field,
 //! except `Send` and `OutputBatch`, which mirror the ENCODED variants. The field names ARE the
 //! wire: a rename on either side is a silent mismatch, not an error.
-//! Nothing here parses a payload — the host routes by `to` and `class` and reads nothing inside.
+//! Nothing here parses a payload; the host routes by `to` and `class` and reads nothing inside.
 
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -65,7 +65,7 @@ impl InputBatch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SendClass {
-    /// Every op must arrive, in order — the journal does not commute.
+    /// Every op must arrive, in order; the journal does not commute.
     Reliable,
     /// Superseded by the next of its kind, so a backed-up connection may discard it.
     Droppable,
@@ -78,7 +78,7 @@ pub struct Send {
     /// which is the only thing worth encoding once.
     pub to: Vec<ConnectionId>,
     /// Already encoded by the sim's own codec and written verbatim. The codec, not
-    /// `JSON.stringify`: it refuses `NaN` and `Infinity`, which JSON turns to `null` — and it is
+    /// `JSON.stringify`: it refuses `NaN` and `Infinity`, which JSON turns to `null`, and it is
     /// what the sim measured a `Welcome` against when it decided whether to chunk.
     pub envelope: String,
     pub class: SendClass,
@@ -115,7 +115,7 @@ pub struct LogLine {
 pub struct SimDiagnostics {
     /// Marks and ops dropped as unrepresentable. Nonzero is a bug report, not a failure.
     pub dropped: u64,
-    /// Marks whose host died between the write and the send — churn, not a defect.
+    /// Marks whose host died between the write and the send: churn, not a defect.
     pub stale: u64,
 }
 

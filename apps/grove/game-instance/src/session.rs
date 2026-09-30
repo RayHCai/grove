@@ -1,6 +1,6 @@
 //! The session thread: the one place the isolate is touched, and the loop that turns arrivals
 //! into batches and batches into writes. A `JsRuntime` is not `Send`, so it never crosses into a
-//! `tokio` task — which is what makes the tick a single-threaded, ordered, replayable sequence.
+//! `tokio` task, which is what makes the tick a single-threaded, ordered, replayable sequence.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -32,7 +32,7 @@ const BOOT_BUDGET: Duration = Duration::from_secs(10);
 const CLOSE_BUDGET: Duration = Duration::from_secs(2);
 
 /// How long a drain waits for the last player to leave before ending the session regardless.
-/// This and the three deadlines below run back to back, and together must finish inside the
+/// This and the two deadlines below run back to back, and together must finish inside the
 /// twenty seconds `@grove/instance-manager` allows before it kills the child.
 const DRAIN_DEADLINE: Duration = Duration::from_secs(6);
 
@@ -49,6 +49,10 @@ const SAVE_ATTEMPTS: u32 = 3;
 
 /// Wait before the second attempt, doubled for each one after it.
 const SAVE_BACKOFF: Duration = Duration::from_millis(200);
+
+/// How many events may wait for the session thread. Bounded, so a session that falls behind costs
+/// the peers feeding it their sockets rather than costing the box its memory.
+pub const EVENT_QUEUE_DEPTH: usize = 4096;
 
 /// Everything the async half tells the session thread. One channel, so the order is one order.
 pub enum HostEvent {
@@ -78,7 +82,7 @@ pub enum HostEvent {
     Saved {
         host_key: String,
     },
-    /// Stop taking new connections and end once the world is empty — a deploy, not a crash.
+    /// Stop taking new connections and end once the world is empty: a deploy, not a crash.
     Drain,
     /// The async half failed at something the session cannot run without, such as the bind.
     ///
@@ -107,10 +111,13 @@ pub struct SessionOptions {
 /// their replies come back into this same queue, which is what keeps one order over everything.
 pub fn run(
     opts: SessionOptions,
-    mut events: mpsc::UnboundedReceiver<HostEvent>,
-    answers: mpsc::UnboundedSender<HostEvent>,
+    mut events: mpsc::Receiver<HostEvent>,
+    answers: mpsc::Sender<HostEvent>,
     io: tokio::runtime::Handle,
 ) -> Result<()> {
+    let mut interval =
+        tick_interval(opts.sim_rate).ok_or_else(|| anyhow!("simRate must be a positive number"))?;
+
     // Held for the life of this thread, before the isolate exists: V8 posts delayed tasks and
     // deno_core schedules them on the ambient runtime, so an isolate built outside one silently
     // loses every timer it asks for.
@@ -140,7 +147,6 @@ pub fn run(
         stale: 0,
     };
 
-    let mut interval = Duration::from_secs_f64(1.0 / opts.sim_rate);
     let mut rates = Rates {
         sim_rate: opts.sim_rate,
         send_rate: opts.send_rate,
@@ -158,7 +164,13 @@ pub fn run(
                     writes,
                     hangup,
                 } => {
-                    peers.insert(connection_id.clone(), Peer { writes, hangup });
+                    peers.insert(
+                        connection_id.clone(),
+                        Peer {
+                            writes,
+                            _hangup: hangup,
+                        },
+                    );
                     pending.opened.push(OpenedConnection {
                         connection_id,
                         identity: Some(identity),
@@ -198,7 +210,7 @@ pub fn run(
         }
 
         // Wall-clock, as `GameInstance` feeds its own driver: the accumulator clamps a reading that
-        // moved backwards, and the same reading stamps the batch — a monotonic one would put 1970
+        // moved backwards, and the same reading stamps the batch; a monotonic one would put 1970
         // on every `serverSentMs`.
         let wake = clock.wake(unix_millis() / 1000.0, &mut drains);
         if wake.shed {
@@ -229,7 +241,9 @@ pub fn run(
                         );
                         rates = out.rates;
                         clock.set_rates(rates.sim_rate, rates.send_rate);
-                        interval = Duration::from_secs_f64(1.0 / rates.sim_rate);
+                        if let Some(next) = tick_interval(rates.sim_rate) {
+                            interval = next;
+                        }
                     }
                     // Only when they move: they are cumulative, so a line per tick would say the
                     // same thing sixty times a second and a rate is what an operator watches.
@@ -246,7 +260,7 @@ pub fn run(
                     }
                     apply(out, &mut peers, &opts.store, &io, &answers, &mut spawned);
                 }
-                // A tick that threw is a world that cannot be trusted to be advanced again — it
+                // A tick that threw is a world that cannot be trusted to be advanced again: it
                 // mutates in place and there is no transaction, so half a step is a world no later
                 // delta repairs. Every peer is told why, and the process ends.
                 Err(error) => {
@@ -313,9 +327,8 @@ pub fn run(
 /// One peer's two ends: the frames it is owed, and the handle that hangs it up.
 struct Peer {
     writes: mpsc::Sender<Outgoing>,
-    /// Held only to be dropped — dropping it is what closes the socket.
-    #[allow(dead_code)]
-    hangup: HangUp,
+    /// Held only to be dropped; dropping it is what closes the socket.
+    _hangup: HangUp,
 }
 
 /// What has arrived since the last tick. Emptied into the batch, never copied out of it.
@@ -347,7 +360,7 @@ fn apply(
     peers: &mut HashMap<ConnectionId, Peer>,
     store: &Store,
     io: &tokio::runtime::Handle,
-    events: &mpsc::UnboundedSender<HostEvent>,
+    events: &mpsc::Sender<HostEvent>,
     spawned: &mut Vec<JoinHandle<()>>,
 ) {
     for line in &out.log {
@@ -359,7 +372,7 @@ fn apply(
     }
 
     for send in out.sends {
-        // The sim's own bytes, written verbatim and shared across the list — the only reason `to`
+        // The sim's own bytes, written verbatim and shared across the list, the only reason `to`
         // is a list. Re-encoding would hand a peer bytes the sim never measured.
         let text = Arc::new(send.envelope);
         for connection_id in &send.to {
@@ -395,7 +408,7 @@ fn apply(
     }
 
     // After the sends, so a `Reject` reaches the wire before the close that follows it. Removing
-    // the peer drops its `HangUp`, which is what actually closes the socket — dropping only the
+    // the peer drops its `HangUp`, which is what actually closes the socket; dropping only the
     // writer would leave the reader parked on a connection nothing will ever answer.
     for order in out.closes {
         tracing::info!(conn = %order.connection_id, reason = %order.reason, "close conn");
@@ -416,10 +429,12 @@ fn apply(
                     None
                 }
             };
-            let _ = events.send(HostEvent::Loaded {
-                connection_id: load.connection_id,
-                fields,
-            });
+            let _ = events
+                .send(HostEvent::Loaded {
+                    connection_id: load.connection_id,
+                    fields,
+                })
+                .await;
         });
     }
 
@@ -433,16 +448,18 @@ fn apply(
                 // attempt either lands or is refused, never applied twice.
                 let error = match store.save(&save.host_key, &save.fields).await {
                     Ok(()) => {
-                        let _ = events.send(HostEvent::Saved {
-                            host_key: save.host_key,
-                        });
+                        let _ = events
+                            .send(HostEvent::Saved {
+                                host_key: save.host_key,
+                            })
+                            .await;
                         return;
                     }
                     Err(error) => error,
                 };
                 if attempt == SAVE_ATTEMPTS {
                     // Not acknowledged: the sim holds the record so a rejoin inside this session
-                    // still reads its own values back — the better of two wrong answers.
+                    // still reads its own values back: the better of two wrong answers.
                     tracing::warn!(%error, key = %save.host_key, "persisting failed");
                     return;
                 }
@@ -454,14 +471,10 @@ fn apply(
     }
 }
 
-/// Waits for the peers just hung up to report themselves closed — the echo that says their last
+/// Waits for the peers just hung up to report themselves closed, the echo that says their last
 /// frame reached the socket. Returning from `run` drops the runtime, cancelling the writer inside
 /// `send`, so the reason a session died reaches nobody unless this thread waits.
-fn flush(
-    io: &tokio::runtime::Handle,
-    events: &mut mpsc::UnboundedReceiver<HostEvent>,
-    hung_up: usize,
-) {
+fn flush(io: &tokio::runtime::Handle, events: &mut mpsc::Receiver<HostEvent>, hung_up: usize) {
     if hung_up == 0 {
         return;
     }
@@ -491,7 +504,7 @@ fn prune(spawned: &mut Vec<JoinHandle<()>>) {
 
 /// Waits out the saves already in flight, under one deadline for all of them together.
 ///
-/// Returning from `run` drops the runtime, and tokio cancels a spawned task at its first await —
+/// Returning from `run` drops the runtime, and tokio cancels a spawned task at its first await,
 /// which for a save is inside the request the drain exists to make.
 fn settle(io: &tokio::runtime::Handle, spawned: &mut Vec<JoinHandle<()>>) {
     let handles = std::mem::take(spawned);
@@ -602,7 +615,15 @@ fn held(deadline: &Mutex<u64>) -> MutexGuard<'_, u64> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Wall-clock milliseconds — the only reading this process takes, and the only one the sim stamps.
+/// The pause between ticks at `rate`, or `None` for a rate `Clock::set_rates` would refuse too.
+fn tick_interval(rate: f64) -> Option<Duration> {
+    if !(rate.is_finite() && rate > 0.0) {
+        return None;
+    }
+    Duration::try_from_secs_f64(1.0 / rate).ok()
+}
+
+/// Wall-clock milliseconds: the only reading this process takes, and the only one the sim stamps.
 fn unix_millis() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -649,12 +670,14 @@ mod tests {
             .unwrap();
         let _entered = io.enter();
 
-        let (answers, mut events) = mpsc::unbounded_channel::<HostEvent>();
+        let (answers, mut events) = mpsc::channel::<HostEvent>(EVENT_QUEUE_DEPTH);
         io.spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            let _ = answers.send(HostEvent::Closed {
-                connection_id: "c1".to_owned(),
-            });
+            let _ = answers
+                .send(HostEvent::Closed {
+                    connection_id: "c1".to_owned(),
+                })
+                .await;
         });
 
         let waited = Instant::now();
@@ -682,6 +705,15 @@ mod tests {
 
         assert_eq!(spawned.len(), 1);
         assert!(!spawned[0].is_finished());
+    }
+
+    #[test]
+    fn refuses_a_rate_it_cannot_pace() {
+        assert_eq!(tick_interval(0.0), None);
+        assert_eq!(tick_interval(-60.0), None);
+        assert_eq!(tick_interval(f64::NAN), None);
+        assert_eq!(tick_interval(1e-320), None);
+        assert_eq!(tick_interval(50.0), Some(Duration::from_millis(20)));
     }
 
     /// A killer that takes as long to terminate as V8's does to be observed, so the interleaving the
