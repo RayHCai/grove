@@ -43,7 +43,9 @@ describe('Transport', () => {
         expect(group?.getAttribute('aria-label')).toBe('Run controls');
         const buttons = group?.querySelectorAll('button');
         expect(buttons?.length).toBe(2);
-        expect(buttons?.[0]?.className).toBe('pg-btn pg-btn--primary pg-btn--sm transport__play');
+        expect(buttons?.[0]?.className).toBe(
+            'pg-btn pg-btn--primary pg-btn--sm pg-btn--no-cursor transport__play',
+        );
         expect(buttons?.[0]?.textContent).toBe('Play');
         expect(buttons?.[0]?.hasAttribute('aria-pressed')).toBe(false);
         expect(buttons?.[1]?.getAttribute('aria-label')).toBe('Stop');

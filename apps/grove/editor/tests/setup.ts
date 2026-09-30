@@ -10,6 +10,7 @@ vi.mock('../src/editor/monaco', () => ({
         dispose: vi.fn(),
         setTheme: vi.fn(),
         syncFiles: vi.fn(),
+        resetFiles: vi.fn(),
         openFile: vi.fn(),
         getValue: () => '',
         onChange: vi.fn(),

@@ -1,16 +1,51 @@
 .explorer-panel__body {
+    position: relative;
     flex: 1;
     min-height: 0;
     overflow: auto;
-    padding-bottom: 8px;
+    padding-bottom: var(--pg-sp-2);
 }
+/* A file dragged off the machine lands anywhere in the panel, so the whole panel answers it. */
+.explorer-panel__body[data-dropping] {
+    outline: 2px dashed var(--pg-accent);
+    outline-offset: -4px;
+}
+
+/*
+ * The game's name, and what may be done to its files.
+ *
+ * The two buttons keep to the name's row rather than a toolbar of their own: a row of words was
+ * wider than the panel, and a panel that scrolls sideways hides the tree it exists to show.
+ */
 .explorer-panel__project {
-    padding: 8px 8px 4px;
-    font-size: 9px;
+    display: flex;
+    align-items: center;
+    gap: var(--pg-sp-1);
+    height: 24px;
+    padding: 0 var(--pg-sp-1) 0 var(--pg-sp-2);
+}
+.explorer-panel__name {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--pg-text-sm);
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--pg-ink-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.explorer-panel__actions {
+    flex: none;
+    display: flex;
+    gap: var(--pg-sp-1);
+    opacity: 0;
+    transition: opacity var(--pg-dur-fast) var(--pg-ease);
+}
+.explorer-panel:hover .explorer-panel__actions,
+.explorer-panel:focus-within .explorer-panel__actions {
+    opacity: 1;
 }
 
 .tree,
@@ -32,9 +67,9 @@
 .tree__row {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--pg-sp-1);
     height: 20px;
-    padding-right: 8px;
+    padding-right: var(--pg-sp-2);
     font-size: 11px;
     color: var(--pg-ink);
     white-space: nowrap;
@@ -70,11 +105,20 @@
     text-overflow: ellipsis;
 }
 
-.explorer-panel__tools {
-    display: flex;
-    gap: 4px;
-    padding: 0 4px 8px;
-}
 .explorer-panel__new {
-    padding: 0 8px 8px;
+    padding: var(--pg-sp-1) var(--pg-sp-2) var(--pg-sp-2);
+}
+
+/* A name the explorer refused, said where it was typed rather than left for a save to fail on. */
+.explorer-panel__problem {
+    padding: 0 var(--pg-sp-2) var(--pg-sp-2);
+    color: var(--pg-warm-ink);
+    font-size: var(--pg-text-sm);
+    line-height: 1.2;
+}
+
+/* What a right-click asks of one row, hung where the pointer left it. */
+.explorer-menu {
+    position: fixed;
+    min-width: 112px;
 }

@@ -2,7 +2,7 @@
  * One file as the editor holds it while somebody is typing in it.
  *
  * A draft is what the editor owns; what the service holds is a key in a bucket, overwritten in
- * place. Nothing here names bytes — a save sends the text of what changed and the service answers
+ * place. Nothing here names bytes: a save sends the text of what changed and the service answers
  * with the version it landed as.
  */
 export interface DraftFile {
@@ -33,10 +33,13 @@ const TYPES: ReadonlyMap<string, string> = new Map([
     ['ogg', 'audio/ogg'],
 ]);
 
+/** What a file whose extension this editor does not know is stored as: opaque bytes, not a guess. */
+export const UNKNOWN_TYPE = 'application/octet-stream';
+
 /** What a path is stored under. An unknown extension is opaque bytes rather than a guess. */
 export function mediaTypeOf(path: string): string {
     const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
-    return TYPES.get(extension) ?? 'application/octet-stream';
+    return TYPES.get(extension) ?? UNKNOWN_TYPE;
 }
 
 /** Whether the code editor can open this: text is editable, and everything else is an asset. */

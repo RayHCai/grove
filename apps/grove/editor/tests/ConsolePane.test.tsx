@@ -7,7 +7,7 @@ import { mount } from './helpers';
 
 const LINES: RunLine[] = [
     { id: 1, level: 'log', text: 'day 1: Pip is 3 tall' },
-    { id: 2, level: 'warn', text: 'src/main.ts:4:1 — unused' },
+    { id: 2, level: 'warn', text: 'src/main.ts:4:1: unused' },
     { id: 3, level: 'error', text: 'ReferenceError: sun is not defined' },
 ];
 
@@ -71,7 +71,7 @@ describe('ConsolePane', () => {
         const printed = [...host.querySelectorAll('.console-line')];
         expect(printed.map((line) => line.textContent)).toEqual([
             'day 1: Pip is 3 tall',
-            'src/main.ts:4:1 — unused',
+            'src/main.ts:4:1: unused',
             'ReferenceError: sun is not defined',
         ]);
         expect(printed.map((line) => line.className)).toEqual([

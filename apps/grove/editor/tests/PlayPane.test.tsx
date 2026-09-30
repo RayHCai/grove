@@ -138,30 +138,13 @@ describe('PlayPane', () => {
         expect(button?.getAttribute('title')).toBe('Enter fullscreen');
         const tools = host.querySelector('iframe')?.nextElementSibling;
         expect(tools?.className).toBe('play-tools');
-        expect(tools?.lastElementChild).toBe(button);
+        // The only tool there is: a run plays on this stage or not at all, so there is nothing
+        // beside fullscreen to make it bigger with.
+        expect(Array.from(tools?.children ?? [])).toEqual([button]);
         const reference = await mount(<MaximizeIcon />);
         expect(button?.querySelector('svg')?.outerHTML).toBe(
             reference.querySelector('svg')?.outerHTML,
         );
-    });
-
-    it('opens the run in a window of its own from the tool beside it', async () => {
-        const onOpenWindow = vi.fn();
-        const host = await mount(
-            <PlayPane status="idle" dispatch={vi.fn()} onOpenWindow={onOpenWindow} />,
-        );
-        const popout = host.querySelector<HTMLButtonElement>('.play-tools .play-popout');
-        expect(popout?.getAttribute('aria-label')).toBe('Full page');
-        expect(popout?.nextElementSibling).toBe(fullscreenButton(host));
-        expect(host.querySelector('.pane__header .play-popout')).toBeNull();
-
-        await click(popout);
-        expect(onOpenWindow).toHaveBeenCalledOnce();
-    });
-
-    it('offers no full page where the caller has no window to open one in', async () => {
-        const host = await mount(<PlayPane status="idle" dispatch={vi.fn()} />);
-        expect(host.querySelector('.play-popout')).toBeNull();
     });
 
     it('asks the stage for fullscreen and flips the label once the document reports it', async () => {

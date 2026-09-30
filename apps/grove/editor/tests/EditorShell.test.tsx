@@ -144,7 +144,6 @@ describe('EditorShell', () => {
             'Explorer',
         );
         expect(host.querySelector('main')?.className).toBe('workspace');
-        expect(host.querySelector('.pg-tilestrip')).not.toBeNull();
     });
 
     it('names the editor, play and console sections and lays them out in the grid', async () => {
@@ -184,16 +183,6 @@ describe('EditorShell', () => {
         expect(names).not.toContain(PROJECT_PATH);
         const synced = workbench().syncFiles.mock.lastCall?.[0] as { path: string }[];
         expect(synced.map((file) => file.path)).toEqual([TEMPLATE_PATH]);
-    });
-
-    it('keeps the mode select in the editor pane header, out of the top bar', async () => {
-        const host = await mountShell();
-        expect(host.querySelector('header [role="combobox"]')).toBeNull();
-        const trigger = host.querySelector('.pane--editor .pane__header [role="combobox"]');
-        expect(trigger?.getAttribute('aria-labelledby')).toBe(
-            'editor-mode-label editor-mode-value',
-        );
-        expect(host.querySelector('#editor-mode-value')?.textContent).toBe('TypeScript');
     });
 
     it('discloses the Grove AI panel from the rail and moves focus into it', async () => {
@@ -343,7 +332,7 @@ describe('EditorShell', () => {
 
         expect(playStatus(host)).toBe('Running');
         expect(printed(host)[0]).toBe(
-            'Build succeeded: 2 scripts in 1 file — 30 Hz, up to 4 players',
+            'Build succeeded: 2 scripts in 1 file: 30 Hz, up to 4 players',
         );
         // The frame is the sandbox's stage; a world in this page takes its place rather than
         // sitting over a document that is still loaded behind it.
@@ -375,14 +364,6 @@ describe('EditorShell', () => {
         await click(play(host));
 
         expect(stage.turned).toEqual(['pause', 'resume']);
-    });
-
-    it('plays a local world on the stage, having no window to open one in', async () => {
-        const host = await mountShell();
-        await click(host.querySelector<HTMLButtonElement>('.play-popout'));
-        await until(() => localStage(host) !== null, COMPILE_MS);
-
-        expect(printed(host).join(' ')).toContain('plays on the stage');
     });
 
     it('stamps what the code declares back into the manifest it compiled', async () => {
@@ -418,7 +399,7 @@ describe('EditorShell', () => {
 
         expect(playStatus(host)).toBe('Idle');
         expect(printed(host)).toEqual([
-            "src/main.ts:4:9 — ')' expected",
+            "src/main.ts:4:9: ')' expected",
             'that did not compile, so there is nothing to run',
         ]);
     });

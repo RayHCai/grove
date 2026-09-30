@@ -1,13 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import type { KeyboardEvent, MouseEvent } from 'react';
 import { ChevronRightIcon, FileIcon, FolderIcon, cx } from '@grove/ui';
+import { useFocusFollow } from '../editor/useFocusFollow';
 import { folderPaths } from '../project/files';
 import type { ProjectFile, ProjectNode } from '../project/files';
+
+/** Where a menu the tree asked for opens, in viewport coordinates. */
+export interface MenuAt {
+    x: number;
+    y: number;
+}
 
 export interface FileTreeProps {
     nodes: readonly ProjectNode[];
     activePath: string | null;
     onOpen: (file: ProjectFile) => void;
+    /** What a right-click (or the menu key, which lands on the row itself) asks for. */
+    onMenu?: ((node: ProjectNode, at: MenuAt) => void) | undefined;
 }
 
 interface Row {
@@ -33,24 +42,19 @@ function rows(
 }
 
 /** The project's files as an ARIA tree: folders disclose, files open in the editor. */
-export function FileTree({ nodes, activePath, onOpen }: FileTreeProps): React.JSX.Element {
+export function FileTree({ nodes, activePath, onOpen, onMenu }: FileTreeProps): React.JSX.Element {
     const [expanded, setExpanded] = useState<ReadonlySet<string>>(
         () => new Set(folderPaths(nodes)),
     );
     const [focusedPath, setFocusedPath] = useState<string | null>(null);
     const itemRefs = useRef(new Map<string, HTMLLIElement>());
-    // Only the keys that move focus set this, so a click never pulls focus back off the pointer.
-    const restoreFocus = useRef(false);
+    const follow = useFocusFollow(focusedPath, () =>
+        focusedPath === null ? null : itemRefs.current.get(focusedPath),
+    );
 
     const visible = rows(nodes, expanded);
     const firstPath = visible[0]?.node.path ?? null;
     const tabbable = visible.some((row) => row.node.path === focusedPath) ? focusedPath : firstPath;
-
-    useEffect(() => {
-        if (!restoreFocus.current || focusedPath === null) return;
-        restoreFocus.current = false;
-        itemRefs.current.get(focusedPath)?.focus();
-    }, [focusedPath]);
 
     const toggle = useCallback((path: string) => {
         setExpanded((current) => {
@@ -67,7 +71,7 @@ export function FileTree({ nodes, activePath, onOpen }: FileTreeProps): React.JS
 
     function move(to: string | undefined): void {
         if (to === undefined) return;
-        restoreFocus.current = true;
+        follow();
         setFocusedPath(to);
     }
 
@@ -111,6 +115,20 @@ export function FileTree({ nodes, activePath, onOpen }: FileTreeProps): React.JS
         event.preventDefault();
     }
 
+    function openMenu(node: ProjectNode, event: MouseEvent<HTMLLIElement>): void {
+        if (onMenu === undefined) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setFocusedPath(node.path);
+        // The menu key reports no pointer, so the row it landed on is where the menu hangs.
+        const box = event.currentTarget.getBoundingClientRect();
+        const pointed = event.clientX !== 0 || event.clientY !== 0;
+        onMenu(
+            node,
+            pointed ? { x: event.clientX, y: event.clientY } : { x: box.left, y: box.bottom },
+        );
+    }
+
     function renderNodes(list: readonly ProjectNode[], level: number): React.JSX.Element[] {
         return list.map((node) => {
             const folder = node.kind === 'folder';
@@ -133,6 +151,9 @@ export function FileTree({ nodes, activePath, onOpen }: FileTreeProps): React.JS
                         event.stopPropagation();
                         setFocusedPath(node.path);
                         activate(node);
+                    }}
+                    onContextMenu={(event) => {
+                        openMenu(node, event);
                     }}
                 >
                     <span

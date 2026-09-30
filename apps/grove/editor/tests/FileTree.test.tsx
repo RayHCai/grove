@@ -39,11 +39,10 @@ describe('FileTree', () => {
         expect(names(host)).toEqual([
             'hud',
             'hud.ts',
-            'src',
+            'game.config.ts',
             'garden.ts',
             'main.ts',
             'sprout.ts',
-            'game.config.ts',
         ]);
         const [hud] = items(host);
         expect(hud?.getAttribute('aria-expanded')).toBe('true');
@@ -72,22 +71,15 @@ describe('FileTree', () => {
         await click(items(host)[0]);
         expect(onOpen).not.toHaveBeenCalled();
         expect(items(host)[0]?.getAttribute('aria-expanded')).toBe('false');
-        expect(names(host)).toEqual([
-            'hud',
-            'src',
-            'garden.ts',
-            'main.ts',
-            'sprout.ts',
-            'game.config.ts',
-        ]);
+        expect(names(host)).toEqual(['hud', 'game.config.ts', 'garden.ts', 'main.ts', 'sprout.ts']);
     });
 
     it('carries one tab stop and moves it with the arrow keys', async () => {
         const host = await tree();
-        expect(items(host).map((item) => item.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1]);
+        expect(items(host).map((item) => item.tabIndex)).toEqual([0, -1, -1, -1, -1, -1]);
 
         await press(host, 'ArrowDown');
-        expect(items(host).map((item) => item.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1, -1]);
+        expect(items(host).map((item) => item.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1]);
         expect(document.activeElement).toBe(items(host)[1]);
 
         await press(host, 'ArrowUp');
@@ -98,18 +90,11 @@ describe('FileTree', () => {
         const host = await tree();
         await press(host, 'ArrowLeft');
         expect(items(host)[0]?.getAttribute('aria-expanded')).toBe('false');
-        expect(names(host)).toEqual([
-            'hud',
-            'src',
-            'garden.ts',
-            'main.ts',
-            'sprout.ts',
-            'game.config.ts',
-        ]);
+        expect(names(host)).toEqual(['hud', 'game.config.ts', 'garden.ts', 'main.ts', 'sprout.ts']);
 
         await press(host, 'ArrowRight');
         expect(items(host)[0]?.getAttribute('aria-expanded')).toBe('true');
-        expect(names(host)).toHaveLength(7);
+        expect(names(host)).toHaveLength(6);
     });
 
     it('walks from a file back to the folder that holds it', async () => {
@@ -125,6 +110,30 @@ describe('FileTree', () => {
         expect(document.activeElement).toBe(items(host).at(-1));
         await press(host, 'Home');
         expect(document.activeElement).toBe(items(host)[0]);
+    });
+
+    it('asks for a menu on the row a right-click landed on, and opens nothing itself', async () => {
+        const onOpen = vi.fn();
+        const onMenu = vi.fn();
+        const host = await mount(
+            <FileTree
+                nodes={projectTree()}
+                activePath="src/main.ts"
+                onOpen={onOpen}
+                onMenu={onMenu}
+            />,
+        );
+        await act(async () => {
+            items(host)[1]?.dispatchEvent(
+                new MouseEvent('contextmenu', { bubbles: true, cancelable: true }),
+            );
+        });
+
+        expect(onMenu).toHaveBeenCalledWith(
+            expect.objectContaining({ path: 'hud/hud.ts' }),
+            expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+        );
+        expect(onOpen).not.toHaveBeenCalled();
     });
 
     it('opens the focused file with Enter and with Space', async () => {

@@ -1,11 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import type { KeyboardEvent } from 'react';
 import { CloseIcon, FileIcon, Panel, VisuallyHidden, cx } from '@grove/ui';
 import type { ProjectFile } from '../project/files';
-import { ModeSelect } from '../shell/ModeSelect';
-import type { Mode } from '../shell/ModeSelect';
 import { CodeEditor } from './CodeEditor';
 import type { EditorHandle } from './monaco';
+import { useFocusFollow } from './useFocusFollow';
 
 export interface EditorPaneProps {
     /** The open files, in tab order. */
@@ -15,8 +14,6 @@ export interface EditorPaneProps {
     onClose: (path: string) => void;
     /** Hands the workbench up once Monaco is in, so the shell can compile and sync the project. */
     onReady?: ((handle: EditorHandle | null) => void) | undefined;
-    mode: Mode;
-    onModeChange: (mode: Mode) => void;
     className?: string | undefined;
 }
 
@@ -26,34 +23,27 @@ function tabId(path: string): string {
     return `tab-${path.replaceAll(/[^a-zA-Z0-9]/g, '-')}`;
 }
 
-/** The editor pane: a tab per open file, the mode select, and the code editor below. */
+/** The editor pane: a tab per open file, and the code editor below. */
 export function EditorPane({
     files,
     activePath,
     onSelect,
     onClose,
     onReady,
-    mode,
-    onModeChange,
     className,
 }: EditorPaneProps): React.JSX.Element {
     const stripRef = useRef<HTMLDivElement>(null);
-    // Set by the keys that act on the strip, so focus follows a closed tab but never a click.
-    const restoreFocus = useRef(false);
+    const follow = useFocusFollow(activePath, () =>
+        stripRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]'),
+    );
     const active = files.find((file) => file.path === activePath) ?? null;
-
-    useEffect(() => {
-        if (!restoreFocus.current) return;
-        restoreFocus.current = false;
-        stripRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
-    }, [activePath]);
 
     function onKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
         if (activePath === null) return;
         const index = files.findIndex((file) => file.path === activePath);
         const move = (to: ProjectFile | undefined): void => {
             if (to === undefined) return;
-            restoreFocus.current = true;
+            follow();
             onSelect(to.path);
         };
         switch (event.key) {
@@ -71,7 +61,7 @@ export function EditorPane({
                 break;
             case 'Delete':
             case 'Backspace':
-                restoreFocus.current = true;
+                follow();
                 onClose(activePath);
                 break;
             default:
@@ -120,7 +110,7 @@ export function EditorPane({
                                     onClick={() => onSelect(file.path)}
                                 >
                                     <FileIcon size={14} />
-                                    {file.name}
+                                    <span className="tab__name">{file.name}</span>
                                 </button>
                                 <button
                                     type="button"
@@ -135,7 +125,6 @@ export function EditorPane({
                         );
                     })}
                 </div>
-                <ModeSelect value={mode} onChange={onModeChange} />
             </div>
             <CodeEditor
                 file={active}

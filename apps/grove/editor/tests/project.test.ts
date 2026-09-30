@@ -100,7 +100,7 @@ describe('compiling a game', () => {
         expect(version?.needsEngine).toBe(true);
         expect(version?.project.contentHash).not.toBe(PROJECT.contentHash);
         expect(summarize(version!)).toBe(
-            'Build succeeded: 2 scripts in 1 file — 30 Hz, up to 4 players',
+            'Build succeeded: 2 scripts in 1 file: 30 Hz, up to 4 players',
         );
     });
 

@@ -1,5 +1,6 @@
-import type { KeyboardEvent, Ref } from 'react';
-import { CloseIcon, IconButton, Panel, SendIcon, SparkIcon, TextArea } from '@grove/ui';
+import type { Ref } from 'react';
+import { IconButton, Panel, SendIcon, SparkIcon, TextArea } from '@grove/ui';
+import { SidePanel } from './SidePanel';
 
 export interface AiPanelProps {
     open: boolean;
@@ -10,31 +11,21 @@ export interface AiPanelProps {
 
 /** The Grove AI panel: a header, the thread and a composer, kept mounted and hidden while closed. */
 export function AiPanel({ open, onClose, ref }: AiPanelProps): React.JSX.Element {
-    function closeOnEscape(event: KeyboardEvent<HTMLElement>): void {
-        if (event.key !== 'Escape' || event.defaultPrevented) return;
-        event.preventDefault();
-        onClose();
-    }
     return (
-        <aside
+        <SidePanel
             id="grove-ai-panel"
-            aria-label="Grove AI"
-            className="side-panel ai-panel"
+            label="Grove AI"
+            title="Grove AI"
+            className="ai-panel"
+            open={open}
+            onClose={onClose}
             ref={ref}
-            tabIndex={-1}
-            hidden={!open}
-            data-open={open}
-            onKeyDown={closeOnEscape}
-        >
-            <div className="side-panel__head">
+            mark={
                 <span className="ai-panel__mark">
                     <SparkIcon />
                 </span>
-                <h2 className="side-panel__title">Grove AI</h2>
-                <IconButton label="Close" size="sm" variant="ghost" onClick={onClose}>
-                    <CloseIcon />
-                </IconButton>
-            </div>
+            }
+        >
             <div className="ai-panel__thread">
                 <Panel face="accent" className="ai-panel__note">
                     <p>I&rsquo;ll help you grow your game. Chat is coming soon.</p>
@@ -64,6 +55,6 @@ export function AiPanel({ open, onClose, ref }: AiPanelProps): React.JSX.Element
                     </IconButton>
                 </div>
             </div>
-        </aside>
+        </SidePanel>
     );
 }

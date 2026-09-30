@@ -19,11 +19,19 @@ export interface ProjectFolder {
 
 export type ProjectNode = ProjectFile | ProjectFolder;
 
+/** The folder a game keeps its code in, which the explorer is rooted at rather than lists. */
+export const SOURCE_ROOT = 'src';
+
+/** Where a name typed into the explorer lands, since the panel is rooted at the source folder. */
+export function sourcePath(name: string): string {
+    return `${SOURCE_ROOT}/${name}`;
+}
+
 function nameOf(path: string): string {
     return path.slice(path.lastIndexOf('/') + 1);
 }
 
-/** Folders above files, then alphabetical — the order a creator scans a project in. */
+/** Folders above files, then alphabetical: the order a creator scans a project in. */
 function ordered(nodes: readonly ProjectNode[]): ProjectNode[] {
     return nodes.toSorted((left, right) => {
         if (left.kind !== right.kind) return left.kind === 'folder' ? -1 : 1;
@@ -34,7 +42,7 @@ function ordered(nodes: readonly ProjectNode[]): ProjectNode[] {
 /**
  * The tree the explorer lists, built from the paths the game holds.
  *
- * A folder is not a thing a game stores — it is what the slashes in a path mean — so the tree is
+ * A folder is not a thing a game stores; it is what the slashes in a path mean, so the tree is
  * derived on every render rather than kept beside the files and edited in step with them.
  */
 export function treeOf(files: readonly ProjectFile[]): ProjectNode[] {
@@ -58,7 +66,13 @@ export function treeOf(files: readonly ProjectFile[]): ProjectNode[] {
     }
 
     for (const folder of folders.values()) folder.children = ordered(folder.children);
-    return ordered(roots);
+    // The source folder is the root the tree hangs from rather than a row in it: every game keeps
+    // its code there, so listing it is one fold nobody closes and an indent under every file.
+    return ordered(
+        roots.flatMap((node) =>
+            node.kind === 'folder' && node.path === SOURCE_ROOT ? node.children : [node],
+        ),
+    );
 }
 
 /** Every folder, so the explorer can open the tree on first paint. */
@@ -68,10 +82,15 @@ export function folderPaths(nodes: readonly ProjectNode[]): readonly string[] {
     );
 }
 
+/** Every file in a node's subtree, which is what removing a folder removes. */
+export function filesUnder(node: ProjectNode): readonly ProjectFile[] {
+    return node.kind === 'file' ? [node] : node.children.flatMap(filesUnder);
+}
+
 /** What a file that is not text reads as when a tab opens on it: a description, never bytes. */
 function describe(file: DraftFile): string {
     const size = file.bytes?.byteLength ?? 0;
-    return `${file.path} — ${String(size)} bytes of ${file.contentType}.\nAssets are carried, not edited.\n`;
+    return `${file.path}: ${String(size)} bytes of ${file.contentType}.\nAssets are carried, not edited.\n`;
 }
 
 /** One stored file as the explorer and the tab strip see it. */

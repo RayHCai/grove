@@ -1,9 +1,9 @@
 // The stage an engine game plays on: a world booted in this tab, and a session mounted against it.
 //
 // Lazily imported, and the only module in the editor that reaches the engine, the sim or the
-// renderer at run time — a creator who never presses Play never downloads a line of it.
+// renderer at run time; a creator who never presses Play never downloads a line of it.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 import { DESIGN_STAGE, GamePlayer } from '@grove/player';
 import type { GamePlayerProps } from '@grove/player';
 import { bootPreview } from '@grove/player/preview';
@@ -68,12 +68,10 @@ export function LocalStage({
 }: LocalStageProps): React.JSX.Element {
     const [preview, setPreview] = useState<Preview | null>(null);
 
-    // Read through refs so a parent may pass fresh closures every render without tearing down a
-    // world that is running perfectly well.
-    const lineRef = useRef(onLine);
-    lineRef.current = onLine;
-    const controlsRef = useRef(onControls);
-    controlsRef.current = onControls;
+    // Effect events, so a parent may pass fresh closures every render without tearing down a world
+    // that is running perfectly well.
+    const line = useEffectEvent(onLine);
+    const controls = useEffectEvent(onControls);
 
     useEffect(() => {
         const mounted = { live: true };
@@ -85,10 +83,10 @@ export function LocalStage({
                 linked = await linkVersion(version, {
                     engine: Engine as unknown as Record<string, unknown>,
                     console: {
-                        log: (...values) => lineRef.current('log', renderLine(values)),
-                        info: (...values) => lineRef.current('log', renderLine(values)),
-                        warn: (...values) => lineRef.current('warn', renderLine(values)),
-                        error: (...values) => lineRef.current('error', renderLine(values)),
+                        log: (...values) => line('log', renderLine(values)),
+                        info: (...values) => line('log', renderLine(values)),
+                        warn: (...values) => line('warn', renderLine(values)),
+                        error: (...values) => line('error', renderLine(values)),
                     },
                 });
                 if (!mounted.live) {
@@ -98,7 +96,7 @@ export function LocalStage({
                 const booted = bootPreview({
                     project: version.project,
                     scripts: linked.scripts,
-                    onLog: (line) => lineRef.current('warn', line),
+                    onLog: (text) => line('warn', text),
                 });
                 if (!mounted.live) {
                     booted.dispose();
@@ -108,7 +106,8 @@ export function LocalStage({
                 return { preview: booted, linked };
             } catch (failure) {
                 linked?.dispose();
-                lineRef.current('error', messageOf(failure));
+                // A thrown engine or link error, which is the creator's to read in full, not an API refusal.
+                line('error', failure instanceof Error ? failure.message : String(failure));
                 return null;
             }
         });
@@ -116,12 +115,12 @@ export function LocalStage({
         void standing.then((up) => {
             if (!mounted.live || up === null) return;
             setPreview(up.preview);
-            controlsRef.current({ pause: up.preview.pause, resume: up.preview.resume });
+            controls({ pause: up.preview.pause, resume: up.preview.resume });
         });
 
         return () => {
             mounted.live = false;
-            controlsRef.current(null);
+            controls(null);
             setPreview(null);
             // Queued behind the boot rather than run here: a world still being stood up has
             // nothing to tear down yet, and the next boot must not start until this one has gone.
@@ -147,14 +146,10 @@ export function LocalStage({
             project={preview.project}
             name={name}
             design={DESIGN_STAGE}
-            onRefused={(_reason, message) => lineRef.current('error', message)}
+            onRefused={(_reason, message) => onLine('error', message)}
             {...(createRenderer === undefined ? {} : { createRenderer })}
         />
     );
-}
-
-function messageOf(failure: unknown): string {
-    return failure instanceof Error ? failure.message : String(failure);
 }
 
 export default LocalStage;

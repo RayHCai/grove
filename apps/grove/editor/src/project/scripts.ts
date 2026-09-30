@@ -1,5 +1,5 @@
 // What the manifest restates about the code: which classes a project exports, where each runs and
-// what it may be attached to. A creator declares none of it — the base class in the source is the
+// what it may be attached to. A creator declares none of it; the base class in the source is the
 // declaration, and this reads it back.
 
 import { scriptId } from '@platform/project';
@@ -22,7 +22,7 @@ const LOCATIONS: ReadonlyMap<string, ScriptLocation> = new Map([
 /**
  * The bases that name their own host.
  *
- * A movement moves one body, so it is entity-hosted whatever it is written as — which is why a
+ * A movement moves one body, so it is entity-hosted whatever it is written as, which is why a
  * creator writes `extends TopDownMovement` with no type argument and owes nothing further.
  */
 const IMPLIED_HOST: ReadonlyMap<string, ScriptHost> = new Map<string, ScriptHost>([
@@ -65,7 +65,7 @@ interface Found {
     host: string | undefined;
 }
 
-/** `src/player.ts#Walk` without the extension — the id the toolchain stamps a chunk with. */
+/** `src/player.ts#Walk` without the extension: the id the toolchain stamps a chunk with. */
 function idOf(path: string, name: string): string {
     return `${path.replace(/\.tsx?$/u, '')}#${name}`;
 }
@@ -75,7 +75,7 @@ function idOf(path: string, name: string): string {
  *
  * A class extending another of the project's own carries that one's location and host, so a
  * movement somebody subclassed twice is still an entity-hosted synced script. A class that reaches
- * no engine base is not a script at all — plain code a script imports — and is passed over in
+ * no engine base is not a script at all (plain code a script imports) and is passed over in
  * silence; one that reaches a base but names no host is a fault, because the manifest is what
  * refuses an illegal attachment and it cannot do that without knowing what this attaches to.
  */

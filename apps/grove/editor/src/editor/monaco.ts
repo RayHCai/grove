@@ -61,6 +61,13 @@ export interface EditorHandle {
      * model is an unresolved import in every other one and a module a local run would be missing.
      */
     syncFiles(files: readonly EditorFile[]): void;
+    /**
+     * Replaces what every model holds with these files, as `syncFiles` never does.
+     *
+     * What a reload goes through: the service's set wins over whatever was typed here, and none of
+     * the replacing is reported to `onChange`, because it is not something the creator typed.
+     */
+    resetFiles(files: readonly EditorFile[]): void;
     /** Which of them is in front of the caret. */
     openFile(file: EditorFile | null): void;
     getValue(): string;
@@ -184,11 +191,11 @@ function messageOf(message: Diagnostic['messageText']): string {
 export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): EditorHandle {
     typescriptDefaults.setCompilerOptions({
         // ES2022, not ESNext: TypeScript emits a standard decorator verbatim for a target that
-        // claims to have them, and no browser does — a `@onStart` would reach the run unlowered.
+        // claims to have them, and no browser does: a `@onStart` would reach the run unlowered.
         target: ES2022,
         module: ModuleKind.ESNext,
         moduleResolution: ModuleResolutionKind.NodeJs,
-        // No DOM: a game is not a page, and two engine names — `Storage` and `Animation` — would
+        // No DOM: a game is not a page, and two engine names (`Storage` and `Animation`) would
         // collide outright with that library's.
         lib: ['es2023'],
         strict: true,
@@ -210,6 +217,8 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
     const models = new Map<string, monaco.editor.ITextModel>();
     const watchers = new Map<string, monaco.IDisposable>();
     let listener: ((path: string, text: string) => void) | undefined;
+    // Set while a reset writes into the models, so a replacement never reads as a keystroke.
+    let resetting = false;
 
     function modelFor({ path, language, value }: EditorFile): monaco.editor.ITextModel {
         const held = models.get(path);
@@ -224,7 +233,7 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
         watchers.set(
             path,
             model.onDidChangeContent(() => {
-                listener?.(path, model.getValue());
+                if (!resetting) listener?.(path, model.getValue());
             }),
         );
         return model;
@@ -295,6 +304,24 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
             for (const each of files) modelFor(each);
         },
 
+        resetFiles(files) {
+            const wanted = new Set(files.map((each) => each.path));
+            const held = [...models.keys()];
+            for (const path of held) {
+                if (!wanted.has(path)) drop(path);
+            }
+            resetting = true;
+            try {
+                for (const each of files) {
+                    const model = models.get(each.path);
+                    if (model === undefined) modelFor(each);
+                    else if (model.getValue() !== each.value) model.setValue(each.value);
+                }
+            } finally {
+                resetting = false;
+            }
+        },
+
         openFile(next) {
             if (next === null) {
                 editor.setModel(null);
@@ -317,14 +344,16 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
 
             // One file at a time, because one worker holds the program: asking it for every file
             // at once queues the same work behind the same thread and only hides the order.
-            /* oxlint-disable no-await-in-loop */
             for (const [path, model] of models) {
                 if (model.getLanguageId() !== 'typescript') continue;
+                // oxlint-disable-next-line no-await-in-loop
                 const client = await worker(model.uri);
                 const name = model.uri.toString();
 
                 for (const [kind, found] of [
+                    // oxlint-disable-next-line no-await-in-loop
                     ['syntactic', await client.getSyntacticDiagnostics(name)],
+                    // oxlint-disable-next-line no-await-in-loop
                     ['semantic', await client.getSemanticDiagnostics(name)],
                 ] as const) {
                     for (const diagnostic of found) {
@@ -341,6 +370,7 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
                     }
                 }
 
+                // oxlint-disable-next-line no-await-in-loop
                 const emitted = await client.getEmitOutput(name);
                 for (const output of emitted.outputFiles) {
                     if (output.name.endsWith('.js')) {
@@ -359,7 +389,6 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
                     });
                 }
             }
-            /* oxlint-enable no-await-in-loop */
 
             return { modules, problems };
         },

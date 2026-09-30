@@ -1,7 +1,7 @@
 .transport {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--pg-sp-1);
 }
 .transport__play {
     min-width: 68px;
@@ -9,14 +9,15 @@
 /* The run controls stand clear of the pane's edge: every button here drops a block below itself. */
 .pane--play .pane__header {
     height: auto;
-    padding-top: 12px;
-    padding-bottom: 8px;
+    padding-top: var(--pg-sp-3);
+    padding-bottom: var(--pg-sp-2);
 }
 .play-status {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--pg-sp-1);
     margin-left: auto;
+    margin-right: var(--pg-sp-2);
     font: 600 10px/1 var(--pg-font-ui);
     color: var(--pg-ink-muted);
     white-space: nowrap;
@@ -39,7 +40,7 @@
 /*
  * The handheld's screen: an olive bezel around a lit panel.
  *
- * A ground of its own rather than the page's, which is what the stage used to carry — on the
+ * A ground of its own rather than the page's, which is what the stage used to carry, on the
  * parchment field that made an empty stage and an empty pane the same thing to look at.
  */
 .play-stage {
@@ -59,15 +60,15 @@
     border: 0;
     color-scheme: light;
 }
-/* What is done to the stage rather than to the game, in its corner: full page, then full screen. */
+/* What is done to the stage rather than to the game, in its corner: full screen. */
 .play-tools {
     position: absolute;
     top: 8px;
     right: 8px;
-    z-index: 1;
+    z-index: var(--pg-z-raised);
     display: flex;
     /* Wide enough for the block each one drops: at 4px the first sits under the second. */
-    gap: 8px;
+    gap: var(--pg-sp-2);
 }
 .play-tools > * {
     box-shadow: var(--pg-shadow-sm);

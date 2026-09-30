@@ -12,12 +12,16 @@
     min-height: 0;
     overflow: hidden;
 }
+/*
+ * A header holds controls in both its corners, so it is padded on both sides and tall enough to
+ * clear them: at 32px with 4px of gutter a corner button sat against the pane's own border.
+ */
 .pane__header {
     flex: none;
     display: flex;
     align-items: center;
-    gap: 8px;
-    height: 32px;
-    padding: 0 4px 0 8px;
+    gap: var(--pg-sp-2);
+    height: 36px;
+    padding: 0 var(--pg-sp-2);
     border-bottom: 1px solid var(--pg-border);
 }

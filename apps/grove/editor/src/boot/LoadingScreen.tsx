@@ -1,4 +1,4 @@
-import { Panel, Progress, Tilestrip, Wordmark } from '@grove/ui';
+import { Progress, Splash } from '@grove/ui';
 
 /** The steps a first load walks, in order, so the bar reports a place rather than a spinner. */
 export const STEPS = ['session', 'account', 'game', 'files'] as const;
@@ -17,19 +17,9 @@ export interface LoadingScreenProps {
 
 /** What the editor shows while it works out who is editing, what, and what is in it. */
 export function LoadingScreen({ step }: LoadingScreenProps): React.JSX.Element {
-    const reached = STEPS.indexOf(step) + 1;
     return (
-        <main className="boot">
-            <Tilestrip />
-            <Panel className="boot__card" aria-busy="true">
-                <Wordmark />
-                <Progress
-                    className="boot__progress"
-                    label={WORDING[step]}
-                    value={reached}
-                    max={STEPS.length}
-                />
-            </Panel>
-        </main>
+        <Splash busy className="boot">
+            <Progress label={WORDING[step]} value={STEPS.indexOf(step) + 1} max={STEPS.length} />
+        </Splash>
     );
 }

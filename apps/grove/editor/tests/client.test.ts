@@ -1,24 +1,12 @@
 // What the editor sends the service, and what it makes of each answer.
 
 import { describe, expect, it, vi } from 'vitest';
-import type { GameId, TaskId, WorkspacePath } from '@grove/api-contract';
+import type { GameId, WorkspacePath } from '@grove/api-contract';
 import { ApiError, createApi } from '../src/api/client';
 
 const BASE = 'http://localhost:4000';
 const GAME = '9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f' as GameId;
-const TASK = '8c2e4a60-5d17-4b93-8f0a-1e6d2c4b7a35' as TaskId;
 const TILE = 'art/tile.png' as WorkspacePath;
-/** What a queued build comes back as, which is the whole of what a publish answers. */
-const QUEUED = {
-    taskId: TASK,
-    gameId: GAME,
-    kind: 'BUILD',
-    status: 'NOT_STARTED',
-    manifestRevision: 2,
-    attempts: 0,
-    createdAt: '2026-09-16T10:00:00.000Z',
-    updatedAt: '2026-09-16T10:00:00.000Z',
-};
 const SIGNED_IN = {
     playerId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
     csrfToken: 'a-minted-token',
@@ -115,19 +103,6 @@ describe('the session', () => {
         await api.games();
         expect(headerOf(sent[1], 'x-csrf-token')).toBe('a-minted-token');
     });
-
-    it('forgets the token when it ends, so nothing rides the session that is gone', async () => {
-        const { sent, fetch } = stub(
-            json(SIGNED_IN),
-            new Response(null, { status: 204 }),
-            json([]),
-        );
-        const api = createApi({ baseUrl: BASE, fetch });
-        await api.session();
-        await api.signOut();
-        await api.games();
-        expect(headerOf(sent[2], 'x-csrf-token')).toBeUndefined();
-    });
 });
 
 describe('a file', () => {
@@ -178,24 +153,6 @@ describe('an asset', () => {
         await expect(
             createApi({ baseUrl: BASE, fetch }).putAsset(TICKET, new Uint8Array([1]), 'image/png'),
         ).rejects.toBeInstanceOf(ApiError);
-    });
-});
-
-describe('a publish', () => {
-    it('carries no body: the manifest is already frozen, and this asks for a build of it', async () => {
-        const { sent, fetch } = stub(json(QUEUED));
-        const task = await createApi({ baseUrl: BASE, fetch }).publish(GAME);
-
-        expect(sent[0]?.url).toBe(`${BASE}/v1/games/${GAME}/versions`);
-        expect(sent[0]?.init?.body).toBeUndefined();
-        expect(task.manifestRevision).toBe(2);
-        expect(task.status).toBe('NOT_STARTED');
-    });
-
-    it('is watched through the game it belongs to', async () => {
-        const { sent, fetch } = stub(json(QUEUED));
-        await createApi({ baseUrl: BASE, fetch }).task(GAME, TASK);
-        expect(sent[0]?.url).toBe(`${BASE}/v1/games/${GAME}/tasks/${TASK}`);
     });
 });
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Panel, Tilestrip, Wordmark } from '@grove/ui';
+import { Button, Splash, leaveFor, messageOf } from '@grove/ui';
 import { ProjectFormatError } from '@platform/project';
 import { ApiError, isLapsedSession } from '../api/client';
 import type { Api } from '../api/client';
@@ -40,12 +40,11 @@ export interface BootProps {
     createRenderer?: EditorShellProps['createRenderer'];
 }
 
-function messageOf(failure: unknown): string {
-    if (failure instanceof ApiError) return failure.message;
+function openFailure(failure: unknown): string {
     // A manifest this build cannot read is the one failure a creator can act on: it names the
     // member at fault, and a file from a newer editor says so rather than reading as a crash.
     if (failure instanceof ProjectFormatError) return `this game's settings: ${failure.message}`;
-    return 'the editor could not open your game';
+    return messageOf(failure, 'the editor could not open your game');
 }
 
 /** Session storage is gone in a private window and throws in a few of them; neither is fatal here. */
@@ -74,7 +73,7 @@ function forget(key: string): void {
  * Everything that has to be true before there is a workbench to show.
  *
  * The session is a cookie the API set on its own origin, and the platform and this editor are two
- * subdomains of one site — so the browser carries it here by itself and there is nothing to hand
+ * subdomains of one site, so the browser carries it here by itself and there is nothing to hand
  * over. Asking the service who this is IS reading it: the cookie is `HttpOnly`, so no script on
  * this origin can, which is what keeps it out of reach of everything the editor compiles and runs.
  *
@@ -103,7 +102,7 @@ export function Boot({
             return;
         }
         remember(BOUNCED, '1');
-        const go = navigate ?? ((url: string) => window.location.assign(url));
+        const go = navigate ?? leaveFor;
         go(signInUrl(new URL(window.location.href)));
     }
 
@@ -111,7 +110,7 @@ export function Boot({
      * A session that lapsed while the workbench was open.
      *
      * This tab stays where it is. There is unsaved work in it, and navigating away to sign in is
-     * exactly what would lose it — so the sign-in goes in a second tab, and coming back and saving
+     * exactly what would lose it, so the sign-in goes in a second tab, and coming back and saving
      * again is all that is left to do. The browser may refuse a tab nothing clicked for, which is
      * why the address is said out loud when it does.
      */
@@ -122,7 +121,7 @@ export function Boot({
 
         // Said before the tab opens: an alert is the one thing here a blocked popup cannot swallow.
         tell(
-            'Your Grove session has ended. Sign in on the new tab, then save again — nothing on this screen is lost.',
+            'Your Grove session has ended. Sign in on the new tab, then save again: nothing on this screen is lost.',
         );
         if (!opened(url)) {
             tell(`The sign-in tab could not be opened. Sign in at ${url}, then save again.`);
@@ -140,7 +139,7 @@ export function Boot({
                 leave();
                 return;
             }
-            setPhase({ at: 'failed', message: messageOf(failure) });
+            setPhase({ at: 'failed', message: openFailure(failure) });
         }
     }
 
@@ -154,13 +153,13 @@ export function Boot({
         } catch (failure) {
             // Every refusal the service named while answering for the session is the same answer:
             // this browser is not carrying one the editor can work behind, whatever the body said.
-            // A service nobody could reach named nothing, and is the one failure left to report —
+            // A service nobody could reach named nothing, and is the one failure left to report:
             // sending the tab into a network that is down would take the Try again with it.
             if (failure instanceof ApiError && failure.code !== 'unreachable') {
                 leave();
                 return;
             }
-            setPhase({ at: 'failed', message: messageOf(failure) });
+            setPhase({ at: 'failed', message: openFailure(failure) });
             return;
         }
         // Whatever sent this tab away last time worked, so the next refusal is a fresh one.
@@ -177,39 +176,22 @@ export function Boot({
     if (phase.at === 'loading') return <LoadingScreen step={phase.step} />;
 
     if (phase.at === 'leaving') {
-        return (
-            <main className="boot">
-                <Tilestrip />
-                <Panel className="boot__card" aria-busy="true">
-                    <Wordmark />
-                    <p className="boot__note" role="status">
-                        Taking you to Grove to sign in…
-                    </p>
-                </Panel>
-            </main>
-        );
+        return <Splash busy className="boot" note="Taking you to Grove to sign in…" />;
     }
 
     if (phase.at === 'failed') {
         return (
-            <main className="boot">
-                <Tilestrip />
-                <Panel className="boot__card">
-                    <Wordmark />
-                    <p className="boot__refusal" role="alert">
-                        {phase.message}
-                    </p>
-                    <Button
-                        variant="primary"
-                        onClick={() => {
-                            forget(BOUNCED);
-                            void start();
-                        }}
-                    >
-                        Try again
-                    </Button>
-                </Panel>
-            </main>
+            <Splash className="boot" alert={phase.message}>
+                <Button
+                    variant="primary"
+                    onClick={() => {
+                        forget(BOUNCED);
+                        void start();
+                    }}
+                >
+                    Try again
+                </Button>
+            </Splash>
         );
     }
 

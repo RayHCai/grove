@@ -76,7 +76,8 @@ describe('the first load', () => {
         const host = await openEditor(api);
 
         const names = [...host.querySelectorAll('.tree__name')].map((name) => name.textContent);
-        expect(names).toEqual(['src', 'main.ts']);
+        // The source folder is the tree's root rather than a row in it.
+        expect(names).toEqual(['main.ts']);
         expect(host.querySelector('.topbar__state')?.textContent).toBe('Up to date');
     });
 
@@ -108,7 +109,7 @@ describe('the first load', () => {
         const host = await mount(<App api={api} />);
         await until(() => host.querySelector('[role="alert"]') !== null);
         expect(host.querySelector('[role="alert"]')?.textContent).toBe(
-            'the Grove API could not be reached',
+            'Grove could not be reached. Check your connection and try again.',
         );
 
         reachable = true;
@@ -234,7 +235,7 @@ describe('reading the session off the cookie', () => {
 
         expect(went).toHaveLength(0);
         expect(host.querySelector('[role="alert"]')?.textContent).toBe(
-            'the Grove API could not be reached',
+            'Grove could not be reached. Check your connection and try again.',
         );
     });
 
@@ -401,7 +402,7 @@ describe('reading the session off the cookie', () => {
 
         expect(went).toHaveLength(0);
         expect(host.querySelector('[role="alert"]')?.textContent).toBe(
-            'the Grove API could not be reached',
+            'Grove could not be reached. Check your connection and try again.',
         );
     });
 

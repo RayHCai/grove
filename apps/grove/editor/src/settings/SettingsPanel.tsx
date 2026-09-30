@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import type { KeyboardEvent, Ref } from 'react';
-import { CloseIcon, IconButton, SectionTitle, TextInput } from '@grove/ui';
+import type { Ref } from 'react';
+import { SectionTitle, TextInput } from '@grove/ui';
 import type { ProjectBounds, ProjectManifest, ProjectSettings } from '@platform/project';
+import { SidePanel } from '../shell/SidePanel';
 
 export interface SettingsPanelProps {
     open: boolean;
@@ -18,7 +19,7 @@ export interface SettingsPanelProps {
  * The project settings, as the settings gear opens them.
  *
  * These are the build-time knobs: they are fixed when the world is built, so a compile reads them
- * and nothing at run time does. What the code declares — the classes, and the digest over them —
+ * and nothing at run time does. What the code declares (the classes, and the digest over them)
  * is not here at all, because a compile stamps that from the files themselves.
  */
 export function SettingsPanel({
@@ -30,12 +31,6 @@ export function SettingsPanel({
 }: SettingsPanelProps): React.JSX.Element {
     const settings = project.settings;
 
-    function closeOnEscape(event: KeyboardEvent<HTMLElement>): void {
-        if (event.key !== 'Escape' || event.defaultPrevented) return;
-        event.preventDefault();
-        onClose();
-    }
-
     function setBound(edge: keyof ProjectBounds, value: number): void {
         onChange({ ...settings, bounds: { ...settings.bounds, [edge]: value } });
     }
@@ -43,80 +38,85 @@ export function SettingsPanel({
     const declared = project.scriptModules.flatMap((module) => module.scripts).length;
 
     return (
-        <aside
+        <SidePanel
             id="settings-panel"
-            aria-label="Project settings"
-            className="side-panel settings-panel"
+            label="Project settings"
+            title="Settings"
+            className="settings-panel"
+            open={open}
+            onClose={onClose}
             ref={ref}
-            tabIndex={-1}
-            hidden={!open}
-            data-open={open}
-            onKeyDown={closeOnEscape}
         >
-            <div className="side-panel__head">
-                <h2 className="side-panel__title">Settings</h2>
-                <IconButton label="Close" variant="ghost" size="sm" onClick={onClose}>
-                    <CloseIcon />
-                </IconButton>
-            </div>
             <div className="settings-panel__body">
-                <SectionTitle as="h3">The world</SectionTitle>
-                <NumberField
-                    label="Players"
-                    hint="How many may be in one game at once."
-                    value={settings.maxPlayers}
-                    whole
-                    onCommit={(maxPlayers) => onChange({ ...settings, maxPlayers })}
-                />
-                <NumberField
-                    label="Sim rate"
-                    hint="Ticks a second the world steps at."
-                    value={settings.simRate}
-                    whole
-                    onCommit={(simRate) => onChange({ ...settings, simRate })}
-                />
-                <NumberField
-                    label="Send rate"
-                    hint="Updates a second each player is sent."
-                    value={settings.sendRate}
-                    whole
-                    onCommit={(sendRate) => onChange({ ...settings, sendRate })}
-                />
+                <section className="settings-panel__section">
+                    <SectionTitle as="h3" variant="label">
+                        The world
+                    </SectionTitle>
+                    <NumberField
+                        label="Players"
+                        hint="How many may be in one game at once."
+                        value={settings.maxPlayers}
+                        whole
+                        onCommit={(maxPlayers) => onChange({ ...settings, maxPlayers })}
+                    />
+                    <NumberField
+                        label="Sim rate"
+                        hint="Ticks a second the world steps at."
+                        value={settings.simRate}
+                        whole
+                        onCommit={(simRate) => onChange({ ...settings, simRate })}
+                    />
+                    <NumberField
+                        label="Send rate"
+                        hint="Updates a second each player is sent."
+                        value={settings.sendRate}
+                        whole
+                        onCommit={(sendRate) => onChange({ ...settings, sendRate })}
+                    />
+                </section>
 
-                <SectionTitle as="h3">Its extent</SectionTitle>
-                <div className="settings-panel__grid">
-                    <NumberField
-                        label="Left"
-                        value={settings.bounds.left}
-                        onCommit={(value) => setBound('left', value)}
-                    />
-                    <NumberField
-                        label="Right"
-                        value={settings.bounds.right}
-                        onCommit={(value) => setBound('right', value)}
-                    />
-                    <NumberField
-                        label="Top"
-                        value={settings.bounds.top}
-                        onCommit={(value) => setBound('top', value)}
-                    />
-                    <NumberField
-                        label="Bottom"
-                        value={settings.bounds.bottom}
-                        onCommit={(value) => setBound('bottom', value)}
-                    />
-                </div>
+                <section className="settings-panel__section">
+                    <SectionTitle as="h3" variant="label">
+                        Its extent
+                    </SectionTitle>
+                    <div className="settings-panel__grid">
+                        <NumberField
+                            label="Left"
+                            value={settings.bounds.left}
+                            onCommit={(value) => setBound('left', value)}
+                        />
+                        <NumberField
+                            label="Right"
+                            value={settings.bounds.right}
+                            onCommit={(value) => setBound('right', value)}
+                        />
+                        <NumberField
+                            label="Top"
+                            value={settings.bounds.top}
+                            onCommit={(value) => setBound('top', value)}
+                        />
+                        <NumberField
+                            label="Bottom"
+                            value={settings.bounds.bottom}
+                            onCommit={(value) => setBound('bottom', value)}
+                        />
+                    </div>
+                </section>
 
-                <SectionTitle as="h3">What the code declares</SectionTitle>
-                <p className="settings-panel__note">
-                    {declared === 1 ? '1 script' : `${String(declared)} scripts`} in{' '}
-                    {project.scriptModules.length === 1
-                        ? '1 file'
-                        : `${String(project.scriptModules.length)} files`}
-                    , read from the code. Play stamps this again.
-                </p>
+                <section className="settings-panel__section">
+                    <SectionTitle as="h3" variant="label">
+                        What the code declares
+                    </SectionTitle>
+                    <p className="settings-panel__note">
+                        {declared === 1 ? '1 script' : `${String(declared)} scripts`} in{' '}
+                        {project.scriptModules.length === 1
+                            ? '1 file'
+                            : `${String(project.scriptModules.length)} files`}
+                        , read from the code. Play stamps this again.
+                    </p>
+                </section>
             </div>
-        </aside>
+        </SidePanel>
     );
 }
 
@@ -144,7 +144,7 @@ function NumberField({ label, hint, value, whole, onCommit }: NumberFieldProps):
         <TextInput
             label={label}
             {...(hint === undefined ? {} : { hint })}
-            className="settings-panel__field"
+            dense
             type="number"
             inputMode="numeric"
             {...(whole === true ? { min: 1, step: 1 } : {})}

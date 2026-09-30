@@ -1,8 +1,12 @@
 import { useRef, useState } from 'react';
-import type { FormEvent, KeyboardEvent, Ref } from 'react';
-import { Button, CloseIcon, IconButton, TextInput } from '@grove/ui';
+import type { DragEvent, FormEvent, Ref } from 'react';
+import { IconButton, Menu, MenuItem, NewFileIcon, TextInput, UploadIcon } from '@grove/ui';
+import { WorkspacePath } from '@grove/api-contract';
+import { filesUnder, sourcePath } from '../project/files';
+import { SidePanel } from '../shell/SidePanel';
 import type { ProjectFile, ProjectNode } from '../project/files';
 import { FileTree } from './FileTree';
+import type { MenuAt } from './FileTree';
 
 export interface ExplorerPanelProps {
     open: boolean;
@@ -20,6 +24,31 @@ export interface ExplorerPanelProps {
     ref?: Ref<HTMLElement> | undefined;
 }
 
+interface RowMenu {
+    node: ProjectNode;
+    at: MenuAt;
+    /** Where focus was when the menu opened, which is where Escape hands it back. */
+    opener: HTMLElement | null;
+}
+
+/**
+ * Why a name cannot be a file in this game, or nothing when it can.
+ *
+ * Checked here rather than left to the service: a save naming one bad path is refused whole, so a
+ * name let through would wedge every save after it.
+ */
+function problemWith(path: string): string | undefined {
+    const checked = WorkspacePath.safeParse(path);
+    return checked.success
+        ? undefined
+        : `${path} is not a name a file can have: use letters, digits, dot, dash and underscore.`;
+}
+
+/** Whether a drag is carrying files off the machine rather than something from this page. */
+function carriesFiles(event: DragEvent): boolean {
+    return event.dataTransfer.types.includes('Files');
+}
+
 /** The file explorer: the game's folders and files, kept mounted and hidden while closed. */
 export function ExplorerPanel({
     open,
@@ -34,74 +63,120 @@ export function ExplorerPanel({
     ref,
 }: ExplorerPanelProps): React.JSX.Element {
     const [naming, setNaming] = useState(false);
-    const [path, setPath] = useState('');
+    const [name, setName] = useState('');
+    const [menu, setMenu] = useState<RowMenu | null>(null);
+    const [dropping, setDropping] = useState(false);
+    const [problem, setProblem] = useState<string | undefined>(undefined);
     const pickerRef = useRef<HTMLInputElement>(null);
 
-    function closeOnEscape(event: KeyboardEvent<HTMLElement>): void {
-        if (event.key !== 'Escape' || event.defaultPrevented) return;
-        event.preventDefault();
-        // The naming row is what Escape closes first; the panel is what is left to close.
+    // The menu takes its own Escape; the naming row is next, and the panel is what is left to close.
+    function escapeInside(): boolean {
         if (naming) {
             setNaming(false);
-            setPath('');
-            return;
+            setName('');
+            return true;
         }
-        onClose();
+        return false;
     }
 
     function create(event: FormEvent): void {
         event.preventDefault();
-        onAddFile(path.trim());
-        setPath('');
+        const typed = name.trim();
+        if (typed !== '') {
+            const path = sourcePath(typed);
+            const refused = problemWith(path);
+            setProblem(refused);
+            if (refused !== undefined) return;
+            onAddFile(path);
+        }
+        setName('');
         setNaming(false);
     }
 
+    function importFile(picked: File): void {
+        const refused = problemWith(picked.name);
+        setProblem(refused);
+        if (refused === undefined) onImportFile(picked);
+    }
+
+    function remove(node: ProjectNode): void {
+        for (const file of filesUnder(node)) onRemoveFile(file.path);
+        setMenu(null);
+    }
+
+    function drop(event: DragEvent<HTMLDivElement>): void {
+        if (!carriesFiles(event)) return;
+        event.preventDefault();
+        setDropping(false);
+        for (const picked of event.dataTransfer.files) importFile(picked);
+    }
+
     return (
-        <aside
+        <SidePanel
             id="explorer-panel"
-            aria-label="Explorer"
-            className="side-panel explorer-panel"
+            label="Explorer"
+            title="Explorer"
+            className="explorer-panel"
+            open={open}
+            onClose={onClose}
+            onEscape={escapeInside}
             ref={ref}
-            tabIndex={-1}
-            hidden={!open}
-            data-open={open}
-            onKeyDown={closeOnEscape}
         >
-            <div className="side-panel__head">
-                <h2 className="side-panel__title">Explorer</h2>
-                <IconButton label="Close" variant="ghost" size="sm" onClick={onClose}>
-                    <CloseIcon />
-                </IconButton>
-            </div>
-            <div className="explorer-panel__body">
-                <p className="explorer-panel__project">{projectName}</p>
-                <div className="explorer-panel__tools">
-                    <Button variant="ghost" size="sm" onClick={() => setNaming(true)}>
-                        New file
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => pickerRef.current?.click()}>
-                        Import
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-disabled={activePath === null || undefined}
-                        onClick={() => {
-                            if (activePath !== null) onRemoveFile(activePath);
-                        }}
-                    >
-                        Delete
-                    </Button>
+            <div
+                className="explorer-panel__body"
+                data-dropping={dropping || undefined}
+                onDragOver={(event) => {
+                    if (!carriesFiles(event)) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'copy';
+                    setDropping(true);
+                }}
+                onDragLeave={(event) => {
+                    // Crossing onto a row inside the panel is not leaving it.
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                        setDropping(false);
+                    }
+                }}
+                onDrop={drop}
+            >
+                <div className="explorer-panel__project">
+                    <p className="explorer-panel__name">{projectName}</p>
+                    <div className="explorer-panel__actions">
+                        <IconButton
+                            label="New file"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                                setProblem(undefined);
+                                setNaming(true);
+                            }}
+                        >
+                            <NewFileIcon />
+                        </IconButton>
+                        <IconButton
+                            label="Import file"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => pickerRef.current?.click()}
+                        >
+                            <UploadIcon />
+                        </IconButton>
+                    </div>
                 </div>
                 {naming && (
                     <form className="explorer-panel__new" onSubmit={create}>
                         <TextInput
                             label="New file"
                             labelHidden
+                            dense
                             autoFocus
-                            placeholder="src/enemy.ts"
-                            value={path}
-                            onChange={(event) => setPath(event.target.value)}
+                            placeholder="enemy.ts"
+                            value={name}
+                            onChange={(event) => setName(event.target.value)}
+                            onBlur={() => {
+                                setNaming(false);
+                                setName('');
+                            }}
                         />
                     </form>
                 )}
@@ -113,13 +188,46 @@ export function ExplorerPanel({
                     tabIndex={-1}
                     onChange={(event) => {
                         const picked = event.target.files?.[0];
-                        if (picked !== undefined) onImportFile(picked);
+                        if (picked !== undefined) importFile(picked);
                         // Cleared, or picking the same file twice raises no second change event.
                         event.target.value = '';
                     }}
                 />
-                <FileTree nodes={nodes} activePath={activePath} onOpen={onOpenFile} />
+                {problem !== undefined && (
+                    <p className="explorer-panel__problem" role="alert">
+                        {problem}
+                    </p>
+                )}
+                <FileTree
+                    nodes={nodes}
+                    activePath={activePath}
+                    onOpen={onOpenFile}
+                    onMenu={(node, at) =>
+                        setMenu({
+                            node,
+                            at,
+                            opener:
+                                document.activeElement instanceof HTMLElement
+                                    ? document.activeElement
+                                    : null,
+                        })
+                    }
+                />
             </div>
-        </aside>
+            {menu !== null && (
+                <Menu
+                    open
+                    label={menu.node.name}
+                    className="explorer-menu"
+                    style={{ left: `${String(menu.at.x)}px`, top: `${String(menu.at.y)}px` }}
+                    onClose={(reason) => {
+                        setMenu(null);
+                        if (reason === 'escape') menu.opener?.focus();
+                    }}
+                >
+                    <MenuItem onClick={() => remove(menu.node)}>Delete</MenuItem>
+                </Menu>
+            )}
+        </SidePanel>
     );
 }

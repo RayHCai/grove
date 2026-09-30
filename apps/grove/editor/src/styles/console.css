@@ -9,7 +9,7 @@
     flex: none;
 }
 .pane--console .pane__title {
-    font: 700 10px/1 var(--pg-font-ui);
+    font: 700 var(--pg-text-sm) / 1 var(--pg-font-ui);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--pg-ink-muted);
@@ -17,7 +17,7 @@
 .console-body {
     flex: 1;
     min-height: 0;
-    padding: 8px;
+    padding: var(--pg-sp-2);
     overflow-y: auto;
     font: 11px/1.5 var(--pg-font-mono);
     white-space: pre-wrap;

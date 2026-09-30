@@ -1,21 +1,34 @@
+/*
+ * The project's settings, as a column of plain rows.
+ *
+ * Everything starts on one left edge, and the type steps down from heading to label to hint: the
+ * headings and the fields take the kit's rail looks, so nothing here reaches into them.
+ */
+.settings-panel {
+    width: 240px;
+}
 .settings-panel__body {
     flex: 1;
     min-height: 0;
     overflow: auto;
+    padding: 0 var(--pg-sp-3) var(--pg-sp-4);
+}
+.settings-panel__section {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 8px 8px 12px;
+    gap: var(--pg-sp-3);
+    padding: var(--pg-sp-4) 0;
+}
+.settings-panel__section + .settings-panel__section {
+    border-top: 1px solid var(--pg-border);
 }
 .settings-panel__grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-}
-.settings-panel__field .pg-field__control {
-    width: 100%;
+    gap: var(--pg-sp-2);
 }
 .settings-panel__note {
-    font-size: 11px;
+    font-size: var(--pg-field-hint-dense);
+    line-height: 1.4;
     color: var(--pg-ink-muted);
 }

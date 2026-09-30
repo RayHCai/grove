@@ -1,41 +1,6 @@
+/* The editor has no page chrome around its splash, so the splash is the whole window. */
 .boot {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
     min-height: 100vh;
     min-height: 100dvh;
-    padding: 16px;
     background: var(--pg-bg);
-}
-.boot .pg-tilestrip {
-    position: fixed;
-    inset: 0 0 auto;
-}
-.boot__card {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-    width: 100%;
-    max-width: 288px;
-    padding: 16px;
-}
-.boot__progress {
-    width: 100%;
-}
-.boot__form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    width: 100%;
-}
-.boot__refusal {
-    font-size: 11px;
-    color: var(--pg-warm-ink);
-}
-.boot__note {
-    font-size: 11px;
-    color: var(--pg-ink-muted);
 }

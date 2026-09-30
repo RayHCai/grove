@@ -18,18 +18,10 @@ const MODULE = PLAYER_PATH.replace(/\.ts$/u, '');
  */
 const AVATAR = 'player';
 
-/**
- * A placeholder body, served by this app rather than fetched from anywhere a creator picked.
- *
- * There is no asset-authoring UI yet — `project.assets` is not a thing this app's panels write —
- * so a template that named art a creator brought would be naming art with no way to change it. A
- * relative url resolves against this app's own origin and is what the client fetches at run time,
- * which is why the file lives under `public/` rather than beside the source that names it.
- *
- * 128 world px on a 960×540 stage: big enough to find on a white ground at a glance, which is the
- * whole job a placeholder has.
- */
+/** A placeholder body, at a relative url the client fetches from this app's own `public/`. */
 const AVATAR_ART = assetId('body');
+
+const AVATAR_URL = '/avatar-square.svg';
 
 /**
  * What a new game is: one file, one body, one rule.
@@ -52,7 +44,7 @@ export const TOP_DOWN: GameTemplate = {
             bounds: { left: -480, right: 480, top: 270, bottom: -270 },
             regions: [],
         },
-        assets: [{ id: AVATAR_ART, kind: 'texture', url: '/avatar-square.svg' }],
+        assets: [{ id: AVATAR_ART, kind: 'texture', url: AVATAR_URL }],
         templates: [
             {
                 id: templateId(AVATAR),

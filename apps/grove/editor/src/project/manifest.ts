@@ -1,6 +1,6 @@
 // The project manifest as the editor holds it: one file in the game, beside the creator's sources.
 //
-// It is a game's own file rather than editor state, because that is what a build reads — the
+// It is a game's own file rather than editor state, because that is what a build reads: the
 // settings gear writes it, a compile stamps the two parts it derives, and a publish hands the
 // service the same bytes.
 
@@ -32,7 +32,7 @@ export function isProjectFile(path: string): boolean {
  * The manifest a stored game holds.
  *
  * Migrated before it is checked, because a file below this build's format is moved forward and
- * only one above it is refused — a file on disk cannot be told to update.
+ * only one above it is refused; a file on disk cannot be told to update.
  */
 export function readProject(text: string): ProjectManifest {
     return validate(migrate(JSON.parse(text)));
@@ -56,7 +56,7 @@ export function withSettings(project: ProjectManifest, settings: ProjectSettings
 /**
  * The manifest with the parts a compile derives put back on it.
  *
- * The hash covers what was authored — the manifest without it, and the text of every source — so
+ * The hash covers what was authored (the manifest without it, and the text of every source), so
  * two games with the same settings and different code never claim to be the same version.
  */
 export async function stamp(

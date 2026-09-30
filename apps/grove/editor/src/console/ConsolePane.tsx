@@ -35,6 +35,7 @@ export function ConsolePane({ lines, onClear, className }: ConsolePaneProps): Re
                 <Button
                     variant="ghost"
                     size="sm"
+                    cursor={false}
                     className="console-clear"
                     aria-disabled={lines.length === 0 || undefined}
                     onClick={onClear}
