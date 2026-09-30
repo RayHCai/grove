@@ -1,14 +1,8 @@
-import { Account, Game, SignedIn } from '@grove/api-contract';
-import {
-    ApiError,
-    apiBaseUrl,
-    createApiBase,
-    isLapsedSession,
-    jsonBody,
-} from '@grove/api-contract/client';
+import { Account, Game, PlaySession, SignedIn } from '@grove/api-contract';
+import { ApiError, createApiBase, isLapsedSession, jsonBody } from '@grove/api-contract/client';
 import type { ApiClientOptions } from '@grove/api-contract/client';
 
-export { ApiError, apiBaseUrl, isLapsedSession };
+export { ApiError, isLapsedSession };
 
 export type ApiOptions = ApiClientOptions;
 
@@ -18,7 +12,7 @@ export type ApiOptions = ApiClientOptions;
  * This is the one Grove origin a password is typed on, so every credential route lives here and
  * nowhere else. It keeps the CSRF token the last sign-in handed out, because every write has to
  * carry it and a component that had to remember would be one that could forget. The cookie is the
- * browser's, which is why every call is `credentials: 'include'` — the API is a different origin.
+ * browser's, which is why every call is `credentials: 'include'`; the API is a different origin.
  */
 export interface Api {
     /** The current session, or nothing at all when the cookie names nobody. */
@@ -30,7 +24,7 @@ export interface Api {
 
     /** Asks for a reset mail. It answers the same way whether or not the address has an account. */
     requestPasswordReset(email: string): Promise<void>;
-    /** `false` is a key that opens nothing — wrong, already spent, or expired. */
+    /** `false` is a key that opens nothing: wrong, already spent, or expired. */
     resetPassword(token: string, newPassword: string): Promise<boolean>;
 
     me(): Promise<Account>;
@@ -41,6 +35,9 @@ export interface Api {
 
     games(): Promise<Game[]>;
     createGame(title: string): Promise<Game>;
+    deleteGame(gameId: string): Promise<void>;
+    /** A seat in a running world and the ticket that admits this account to it. */
+    play(gameId: string): Promise<PlaySession>;
 }
 
 export function createApi(options: ApiOptions): Api {
@@ -102,5 +99,15 @@ export function createApi(options: ApiOptions): Api {
 
         games: async () => base.read('/v1/games', Game.array()),
         createGame: async (title) => base.write('/v1/games', 'POST', { title }, Game),
+        deleteGame: async (gameId) => {
+            await base.call(`/v1/games/${encodeURIComponent(gameId)}`, { method: 'DELETE' });
+        },
+        play: async (gameId) =>
+            base.write(
+                `/v1/games/${encodeURIComponent(gameId)}/play`,
+                'POST',
+                undefined,
+                PlaySession,
+            ),
     };
 }

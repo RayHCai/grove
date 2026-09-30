@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button, TextInput } from '@grove/ui';
-import { messageOf } from '../api/messages';
 import { Link } from '../router/Link';
+import { useAction } from '../session/useAction';
 import { useSession } from '../session/SessionProvider';
 import { AuthCard } from './AuthCard';
 
@@ -9,24 +9,9 @@ import { AuthCard } from './AuthCard';
 export function ForgotPassword(): React.JSX.Element {
     const { api } = useSession();
     const [email, setEmail] = useState('');
-    const [refusal, setRefusal] = useState<string | undefined>(undefined);
-    const [busy, setBusy] = useState(false);
-    const [sent, setSent] = useState(false);
+    const action = useAction();
 
-    async function submit(): Promise<void> {
-        setBusy(true);
-        setRefusal(undefined);
-        try {
-            await api.requestPasswordReset(email);
-            setSent(true);
-        } catch (failure) {
-            setRefusal(messageOf(failure, 'That did not go through. Try again.'));
-        } finally {
-            setBusy(false);
-        }
-    }
-
-    if (sent) {
+    if (action.state.at === 'done') {
         return (
             <AuthCard
                 title="The link is on its way"
@@ -46,8 +31,13 @@ export function ForgotPassword(): React.JSX.Element {
     return (
         <AuthCard
             title="Forgot your password?"
-            refusal={refusal}
-            onSubmit={() => void submit()}
+            refusal={action.refusal}
+            onSubmit={() =>
+                void action.run(
+                    () => api.requestPasswordReset(email),
+                    'That did not go through. Try again.',
+                )
+            }
             footer={<Link to={{ at: 'sign-in', returnTo: undefined }}>Back to sign in</Link>}
         >
             <TextInput
@@ -59,8 +49,13 @@ export function ForgotPassword(): React.JSX.Element {
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
             />
-            <Button type="submit" variant="primary" aria-busy={busy} aria-disabled={busy}>
-                {busy ? 'Sending…' : 'Send the link'}
+            <Button
+                type="submit"
+                variant="primary"
+                aria-busy={action.busy}
+                aria-disabled={action.busy}
+            >
+                {action.busy ? 'Sending…' : 'Send the link'}
             </Button>
         </AuthCard>
     );

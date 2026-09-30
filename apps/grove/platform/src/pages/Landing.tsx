@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@grove/ui';
 import type { ReactNode } from 'react';
-import { messageOf } from '../api/messages';
-import { go } from '../router/useRoute';
+import { ButtonLink } from '../router/Link';
 import { useSession } from '../session/SessionProvider';
 
 /**
@@ -19,28 +18,14 @@ function Floating({ children }: { children: ReactNode }): React.JSX.Element {
 /** The front door: what Grove is, and the two ways in, on one screenful. */
 export function Landing(): React.JSX.Element {
     const { session, openEditor } = useSession();
-    const [refusal, setRefusal] = useState<string | undefined>(undefined);
     const [leaving, setLeaving] = useState(false);
-
-    async function toEditor(): Promise<void> {
-        setLeaving(true);
-        setRefusal(undefined);
-        try {
-            openEditor();
-        } catch (failure) {
-            setRefusal(messageOf(failure, 'The editor could not be opened. Try again.'));
-            setLeaving(false);
-        }
-    }
 
     return (
         <main className="landing">
             <section className="hero">
                 <div className="hero__body">
-                    <h1 className="hero__title">Multiplayer, in a tab.</h1>
-                    <p className="hero__lede">
-                        You write the game. Grove runs the server and gives you a link to share.
-                    </p>
+                    <h1 className="hero__title">Creativity unleashed</h1>
+                    <p className="hero__lede">Your friends. Millions of games. One platform.</p>
                 </div>
 
                 <div className="hero__side">
@@ -49,44 +34,41 @@ export function Landing(): React.JSX.Element {
                             <>
                                 <Floating>
                                     <Button
+                                        variant="warm"
                                         className="hero__cta"
                                         aria-busy={leaving}
                                         aria-disabled={leaving}
-                                        onClick={() => void toEditor()}
+                                        onClick={() => {
+                                            setLeaving(true);
+                                            openEditor();
+                                        }}
                                     >
                                         {leaving ? 'Opening the editor…' : 'Open the editor'}
                                     </Button>
                                 </Floating>
                                 <Floating>
-                                    <Button onClick={() => go({ at: 'games' })}>Your games</Button>
+                                    <ButtonLink to={{ at: 'games' }}>Your games</ButtonLink>
                                 </Floating>
                             </>
                         ) : (
                             <>
                                 <Floating>
-                                    <Button
+                                    <ButtonLink
+                                        variant="warm"
                                         className="hero__cta"
-                                        onClick={() => go({ at: 'sign-up', returnTo: undefined })}
+                                        to={{ at: 'sign-up', returnTo: undefined }}
                                     >
                                         Start building
-                                    </Button>
+                                    </ButtonLink>
                                 </Floating>
                                 <Floating>
-                                    <Button
-                                        onClick={() => go({ at: 'sign-in', returnTo: undefined })}
-                                    >
+                                    <ButtonLink to={{ at: 'sign-in', returnTo: undefined }}>
                                         Sign in
-                                    </Button>
+                                    </ButtonLink>
                                 </Floating>
                             </>
                         )}
                     </div>
-
-                    {refusal !== undefined && (
-                        <p className="hero__refusal" role="alert">
-                            {refusal}
-                        </p>
-                    )}
                 </div>
             </section>
         </main>

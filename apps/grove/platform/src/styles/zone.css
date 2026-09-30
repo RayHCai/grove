@@ -1,0 +1,211 @@
+.zone {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--pg-sp-6);
+    width: 100%;
+    max-width: var(--shell-measure);
+    margin: 0 auto;
+    padding: var(--pg-sp-7) var(--shell-gutter) 0;
+}
+
+.zone__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--pg-sp-5);
+}
+
+.zone__note {
+    color: var(--pg-ink-muted);
+    font-size: 18px;
+}
+
+.zone__refusal {
+    padding: var(--pg-sp-3) var(--pg-sp-4);
+    border: var(--pg-bw) solid var(--pg-warm);
+    background: var(--pg-warm-soft);
+    color: var(--pg-warm-ink);
+    font-size: var(--pg-text);
+}
+
+.zone__empty,
+.zone__failure {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--pg-sp-5);
+    padding: var(--pg-sp-6);
+    color: var(--pg-ink-muted);
+    font-size: 18px;
+    line-height: 1.45;
+}
+
+.newgame {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-5);
+    padding: var(--pg-sp-5);
+}
+
+.newgame__actions,
+.card__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--pg-sp-5);
+}
+
+.gamecard {
+    display: grid;
+    grid-template-columns: var(--gamelist-cols);
+    align-items: center;
+    gap: var(--pg-sp-5);
+    padding: var(--pg-sp-5);
+}
+
+.gamecard:hover {
+    transform: translate(-2px, -2px);
+}
+
+.gamecard:hover::before {
+    transform: translate(6px, 6px);
+}
+
+.gamecard__body {
+    /* Lets a long title wrap instead of pushing the button off the card. */
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--pg-sp-3);
+    min-width: 0;
+}
+
+.gamecard__title {
+    color: var(--pg-ink);
+    font-family: var(--pg-font-brand);
+    font-size: 10px;
+    font-weight: normal;
+    line-height: 1.6;
+    letter-spacing: 1px;
+    overflow-wrap: anywhere;
+}
+
+.gamecard__actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--pg-sp-3);
+}
+
+/* A control that shrank to fit would be a sprite drawn at a fraction of its pixels. */
+.gamecard__actions > * {
+    flex: none;
+}
+
+.card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-5);
+    padding: var(--pg-sp-6);
+}
+
+/* A field is as wide as what goes in it, not as wide as the card: these cards sit on the full
+   measure, and a name stretched across it reads as a paragraph. */
+.card__field,
+.newgame__field {
+    max-width: var(--shell-narrow);
+}
+
+.card__refusal {
+    color: var(--pg-warm-ink);
+    font-size: var(--pg-text);
+}
+
+.card__saved {
+    color: var(--pg-accent-strong);
+    font-size: var(--pg-text);
+}
+
+@media (max-width: 512px) {
+    .zone {
+        padding-top: var(--pg-sp-6);
+    }
+}
+
+.gamesbar {
+    align-items: center;
+    flex-wrap: nowrap;
+}
+
+.gamesbar__search {
+    flex: 0 1 320px;
+}
+
+/* Pushed right, and it does not sink when pressed. */
+.gamesbar__new {
+    margin-left: auto;
+}
+
+.gamesbar__new:active,
+.gamesbar__new:active::before {
+    transform: none;
+}
+
+/*
+ * One grid shared by the labels and every card, so the columns line up like Unity Hub's list
+ * while each row is still its own raised card rather than a table line.
+ */
+.gamelist {
+    --gamelist-cols: minmax(0, 1fr) 112px 112px 296px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-3);
+}
+
+.gamelist__labels {
+    display: grid;
+    grid-template-columns: var(--gamelist-cols);
+    gap: var(--pg-sp-5);
+    /* The card's padding plus its edge, so each label sits over its column. */
+    padding: 0 calc(var(--pg-sp-5) + var(--pg-bw));
+    color: var(--pg-ink-muted);
+    font: normal var(--pg-field-label) / 1.4 var(--pg-font-brand);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.gamelist__rows {
+    display: flex;
+    flex-direction: column;
+    /* Wide enough for the block each card drops, so one card's shadow never lands on the next. */
+    gap: var(--pg-sp-4);
+    list-style: none;
+}
+
+.gamecard__cell {
+    color: var(--pg-ink-muted);
+    font-size: var(--pg-text);
+}
+
+@media (max-width: 640px) {
+    .gamelist__labels {
+        display: none;
+    }
+
+    /* Stacked, because five controls beside a title leave the title no width at all. */
+    .gamecard {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--pg-sp-4);
+    }
+
+    .gamecard__cell {
+        display: none;
+    }
+
+    .gamecard__actions {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+}

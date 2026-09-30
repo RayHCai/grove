@@ -4,6 +4,9 @@ import { unmountAll } from './helpers';
 // React refuses to run `act` without it, and says so at the first render rather than at setup.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// jsdom has no layout, so it logs "not implemented" for every navigation's scroll to the top.
+window.scrollTo = () => undefined;
+
 afterEach(() => {
     // Before the address bar is reset: a root still mounted is still subscribed to the router, and
     // it would answer the reset below by redirecting the next case's app.

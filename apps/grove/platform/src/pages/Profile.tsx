@@ -1,14 +1,12 @@
 import { useState } from 'react';
-import { Button, Eyebrow, Panel, SectionTitle, TextInput } from '@grove/ui';
-import { PASSWORD_MAX, PASSWORD_MIN, type Account } from '@grove/api-contract';
-import type { Api } from '../api/client';
-import { isLapsedSession, messageOf } from '../api/messages';
+import { Button, SectionTitle, TextInput, VisuallyHidden } from '@grove/ui';
+import type { Account } from '@grove/api-contract';
+import { FormPanel } from '../chrome/FormPanel';
 import { go } from '../router/useRoute';
+import { useAction } from '../session/useAction';
+import type { ActionState } from '../session/useAction';
 import { useSession } from '../session/SessionProvider';
-import { formatDate } from './date';
-
-/** What one card's last write did. Every card on this page reports in these four states. */
-type Wrote = { at: 'idle' | 'saving' | 'saved' } | { at: 'failed'; message: string };
+import { NewPasswordField, TOO_SHORT, tooShort } from './NewPasswordField';
 
 export interface ProfileProps {
     account: Account;
@@ -16,64 +14,32 @@ export interface ProfileProps {
 
 /** The account and the four things its holder may do to it. */
 export function Profile({ account }: ProfileProps): React.JSX.Element {
-    const { api, accountChanged, forget } = useSession();
-
     return (
         <main className="zone">
-            <header className="zone__head">
-                <div>
-                    <Eyebrow>{account.displayName}</Eyebrow>
-                    <SectionTitle
-                        as="h1"
-                        subline={`With Grove since ${formatDate(account.createdAt, 'long')}.`}
-                    >
-                        Your profile
-                    </SectionTitle>
-                </div>
-                <Button onClick={() => go({ at: 'games' })}>Your games</Button>
-            </header>
-
-            <NameCard account={account} onRenamed={accountChanged} api={api} />
-            <PasswordCard api={api} />
-            <CloseCard api={api} onClosed={forget} />
+            <VisuallyHidden as="h1">Your profile</VisuallyHidden>
+            <NameCard account={account} />
+            <PasswordCard />
+            <CloseCard />
         </main>
     );
 }
 
 /** The two facts a profile is: the name others see, and the address only its holder does. */
-function NameCard({
-    account,
-    onRenamed,
-    api,
-}: {
-    account: Account;
-    onRenamed: (account: Account) => void;
-    api: Api;
-}): React.JSX.Element {
+function NameCard({ account }: { account: Account }): React.JSX.Element {
+    const { api, accountChanged } = useSession();
     const [displayName, setDisplayName] = useState(account.displayName);
-    const [state, setState] = useState<Wrote>({ at: 'idle' });
+    const action = useAction();
 
     const changed = displayName.trim() !== account.displayName;
 
-    async function save(): Promise<void> {
-        setState({ at: 'saving' });
-        try {
-            onRenamed(await api.rename(displayName.trim()));
-            setState({ at: 'saved' });
-        } catch (failure) {
-            setState({ at: 'failed', message: messageOf(failure, 'That name was not saved.') });
-        }
-    }
-
     return (
-        <Panel
-            as="form"
+        <FormPanel
             className="card"
-            noValidate
-            onSubmit={(event) => {
-                event.preventDefault();
-                void save();
-            }}
+            onSubmit={() =>
+                void action.run(async () => {
+                    accountChanged(await api.rename(displayName.trim()));
+                }, 'That name was not saved.')
+            }
         >
             <SectionTitle as="h2" subline="Other players see this on a leaderboard.">
                 Display name
@@ -81,6 +47,7 @@ function NameCard({
             <TextInput
                 label="Display name"
                 labelHidden
+                className="card__field"
                 name="displayName"
                 maxLength={64}
                 required
@@ -89,6 +56,7 @@ function NameCard({
             />
             <TextInput
                 label="Email"
+                className="card__field"
                 name="email"
                 value={account.email}
                 readOnly
@@ -98,60 +66,41 @@ function NameCard({
                 <Button
                     type="submit"
                     variant="primary"
-                    aria-busy={state.at === 'saving'}
-                    aria-disabled={state.at === 'saving' || !changed || undefined}
+                    aria-busy={action.busy}
+                    aria-disabled={action.busy || !changed || undefined}
                 >
-                    {state.at === 'saving' ? 'Saving…' : 'Save name'}
+                    {action.busy ? 'Saving…' : 'Save name'}
                 </Button>
-                <CardState state={state} saved="Saved." />
+                <CardState state={action.state} done="Saved." />
             </div>
-        </Panel>
+        </FormPanel>
     );
 }
 
 /** Changing the password, which drops every other session the account was holding. */
-function PasswordCard({ api }: { api: Api }): React.JSX.Element {
+function PasswordCard(): React.JSX.Element {
+    const { api } = useSession();
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
-    const [state, setState] = useState<Wrote>({ at: 'idle' });
+    const action = useAction();
 
-    const tooShort = newPassword.length > 0 && newPassword.length < PASSWORD_MIN;
-
-    async function save(): Promise<void> {
-        if (tooShort) {
-            setState({
-                at: 'failed',
-                message: `A password is at least ${String(PASSWORD_MIN)} characters.`,
-            });
+    function save(): void {
+        if (tooShort(newPassword)) {
+            action.fail(TOO_SHORT);
             return;
         }
-        setState({ at: 'saving' });
-        try {
+        void action.run(async () => {
             if ((await api.changePassword(currentPassword, newPassword)) === undefined) {
-                setState({ at: 'failed', message: 'That is not your current password.' });
-                return;
+                return 'That is not your current password.';
             }
             setCurrentPassword('');
             setNewPassword('');
-            setState({ at: 'saved' });
-        } catch (failure) {
-            setState({
-                at: 'failed',
-                message: messageOf(failure, 'The password was not changed.'),
-            });
-        }
+            return undefined;
+        }, 'The password was not changed.');
     }
 
     return (
-        <Panel
-            as="form"
-            className="card"
-            noValidate
-            onSubmit={(event) => {
-                event.preventDefault();
-                void save();
-            }}
-        >
+        <FormPanel className="card" onSubmit={save}>
             <SectionTitle
                 as="h2"
                 subline="Changing it signs out everything else that was signed in."
@@ -160,6 +109,7 @@ function PasswordCard({ api }: { api: Api }): React.JSX.Element {
             </SectionTitle>
             <TextInput
                 label="Current password"
+                className="card__field"
                 type="password"
                 name="currentPassword"
                 autoComplete="current-password"
@@ -167,78 +117,53 @@ function PasswordCard({ api }: { api: Api }): React.JSX.Element {
                 value={currentPassword}
                 onChange={(event) => setCurrentPassword(event.target.value)}
             />
-            <TextInput
+            <NewPasswordField
                 label="New password"
-                type="password"
                 name="newPassword"
-                autoComplete="new-password"
-                required
-                minLength={PASSWORD_MIN}
-                maxLength={PASSWORD_MAX}
-                aria-invalid={tooShort || undefined}
-                hint={`At least ${String(PASSWORD_MIN)} characters.`}
+                hintAlways
+                className="card__field"
                 value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
+                onChange={setNewPassword}
             />
             <div className="card__actions">
                 <Button
                     type="submit"
                     variant="primary"
-                    aria-busy={state.at === 'saving'}
+                    aria-busy={action.busy}
                     aria-disabled={
-                        state.at === 'saving' ||
-                        currentPassword === '' ||
-                        newPassword === '' ||
-                        undefined
+                        action.busy || currentPassword === '' || newPassword === '' || undefined
                     }
                 >
-                    {state.at === 'saving' ? 'Changing…' : 'Change password'}
+                    {action.busy ? 'Changing…' : 'Change password'}
                 </Button>
-                <CardState state={state} saved="Your password is changed." />
+                <CardState state={action.state} done="Your password is changed." />
             </div>
-        </Panel>
+        </FormPanel>
     );
 }
 
 /** Closing the account, which the service refuses while it still owns a game. */
-function CloseCard({ api, onClosed }: { api: Api; onClosed: () => void }): React.JSX.Element {
+function CloseCard(): React.JSX.Element {
+    const { api, forget } = useSession();
     const [asked, setAsked] = useState(false);
     const [currentPassword, setCurrentPassword] = useState('');
-    const [state, setState] = useState<Wrote>({ at: 'idle' });
-
-    async function close(): Promise<void> {
-        setState({ at: 'saving' });
-        try {
-            await api.closeAccount(currentPassword);
-            onClosed();
-            go({ at: 'landing' });
-        } catch (failure) {
-            if (isLapsedSession(failure)) {
-                onClosed();
-                go({ at: 'sign-in', returnTo: undefined });
-                return;
-            }
-            setState({
-                at: 'failed',
-                message: messageOf(failure, 'The account was not closed.'),
-            });
-        }
-    }
+    const action = useAction();
 
     return (
-        <Panel
-            as="form"
+        <FormPanel
             face="warm"
             className="card"
-            noValidate
-            onSubmit={(event) => {
-                event.preventDefault();
-                void close();
-            }}
+            onSubmit={() =>
+                void action.run(async () => {
+                    await api.closeAccount(currentPassword);
+                    forget();
+                    go({ at: 'landing' });
+                }, 'The account was not closed.')
+            }
         >
             <SectionTitle
                 as="h2"
-                subline="Delete your games first — Grove will not close an account that still owns one."
+                subline="Delete your games first: Grove will not close an account that still owns one."
             >
                 Close your account
             </SectionTitle>
@@ -247,6 +172,7 @@ function CloseCard({ api, onClosed }: { api: Api; onClosed: () => void }): React
                 <>
                     <TextInput
                         label="Your password"
+                        className="card__field"
                         type="password"
                         name="currentPassword"
                         autoComplete="current-password"
@@ -257,24 +183,22 @@ function CloseCard({ api, onClosed }: { api: Api; onClosed: () => void }): React
                     <div className="card__actions">
                         <Button
                             type="submit"
-                            aria-busy={state.at === 'saving'}
-                            aria-disabled={
-                                state.at === 'saving' || currentPassword === '' || undefined
-                            }
+                            aria-busy={action.busy}
+                            aria-disabled={action.busy || currentPassword === '' || undefined}
                         >
-                            {state.at === 'saving' ? 'Closing…' : 'Close it for good'}
+                            {action.busy ? 'Closing…' : 'Close it for good'}
                         </Button>
                         <Button
                             variant="ghost"
                             onClick={() => {
                                 setAsked(false);
                                 setCurrentPassword('');
-                                setState({ at: 'idle' });
+                                action.reset();
                             }}
                         >
                             Keep my account
                         </Button>
-                        <CardState state={state} saved="" />
+                        <CardState state={action.state} done="" />
                     </div>
                 </>
             ) : (
@@ -282,12 +206,18 @@ function CloseCard({ api, onClosed }: { api: Api; onClosed: () => void }): React
                     <Button onClick={() => setAsked(true)}>Close my account</Button>
                 </div>
             )}
-        </Panel>
+        </FormPanel>
     );
 }
 
 /** What a card's last write did, in the one place all three of them report it. */
-function CardState({ state, saved }: { state: Wrote; saved: string }): React.JSX.Element | null {
+function CardState({
+    state,
+    done,
+}: {
+    state: ActionState;
+    done: string;
+}): React.JSX.Element | null {
     if (state.at === 'failed') {
         return (
             <span className="card__refusal" role="alert">
@@ -295,10 +225,10 @@ function CardState({ state, saved }: { state: Wrote; saved: string }): React.JSX
             </span>
         );
     }
-    if (state.at === 'saved' && saved !== '') {
+    if (state.at === 'done' && done !== '') {
         return (
             <span className="card__saved" role="status">
-                {saved}
+                {done}
             </span>
         );
     }

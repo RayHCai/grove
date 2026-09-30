@@ -20,12 +20,11 @@ async function profile(api = signedInApi(), tab = navigation()) {
 }
 
 describe('the profile page', () => {
-    it('shows the name, the address and when the account started', async () => {
+    it('shows the name and the address', async () => {
         const { host } = await profile();
 
         expect(field(host, 'Email').value).toBe(ACCOUNT.email);
         expect(field(host, 'Email').readOnly).toBe(true);
-        expect(host.textContent).toContain('With Grove since');
     });
 });
 
@@ -38,8 +37,6 @@ describe('renaming', () => {
         await until(() => api.account.displayName === 'Juniper');
 
         expect(host.querySelector('.card__saved')?.textContent).toBe('Saved.');
-        // The header reads the held account, so a stale one there is a name the site disagrees with.
-        expect(host.querySelector('.siteheader__who')?.textContent).toBe('Juniper');
     });
 });
 
@@ -113,5 +110,26 @@ describe('closing the account', () => {
         await until(() => window.location.pathname === '/');
 
         expect(api.signedIn).toBe(false);
+    });
+});
+
+describe('a session that lapsed while the page was open', () => {
+    it('sends a rename to sign in rather than reporting it as a failure', async () => {
+        const { host, api } = await profile();
+        api.signedIn = false;
+
+        await type(field(host, 'Display name'), 'Juniper');
+        await submit(need(host, 'button', 'Save name'));
+        await until(() => window.location.pathname === '/sign-in');
+    });
+
+    it('sends a password change to sign in the same way', async () => {
+        const { host, api } = await profile();
+        api.signedIn = false;
+
+        await type(field(host, 'Current password'), PASSWORD);
+        await type(field(host, 'New password'), 'a-different-long-password');
+        await submit(need(host, 'button', 'Change password'));
+        await until(() => window.location.pathname === '/sign-in');
     });
 });

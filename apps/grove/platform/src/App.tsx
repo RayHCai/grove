@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { apiBaseUrl, createApi } from './api/client';
+import { apiUrl } from '@grove/ui';
+import { createApi } from './api/client';
 import type { Api } from './api/client';
 import { SessionProvider } from './session/SessionProvider';
 import { Site } from './Site';
@@ -14,7 +15,11 @@ export interface AppProps {
 export function App({ api, navigate }: AppProps = {}): React.JSX.Element {
     // Made once and kept: the client holds the CSRF token the last sign-in handed out, and a new
     // one per render would be a client that had never signed in.
-    const [client] = useState(() => api ?? createApi({ baseUrl: apiBaseUrl() }));
+    const [client] = useState(
+        () =>
+            api ??
+            createApi({ baseUrl: apiUrl(import.meta.env.VITE_API_URL, import.meta.env.DEV) }),
+    );
     return (
         <SessionProvider api={client} navigate={navigate}>
             <Site />

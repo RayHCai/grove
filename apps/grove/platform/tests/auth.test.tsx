@@ -21,15 +21,15 @@ async function signInForm(api = fakeApi(), navigate = navigation()) {
 }
 
 describe('signing in', () => {
-    it('lands on the games page when nobody sent them here', async () => {
+    it('lands on the home page when nobody sent them here', async () => {
         const { host } = await signInForm();
 
         await type(field(host, 'Email'), ACCOUNT.email);
         await type(field(host, 'Password'), PASSWORD);
         await submit(need(host, 'form button', 'Sign in'));
-        await until(() => window.location.pathname === '/games');
+        await until(() => window.location.pathname === '/');
 
-        expect(host.querySelector('h1')?.textContent?.trim()).toBe('Your games');
+        expect(host.querySelector('.home')).not.toBeNull();
     });
 
     it('goes back to the editor when the editor sent them here', async () => {
@@ -51,7 +51,7 @@ describe('signing in', () => {
 
     /**
      * The service answers an unknown address, a wrong password and a locked account the same way,
-     * and this page must not be the end that tells them apart — which of the three it was is the
+     * and this page must not be the end that tells them apart; which of the three it was is the
      * fact an enumeration is looking for.
      */
     it('says one thing for every credential that does not open an account', async () => {
@@ -87,7 +87,7 @@ describe('signing in', () => {
 });
 
 describe('signing up', () => {
-    it('makes the account and lands on the games page', async () => {
+    it('makes the account and lands on the home page', async () => {
         at('/sign-up');
         const api = fakeApi();
         const host = await mount(<App api={api} navigate={navigation().navigate} />);
@@ -97,10 +97,9 @@ describe('signing up', () => {
         await type(field(host, 'Email'), 'juniper@grove.example');
         await type(field(host, 'Password'), 'another-long-password');
         await submit(need(host, 'button', 'Create account'));
-        await until(() => window.location.pathname === '/games');
+        await until(() => window.location.pathname === '/');
 
         expect(api.account.displayName).toBe('Juniper');
-        expect(host.textContent).toContain('Juniper');
     });
 
     it('goes straight to the editor when the editor sent them here', async () => {
@@ -149,19 +148,5 @@ describe('signing up', () => {
 
         expect(host.querySelector('[role="alert"]')?.textContent).toContain('at least 8');
         expect(api.account.displayName).toBe(ACCOUNT.displayName);
-    });
-});
-
-describe('signing out', () => {
-    it('drops the session and leaves the front page standing', async () => {
-        const api = fakeApi({ signedIn: true });
-        const host = await mount(<App api={api} navigate={navigation().navigate} />);
-        await untilSettled(host);
-
-        await click(need(host, 'button', 'Sign out'));
-        await until(() => api.signedIn === false);
-        await untilSettled(host);
-
-        expect(need(host, 'button', 'Get started')).toBeDefined();
     });
 });

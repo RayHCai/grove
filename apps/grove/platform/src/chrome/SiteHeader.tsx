@@ -1,8 +1,10 @@
-import { Button, Panel, Wordmark } from '@grove/ui';
-import { Link } from '../router/Link';
+import { HomeIcon, Panel, Wordmark } from '@grove/ui';
+import { ButtonLink, Link, navigateInPlace } from '../router/Link';
 import { hrefOf, type Route } from '../router/routes';
-import { go } from '../router/useRoute';
 import { useSession } from '../session/SessionProvider';
+import { UNFINISHED } from '../unfinished';
+import { ProfileMenu } from './ProfileMenu';
+import { SearchField } from './SearchField';
 
 export interface SiteHeaderProps {
     route: Route;
@@ -10,64 +12,61 @@ export interface SiteHeaderProps {
 
 /** The header every page carries: the wordmark, where else to go, and the account. */
 export function SiteHeader({ route }: SiteHeaderProps): React.JSX.Element {
-    const { session, signOut } = useSession();
+    const { session } = useSession();
 
     return (
         <header className="siteheader">
             <Panel className="siteheader__inner" aria-label="Main">
                 <Wordmark
                     href={hrefOf({ at: 'landing' })}
-                    onClick={(event) => {
-                        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
-                        event.preventDefault();
-                        go({ at: 'landing' });
-                    }}
+                    onClick={(event) => navigateInPlace({ at: 'landing' }, event)}
                 />
 
                 {session.at === 'signed-in' && (
-                    <nav className="sitenav" aria-label="Your Grove">
-                        <Link
-                            to={{ at: 'games' }}
-                            className="sitenav__link"
-                            aria-current={route.at === 'games' ? 'page' : undefined}
-                        >
-                            Games
-                        </Link>
-                        <Link
-                            to={{ at: 'profile' }}
-                            className="sitenav__link"
-                            aria-current={route.at === 'profile' ? 'page' : undefined}
-                        >
-                            Profile
-                        </Link>
-                    </nav>
+                    <>
+                        <nav className="sitenav" aria-label="Your Grove">
+                            <Link
+                                to={{ at: 'landing' }}
+                                className="sitenav__link sitenav__link--icon"
+                                aria-label="Home"
+                                title="Home"
+                                aria-current={route.at === 'landing' ? 'page' : undefined}
+                            >
+                                <HomeIcon size={20} />
+                            </Link>
+                        </nav>
+
+                        {/* Not wired to anything yet: there is no search endpoint to ask. */}
+                        {UNFINISHED && (
+                            <form
+                                className="sitesearch"
+                                role="search"
+                                onSubmit={(event) => event.preventDefault()}
+                            >
+                                <SearchField label="Search Grove" name="q" />
+                            </form>
+                        )}
+                    </>
                 )}
 
                 <div className="siteheader__end">
-                    {session.at === 'signed-in' && (
-                        <>
-                            <span className="siteheader__who">{session.account.displayName}</span>
-                            <Button size="sm" variant="ghost" onClick={() => void signOut()}>
-                                Sign out
-                            </Button>
-                        </>
-                    )}
+                    {session.at === 'signed-in' && <ProfileMenu />}
                     {session.at === 'anonymous' && (
                         <>
-                            <Button
+                            <ButtonLink
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => go({ at: 'sign-in', returnTo: undefined })}
+                                to={{ at: 'sign-in', returnTo: undefined }}
                             >
                                 Sign in
-                            </Button>
-                            <Button
+                            </ButtonLink>
+                            <ButtonLink
                                 size="sm"
                                 variant="primary"
-                                onClick={() => go({ at: 'sign-up', returnTo: undefined })}
+                                to={{ at: 'sign-up', returnTo: undefined }}
                             >
                                 Get started
-                            </Button>
+                            </ButtonLink>
                         </>
                     )}
                 </div>

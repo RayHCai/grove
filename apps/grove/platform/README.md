@@ -23,16 +23,18 @@ reset mail `@grove/api` sends links to `/reset-password?token=`.
 | `/forgot-password` | Asking for a reset link                                                 |
 | `/reset-password`  | Spending the key that link carried                                      |
 | `/games`           | Every game this creator owns, newest first, and the way into the editor |
+| `/games/:gameId`   | One game: its pictures, the way in, what it is and where it is running  |
 | `/profile`         | The name others see, the password, and closing the account              |
 
-`src/router/routes.ts` is the whole of what an address means — parsing and writing are one module
-with no DOM in it — and `src/router/useRoute.ts` is the subscription to the address bar. `popstate`
+`src/router/routes.ts` is the whole of what an address means (parsing and writing are one module
+with no DOM in it), and `src/router/useRoute.ts` is the subscription to the address bar. `popstate`
 covers the back button and nothing else, because a browser does not fire it for a push this app
 made, so `go` and `replace` tell the subscribers themselves.
 
 `src/router/Link.tsx` sets a real `href` as well as handling the click, so a link can be
 middle-clicked, copied and read by anything that looks at a page's links. A modifier or any button
-but the first is left to the browser.
+but the first is left to the browser; `navigateInPlace` is that rule alone, for an anchor that is not
+a `Link`, such as the wordmark.
 
 ## The gates
 
@@ -41,7 +43,7 @@ is a fact about the route and a page that had to check for itself is a page that
 Both redirects **replace** rather than push: somebody bounced off a page they could not see should
 not have to click back twice to get past it.
 
-- **No session, on `/games` or `/profile`** → `/sign-in`.
+- **No session, on `/games`, a game's page or `/profile`** → `/sign-in`.
 - **A session, on `/sign-in` or `/sign-up`** → `/games`, unless the editor sent them, which is the
   next section.
 
@@ -56,7 +58,7 @@ the editor reads the same one, so this is a destination rather than a credential
 nothing on it to leak into a history entry or a `Referer`.
 
 A `return=` the editor sent is honoured **only when it is on the editor's own origin**. Anything
-else is dropped for the editor's front door instead — a link written by anybody could otherwise
+else is dropped for the editor's front door instead; a link written by anybody could otherwise
 bounce a creator off this origin onto a page dressed as it. Nothing is not a failure here; it is the
 front door.
 
@@ -70,14 +72,40 @@ only the first card and says which game that is. A button on the rest would name
 different one. `New game` makes one and then crosses, in that order, because making it is what makes
 it the newest.
 
+## Crossing to a game
+
+Every card on `/games` has a **Play** button. It asks `POST /v1/games/:gameId/play` for a seat and a
+ticket, behind the cookie, and sends the tab to `VITE_PLAYER_URL` with the `PlayHandoff` in the url
+**fragment**, encoded by `encodeHandoff` from `@grove/api-contract`. A fragment never reaches a
+server, so the ticket stays out of access logs and `Referer`; the player origin is absent from the
+API's CORS allowlist, so this is the only way a join reaches it. `src/player/link.ts` is the only
+module that builds that link. A game with no finished build, or no box with room for it, is a
+conflict, and the card says so with the service's reason.
+
+A game's own page, `/games/:gameId`, is reached from a tile on `/` and from the eye on a `/games`
+card, which only a game with a `publishedAt` carries. It has the same **Play**. The service has no
+read of one game for anybody but its owner, so an id is looked for in the viewer's own listing, and
+one not there is a page saying so. The ids the front page's tiles carry are placeholders
+(`src/catalog/placeholder.ts`), and so is every count no service keeps (visits, favourites, votes,
+running servers): a placeholder game shows made-up ones, and a real game shows a dash rather than a
+zero. Favourite, the votes and a server's Join are drawn but disabled, because nothing would keep
+what they say; Play on a placeholder is disabled for the same reason. All of the made-up parts (the
+front page's shelves, a placeholder id, the suggestions, favourites and votes, the header's search
+and a card's settings) show only in a dev server or a build told `VITE_SHOW_UNFINISHED=true`;
+anywhere else `/` is the front door for everybody.
+
 ## The session
 
 `src/session/SessionProvider.tsx` holds who is signed in, read once on the first load and kept for
 every page after it. Two calls rather than one: `GET /v1/auth/session` is the route that answers a
 cookie naming nobody without it being a failure, and it hands back the CSRF token every write here
-has to carry — so it runs before the account is read and before any form can be submitted. An API
+has to carry, so it runs before the account is read and before any form can be submitted. An API
 nobody can reach is a visitor who is not signed in, which leaves the pages in front of the gate
 working.
+
+Every form and button that asks the service something goes through `src/session/useAction.ts`: busy
+while the request is out, then the sentence it was refused with, and a session the service stopped
+recognising handed to the provider's `lapsed`, which forgets it and sends the visitor to sign in.
 
 `src/api/client.ts` is every call to `@grove/api` and the only place that CSRF token lives, because a
 component that had to carry it from the sign-in to the next write is one that can drop it. The API is
@@ -85,8 +113,8 @@ a different origin, so every call is `credentials: 'include'`.
 
 A refusal a person can act on comes back as an **answer** rather than as something thrown past the
 form: a cookie naming nobody, a credential that opens no account, a spent reset key and a wrong
-current password are each a value the caller branches on. `src/api/messages.ts` turns anything else
-into one sentence, keeping the service's own wording where it wrote some — it is the end that knows
+current password are each a value the caller branches on. `@grove/ui`'s `messageOf` turns anything else
+into one sentence, keeping the service's own wording where it wrote some; it is the end that knows
 which field was wrong.
 
 ## What a page is allowed to say
@@ -104,36 +132,51 @@ page goes on to make. `hrefOf` cannot write one back.
 
 ## The look
 
-**Pixel Grove**, dark only, and `@grove/ui` owns all of it — the palette, the components, and how
+**Pixel Grove**, dark only, and `@grove/ui` owns all of it: the palette, the components, and how
 a surface is built: the 3px edge, the solid block it drops, and the stepped corner it is clipped to.
-This app adds `src/styles/platform.css` and nothing else. Every page is a column of at most
+This app adds `src/styles/platform.css`, which imports one sheet per area (the scale, the chrome,
+the front door, the sign-in flow, the zone pages, the shelves and a game's page), and nothing else.
+Every page is a column of at most
 `--shell-measure`, every gap and padding is a `--pg-sp-*` step, and no rule here names a colour that
-is not a `--pg-*` token or draws an edge that is not `--pg-bw` — the kit says how a surface looks,
-and this sheet only says where the surfaces go.
+is not a `--pg-*` token or draws an edge that is not `--pg-bw`; the kit says how a surface looks,
+and this sheet only says where the surfaces go. The one exception is a game's art (a tile, and the
+scene on a game's page), which is painted from that game's own `--tile-hue` or `--art-hue`, because
+a picture of a game is content rather than chrome.
 
-The nav and the footer are `Panel`s like every other surface rather than divs with a rule under
-them, which is why the header is not sticky: a panel drops a solid block, and a sticky one would
+A front door is read at arm's length rather than worked in, so that sheet's `:root` restates the
+kit's whole metric scale at four fifths (the spacing steps, the control and field metrics, the type
+sizes and the chip metrics), which is the root of its own the kit asks a denser app to take, rather
+than overriding the rules that read those tokens or scaling the page with a transform. The
+construction steps stay whole: `--pg-bw`, `--pg-lift` and the notches are a sprite's pixels.
+
+The nav is a `Panel` like every other surface rather than a div with a rule under it, which is why
+the header is not sticky: a panel drops a solid block, and a sticky one would
 drag that block down the page behind it. Two places invert to the plate pair rather than to the
-page's own ink — a hovered nav link and a hovered link in the sign-in flow — because `--pg-ink` is
+page's own ink (a hovered nav link and a hovered link in the sign-in flow) because `--pg-ink` is
 the light parchment in dark, and a plate painted with it would be sun text on cream.
 
 `index.html` loads Press Start 2P and VT323, carries `class="pg-scanlines"` for the wash the kit
 paints over the viewport, and hard-codes `data-theme="dark"` on `<html>`. There is no toggle and no
-`ThemeProvider` here: light is the editor's theme, because that is the app somebody reads code in
-all day, and this one is a front door. The kit still ships both, so nothing about `@grove/ui`
-changes.
+`ThemeProvider` here: the editor, which somebody reads code in all day, follows the system's
+preference through one, and this app is a front door.
 
 ## The environment
 
-| Variable          | What                                                         |
-| ----------------- | ------------------------------------------------------------ |
-| `VITE_API_URL`    | Where `@grove/api` is; `http://localhost:4000` by default    |
-| `VITE_EDITOR_URL` | Where `@grove/editor` is; `http://localhost:5176` by default |
+| Variable               | What                                                                |
+| ---------------------- | ------------------------------------------------------------------- |
+| `VITE_API_URL`         | Where `@grove/api` is; `http://localhost:4000` in dev               |
+| `VITE_EDITOR_URL`      | Where `@grove/editor` is; `http://localhost:5176` in dev            |
+| `VITE_PLAYER_URL`      | Where the player origin is; `http://localhost:5177` in dev          |
+| `VITE_SHOW_UNFINISHED` | `true` shows the made-up parts in a build; a dev server always does |
+
+The address defaults are a dev server's only: a production build that was never told one of them
+throws rather than sending somebody to their own machine. `.env.example` lists them and
+`src/vite-env.d.ts` types them.
 
 ## Running it
 
 Consumers resolve `@grove/ui` from its built `dist` (`pnpm --filter @grove/ui build`), so
-`pnpm --filter @grove/platform dev` builds it first and then serves on port 5175 — the port
+`pnpm --filter @grove/platform dev` builds it first and then serves on port 5175, the port
 `@grove/editor` dials when it sends somebody here.
 
 The pages above are paths, so whatever serves the built `dist/` has to answer an unknown path with

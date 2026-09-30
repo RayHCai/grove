@@ -1,0 +1,70 @@
+/*
+ * The front door is read at arm's length rather than worked in, so it restates the kit's scale at
+ * four fifths on its own root (the way the kit asks an app wanting a denser scale to take one)
+ * rather than overriding the rules that read those tokens or scaling the page with a transform.
+ *
+ * The construction steps are not in the restatement: --pg-bw, --pg-lift and the stepped corners are
+ * whole pixels of a sprite, and four fifths of a 3px edge is a blurred one.
+ */
+:root {
+    --pg-sp-1: 3px;
+    --pg-sp-2: 6px;
+    --pg-sp-3: 10px;
+    --pg-sp-4: 13px;
+    --pg-sp-5: 19px;
+    --pg-sp-6: 26px;
+    --pg-sp-7: 38px;
+    --pg-sp-8: 64px;
+
+    --pg-ctl-h: 27px;
+    --pg-ctl-h-sm: 22px;
+    --pg-ctl-pad: 8px 11px;
+    --pg-ctl-pad-sm: 6px 8px;
+    --pg-ctl-text: 10px;
+    --pg-ctl-text-sm: 8px;
+    --pg-icon: 13px;
+    --pg-field-h: 32px;
+    --pg-field-text: 18px;
+    --pg-field-label: 9px;
+    --pg-field-pad: 7px 10px;
+    --pg-plate-text: 10px;
+    --pg-plate-pad: 10px 13px;
+    --pg-plate-sub-text: 18px;
+    --pg-mark-text: 13px;
+    --pg-text: 17px;
+    --pg-text-sm: 15px;
+    --pg-badge-text: 8px;
+    --pg-badge-pad: 6px 10px;
+    --pg-tag-text: 7px;
+    --pg-tag-pad: 5px 6px;
+    --pg-eyebrow-text: 9px;
+    --pg-eyebrow-pad: 7px 10px;
+    --pg-eyebrow-gap: 8px;
+    --pg-eyebrow-pip: 6px;
+    --pg-tile: 6px;
+
+    --shell-measure: 896px;
+    --shell-narrow: 352px;
+    --shell-gutter: clamp(13px, 3.2vw, 32px);
+    --header-height: 51px;
+}
+
+body {
+    display: flex;
+    min-height: 100vh;
+    /* dvh second, so a mobile browser's collapsing toolbar does not make a fitted page scroll;
+       a browser that does not know the unit keeps the line above. */
+    min-height: 100dvh;
+    flex-direction: column;
+    overflow-x: hidden;
+}
+
+/*
+ * The mount point is the column, not the body: everything React renders is inside it, so without
+ * this the chrome would stack at the top of a page short enough to leave slack under it.
+ */
+#root {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+}

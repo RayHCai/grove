@@ -37,6 +37,17 @@ describe('reading an address', () => {
         expect(parseRoute('/')).toEqual({ at: 'landing' });
     });
 
+    it('reads one game out of the segment under /games', () => {
+        expect(parseRoute('/games/game-7')).toEqual({ at: 'game', gameId: 'game-7' });
+        expect(parseRoute('/games/game-7/')).toEqual({ at: 'game', gameId: 'game-7' });
+        expect(parseRoute('/games/a%20b')).toEqual({ at: 'game', gameId: 'a b' });
+    });
+
+    it('reads a game address it cannot decode, or one nested deeper, as no page', () => {
+        expect(parseRoute('/games/%E0%A4%A')).toEqual({ at: 'missing', path: '/games/%E0%A4%A' });
+        expect(parseRoute('/games/a/b')).toEqual({ at: 'missing', path: '/games/a/b' });
+    });
+
     it('names an address it has no page for rather than guessing one', () => {
         expect(parseRoute('/nowhere')).toEqual({ at: 'missing', path: '/nowhere' });
     });
@@ -50,6 +61,8 @@ describe('writing an address', () => {
             { at: 'sign-up', returnTo: undefined },
             { at: 'forgot-password' },
             { at: 'games' },
+            { at: 'game', gameId: '9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f' },
+            { at: 'game', gameId: 'a/b c' },
             { at: 'profile' },
         ] as const;
         for (const route of routes) expect(parseRoute(hrefOf(route))).toEqual(route);
@@ -74,6 +87,7 @@ describe('what a route needs', () => {
     it('knows the pages that mean nothing without a session', () => {
         expect(needsSession({ at: 'games' })).toBe(true);
         expect(needsSession({ at: 'profile' })).toBe(true);
+        expect(needsSession({ at: 'game', gameId: 'game-1' })).toBe(true);
         expect(needsSession({ at: 'landing' })).toBe(false);
         expect(needsSession({ at: 'reset-password', token: undefined })).toBe(false);
     });

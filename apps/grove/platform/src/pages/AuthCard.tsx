@@ -1,5 +1,6 @@
-import { Panel, SectionTitle } from '@grove/ui';
+import { SectionTitle } from '@grove/ui';
 import type { ReactNode } from 'react';
+import { FormPanel } from '../chrome/FormPanel';
 
 export interface AuthCardProps {
     title: string;
@@ -21,18 +22,10 @@ export function AuthCard({
 }: AuthCardProps): React.JSX.Element {
     return (
         <main className="authpage">
-            <Panel
-                as="form"
-                className="authcard"
-                noValidate
-                onSubmit={(event) => {
-                    // The browser's own navigation would reload the app and lose the typed fields;
-                    // everything here is a fetch.
-                    event.preventDefault();
-                    onSubmit();
-                }}
-            >
-                <SectionTitle as="h1">{title}</SectionTitle>
+            <FormPanel className="authcard" onSubmit={onSubmit}>
+                <SectionTitle as="h1" className="authcard__title">
+                    {title}
+                </SectionTitle>
 
                 {refusal !== undefined && (
                     <p className="authcard__refusal" role="alert">
@@ -41,7 +34,7 @@ export function AuthCard({
                 )}
 
                 <div className="authcard__fields">{children}</div>
-            </Panel>
+            </FormPanel>
             {footer !== undefined && <p className="authpage__footer">{footer}</p>}
         </main>
     );

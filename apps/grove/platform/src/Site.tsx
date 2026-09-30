@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { Panel, Tilestrip, Wordmark } from '@grove/ui';
-import { SiteFooter } from './chrome/SiteFooter';
+import { Splash, Tilestrip } from '@grove/ui';
 import { SiteHeader } from './chrome/SiteHeader';
 import { ForgotPassword } from './pages/ForgotPassword';
+import { GamePage } from './pages/GamePage';
 import { Games } from './pages/Games';
+import { Home } from './pages/Home';
 import { Landing } from './pages/Landing';
 import { NotFound } from './pages/NotFound';
 import { Profile } from './pages/Profile';
@@ -11,23 +12,10 @@ import { ResetPassword } from './pages/ResetPassword';
 import { SignIn } from './pages/SignIn';
 import { SignUp } from './pages/SignUp';
 import { needsAnonymity, needsSession, type Route } from './router/routes';
-import { replace, useRoute } from './router/useRoute';
+import { replace, useRoute, useRouteFocus } from './router/useRoute';
 import { useSession } from './session/SessionProvider';
 import type { Session } from './session/SessionProvider';
-
-/** What the page is while the cookie is still being asked about, or while a gate is acting on it. */
-function Waiting({ note }: { note: string }): React.JSX.Element {
-    return (
-        <main className="waiting" aria-busy="true">
-            <Panel className="waiting__card">
-                <Wordmark />
-                <p className="waiting__note" role="status">
-                    {note}
-                </p>
-            </Panel>
-        </main>
-    );
-}
+import { UNFINISHED } from './unfinished';
 
 /** The way back the editor asked for, on the two pages that carry one. */
 function returnOf(route: Route): string | undefined {
@@ -46,17 +34,21 @@ function pageFor(route: Route, session: Session): React.JSX.Element {
             return <ResetPassword token={route.token} />;
         case 'games':
             return <Games />;
+        case 'game':
+            // Keyed, so going from one game's page to another starts the second one fresh.
+            return <GamePage key={route.gameId} gameId={route.gameId} />;
         case 'profile':
             // The gate below has already established there is a session; this is the narrowing.
             return session.at === 'signed-in' ? (
                 <Profile account={session.account} />
             ) : (
-                <Waiting note="One moment…" />
+                <Splash busy note="One moment…" />
             );
         case 'missing':
             return <NotFound path={route.path} />;
         default:
-            return <Landing />;
+            // The front page browses made-up games until there is a listing of real ones to ask.
+            return session.at === 'signed-in' && UNFINISHED ? <Home /> : <Landing />;
     }
 }
 
@@ -68,6 +60,7 @@ function pageFor(route: Route, session: Session): React.JSX.Element {
  */
 export function Site(): React.JSX.Element {
     const route = useRoute();
+    useRouteFocus(route);
     const { session, openEditor } = useSession();
     // A tab that is already leaving must not be sent again: the crossing is a navigation, and a
     // test that hands in its own `navigate` does not actually leave.
@@ -84,7 +77,7 @@ export function Site(): React.JSX.Element {
         // Replaced rather than pushed: somebody bounced off a page they could not see should not
         // have to click back twice to get past it.
         if (turnedAway) replace({ at: 'sign-in', returnTo: undefined });
-        else if (alreadyIn) replace({ at: 'games' });
+        else if (alreadyIn) replace({ at: 'landing' });
     }, [turnedAway, alreadyIn]);
 
     useEffect(() => {
@@ -94,18 +87,17 @@ export function Site(): React.JSX.Element {
     }, [crossBack, returnTo, openEditor]);
 
     function body(): React.JSX.Element {
-        if (session.at === 'loading') return <Waiting note="One moment…" />;
-        if (crossBack) return <Waiting note="Taking you back to the editor…" />;
-        if (turnedAway || alreadyIn) return <Waiting note="One moment…" />;
+        if (session.at === 'loading') return <Splash busy note="One moment…" />;
+        if (crossBack) return <Splash busy note="Taking you back to the editor…" />;
+        if (turnedAway || alreadyIn) return <Splash busy note="One moment…" />;
         return pageFor(route, session);
     }
 
     return (
         <>
-            <Tilestrip />
+            <Tilestrip className="site__strip" />
             <SiteHeader route={route} />
             {body()}
-            <SiteFooter />
         </>
     );
 }
