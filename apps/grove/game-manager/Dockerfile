@@ -28,5 +28,5 @@ COPY --from=build /out/grove-healthcheck /usr/local/bin/grove-healthcheck
 COPY --from=build /out/grove-game-manager /usr/local/bin/grove-game-manager
 EXPOSE 4001
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/usr/local/bin/grove-healthcheck", "-port-env", "GAME_MANAGER_PORT", "-port", "4001"]
+    CMD ["/usr/local/bin/grove-healthcheck", "-port-env", "GAME_MANAGER_PORT,PORT", "-port", "4001"]
 ENTRYPOINT ["/usr/local/bin/grove-game-manager"]
