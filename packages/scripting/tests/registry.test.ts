@@ -3,7 +3,7 @@
 
 import { ClientScript, LoadError, ServerScript, SyncedScript } from '@platform/core';
 import { describe, expect, it } from 'vitest';
-import { ScriptRegistry, locationsFor } from '../src/registry.js';
+import { ScriptRegistry } from '../src/registry.js';
 import type { ScriptEntry } from '../src/registry.js';
 
 class Rules extends ServerScript {}
@@ -47,12 +47,5 @@ describe('ScriptRegistry', () => {
         expect(() =>
             ScriptRegistry.from([entry('a', Rules, 'server'), entry('b', Rules, 'server')]),
         ).toThrow(LoadError);
-    });
-});
-
-describe('locationsFor', () => {
-    it('puts synced on both sides and each other location on one', () => {
-        expect([...locationsFor('server')].toSorted()).toEqual(['server', 'synced']);
-        expect([...locationsFor('client')].toSorted()).toEqual(['client', 'synced']);
     });
 });

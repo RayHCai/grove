@@ -1,5 +1,5 @@
 {
-    // A creator's project, standing in for a real one — so it extends no config of this repo's and
+    // A creator's project, standing in for a real one, so it extends no config of this repo's and
     // spells out what the pipeline requires: NodeNext, and `ESNext.Decorators` in `lib`.
     "compilerOptions": {
         "target": "ES2023",

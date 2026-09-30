@@ -1,7 +1,7 @@
 // The browser-safe half: nothing reachable from here may pull tsc or rolldown into a module graph.
 
 export type { ScriptClass, ScriptEntry, ScriptChunkModule, ScriptSide } from './registry.js';
-export { ScriptRegistry, locationsFor } from './registry.js';
+export { ScriptRegistry } from './registry.js';
 
 export {
     AMBIENT_DTS,
@@ -9,7 +9,6 @@ export {
     ENGINE_TYPES,
     ENGINE_VALUES,
     engineNamesIn,
-    engineTypesIn,
     preludeFor,
     typePreludeFor,
     usesFreeName,

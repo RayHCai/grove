@@ -1,4 +1,4 @@
-// The shim guards a realm, so it is asserted against one — a plain object standing in for the
+// The shim guards a realm, so it is asserted against one: a plain object standing in for the
 // global of the context a chunk is evaluated in. Guarding the host's own realm would break the
 // ClientScript half of the same chunk, which is why the static pass is the mechanism.
 

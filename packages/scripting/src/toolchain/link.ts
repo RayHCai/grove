@@ -6,9 +6,9 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { rolldown } from 'rolldown';
 import type { ScriptLocation } from '@platform/core';
+import { activeLocationsFor } from '@platform/core';
 import { BundleError } from '../errors.js';
 import type { ScriptSide } from '../registry.js';
-import { locationsFor } from '../registry.js';
 
 /** One class the project wants stamped, named the way the manifest names it. */
 export interface ScriptRef<Id extends string = string> {
@@ -19,7 +19,7 @@ export interface ScriptRef<Id extends string = string> {
     readonly export: string;
 }
 
-/** A {@link ScriptRef} once the analysis has placed it on a side — what a chunk is stamped with. */
+/** A {@link ScriptRef} once the analysis has placed it on a side: what a chunk is stamped with. */
 export interface ScriptDeclaration<Id extends string = string> extends ScriptRef<Id> {
     readonly location: ScriptLocation;
 }
@@ -31,7 +31,7 @@ export interface SideChunk<Id extends string = string> {
     readonly code: string;
     /** SHA-256 of the normalised code, hex. */
     readonly hash: string;
-    /** Bare specifiers the chunk still imports — what the evaluation boundary has to resolve. */
+    /** Bare specifiers the chunk still imports: what the evaluation boundary has to resolve. */
     readonly imports: readonly string[];
     readonly scripts: readonly Id[];
 }
@@ -70,7 +70,7 @@ export async function linkChunks<Id extends string = string>(
         if (!existsSync(emitted)) {
             throw new BundleError(
                 'lowered-module-missing',
-                `${declaration.module}.js is not in the lowered output — the analysed source root must be the tsconfig's rootDir`,
+                `${declaration.module}.js is not in the lowered output: the analysed source root must be the tsconfig's rootDir`,
             );
         }
     }
@@ -103,7 +103,7 @@ async function link<Id extends string>(
     loweredDir: string,
     all: readonly ScriptDeclaration<Id>[],
 ): Promise<LinkedChunk<Id>> {
-    const locations = target === 'synced' ? SYNCED_ONLY : locationsFor(target);
+    const locations = target === 'synced' ? SYNCED_ONLY : activeLocationsFor(target);
     const scripts = all.filter((s) => locations.has(s.location));
 
     const entryPath = path.join(loweredDir, `.script-entry-${target}.js`);
@@ -130,7 +130,7 @@ async function link<Id extends string>(
     if (!chunk || chunks.length !== 1) {
         throw new BundleError(
             'chunk-split',
-            `the ${target} half linked into ${chunks.length} chunks — a script module may not import dynamically`,
+            `the ${target} half linked into ${chunks.length} chunks: a script module may not import dynamically`,
         );
     }
 

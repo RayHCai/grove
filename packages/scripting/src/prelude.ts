@@ -1,6 +1,8 @@
-// The boilerplate a creator never sees. A Grove script is written with no imports at all — every
-// engine name is a bare global on screen — so something has to put the import back above the file
+// The boilerplate a creator never sees. A Grove script is written with no imports at all: every
+// engine name is a bare global on screen, so something has to put the import back above the file
 // before a compiler reads it. Both places that compile a creator's source do it from this list.
+
+import { TRANSCENDENTALS } from './policy.js';
 
 /** The one module a compiled Grove script imports, and the only one a creator may reach. */
 export const ENGINE_MODULE = '@platform/engine';
@@ -10,34 +12,13 @@ export const ENGINE_MODULE = '@platform/engine';
  *
  * The type-only exports are not here: they are erased before a module is emitted, and importing
  * one would be a binding that does not exist. `@platform/engine` cannot be imported here to check
- * the list against — the dependency runs the other way — so the editor, which holds both, is where
+ * the list against (the dependency runs the other way), so the editor, which holds both, is where
  * a name the engine renamed fails a typecheck rather than a creator's game at run time.
  */
 export const ENGINE_VALUES = [
     'clamp',
     'lerp',
-    'sin',
-    'cos',
-    'tan',
-    'asin',
-    'acos',
-    'atan',
-    'atan2',
-    'sinh',
-    'cosh',
-    'tanh',
-    'asinh',
-    'acosh',
-    'atanh',
-    'exp',
-    'expm1',
-    'log',
-    'log1p',
-    'log2',
-    'log10',
-    'pow',
-    'cbrt',
-    'hypot',
+    ...TRANSCENDENTALS,
     'BaseScript',
     'ServerScript',
     'ClientScript',
@@ -96,7 +77,7 @@ export const ENGINE_VALUES = [
  *
  * Separate from the values because these are erased: importing one as a binding would be a name
  * that does not exist at run time. `@platform/engine` cannot be imported here to check the list
- * against — the dependency runs the other way — so the editor, which holds both this and the
+ * against (the dependency runs the other way), so the editor, which holds both this and the
  * declarations a creator is checked against, is where the two are held to agree.
  */
 export const ENGINE_TYPES = [
@@ -131,7 +112,7 @@ export const ENGINE_TYPES = [
  *
  * Declared rather than taken from the DOM library, which a creator's program is compiled without:
  * `window`, `document` and the rest exist on one end only, and the two names this engine and that
- * library share — `Storage` and `Animation` — would collide outright.
+ * library share, `Storage` and `Animation`, would collide outright.
  */
 export const AMBIENT_DTS = `declare const console: {
     log(...values: unknown[]): void;
@@ -162,7 +143,7 @@ function namesIn(source: string): ReadonlySet<string> {
  * Whether the file declares this name itself at its top level.
  *
  * A creator may call their own class `Storage`; the global is then shadowed, which the checker
- * allows — and importing the engine's beside it would be two declarations of one name, which no
+ * allows, and importing the engine's beside it would be two declarations of one name, which no
  * module may have.
  */
 function declaredIn(source: string, name: string): boolean {
@@ -198,8 +179,8 @@ export function usesFreeName(source: string, name: string): boolean {
  * The import to put above this source, or `''` for a file that reaches no engine name.
  *
  * Only what the file uses: an import of every name would shadow the file's own declarations and
- * carry bindings into a module that never asked for them. A class named only as a type argument —
- * `ServerScript<Game>` — rides along anyway, since reading that off the text would take a parser
+ * carry bindings into a module that never asked for them. A class named only as a type argument,
+ * `ServerScript<Game>`, rides along anyway, since reading that off the text would take a parser
  * and what it imports is a real export either way.
  */
 export function preludeFor(source: string): string {
