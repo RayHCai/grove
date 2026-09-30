@@ -3,8 +3,19 @@
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
-import type { Session, Tab } from './harness.js';
-import { gameField, mineField, newSession, ofTemplate, runtimeOf, transformIn } from './harness.js';
+import type { Tab } from './harness.js';
+import {
+    gameField,
+    mineField,
+    newSession,
+    ofTemplate,
+    openWorld,
+    press,
+    reading,
+    runtimeOf,
+    SETTLE,
+    transformIn,
+} from './harness.js';
 import { SEND_RATE, SIM_RATE } from '../dist/world.js';
 import {
     ACTION_PULSE,
@@ -17,13 +28,12 @@ import {
     PING_TIMES,
     S,
     SCREEN_KIOSK,
+    SENDER_NONE,
     TEMPLATE_BEACON,
     W,
     WIDGET_ASK,
 } from '../dist/worlds/events.js';
 
-/** Ticks that comfortably outlast one send interval, so a press has been answered. */
-const SETTLE = 12;
 /** Ticks between broadcasts, which bounds how stale a tab's reading of a live counter is. */
 const SEND_INTERVAL = SIM_RATE / SEND_RATE;
 /** Ticks that outlast the parked gate handlers, whatever the send rate rounds them to. */
@@ -36,23 +46,7 @@ const GATE_TAPS = 3;
  */
 const GATE_GAP = 3;
 
-async function open(): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(EVENTS_WORLD);
-    const tab = await session.join('one');
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
-
-async function press(session: Session, tab: Tab, widget: string): Promise<void> {
-    session.press(tab, widget);
-    await session.step(SETTLE);
-}
-
-/** A Game-hosted reading, as this tab holds it. */
-function reading<T>(tab: Tab, field: string): T | undefined {
-    return gameField<T>(runtimeOf(tab), field);
-}
+const open = (): ReturnType<typeof openWorld> => openWorld(EVENTS_WORLD);
 
 /** The beacon where this tab draws it, so a pick runs against art, not the simulation. */
 function beaconPoint(tab: Tab): { x: number; y: number } {
@@ -120,7 +114,7 @@ describe('the update pass', () => {
         const toMirror = reading<number>(tab, S.ticks) ?? 0;
         expect(toMirror).toBeGreaterThan(fromMirror + 45);
         // A field rewritten every tick still leaves on the send interval, so the tab trails by one
-        // of those plus the pump that carries it — never by the whole run.
+        // of those plus the pump that carries it, never by the whole run.
         expect((gameField<number>(rt, S.ticks) ?? 0) - toMirror).toBeLessThanOrEqual(
             SEND_INTERVAL * 2,
         );
@@ -194,7 +188,7 @@ describe('a bound key', () => {
         expect(mineField<number>(tab, P.presses)).toBe(1);
         expect(mineField<number>(tab, P.releases)).toBe(1);
         // A hold is synthesized from the authority's own fold, and the action left it on the tick
-        // it entered — so there was never a tick on which it was down.
+        // it entered, so there was never a tick on which it was down.
         expect(mineField<number>(tab, P.holds)).toBe(0);
     });
 });
@@ -275,7 +269,7 @@ describe('a request raised from a client script', () => {
         expect(reading<number>(tab, S.grants)).toBe(0);
 
         // Pressed on the kiosk screen, so the client-located handler that calls `request()` is the
-        // only thing that runs here — this world's `@onRequest` lives on the authority, where no
+        // only thing that runs here; this world's `@onRequest` lives on the authority, where no
         // press of this widget is dispatched.
         session.press(tab, WIDGET_ASK, SCREEN_KIOSK);
         await session.step(SETTLE);
@@ -349,6 +343,24 @@ describe('an event a script sent by hand', () => {
         await press(session, tab, W.ring);
         expect(reading<number>(tab, S.pings)).toBe(1);
         expect(reading<number>(tab, S.pinged)).toBe(PING_TIMES);
+        // Sent from a Game-hosted handler, so there is no entity to name as the sender.
+        expect(reading<string>(tab, S.sender)).toBe(SENDER_NONE);
+    });
+
+    it('names the entity whose handler sent it as ctx.from', async () => {
+        const { session, tab } = await open();
+        const me = tab.client.localPlayer?.id;
+        expect(me).toBeDefined();
+
+        // The press reaches the avatar, whose own handler sends the ping on: the sender is that avatar.
+        await press(session, tab, W.echo);
+        expect(reading<number>(tab, S.pings)).toBe(1);
+        expect(reading<string>(tab, S.sender)).toBe(me);
+        expect(gameField<string>(session.sim.runtime, S.sender)).toBe(me);
+
+        await press(session, tab, W.ring);
+        expect(reading<string>(tab, S.sender)).toBe(SENDER_NONE);
+        expect(session.trips).toEqual([]);
     });
 
     it('is one dispatch per call, not one per tick that followed it', async () => {

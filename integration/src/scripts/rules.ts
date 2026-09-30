@@ -28,7 +28,7 @@ export class Rules extends ServerScript<Game> {
     orbInterval = ORB_INTERVAL;
 
     /**
-     * Game-hosted, so every peer sees these — a player-hosted field reaches only its owner.
+     * Game-hosted, so every peer sees these; a player-hosted field reaches only its owner.
      * They land on the same record `Ledger`'s do: two scripts declaring one name there is an error.
      */
     @serverState phase: MatchPhase = 'idle';

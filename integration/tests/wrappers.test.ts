@@ -4,7 +4,16 @@
 import { describe, expect, it } from 'vitest';
 import { Inventory, Leaderboard, MemoryKVStore, Scoreboard, Team } from '@platform/core';
 import type { Session, Tab } from './harness.js';
-import { gameField, mineField, newSession, playerField, runtimeOf } from './harness.js';
+import {
+    mineField,
+    newSession,
+    openWorld,
+    playerField,
+    press,
+    reading,
+    runtimeOf,
+    SETTLE,
+} from './harness.js';
 import {
     AWARD,
     COUNTDOWN_SECONDS,
@@ -21,18 +30,10 @@ import {
     WRAPPERS_WORLD,
 } from '../dist/worlds/wrappers.js';
 
-/** Ticks that comfortably outlast one send interval, so a press has been answered. */
-const SETTLE = 12;
 /** Ticks that outlast the countdown this world builds, whatever the send rate rounds it to. */
 const CLOCK_TICKS = Math.ceil(COUNTDOWN_SECONDS * 60) + SETTLE * 2;
 
-async function open(): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(WRAPPERS_WORLD);
-    const tab = await session.join('one');
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
+const open = (): ReturnType<typeof openWorld> => openWorld(WRAPPERS_WORLD);
 
 /** Two tabs, for the readings that are about a room rather than about a player. */
 async function openTwo(): Promise<{ session: Session; one: Tab; two: Tab }> {
@@ -42,17 +43,6 @@ async function openTwo(): Promise<{ session: Session; one: Tab; two: Tab }> {
     await session.live(one, two);
     await session.step(SETTLE);
     return { session, one, two };
-}
-
-/** Presses one widget and settles, which is the whole shape of every case below. */
-async function press(session: Session, tab: Tab, widget: string, ticks = SETTLE): Promise<void> {
-    session.press(tab, widget);
-    await session.step(ticks);
-}
-
-/** A Game-hosted value as this tab's own mirror holds it. */
-function reading<T>(tab: Tab, field: string): T | undefined {
-    return gameField<T>(runtimeOf(tab), field);
 }
 
 function idOf(tab: Tab): string {

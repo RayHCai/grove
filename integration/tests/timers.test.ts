@@ -2,8 +2,7 @@
 // state it wrote would pass a unit test and leave a HUD frozen here.
 
 import { describe, expect, it } from 'vitest';
-import type { Session, Tab } from './harness.js';
-import { gameField, newSession, runtimeOf } from './harness.js';
+import { openWorld, press, reading, SETTLE } from './harness.js';
 import {
     AFTER_TICKS,
     EVERY_TICKS,
@@ -14,29 +13,11 @@ import {
     W,
 } from '../dist/worlds/timers.js';
 
-/** Ticks that comfortably outlast one send interval, so a press has been answered. */
-const SETTLE = 12;
 const PAST_AFTER = AFTER_TICKS + SETTLE * 2;
 const PAST_NAP = NAP_TICKS + SETTLE * 2;
 const PAST_TICKER_NAP = TICKER_NAP_TICKS + SETTLE * 2;
 
-async function open(): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(TIMER_WORLD);
-    const tab = await session.join('one');
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
-
-/** Presses one widget and settles, which is the whole shape of every case below. */
-async function press(session: Session, tab: Tab, widget: string, ticks = SETTLE): Promise<void> {
-    session.press(tab, widget);
-    await session.step(ticks);
-}
-
-function reading<T>(tab: Tab, field: string): T | undefined {
-    return gameField<T>(runtimeOf(tab), field);
-}
+const open = (): ReturnType<typeof openWorld> => openWorld(TIMER_WORLD);
 
 describe('a one-shot timer', () => {
     it('fires at its due time, once, and never again', async () => {
@@ -159,7 +140,7 @@ describe('a destroyed host', () => {
         await press(session, tab, W.killTicker);
 
         await session.step(PAST_TICKER_NAP);
-        // A cancelled sleep never resolves, so nothing downstream of that await ever runs — and
+        // A cancelled sleep never resolves, so nothing downstream of that await ever runs, and
         // nothing faults where the continuation would have been.
         expect(reading<boolean>(tab, S.tickerWoke)).toBe(false);
         expect(session.trips).toEqual([]);

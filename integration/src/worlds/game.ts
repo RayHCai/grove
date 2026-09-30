@@ -113,7 +113,7 @@ export const S = {
 /** Not a readonly tuple: `pick` takes a mutable list. */
 const PICKS = ['ash', 'birch', 'cedar'];
 
-/** Tick-driven motion with no tween and no input behind it — what a paused world would stop. */
+/** Tick-driven motion with no tween and no input behind it: what a paused world would stop. */
 export class Drift extends ServerScript<Entity> {
     @onUpdate
     advance(ctx: Ctx): void {

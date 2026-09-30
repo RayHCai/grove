@@ -16,7 +16,7 @@ export const SCRIPT_BAG = 'bag';
 export const SCREEN_DECK = 'deck';
 export const SCREEN_BAG = 'bag';
 
-/** A screen nothing opens and a widget nothing writes — the null answer both lookups are owed. */
+/** A screen nothing opens and a widget nothing writes, the null answer both lookups are owed. */
 export const NOTHING = 'nothing';
 /** What a reading writes where a lookup answered null, since a widget carries text and not null. */
 export const NONE = 'none';
@@ -83,7 +83,7 @@ function describeWidget(widget: WidgetState): string {
 }
 
 export class Bag extends ClientScript<HUDScreen> {
-    /** Client state, which is why a screen holds a script — and must not outlive it. */
+    /** Client state, which is why a screen holds a script, and must not outlive it. */
     #pressed = 0;
 
     @onStart

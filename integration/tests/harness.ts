@@ -143,7 +143,7 @@ export class Session {
 
     /**
      * One more tab, admitted under the identity the HOST resolved. The server reads that player's
-     * persisted record first, and that read is a promise — hence the microtask yield per step.
+     * persisted record first, and that read is a promise, hence the microtask yield per step.
      */
     async join(name: string, identity = name): Promise<Tab> {
         const pair = loopbackPair();
@@ -156,7 +156,7 @@ export class Session {
         // The composition a browser uses, from the same manifest the server booted from: the
         // identity check is derived once and compared, rather than restated on both ends. Built
         // rather than dialled, which is why the socket layer is a function beside the session
-        // instead of inside it — this suite reaches the authority over a loopback pair.
+        // instead of inside it: this suite reaches the authority over a loopback pair.
         const session = new ClientInstance({
             transport: pair.client,
             renderer,
@@ -191,7 +191,7 @@ export class Session {
         return tab;
     }
 
-    /** Server first, then every live tab — the order a socket would produce anyway. */
+    /** Server first, then every live tab, the order a socket would produce anyway. */
     async step(ticks: number): Promise<void> {
         for (let i = 0; i < ticks; i++) {
             this.#now += this.#tick;
@@ -203,7 +203,7 @@ export class Session {
                 tab.score?.sync(tab.client);
                 // Once per RUNTIME rather than once per tab: re-registering every frame would
                 // discard the instance the overlay's own switch believes is still up, but a resync
-                // throws the mirror away and builds a fresh one whose screen list is empty — so a
+                // throws the mirror away and builds a fresh one whose screen list is empty, so a
                 // one-shot flag would lose every screen exactly when a backgrounded tab came back.
                 const rt = tab.client.mirror?.runtime;
                 if (tab.client.state === 'live' && rt !== undefined && tab.opened !== rt) {
@@ -325,7 +325,7 @@ export function openScreens(client: GameClient, world: World): void {
     withRuntime(rt, () => {
         for (const spec of world.screens) {
             // A screen is minted on first mention, and `hud.open` attaches whatever it ALREADY
-            // carries before marking it visible — then early-returns on every later open. So the
+            // carries before marking it visible, then early-returns on every later open. So the
             // class has to be registered while the screen is closed: mint it, close it to discard
             // the empty instance set the first open made, register, and open it for real.
             const screen = hud.open(spec.name);
@@ -344,13 +344,44 @@ export async function flushMicrotasks(): Promise<void> {
     for (let i = 0; i < 6; i++) await Promise.resolve();
 }
 
+/** Ticks that comfortably outlast one send interval, so a press has been answered. */
+export const SETTLE = 12;
+
+/** A fresh session on `world` with one tab joined, live and settled. */
+export async function openWorld(
+    world: World,
+    name = 'one',
+): Promise<{ session: Session; tab: Tab }> {
+    const session = newSession(world);
+    const tab = await session.join(name);
+    await session.live(tab);
+    await session.step(SETTLE);
+    return { session, tab };
+}
+
+/** Presses one widget and settles, which is the whole shape of most cases. */
+export async function press(
+    session: Session,
+    tab: Tab,
+    widget: string,
+    ticks = SETTLE,
+): Promise<void> {
+    session.press(tab, widget);
+    await session.step(ticks);
+}
+
+/** A Game-hosted value as this tab's own mirror holds it. */
+export function reading<T>(tab: Tab, field: string): T | undefined {
+    return gameField<T>(runtimeOf(tab), field);
+}
+
 export function runtimeOf(tab: Tab): Runtime {
     const mirror = tab.client.mirror;
     if (mirror === undefined) throw new Error(`${tab.name} has no mirror yet`);
     return mirror.runtime;
 }
 
-/** One replicated field, read off a host record — where the hoist puts it. */
+/** One replicated field, read off a host record, where the hoist puts it. */
 export function gameField<T>(rt: Runtime, name: string): T | undefined {
     return rt.hosts.get(GAME_KEY)?.record.values.get(name) as T | undefined;
 }
@@ -376,7 +407,7 @@ export function ofTemplate(rt: Runtime, template: string): EntityId[] {
     return [...rt.entities.liveIds()].filter((id) => rt.entities.record(id)?.template === template);
 }
 
-/** The avatar the given player owns, in whichever world is asked — mirror or authority. */
+/** The avatar the given player owns, in whichever world is asked: mirror or authority. */
 export function avatarIn(rt: Runtime, playerId: string): EntityId | undefined {
     return [...rt.entities.liveIds()].find((id) => {
         const record = rt.entities.record(id);

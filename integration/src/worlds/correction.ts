@@ -1,5 +1,5 @@
 // `Drift` is synced and is what a tab predicts; `Hand` is server-located, so its displacement is
-// unpredictable by construction — the class does not exist in the mirror.
+// unpredictable by construction: the class does not exist in the mirror.
 
 import type { Ctx, Entity, Game } from '@platform/engine';
 import { ServerScript, SyncedScript, onEventHold, onPlayerJoin, onPress } from '@platform/engine';
@@ -32,7 +32,7 @@ export const W = {
     hurl: 'hurl',
 } as const;
 
-/** Synced, so a tab holds a copy and predicts with it — the only way a mispredict happens. */
+/** Synced, so a tab holds a copy and predicts with it, the only way a mispredict happens. */
 export class Drift extends SyncedScript<Entity> {
     @onEventHold(ACTION_PUSH)
     push(): void {

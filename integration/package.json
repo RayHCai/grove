@@ -17,21 +17,19 @@
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
-        "@platform/client": "workspace:*",
         "@platform/core": "workspace:*",
         "@platform/engine": "workspace:*",
         "@platform/glue": "workspace:*",
         "@platform/math": "workspace:*",
         "@platform/project": "workspace:*",
-        "@platform/protocol": "workspace:*",
         "@platform/renderer": "workspace:*",
         "@platform/scripting": "workspace:*",
         "@platform/sim": "workspace:*",
         "@platform/transport": "workspace:*"
     },
     "devDependencies": {
-        "@types/node": "^26.1.2",
+        "@types/node": "^24.12.0",
         "typescript": "^7.0.2",
-        "vitest": "^4.1.10"
+        "vitest": "^5.0.1"
     }
 }

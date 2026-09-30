@@ -2,8 +2,18 @@
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
-import type { Session, Tab } from './harness.js';
-import { gameField, mineField, newSession, ofTemplate, runtimeOf, transformIn } from './harness.js';
+import type { Tab } from './harness.js';
+import {
+    mineField,
+    newSession,
+    ofTemplate,
+    openWorld,
+    press,
+    reading,
+    runtimeOf,
+    SETTLE,
+    transformIn,
+} from './harness.js';
 import {
     AUTHORED_ENTITIES,
     BADGE_RANK,
@@ -19,25 +29,7 @@ import {
     YARD,
 } from '../dist/worlds/game.js';
 
-/** Ticks that comfortably outlast one send interval, so a press has been answered. */
-const SETTLE = 12;
-
-async function open(): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(GAME_WORLD);
-    const tab = await session.join('one');
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
-
-async function press(session: Session, tab: Tab, widget: string, ticks = SETTLE): Promise<void> {
-    session.press(tab, widget);
-    await session.step(ticks);
-}
-
-function reading<T>(tab: Tab, field: string): T | undefined {
-    return gameField<T>(runtimeOf(tab), field);
-}
+const open = (): ReturnType<typeof openWorld> => openWorld(GAME_WORLD);
 
 /** The one entity of a template only ever minted once, as this tab's own mirror holds it. */
 function sole(tab: Tab, template: string): EntityId {
@@ -160,8 +152,8 @@ describe('a query asked for the world as it was seen', () => {
         // finds the sentinel in the yard it has only just hopped into.
         expect(reading<number>(tab, S.seenIn)).toBe(1);
         // And a press carries no view tick at all. The spec has `asSeen` resolve against the tick
-        // the asking client named, and raise at load from a handler carrying none; it does neither
-        // — it takes the ring's most recent capture, unclamped, and answers.
+        // the asking client named, and raise at load from a handler carrying none; it does neither:
+        // it takes the ring's most recent capture, unclamped, and answers.
         expect(reading<boolean>(tab, S.sawTick)).toBe(false);
         expect(session.trips).toEqual([]);
     });
@@ -199,7 +191,7 @@ describe('reaching a script by its class', () => {
 
     // Both worlds live in one test because the second half only holds for the FIRST world of a
     // process to attach this class, and a separate test could not promise it ran first.
-    it('attaches a second game script at runtime — once per process, not once per world', async () => {
+    it('attaches a second game script at runtime: once per process, not once per world', async () => {
         const first = await open();
         expect(reading<number>(first.tab, S.tally)).toBeUndefined();
 
@@ -211,8 +203,8 @@ describe('reaching a script by its class', () => {
         expect(reading<number>(first.tab, S.tally)).toBe(LEDGER_START);
         first.session.dispose();
 
-        // The hoist defined `tally` on the `game` const — a Proxy with no defineProperty trap over
-        // ONE module-level target — so the accessor outlives its world. The next world refuses the
+        // The hoist defined `tally` on the `game` const (a Proxy with no defineProperty trap over
+        // ONE module-level target), so the accessor outlives its world. The next world refuses the
         // class, the handler dies at the call, and one throw is under the breaker's threshold.
         const second = await open();
         await press(second.session, second.tab, W.gameScript);

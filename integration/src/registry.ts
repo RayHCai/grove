@@ -25,7 +25,7 @@ export const SERVER_SCRIPTS: ScriptRegistry<ScriptId> = ScriptRegistry.from<Scri
     { id: scriptId(SCRIPT_PROFILE), location: 'server', ctor: Profile },
     { id: scriptId(SCRIPT_COLLECTOR), location: 'server', ctor: Collector },
     { id: scriptId(SCRIPT_ORB), location: 'server', ctor: Orb },
-    // Synced, so it links into both sides — and it is the one class the client is ever told to
+    // Synced, so it links into both sides, and it is the one class the client is ever told to
     // attach, which is what makes prediction have anything to replay.
     { id: scriptId(SCRIPT_MOVER), location: 'synced', ctor: Mover },
 ]);

@@ -77,7 +77,7 @@ const WEIGHTS: Array<[Action, number]> = [
 interface Settled {
     name: string;
     state: string;
-    /** Null when this tab never reached a body — a join still in flight when the input stopped. */
+    /** Null when this tab never reached a body: a join still in flight when the input stopped. */
     avatar: { mirror: [number, number]; server: [number, number] } | null;
     orbs: { mirror: number; server: number };
     game: { mirror: Record<string, unknown>; server: Record<string, unknown> };
@@ -263,7 +263,7 @@ function pickOrb(tab: Tab, rng: SeededRandom): { x: number; y: number } | undefi
 
 /**
  * What has already been reported, so a fault is named on the beat it happens rather than on
- * every beat after it — one throw at beat 5 would otherwise be six hundred lines.
+ * every beat after it; one throw at beat 5 would otherwise be six hundred lines.
  */
 interface Watch {
     counters: Map<string, number>;
@@ -297,10 +297,10 @@ function health(session: Session, beat: number, watch: Watch): string[] {
     }
     session.trips.length = 0;
     // `droppedMarks` is deliberately not a fault here. It counts unrepresentable values AND marks
-    // whose host died before the next send — and the second is ordinary in this game, where the
+    // whose host died before the next send, and the second is ordinary in this game, where the
     // region pass reprices an orb that is then taken inside the same send interval.
     for (const record of since(watch, session.sim.runtime.log)) {
-        faults.push(`${at}: server ${record.scriptClass}.${record.method} — ${why(record)}`);
+        faults.push(`${at}: server ${record.scriptClass}.${record.method}: ${why(record)}`);
     }
 
     for (const tab of session.tabs) {
@@ -337,7 +337,7 @@ function health(session: Session, beat: number, watch: Watch): string[] {
             faults.push(`${where} was sent an oversized list`);
 
         for (const record of since(watch, mirror.runtime.log)) {
-            faults.push(`${where} ${record.scriptClass}.${record.method} — ${why(record)}`);
+            faults.push(`${where} ${record.scriptClass}.${record.method}: ${why(record)}`);
         }
 
         const declared = new Set(PROJECT.templates.map((template) => template.id as string));
@@ -470,7 +470,7 @@ function values(rt: Runtime, key: string): string {
 }
 
 /** One replicated value as text. A wrapper goes through its own serializer, which is what the wire
- * and the checkpoint use — `String(...)` would render every scoreboard identical. */
+ * and the checkpoint use; `String(...)` would render every scoreboard identical. */
 function asText(value: unknown): string {
     if (typeof value === 'number') return fixed(value);
     const wrapper = value as { serialize?: () => unknown } | null;
@@ -499,7 +499,7 @@ describe('one seeded run of the whole platform', () => {
         expect(report.orbsSpawned).toBeGreaterThan(60);
         expect(report.sweeps).toBeGreaterThan(2);
         // Both scoring routes, counted apart: an orb walked into is the collider pass and an orb
-        // clicked is the whole pick path — a world point, the node drawn there, the entity behind
+        // clicked is the whole pick path: a world point, the node drawn there, the entity behind
         // it, and the netId it goes out as. One standing in for the other would hide half of it.
         expect(report.walked).toBeGreaterThan(10);
         expect(report.popped).toBeGreaterThan(10);
@@ -553,7 +553,7 @@ describe('the same seed', () => {
     it('replays to the same world, and a different seed does not', async () => {
         const first = await soak(SEED, SHORT_BEATS);
         const second = await soak(SEED, SHORT_BEATS);
-        // A world with entities, scores and a roster in it — an empty digest would match itself.
+        // A world with entities, scores and a roster in it; an empty digest would match itself.
         expect(first.digest.split('\n').length).toBeGreaterThan(10);
         expect(second.digest).toBe(first.digest);
         expect(second.faults).toEqual([]);
@@ -592,7 +592,7 @@ describe('a player who comes back', () => {
     });
 });
 
-/** This session's take, off the authority — the field a tab is told about only itself. */
+/** This session's take, off the authority, the field a tab is told about only itself. */
 function scoreOn(session: Session, tab: Tab): number {
     const id = tab.client.localPlayer?.id;
     if (id === undefined) return 0;

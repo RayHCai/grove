@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HUDWidgetState } from '@platform/core';
 import type { Session, Tab } from './harness.js';
-import { newSession, runtimeOf } from './harness.js';
+import { newSession, openWorld, runtimeOf, SETTLE } from './harness.js';
 import { ASSET_DISC } from '../dist/world.js';
 import {
     B,
@@ -23,16 +23,7 @@ import {
     V,
 } from '../dist/worlds/hud.js';
 
-/** Ticks that comfortably outlast one send interval, so the tab has been answered. */
-const SETTLE = 12;
-
-async function open(): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(HUD_WORLD);
-    const tab = await session.join('one');
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
+const open = (): ReturnType<typeof openWorld> => openWorld(HUD_WORLD);
 
 /** Presses one of a screen's buttons and settles, which is the shape of every case below. */
 async function press(

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { Camera, Runtime } from '@platform/core';
 import type { CameraState } from '@platform/renderer';
 import type { Session, Tab } from './harness.js';
-import { newSession, runtimeOf } from './harness.js';
+import { newSession, openWorld, press, runtimeOf, SETTLE } from './harness.js';
 import {
     AVATAR_AT,
     CAMERA_WORLD,
@@ -21,25 +21,12 @@ import {
     ZOOM_TO,
 } from '../dist/worlds/camera.js';
 
-/** Ticks that comfortably outlast one send interval, so a press has been answered. */
-const SETTLE = 12;
 /** Ticks that outlast the seconds every camera tween below was handed. */
 const TWEEN_TICKS = Math.ceil(TWEEN_SECONDS * 60) + SETTLE;
 
-async function open(): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(CAMERA_WORLD);
-    const tab = await session.join('one');
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
+const open = (): ReturnType<typeof openWorld> => openWorld(CAMERA_WORLD);
 
-async function press(session: Session, tab: Tab, widget: string, ticks = SETTLE): Promise<void> {
-    session.press(tab, widget);
-    await session.step(ticks);
-}
-
-/** A tab whose camera has been given a lens — what every case below but the first needs. */
+/** A tab whose camera has been given a lens: what every case below but the first needs. */
 async function fitted(): Promise<{ session: Session; tab: Tab }> {
     const opened = await open();
     await press(opened.session, opened.tab, W.mount);
@@ -87,7 +74,7 @@ function idOf(tab: Tab): string {
     return id;
 }
 
-/** One player's camera in whichever world is asked — a mirror's or the authority's. */
+/** One player's camera in whichever world is asked: a mirror's or the authority's. */
 function cameraIn(rt: Runtime, playerId: string): Camera {
     const player = rt.playerManager.byId(playerId);
     if (player === null) throw new Error(`no player ${playerId} in this world`);

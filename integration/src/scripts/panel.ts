@@ -10,7 +10,7 @@ export const ASKED_LABEL = 'asked';
 
 /**
  * Reading a `@serverState` field by name, on a client: the value lives on the host RECORD and the
- * mirror hoists an accessor as each diff lands. Neither end can TYPE it — no such member exists.
+ * mirror hoists an accessor as each diff lands. Neither end can TYPE it: no such member exists.
  */
 function readState<T>(host: object | null | undefined, field: string): T | undefined {
     if (host === null || host === undefined) return undefined;
