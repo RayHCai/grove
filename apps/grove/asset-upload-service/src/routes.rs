@@ -1,14 +1,15 @@
 //! The four object routes, the health probe, and the shape of a refusal. Nothing here holds an
-//! object: the handler owns only the checks a stream cannot make for itself — the name is a
+//! object: the handler owns only the checks a stream cannot make for itself: the name is a
 //! SHA-256, the declared length is under the ceiling, the type is bounded.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, put};
 use axum::{middleware, Json, Router};
@@ -33,18 +34,21 @@ const MAX_CONTENT_TYPE_LEN: usize = 255;
 const BODY_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Object requests running at once. A permit is held until the handler returns, which for a put is
-/// the whole body — the descriptor and the file in `incoming/` this is here to bound.
+/// the whole body: the descriptor and the file in `incoming/` this is here to bound.
 const MAX_OBJECTS_IN_FLIGHT: usize = 64;
 
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<dyn ObjectStore>,
     pub max_bytes: u64,
+    /// Whether the asset consumer is running, or `None` where no stream is attached.
+    pub consuming: Option<Arc<AtomicBool>>,
 }
 
 /// `/health` sits outside the bearer layer: the load balancer probing it holds no fleet secret, and
 /// it answers nothing a peer could not already infer from the socket being open.
 pub fn router(state: AppState, fleet_secret: Arc<String>) -> Router {
+    let consuming = state.consuming.clone();
     let objects = Router::new()
         .route(
             "/v1/objects/{hash}",
@@ -67,14 +71,14 @@ pub fn router(state: AppState, fleet_secret: Arc<String>) -> Router {
         .with_state(state);
 
     Router::new()
-        .route("/health", get(health))
+        .route("/health", get(health).with_state(consuming))
         // Reaches `/health` alone: the object routes were given theirs inside the bearer layer.
         .method_not_allowed_fallback(method_not_allowed)
         .merge(objects)
         .fallback(no_such_route)
         // On the OUTER router, which is what reaches the two fallbacks and the health probe as well
         // as the object routes: a refusal is the answer an operator is tracing.
-        .layer(middleware::from_fn(correlate))
+        .layer(middleware::from_fn(request_id::correlate))
 }
 
 /// A peer that stops sending holds a task, a descriptor and a file in `incoming/`, and the gap
@@ -82,27 +86,6 @@ pub fn router(state: AppState, fleet_secret: Arc<String>) -> Router {
 async fn deadline_between_chunks(request: Request, next: middleware::Next) -> Response {
     next.run(request.map(|body| Body::new(TimeoutBody::new(BODY_IDLE_TIMEOUT, body))))
         .await
-}
-
-/// Joins one request to the caller that made it: the id it presented when that is one token this
-/// service can log unchanged, and a fresh one when it is not. Put back on the request as well as
-/// the answer, so a handler reads the id the caller will quote.
-async fn correlate(mut request: Request, next: middleware::Next) -> Response {
-    let id = request
-        .headers()
-        .get(request_id::HEADER)
-        .and_then(|presented| presented.to_str().ok())
-        .filter(|presented| request_id::valid(presented))
-        .map_or_else(request_id::mint, str::to_owned);
-
-    let value = HeaderValue::from_str(&id).expect("a checked request id is a header value");
-    request
-        .headers_mut()
-        .insert(request_id::HEADER, value.clone());
-
-    let mut response = next.run(request).await;
-    response.headers_mut().insert(request_id::HEADER, value);
-    response
 }
 
 /// A wrong path answers in the shape a wrong body does, which is the whole point of a code a caller
@@ -124,8 +107,16 @@ struct Health {
     ok: bool,
 }
 
-async fn health() -> Json<Health> {
-    Json(Health { ok: true })
+/// 503 while the consumer is down: a box that serves objects but claims no asset is one a
+/// supervisor should see, since the asset's creator is left watching a task nothing moves.
+async fn health(State(consuming): State<Option<Arc<AtomicBool>>>) -> (StatusCode, Json<Health>) {
+    let ok = consuming.is_none_or(|alive| alive.load(Ordering::Relaxed));
+    let status = if ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status, Json(Health { ok }))
 }
 
 async fn put_object(
@@ -289,7 +280,7 @@ impl ApiError {
         )
     }
 
-    /// The cause goes to the log and never to the caller — a path, a permission or a disk is this
+    /// The cause goes to the log and never to the caller: a path, a permission or a disk is this
     /// side's to know.
     fn internal(err: anyhow::Error) -> Self {
         tracing::error!(error = ?err, "object store failed");
@@ -365,11 +356,16 @@ mod tests {
     }
 
     async fn app(root: &std::path::Path) -> Router {
+        consuming_app(root, None).await
+    }
+
+    async fn consuming_app(root: &std::path::Path, consuming: Option<Arc<AtomicBool>>) -> Router {
         let store = FileStore::open(root.to_path_buf()).await.unwrap();
         router(
             AppState {
                 store: Arc::new(store),
                 max_bytes: 1024,
+                consuming,
             },
             Arc::new(SECRET.to_owned()),
         )
@@ -493,6 +489,19 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(body_of(response).await, r#"{"ok":true}"#);
+    }
+
+    #[tokio::test]
+    async fn health_is_unavailable_while_the_consumer_is_down() {
+        let root = tempfile::tempdir().unwrap();
+        let response = consuming_app(root.path(), Some(Arc::new(AtomicBool::new(false))))
+            .await
+            .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body_of(response).await, r#"{"ok":false}"#);
     }
 
     #[tokio::test]

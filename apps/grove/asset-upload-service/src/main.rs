@@ -1,4 +1,4 @@
-//! Content-addressed object storage for the fleet, in one process — the composition root only.
+//! Content-addressed object storage for the fleet, in one process, the composition root only.
 //! An object arrives and leaves as a stream, so the state held between a request and its answer
 //! is a chunk and a hasher.
 
@@ -11,6 +11,7 @@ mod tasks;
 
 use std::future::Future;
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,22 +31,22 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    request_id::init_tracing();
 
     let config = Config::from_env()?;
     let store = FileStore::open(config.root.clone())
         .await
         .with_context(|| format!("opening the object root at {}", config.root.display()))?;
+    let consuming = config
+        .redis_url
+        .as_ref()
+        .map(|_| Arc::new(AtomicBool::new(true)));
 
     let router = routes::router(
         AppState {
             store: Arc::new(store),
             max_bytes: config.max_bytes,
+            consuming: consuming.clone(),
         },
         Arc::new(config.fleet_secret.clone()),
     );
@@ -60,15 +61,15 @@ async fn main() -> Result<()> {
     tracing::info!(addr = %bind, root = %config.root.display(), "listening");
 
     // The object routes come up either way. A deploy with no stream behind it serves bundles and
-    // claims nothing — a wiring fault to see in the logs rather than a process that will not start,
+    // claims nothing, a wiring fault to see in the logs rather than a process that will not start,
     // which no host agent could tell from a box that is gone.
     let (stopping, stop) = watch::channel(false);
-    let consuming = match config.redis_url.as_deref() {
+    let consumer = match config.redis_url.as_deref().zip(consuming) {
         None => {
             tracing::error!("no asset stream is attached; nothing will be claimed");
             None
         }
-        Some(url) => {
+        Some((url, alive)) => {
             let settling = Arc::new(HttpTasks::new(
                 config.api_url.clone(),
                 config.fleet_secret.clone(),
@@ -76,11 +77,9 @@ async fn main() -> Result<()> {
             let client = redis::Client::open(url).context("REDIS_URL is not a Redis address")?;
             let name = config.worker_name.clone();
             tracing::info!(worker = %name, "claiming asset uploads");
-            Some(tokio::spawn(async move {
-                if let Err(err) = consumer::consume(client, settling, name, stop).await {
-                    tracing::error!(error = ?err, "asset consumer stopped");
-                }
-            }))
+            Some(tokio::spawn(consumer::supervise(
+                client, settling, name, stop, alive,
+            )))
         }
     };
 
@@ -95,7 +94,7 @@ async fn main() -> Result<()> {
     // After the drain, so an asset claimed on the way out is settled rather than left pending for
     // the reclaim window to hand back.
     let _ = stopping.send(true);
-    if let Some(handle) = consuming {
+    if let Some(handle) = consumer {
         let _ = handle.await;
     }
     served
@@ -205,6 +204,7 @@ mod tests {
             AppState {
                 store: store.clone(),
                 max_bytes: STUCK_OBJECT_BYTES as u64,
+                consuming: None,
             },
             Arc::new(SECRET.to_owned()),
         );

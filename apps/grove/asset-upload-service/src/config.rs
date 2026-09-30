@@ -3,10 +3,8 @@
 
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
-
-/// The shortest secret this process will accept, matching `@grove/api`'s own floor.
-const MIN_SECRET_LEN: usize = 32;
+use anyhow::Result;
+use request_id::env::{number, required, secret};
 
 /// 64 MiB. Generous, because an uncompressed atlas is the worst case: it exists to bound one
 /// hostile upload rather than to size a legitimate one.
@@ -30,15 +28,9 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self> {
-        let fleet_secret = required("FLEET_SECRET")?;
-        if fleet_secret.len() < MIN_SECRET_LEN {
-            bail!("FLEET_SECRET must be at least {MIN_SECRET_LEN} characters");
-        }
+        let fleet_secret = secret("FLEET_SECRET")?;
         Ok(Self {
-            // Binds loopback by default. This service is reachable from the fleet's own network and
-            // from nowhere else, and a default of 0.0.0.0 is how that stops being true by accident.
-            bind: std::env::var("ASSET_UPLOAD_SERVICE_BIND")
-                .unwrap_or_else(|_| "127.0.0.1:4005".to_owned()),
+            bind: bind(),
             root: PathBuf::from(required("UPLOAD_ROOT")?),
             fleet_secret,
             max_bytes: number("UPLOAD_MAX_BYTES", DEFAULT_MAX_BYTES)?,
@@ -53,23 +45,23 @@ impl Config {
     }
 }
 
+/// Loopback by default: this service is reachable from the fleet's own network and from nowhere
+/// else, and a default of 0.0.0.0 is how that stops being true by accident. A platform that assigns
+/// `PORT` routes to the process from off the box, so that one binds every interface.
+fn bind() -> String {
+    if let Ok(bind) = std::env::var("ASSET_UPLOAD_SERVICE_BIND") {
+        return bind;
+    }
+    match std::env::var("PORT") {
+        Ok(port) if !port.is_empty() => format!("0.0.0.0:{port}"),
+        _ => "127.0.0.1:4005".to_owned(),
+    }
+}
+
 /// What this box is called, which keeps two workers' claims apart without a deploy saying so.
 fn hostname() -> Option<String> {
     std::env::var("HOSTNAME")
         .ok()
         .or_else(|| std::env::var("COMPUTERNAME").ok())
         .filter(|name| !name.is_empty())
-}
-
-fn required(name: &str) -> Result<String> {
-    std::env::var(name).with_context(|| format!("{name} is not set"))
-}
-
-fn number(name: &str, fallback: u64) -> Result<u64> {
-    match std::env::var(name) {
-        Err(_) => Ok(fallback),
-        Ok(raw) => raw
-            .parse()
-            .with_context(|| format!("{name} must be a whole number")),
-    }
 }

@@ -17,22 +17,25 @@ RUN apt-get update \
 # The manifests first, with a placeholder entry point for each member: this compiles every dependency
 # of this crate and none of its own code, so the layer survives any edit under `src/` and only a
 # changed lockfile rebuilds it. The sibling member is named because a workspace root that cannot find
-# one is a manifest cargo refuses to read — nothing of it is built here, which is what keeps V8 out of
+# one is a manifest cargo refuses to read; nothing of it is built here, which is what keeps V8 out of
 # this image's build.
 COPY apps/grove/Cargo.toml apps/grove/Cargo.lock apps/grove/rust-toolchain.toml ./
 COPY apps/grove/asset-upload-service/Cargo.toml ./asset-upload-service/
 COPY apps/grove/game-instance/Cargo.toml ./game-instance/
-RUN mkdir -p asset-upload-service/src game-instance/src \
-    && echo 'fn main() {}' | tee asset-upload-service/src/main.rs game-instance/src/main.rs >/dev/null
+COPY apps/grove/request-id/Cargo.toml ./request-id/
+RUN mkdir -p asset-upload-service/src game-instance/src request-id/src \
+    && echo 'fn main() {}' | tee asset-upload-service/src/main.rs game-instance/src/main.rs >/dev/null \
+    && : > request-id/src/lib.rs
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo build --release --package grove-asset-upload-service
+    cargo build --release --locked --package grove-asset-upload-service
 
 # The real sources over the placeholder. `touch`, because cargo decides what is stale by timestamp and
 # a copied file can land with one older than the placeholder build it has to invalidate.
 COPY apps/grove/asset-upload-service ./asset-upload-service
-RUN touch asset-upload-service/src/main.rs
+COPY apps/grove/request-id ./request-id
+RUN touch asset-upload-service/src/main.rs request-id/src/lib.rs
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo build --release --package grove-asset-upload-service --bin grove-asset-upload-service
+    cargo build --release --locked --package grove-asset-upload-service --bin grove-asset-upload-service
 
 # Seeded here so the runtime stage can own it: that stage has no shell to `mkdir` with, and a named
 # volume mounted over this path takes its ownership from what the image has at it.
@@ -53,5 +56,5 @@ COPY --from=build /src/target/release/grove-asset-upload-service /usr/local/bin/
 COPY --from=build --chown=65532:65532 /seed/objects /var/lib/grove/objects
 EXPOSE 4005
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/usr/local/bin/grove-healthcheck", "-addr-env", "ASSET_UPLOAD_SERVICE_BIND", "-port", "4005"]
+    CMD ["/usr/local/bin/grove-healthcheck", "-addr-env", "ASSET_UPLOAD_SERVICE_BIND", "-port-env", "PORT", "-port", "4005"]
 ENTRYPOINT ["/usr/local/bin/grove-asset-upload-service"]
