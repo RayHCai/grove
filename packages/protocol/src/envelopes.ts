@@ -6,7 +6,7 @@ import type { AssetId, ScriptId, ScriptProps, TemplateId } from '@platform/proje
 import type { JsonValue } from '@platform/transport';
 import type { NetId, PlayerId, ProjectId } from './ids.js';
 
-/** Everything the server may send — the authoritative list for this direction. */
+/** Everything the server may send: the authoritative list for this direction. */
 export type ServerToClient =
     | Welcome
     | SnapshotChunk
@@ -17,18 +17,15 @@ export type ServerToClient =
     | TimeSyncReply
     | RateChange;
 
-/** Everything a client may send — the authoritative list for this direction. */
+/** Everything a client may send: the authoritative list for this direction. */
 export type ClientToServer = JoinRequest | InputFrame | InteractionFrame | RequestFrame | TimeSync;
-
-/** Either direction, for code that handles a frame before it knows which way it came. */
-export type Envelope = ServerToClient | ClientToServer;
 
 /** Client → server, the first frame on a connection. */
 export type JoinRequest = {
     kind: 'join-request';
     /** A mismatch is a clean refusal, not a decode error. */
     protocolVersion: number;
-    /** Untrusted — the server sanitizes and may replace it. */
+    /** Untrusted: the server sanitizes and may replace it. */
     name: string;
     /** Client wall-clock at send, echoed in the welcome so one RTT is measurable at join. */
     clientSentMs: number;
@@ -39,9 +36,6 @@ export type JoinRequest = {
     projectHash: string;
     /** The bundle this client already holds, or `''`; a joiner has fetched none. */
     bundleHash: string;
-
-    /** Reconnect rebind; a reconnect path must OMIT the key rather than pass `undefined`. */
-    token?: string;
 };
 
 /** Server → one client, once, in reply. It carries what a joiner cannot guess and nothing else. */
@@ -67,7 +61,7 @@ export type Welcome = {
     bounds: WireBounds;
     regions: WireRegion[];
 
-    /** Echoed from the JoinRequest, plus the server's own stamp — one RTT sample. */
+    /** Echoed from the JoinRequest, plus the server's own stamp: one RTT sample. */
     clientSentMs: number;
     serverSentMs: number;
 
@@ -77,9 +71,6 @@ export type Welcome = {
     snapshotChunks?: number;
     /** What the renderer needs to draw a netId at all. */
     visuals: RenderManifest;
-
-    /** Opaque; presented on a later connect() to rebind. Omitted, never `undefined`. */
-    reconnectToken?: string;
 };
 
 /** Server → client, ahead of a `Welcome` whose world does not fit in one frame. */
@@ -103,7 +94,7 @@ export type Reject = {
 /** Coarse on purpose: detail belongs in a log, not on a wire an unauthenticated peer reaches. */
 export type RejectReason = 'version' | 'full' | 'identity';
 
-/** Server → client, every send-tick. RELIABLE — every op must arrive, in order. */
+/** Server → client, every send-tick. RELIABLE: every op must arrive, in order. */
 export type StateEnvelope = {
     kind: 'state';
     tick: number;
@@ -111,16 +102,16 @@ export type StateEnvelope = {
     ackSeq: number;
     /** Spare ticks the EARLIEST input this ack resolved had on arrival; a mean drops the tail. */
     earliestHeadroom?: number;
-    /** Ordered journal, applied verbatim — the ops do not commute, and a drop is unrecoverable. */
+    /** Ordered journal, applied verbatim; the ops do not commute, and a drop is unrecoverable. */
     structural: WireStructuralOp[];
     /** One entry per host with writes this tick, scoped to this connection's player. */
     state: StateDiff[];
 };
 
-/** Server → client, every send-tick. DROPPABLE — superseded by the next by construction. */
+/** Server → client, every send-tick. DROPPABLE: superseded by the next by construction. */
 export type TransformEnvelope = {
     kind: 'transform';
-    /** The tick of the `StateEnvelope` it accompanies — an equality, and the join key. */
+    /** The tick of the `StateEnvelope` it accompanies: an equality, and the join key. */
     tick: number;
     transform: TransformDiff[];
 };
@@ -137,7 +128,7 @@ export type WireSingleStructuralOp =
     /** Carries the roster because nothing else on the wire names a player. */
     | { kind: 'player-join'; player: PlayerSnapshot }
     | { kind: 'player-leave'; id: PlayerId }
-    /** Which script runs on which entity — on the wire nowhere else. */
+    /** Which script runs on which entity, on the wire nowhere else. */
     | ({ kind: 'attach'; netId: NetId } & WireScriptAttachment);
 
 /** Every op one template instantiation produced, applied as one. A BOUNDARY, not a reordering. */
@@ -205,7 +196,7 @@ export type EntitySnapshot = {
      * client cannot infer it, and the template is wrong for any game with two player-owned kinds.
      */
     owner: PlayerId | null;
-    /** Every tag currently on it — what `game.find` queries. */
+    /** Every tag currently on it: what `game.find` queries. */
     tags: string[];
     /** All seven fields, none of them defaultable. */
     transform: WireTransform;
@@ -213,9 +204,9 @@ export type EntitySnapshot = {
     overrides?: EntityOverrides;
 };
 
-/** Per-instance deviations from a template — the baseline a delta `attach` has none for. */
+/** Per-instance deviations from a template: the baseline a delta `attach` has none for. */
 export type EntityOverrides = {
-    /** Every script, in attachment order — the whole list, not a merge over the template's. */
+    /** Every script, in attachment order: the whole list, not a merge over the template's. */
     scripts?: WireScriptAttachment[];
 };
 
@@ -224,9 +215,9 @@ export type PlayerSnapshot = { id: PlayerId; index: number; name: string };
 
 /** The whole world this player may see, at one tick; every channel supplies a baseline. */
 export type WorldSnapshot = {
-    /** Authoritative — the client's tick counter seeds from this, and `Welcome` carries no tick. */
+    /** Authoritative: the client's tick counter seeds from this, and `Welcome` carries no tick. */
     tick: number;
-    /** PARENTS BEFORE CHILDREN — a wire requirement, not a convention. */
+    /** PARENTS BEFORE CHILDREN: a wire requirement, not a convention. */
     entities: EntitySnapshot[];
     players: PlayerSnapshot[];
     state: StateDiff[];
@@ -248,7 +239,7 @@ export type WireRegion = { name: string; bounds: WireBounds };
 export type WireAssetRef = {
     key: AssetId;
     kind: WireAssetKind;
-    /** Core loads nothing — the panel does — so a key with no source cannot be fetched. */
+    /** Core loads nothing (the panel does), so a key with no source cannot be fetched. */
     url: string;
     meta?: { width?: number; height?: number; duration?: number };
 };
@@ -268,7 +259,7 @@ export type SpriteTemplateVisual = {
     anchorX?: number;
     anchorY?: number;
     tint?: number;
-    /** For visuals that exceed their bounds — glow, thick stroke, emitter. */
+    /** For visuals that exceed their bounds: glow, thick stroke, emitter. */
     neverCull?: boolean;
 };
 
@@ -305,7 +296,7 @@ export type SpriteTemplateChild = {
     tint?: number;
     /** Draw order among siblings. */
     layer?: number;
-    /** For visuals that exceed their bounds — glow, thick stroke, emitter. */
+    /** For visuals that exceed their bounds: glow, thick stroke, emitter. */
     neverCull?: boolean;
 };
 
@@ -345,7 +336,7 @@ export type RateChange = { kind: 'rate-change'; simRate: number };
 export type InputFrame = {
     kind: 'input';
     tick: number;
-    /** One per tick, so seq and tick advance together — what makes `ackSeq` tick-aligned. */
+    /** One per tick, so seq and tick advance together: what makes `ackSeq` tick-aligned. */
     seq: number;
     /** Every action for this tick. Empty is not sent. */
     actions: InputAction[];

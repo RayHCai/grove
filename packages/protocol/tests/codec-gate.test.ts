@@ -5,4 +5,4 @@
 import { runCodecContract } from '@platform/transport/testing';
 import { jsonCodec } from '@platform/transport';
 
-runCodecContract(() => jsonCodec, { name: 'codec gate — jsonCodec across the protocol edge' });
+runCodecContract(() => jsonCodec, { name: 'codec gate: jsonCodec across the protocol edge' });

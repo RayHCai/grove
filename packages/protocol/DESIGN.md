@@ -1,11 +1,11 @@
 # `@platform/protocol`
 
-**TL;DR** — the shared wire vocabulary, and nothing else. It declares every message that crosses the wire as
+**TL;DR**: the shared wire vocabulary, and nothing else. It declares every message that crosses the wire as
 a TypeScript `type`, so `@platform/sim` and `@platform/client` narrow to one definition instead of two that
 drift. Types only: no bytes move here, no frame is validated here. It sits above `@platform/transport` and
-`@platform/project` — its two dependencies — and below both endpoints.
+`@platform/project` (its two dependencies) and below both endpoints.
 
-**Authoritative for the wire** where this and the transport, server, or client design disagree.
+**Authoritative for the wire** where this and the transport, sim, or client design disagree.
 
 ---
 
@@ -20,7 +20,7 @@ drift. Types only: no bytes move here, no frame is validated here. It sits above
 
 `PROTOCOL_VERSION` is the only runtime value exported. Everything else is a type.
 
-Dependencies: `@platform/transport` — `src` imports exactly one type from it, `JsonValue` — and
+Dependencies: `@platform/transport` (`src` imports exactly one type from it, `JsonValue`) and
 `@platform/project`, whose authoring ids are exempt from the restatement rule below. `@platform/core` is
 a **devDependency**, reachable only from the dev-only reference, so it cannot enter the shipped module graph.
 
@@ -63,16 +63,16 @@ union `WireStructuralOp` and `WireStructuralOpKind`; `WireScriptAttachment`, `En
 Every envelope must be assignable to transport's `Message` (`JsonValue`). All three failures surface at the
 `send` call as assignability errors that read like nothing to do with design.
 
-1. **`type`, never `interface`** — an `interface` gets no implicit index signature.
-2. **No `readonly` fields or arrays** — `readonly string[]` is not assignable to `JsonValue[]`.
-3. **Optional means absent, never `undefined`** — `exactOptionalPropertyTypes` rejects it at compile time, and
+1. **`type`, never `interface`**: an `interface` gets no implicit index signature.
+2. **No `readonly` fields or arrays**: `readonly string[]` is not assignable to `JsonValue[]`.
+3. **Optional means absent, never `undefined`**: `exactOptionalPropertyTypes` rejects it at compile time, and
    `jsonCodec.encode` throws at runtime for the value a socket actually produces. The carriers:
    `JoinRequest.token`, `Welcome.reconnectToken`, `StateEnvelope.earliestHeadroom`, `WireAssetRef.meta` (and
    its three members), `SpriteTemplateVisual`'s `anchorX` / `anchorY` / `tint` / `neverCull`,
    `InputAction.value`, the `press` arm's `screen`, `GameRequest.data`, `GroupTemplateVisual.children`,
    and every `TemplateChild` field but `kind` and a sprite child's `texture`.
 
-Branded numbers, unions of `type` aliases, and intersections all pass — which is what makes `NetId` and the
+Branded numbers, unions of `type` aliases, and intersections all pass, which is what makes `NetId` and the
 flattened `TransformDiff` free.
 
 ## 4. Invariants an endpoint must honour
@@ -82,12 +82,12 @@ flattened `TransformDiff` free.
   runtimes that reached the same world through different histories hold different handles. The client owns the
   one `netId ↔ EntityId` map.
 - **Apply order: structural → state → transform.** A transform for an unspawned `netId` fails silently and
-  worse than a lost update — `initSlot` zeroes the write but does not clear the dirty bit, so the renderer gets
+  worse than a lost update: `initSlot` zeroes the write but does not clear the dirty bit, so the renderer gets
   a visible snap to the origin at scale 1.
 - **The structural array is applied verbatim.** The ops do not commute; never group by kind.
 - **A `group` is a boundary, not permission to reorder.** It carries every op one template instantiation
   produced, in journal order, parents ahead of children; the group itself sits in journal order among the
-  rest. It is flat — one level, never a group inside a group — because a recursive shape is one a cardinality
+  rest. It is flat (one level, never a group inside a group) because a recursive shape is one a cardinality
   cap does not bound, and a receiver would have to cap depth before it could walk it at all. A sender that
   cannot convert the whole of one drops the whole of one: a partial group tells the receiver a subtree
   arrived complete when the entity its children hang off never existed. A budget counts a group by what it
@@ -98,50 +98,49 @@ flattened `TransformDiff` free.
   state to apply one against. A receiver resolves the id through the registry its own bundle built and
   attaches nothing for a `ServerScript`, which a client tick filters out of every dispatch anyway.
 - **A `StateDiff` names its host once and carries that host's fields as a map.** Field names are
-  therefore KEYS, which puts them under the codec's reserved-key check — so a sender must drop a field
+  therefore KEYS, which puts them under the codec's reserved-key check, so a sender must drop a field
   named `__proto__` / `constructor` / `prototype` rather than emit it, and a receiver never sees one.
-  The shape it replaced put the name in value position, where that check could not see it.
 - **`state` is sent every send-tick, even when both arrays are empty**, because a `transform` envelope is held
   until the `state` envelope for the _same_ `tick` has been applied. `Welcome.snapshot` is the state envelope
   for its tick.
-- **`ackSeq` is the highest contiguous _resolved_ seq for this connection** — applied _or_ definitively refused.
+- **`ackSeq` is the highest contiguous _resolved_ seq for this connection**: applied _or_ definitively refused.
   A rate-limited or windowed-out frame is resolved; only a frame that never arrived is not.
 - **`earliestHeadroom` absent ≠ 0.** Absent means the ack resolved no input, so the client holds its lead. `0`
   is a measurement: arrived exactly on time.
 - **`StateHostAddr` → a _prefixed_ core host key.** Use core's `playerKey` / `entityKey` / `GAME_KEY`, and map
   `netId` → local `EntityId` _before_ building an entity key. `hosts.ensure` mints a record for whatever key it
   is handed, so a bare `'p1'` creates a second empty record and every write lands where no reader looks.
-- **`WorldSnapshot.entities` is parents-before-children**, a real topological emit — core's slot order does not
+- **`WorldSnapshot.entities` is parents-before-children**, a real topological emit; core's slot order does not
   satisfy it, since parenting is a later mutation. A client rejects or roots-and-counts an out-of-order entity
   rather than silently rooting it.
 - **An interest set is parent-closed**, and leaving is bottom-up. No server emits `enter-interest` /
   `leave-interest`; the arms are declared so interest management costs no breaking change to the union.
-- **`spawn` and `enter-interest` carry a full `EntitySnapshot`** — all seven transform fields, `parent`,
-  `owner`, `tags` — because transform is dropped first under backpressure and a static entity is dirty exactly
+- **`spawn` and `enter-interest` carry a full `EntitySnapshot`** (all seven transform fields, `parent`,
+  `owner`, `tags`) because transform is dropped first under backpressure and a static entity is dirty exactly
   once. The duplicate transform in the same tick's `transform` envelope is deliberate. `template` is a
   `TemplateId` rather than a free string: it keys the render manifest on one end and a saved file on the
-  other, and a rename that misses one of them should not typecheck. Both ends of that join declare the id —
+  other, and a rename that misses one of them should not typecheck. Both ends of that join declare the id:
   a `TemplateVisual`'s `template` too, as `texture` and `WireAssetRef.key` both declare `AssetId`.
   `overrides` is absent for an entity its template describes whole, which is why `template` earns its
-  place — an ordinary spawn is one id and a transform.
+  place: an ordinary spawn is one id and a transform.
 - **Every array and string arriving from a peer is bounded by the receiver**, cardinality and length both, and
-  bounded _before_ the element walk — the count is peer-chosen and both validation and the work behind it are
+  bounded _before_ the element walk; the count is peer-chosen and both validation and the work behind it are
   linear in it. No type here expresses a cap, because a cap is a receiver's policy and not a shape. Three layers
   hold one each: transport refuses a frame over `MAX_FRAME_BYTES` before parsing it, since parsing is what
   allocates; the server bounds the unauthenticated client → server surface (`MAX_ACTIONS_PER_FRAME`,
   `MAX_ACTION_NAME_LENGTH`, `MAX_ACTION_NAMES`, `MAX_INTERACTIONS_PER_FRAME`, `MAX_WIDGET_NAME_LENGTH`,
   `MAX_NAME_LENGTH`, `MAX_REQUESTS_PER_FRAME`, `MAX_REQUEST_NAME_LENGTH`, `MAX_REQUEST_PAYLOAD_NODES`,
   `maxSeqGap`); the client bounds every array
-  it walks at `MAX_WIRE_ITEMS` — a spawn's attachment list at the smaller `MAX_ENTITY_SCRIPTS`, since each
-  entry mints a script instance that outlives the frame — and refuses a `netId` that could not name a
+  it walks at `MAX_WIRE_ITEMS` (a spawn's attachment list at the smaller `MAX_ENTITY_SCRIPTS`, since each
+  entry mints a script instance that outlives the frame) and refuses a `netId` that could not name a
   server handle. A `kind` check that
   narrows and then trusts is the shape of the bug. `TemplateChild` is the one recursive shape here, so a
-  cardinality cap bounds nothing on its own — a receiver caps depth and total node count as well, or a peer
+  cardinality cap bounds nothing on its own; a receiver caps depth and total node count as well, or a peer
   spends the per-level cap to the power of the nesting. `Welcome.snapshotChunks` is a count that arrives
   across frames rather than inside one, so it is bounded too (`MAX_SNAPSHOT_CHUNKS`): every chunk it promises
   is memory the receiver holds before anything is applied.
 - **A sender at the frame cap chunks; it never asks for a bigger frame.** The cap bounds what one parse
-  allocates, which is the receiver's protection and not the sender's to spend — and a refused frame is
+  allocates, which is the receiver's protection and not the sender's to spend, and a refused frame is
   unrecoverable on its own, since the client answers a broken session with a resync that asks for the same
   snapshot again. `snapshot-chunk` carries no tick and is never applied alone: chunks precede their
   `Welcome`, which names how many there were, and a set that does not add up is refused rather than
@@ -149,25 +148,25 @@ flattened `TransformDiff` free.
   precede state chunks, since a `StateDiff` addressing an entity needs that entity to exist.
 - **An `interaction` is a claim the authority cannot recompute, and is not input.** A widget's hit box is
   panel layout the server does not hold and a cursor position is meaningless without that client's camera,
-  so both arrive already resolved — by widget name, and by `netId`. The receiver checks the entity is alive
+  so both arrive already resolved: by widget name, and by `netId`. The receiver checks the entity is alive
   and nothing further; a handler that grants something must check reach itself. It carries no `seq`, so it
   is neither acked nor replayed: an interaction is one discrete event, not an edge of a sustained input, and
-  a lost one is lost rather than re-derivable from the next sample. That is why it is its own frame — in
+  a lost one is lost rather than re-derivable from the next sample. That is why it is its own frame; in
   `actions[]` every one of those rules would become conditional on a name.
 - **A `request` is the one client → server path with authority behind it, so it crosses the wire and
   runs only on the authority.** Server-to-client is implicit `@serverState` replication and
-  client-to-server is always an explicit, checked `request()` — an arm that dispatched at the sender
+  client-to-server is always an explicit, checked `request()`; an arm that dispatched at the sender
   would put that check on the untrusted machine. It carries no `seq` for the reason an `interaction`
   does not: one discrete ask, neither acked nor replayed. `GameRequest.name` becomes the event name of
   a dispatch and `data` is the only untrusted payload on this wire, so the receiver caps the name's
   length and bounds the payload before a handler sees it.
 - **`Welcome.visuals` is a baseline, not a session's whole manifest.** A template first used after a client
-  joined reaches it on a `manifest` arm, which carries ADDITIONS the receiver merges — never a replacement,
+  joined reaches it on a `manifest` arm, which carries ADDITIONS the receiver merges, never a replacement,
   which would drop what the join established. It is sent _before_ the `state` envelope whose journal first
   spawns an entity of that template: a node created against a table that does not hold it draws the
   placeholder and keeps it for the session. It carries no `tick`, because a visual is not tick-ordered state.
 - **The handshake proves both ends run the same bytes.** `projectId` and `projectHash` must agree, and a
-  `JoinRequest.bundleHash` that is not `''` must match the server's — a client holding stale code is refused
+  `JoinRequest.bundleHash` that is not `''` must match the server's; a client holding stale code is refused
   rather than left to diverge, since prediction replays its own input through that code and a divergence
   reads as jitter rather than as a fault. All three disagreements reject as `identity`.
 - **`Welcome.bundleUrl` is executable**, so the client verifies `bundleHash` against the fetched bytes _before_
@@ -179,11 +178,8 @@ flattened `TransformDiff` free.
   manifest, so a hostile `Welcome` would otherwise get a browser to fetch an arbitrary URL at join, before a
   frame is drawn. The receiver must constrain the scheme: the client parses it and admits `http:` / `https:` and
   relative paths only, dropping the entry rather than the join.
-- **The handshake is codec-frozen JSON.** `join-request`, `welcome`, `reject` always ride `jsonCodec`; the
-  negotiated codec takes effect after `Welcome`, implied by `protocolVersion` rather than carried as a field.
-  Sound only under FIFO per direction, and not enforced anywhere: transport decodes with one injected codec per
-  process before `onMessage` fires, so a binary-codec server fails a JSON `JoinRequest` inside transport, before
-  protocol sees it.
+- **Every envelope, the handshake included, rides `jsonCodec`.** Transport decodes with one injected codec
+  per process before `onMessage` fires, so both endpoints must be handed the same one.
 
 ## 5. Five types are restated, not imported
 
@@ -191,16 +187,16 @@ flattened `TransformDiff` free.
 | --------------- | ----------------------- | ------------------------------------------------------------- |
 | `InputPhase`    | core `EventPhase`       | core would put the simulation in a client's graph             |
 | `WireAssetKind` | core `AssetKind`        | same; core's six kinds, not the renderer's four               |
-| `WireTransform` | core `TransformBuffer`  | same, and it is an `interface` there — rule 1                 |
+| `WireTransform` | core `TransformBuffer`  | same, and it is an `interface` there (rule 1)                 |
 | `NetId`         | what `EntityId` _means_ | sharing the type is the correctness bug it exists to prevent  |
-| `WireBounds`    | math `Bounds`           | math is a legal edge, but `Bounds` is an `interface` — rule 1 |
+| `WireBounds`    | math `Bounds`           | math is a legal edge, but `Bounds` is an `interface` (rule 1) |
 
 `InputPhase`, `WireAssetKind` and `WireTransform` are **parity-locked** to core through the dev-only reference,
 mutually in both directions, so core widening _or_ narrowing breaks the build. `NetId` locks the opposite
-relation — core's `EntityId` must _not_ be assignable to it — and `WireBounds` locks nothing, because four named
+relation (core's `EntityId` must _not_ be assignable to it) and `WireBounds` locks nothing, because four named
 edges is a shape that does not grow.
 
-`@platform/project`'s three authoring ids — `TemplateId`, `ScriptId`, `AssetId` — and `ScriptProps` are the
+`@platform/project`'s three authoring ids (`TemplateId`, `ScriptId`, `AssetId`) and `ScriptProps` are the
 deliberate exception to the table: they are imported rather than restated, because an id exists to name one
 thing in a saved file, in an editor and on the wire, and a second copy defeats the only job it has.
-`ScriptProps` rides along for the same reason — it is the inspector's own map, saved as it is sent.
+`ScriptProps` rides along for the same reason: it is the inspector's own map, saved as it is sent.
