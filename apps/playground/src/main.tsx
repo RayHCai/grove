@@ -2,7 +2,6 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 // A side-effect import is how Vite is told to bundle a stylesheet; there is nothing to assign.
-// oxlint-disable-next-line import/no-unassigned-import
 import './styles.css';
 
 const host = document.getElementById('root');

@@ -1,4 +1,4 @@
-// Input reaches a player host and an avatar host, never the Game host — hence per-player.
+// Input reaches a player host and an avatar host, never the Game host, hence per-player.
 
 import type { Ctx, Player } from '@platform/engine';
 import { ServerScript, game, onEvent, onEventHold, onUpdate } from '@platform/engine';

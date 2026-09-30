@@ -6,7 +6,7 @@
         "tsBuildInfoFile": "dist/.tsbuildinfo",
 
         // Vite emits the bundle; `tsc` here is only ever a type check. `composite` is therefore
-        // OFF — a composite project may not disable declaration emit (TS6304) — which is also why
+        // OFF: a composite project may not disable declaration emit (TS6304), which is also why
         // the root solution tsconfig does not reference this project. See its comment.
         "noEmit": true,
         "composite": false,
@@ -14,7 +14,7 @@
         "declarationMap": false,
 
         // An app, so it owns a document: `lib` gains DOM, and resolution becomes `bundler`
-        // because Vite — not Node — resolves these specifiers, which is also what lets the
+        // because Vite, not Node, resolves these specifiers, which is also what lets the
         // extensionless `./App` imports below typecheck.
         "lib": ["ES2023", "DOM", "DOM.Iterable"],
         "module": "ESNext",
@@ -25,7 +25,7 @@
     // `src/server` is the Node half: decorator syntax, `ws`, and NodeNext resolution. `src/scripts`
     // is the game, and every file in it but `globals.ts` carries decorators. Both belong to
     // `tsconfig.server.json`, and the browser reaches the two scripts it runs as the `dist/scripts`
-    // copies `tsc` lowered — decorator syntax through Vite's transform reaches the runtime verbatim.
+    // copies `tsc` lowered; decorator syntax through Vite's transform reaches the runtime verbatim.
     //
     // Excluding a directory only drops it from the ROOT file set, so `scripts/globals.ts` is still
     // type-checked here: `project.ts` imports it, and TypeScript follows an import wherever it goes.

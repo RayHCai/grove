@@ -45,7 +45,7 @@ export class HudScreen extends ClientScript<HUDScreen> {
         // these read the same names the authority wrote.
         const world = game;
         // Declared non-null on a `ClientScript`, but a screen can open before the roster carries
-        // the local player — the welcome is what seats them.
+        // the local player; the welcome is what seats them.
         const me = this.localPlayer as Player | undefined;
         const phase = readState<MatchPhase>(world, STATE_PHASE) ?? 'lobby';
         const round = readState<number>(world, STATE_ROUND) ?? 0;
@@ -54,7 +54,7 @@ export class HudScreen extends ClientScript<HUDScreen> {
         const playerCount = readState<number>(world, STATE_PLAYER_COUNT) ?? 0;
         const winner = readState<string>(world, STATE_WINNER) ?? '';
 
-        // BEFORE the widgets below: opening runs the new screen's `@onStart`, and a placeholder
+        // Before the widgets below: opening runs the new screen's `@onStart`, and a placeholder
         // written there must not survive the authoritative value this frame already holds.
         this.#showFor(phase);
 
@@ -79,7 +79,7 @@ export class HudScreen extends ClientScript<HUDScreen> {
         this.#writeBoard(readState<Leaderboard>(world, STATE_BOARD));
     }
 
-    /** One menu at a time, and only on a transition — an open runs its scripts' `@onStart`. */
+    /** One menu at a time, and only on a transition: an open runs its scripts' `@onStart`. */
     #showFor(phase: MatchPhase): void {
         const want = phase === 'results' ? SCREEN_RESULTS : phase === 'lobby' ? SCREEN_LOBBY : null;
         if (want === this.#shown) return;
@@ -94,7 +94,7 @@ export class HudScreen extends ClientScript<HUDScreen> {
         for (let row = 0; row < BOARD_SIZE; row++) {
             const entry = rows[row];
             const line =
-                entry === undefined ? '' : `${row + 1}. ${entry.player.name} — ${entry.score}`;
+                entry === undefined ? '' : `${row + 1}. ${entry.player.name}: ${entry.score}`;
             hud.text(rankWidget(row), line);
             if (line === '') hud.hide(rankWidget(row));
             else hud.show(rankWidget(row));
@@ -120,7 +120,7 @@ function describeReady(
     playerCount: number,
 ): string {
     if (phase !== 'lobby') return `${playerCount} playing`;
-    if (ready) return `waiting — ${readyCount}/${playerCount} ready`;
+    if (ready) return `waiting: ${readyCount}/${playerCount} ready`;
     return `ready up (${readyCount}/${playerCount})`;
 }
 

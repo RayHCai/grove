@@ -41,9 +41,9 @@ export class Rules extends ServerScript<Game> {
     resultsSeconds = RESULTS_SECONDS;
     leafInterval = LEAF_INTERVAL;
 
-    /** Game-hosted, so every peer sees these — a player-hosted field reaches only its owner. */
+    /** Game-hosted, so every peer sees these; a player-hosted field reaches only its owner. */
     @serverState phase: MatchPhase = 'lobby';
-    /** Seconds left in the round, or in the results dwell — one clock, whichever is running. */
+    /** Seconds left in the round, or in the results dwell: one clock, whichever is running. */
     @serverState secondsLeft = 0;
     @serverState readyCount = 0;
     @serverState playerCount = 0;
@@ -133,7 +133,7 @@ export class Rules extends ServerScript<Game> {
         }
     }
 
-    /** @internal — every other script scores through here, so the wrapper has one writer. */
+    /** @internal every other script scores through here, so the wrapper has one writer. */
     award(player: Player, points: number): void {
         if (this.phase !== 'playing') return;
         // Passed explicitly: the acting-player ambient is only available inside a handler driven by
@@ -141,7 +141,7 @@ export class Rules extends ServerScript<Game> {
         this.scores.add(points, player);
     }
 
-    /** @internal — a leaf nobody caught. */
+    /** @internal a leaf nobody caught. */
     noteWasted(): void {
         if (this.phase !== 'playing') return;
         this.wasted = this.wasted + 1;
@@ -214,7 +214,7 @@ export class Rules extends ServerScript<Game> {
     }
 
     /**
-     * The winner's crown, whose art is declared the first time one is needed — before the spawn,
+     * The winner's crown, whose art is declared the first time one is needed: before the spawn,
      * and so before the send that journals it, or the node keeps the placeholder.
      */
     #crown(winner: Player): void {

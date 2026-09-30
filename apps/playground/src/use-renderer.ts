@@ -1,4 +1,4 @@
-// THE RENDERER LIVES IN A REF, NEVER IN STATE: it is a mutable GPU-backed object whose identity
+// The renderer lives in a ref, never in state: it is a mutable GPU-backed object whose identity
 // never changes, and state would re-render every consumer and invite React to copy it.
 
 import { useEffect, useRef, useState } from 'react';
@@ -20,7 +20,7 @@ export interface UseRendererOptions {
     /** Everything but `container`, which the hook supplies from its own ref. */
     init: Omit<RendererInitOptions, 'container'>;
     /**
-     * Called once after `init()` resolves and before the phase turns `'ready'` — load assets here.
+     * Called once after `init()` resolves and before the phase turns `'ready'`: load assets here.
      * An async return is awaited, and the hook stays `'initializing'` until it settles.
      */
     onReady?: (renderer: IRenderer) => void | Promise<void>;
@@ -63,7 +63,7 @@ export function useRenderer(options: UseRendererOptions): UseRendererResult {
             try {
                 await renderer.init({ ...initRef.current, container });
                 settled = true;
-                // Unmounted while initializing: the canvas exists now, so tear it down here —
+                // Unmounted while initializing: the canvas exists now, so tear it down here;
                 // cleanup already ran and could not do it.
                 if (cancelled) {
                     renderer.destroy();
@@ -80,7 +80,7 @@ export function useRenderer(options: UseRendererOptions): UseRendererResult {
                 setPhase('ready');
             } catch (cause) {
                 // A rejected `init()` built nothing, but `onReady` may have thrown after it
-                // succeeded — so destroy unconditionally. It is idempotent.
+                // succeeded, so destroy unconditionally. It is idempotent.
                 settled = true;
                 renderer.destroy();
                 if (cancelled) return;
@@ -92,7 +92,7 @@ export function useRenderer(options: UseRendererOptions): UseRendererResult {
         return () => {
             cancelled = true;
             rendererRef.current = null;
-            // Only destroy once `init()` has settled — otherwise the canvas it is about to append
+            // Only destroy once `init()` has settled; otherwise the canvas it is about to append
             // would outlive this effect. The init path handles the cancelled-mid-init case.
             if (settled) renderer.destroy();
         };

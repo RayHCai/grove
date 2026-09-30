@@ -26,7 +26,7 @@ function gameServer(): Plugin {
         configureServer(server) {
             if (!existsSync(SERVER_ENTRY)) {
                 server.config.logger.error(
-                    `[game] ${SERVER_ENTRY} is missing — run \`tsc -p tsconfig.server.json\` (the \`dev\` script does).`,
+                    `[game] ${SERVER_ENTRY} is missing: run \`tsc -p tsconfig.server.json\` (the \`dev\` script does).`,
                 );
                 return;
             }
@@ -55,12 +55,12 @@ export default defineConfig({
     plugins: [react(), gameServer()],
     server: {
         port: 5173,
-        // Fail loudly rather than silently picking another port — a harness on an unexpected
+        // Fail loudly rather than silently picking another port; a harness on an unexpected
         // port is worse than one that did not start.
         strictPort: true,
     },
     build: {
-        // `dist/` is shared with the server project's output, so Vite owns a subdirectory of it —
+        // `dist/` is shared with the server project's output, so Vite owns a subdirectory of it:
         // `emptyOutDir` empties whatever it is pointed at, and `dist` would take the server with
         // it.
         outDir: 'dist/client',

@@ -1,4 +1,4 @@
-/* Harness chrome. Plain CSS — no framework, because none of this is the thing under test. */
+/* Harness chrome. Plain CSS: no framework, because none of this is the thing under test. */
 
 :root {
     --bg: #0b0f0d;
@@ -37,19 +37,6 @@ body {
     display: flex;
     flex-direction: column;
     gap: 20px;
-}
-
-.app__header h1 {
-    margin: 0 0 6px;
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-}
-
-.app__header p {
-    margin: 0;
-    max-width: 62ch;
-    color: var(--muted);
 }
 
 .stage {
@@ -176,16 +163,7 @@ body {
     font-size: 12px;
 }
 
-.app__header code {
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: #1b241e;
-    color: var(--text);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
-}
-
-/* ── the HUD, drawn from the client's own sink ─────────────────────── */
+/* The HUD, drawn from the client's own sink. */
 
 /*
  * An overlay, so the round clock the renderer draws on its `ui` surface and the panels drawn here
@@ -328,7 +306,7 @@ body {
     font-size: 12px;
 }
 
-/* ── panels: render tree beside the session ────────────────────────── */
+/* Panels: render tree beside the session. */
 
 .stage__panels {
     display: grid;
@@ -344,7 +322,7 @@ body {
     }
 }
 
-/* ── inspector ─────────────────────────────────────────────────────── */
+/* Inspector. */
 
 .inspector {
     border: 1px solid var(--border);
@@ -571,7 +549,7 @@ body {
     font-variant-numeric: tabular-nums;
 }
 
-/* ── session panel ─────────────────────────────────────────────────── */
+/* Session panel. */
 
 .loop {
     border: 1px solid var(--border);

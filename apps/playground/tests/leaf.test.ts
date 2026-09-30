@@ -90,7 +90,7 @@ describe('dropBand', () => {
 
     it('stays inside what an avatar can reach', () => {
         // The avatar clamps its own body onto the stage, so the furthest height it can stand at is
-        // an avatar's half-box inside the edge — a leaf dropped past that plus both half-boxes
+        // an avatar's half-box inside the edge; a leaf dropped past that plus both half-boxes
         // would be uncatchable rather than merely hard.
         const band = dropBand(WORLD);
         const reach = AVATAR_HALF + LEAF_HALF;

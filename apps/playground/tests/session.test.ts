@@ -60,13 +60,13 @@ interface Tab {
     device: ScriptedInputDevice;
     renderer: IRenderer;
     clock: ClockNode;
-    /** Whether the host has registered this tab's screens yet — a once-per-session job. */
+    /** Whether the host has registered this tab's screens yet, a once-per-session job. */
     opened: boolean;
 }
 
 /**
  * One server, N clients, one hand-turned clock. Every join is IDENTIFIED, as `main.ts`'s is:
- * the server reads the persisted record first, and that read is a promise — hence the yields.
+ * the server reads the persisted record first, and that read is a promise, hence the yields.
  */
 class Session {
     readonly instance: GameInstance;
@@ -136,7 +136,7 @@ class Session {
         return tab;
     }
 
-    /** Server first, then every client — the order a socket would produce anyway. */
+    /** Server first, then every client: the order a socket would produce anyway. */
     async step(ticks: number): Promise<void> {
         for (let i = 0; i < ticks; i++) {
             this.#now += TICK;
@@ -145,7 +145,7 @@ class Session {
                 tab.frames.frame(this.#now);
                 // The host's own after-frame work, exactly as `use-game.ts` runs it.
                 tab.clock.sync(tab.client);
-                // Once, on the transition to `live` — which is exactly where `use-game.ts` calls
+                // Once, on the transition to `live`, which is exactly where `use-game.ts` calls
                 // it. Every frame would re-open and re-close each screen, discarding the instances
                 // the overlay's own switch believes are still up.
                 if (tab.client.state === 'live' && !tab.opened) {
@@ -217,7 +217,7 @@ function runtimeOf(tab: Tab): Runtime {
     return mirror.runtime;
 }
 
-/** One replicated field, read off the mirror's host record — where the hoist puts it. */
+/** One replicated field, read off the mirror's host record, where the hoist puts it. */
 function gameField<T>(tab: Tab, name: string): T | undefined {
     return runtimeOf(tab).hosts.get(GAME_KEY)?.record.values.get(name) as T | undefined;
 }
@@ -228,7 +228,7 @@ function playerField<T>(tab: Tab, name: string): T | undefined {
     return runtimeOf(tab).hosts.get(playerKey(id))?.record.values.get(name) as T | undefined;
 }
 
-/** The palette seat the rules assigned this tab — never `player.index`, which is never reused. */
+/** The palette seat the rules assigned this tab, never `player.index`, which is never reused. */
 function slotOf(tab: Tab): number {
     return playerField<number>(tab, STATE_SLOT) ?? 0;
 }
@@ -247,7 +247,7 @@ function templatesIn(tab: Tab): string[] {
     return out;
 }
 
-/** Leaves only, by the tag the rules put on them — the zone pips are entities too. */
+/** Leaves only, by the tag the rules put on them; the zone pips are entities too. */
 function leafIds(tab: Tab): EntityId[] {
     const rt = runtimeOf(tab);
     return [...rt.entities.liveIds()].filter((id) => rt.tags.has(id, LEAF_TAG));
@@ -263,7 +263,7 @@ function badgesIn(tab: Tab): string[] {
     return templatesIn(tab).filter((template) => badge.has(template));
 }
 
-/** This tab's own avatar — an entity it owns whose template is the Player one. */
+/** This tab's own avatar: an entity it owns whose template is the Player one. */
 function avatarOf(tab: Tab): EntityId {
     const rt = runtimeOf(tab);
     const mine = tab.client.localPlayer!.id;
@@ -391,7 +391,7 @@ describe('a session over the real wire', () => {
         tab.device.emit({ kind: 'key', code: CODE_RIGHT, down: false });
         await session.step(30);
 
-        // The authority ran the same script on the same input, so the two agree exactly — and the
+        // The authority ran the same script on the same input, so the two agree exactly, and the
         // client never had to be snapped back to get there.
         const server = session.sim.runtime;
         const authoritative = [...server.entities.liveIds()].find((id) => {
@@ -414,7 +414,7 @@ describe('a session over the real wire', () => {
 
         const avatar = avatarOf(tab);
         const rt = runtimeOf(tab);
-        // The avatar is PREDICTED, so what is drawn is what is simulated — the one entity whose
+        // The avatar is PREDICTED, so what is drawn is what is simulated: the one entity whose
         // screen position a test can compute without knowing the interpolation delay.
         const at = tab.renderer.worldToScreen({
             x: rt.transforms.posX(avatar),
@@ -548,7 +548,7 @@ describe('a round', () => {
         await session.live(a, b);
         expect(phaseOf(a)).toBe('lobby');
 
-        // The interaction frame, not an input action — the one creator-facing command channel.
+        // The interaction frame, not an input action: the one creator-facing command channel.
         pressWidget(a.client, WIDGET_READY, SCREEN_LOBBY);
         await session.step(10);
         expect(gameField<number>(a, STATE_READY_COUNT)).toBe(1);
@@ -574,7 +574,7 @@ describe('a round', () => {
             expect(y).toBeGreaterThanOrEqual(band.low - 1);
             expect(y).toBeLessThanOrEqual(band.high + 1);
         }
-        // One tab seated, so every badge is that tab's slot — `random.pick` draws from the roster.
+        // One tab seated, so every badge is that tab's slot; `random.pick` draws from the roster.
         const slot = slotOf(tab);
         expect(new Set(badgesIn(tab))).toEqual(new Set([markerTemplate(slot)]));
 
@@ -624,7 +624,7 @@ describe('a round', () => {
 
         // Re-aim each pass rather than steering once at the first leaf seen: leaf heights are
         // `game.random`'s, so a single manoeuvre only lands when the stream happens to drop one
-        // within reach — which makes the test a property of the seed rather than of the harvest.
+        // within reach, which makes the test a property of the seed rather than of the harvest.
         for (let attempt = 0; attempt < 12 && scoreWidget(tab) === 0; attempt++) {
             await session.stepUntil(() => leavesIn(tab) > 0, 200);
             const target = leafIds(tab).reduce((lowest, id) =>
@@ -667,7 +667,7 @@ describe('the results screen and the lobby after it', () => {
         expect(phaseOf(a)).toBe('playing');
 
         b.session.close();
-        // The roster still holds the leaver when `@onPlayerLeave` runs — the removal is last — so
+        // The roster still holds the leaver when `@onPlayerLeave` runs (the removal is last), so
         // the recount is told who to leave out rather than counting them one last time.
         await session.stepUntil(() => gameField<number>(a, STATE_PLAYER_COUNT) === 1, 200);
         expect(phaseOf(a)).toBe('playing');
@@ -738,7 +738,7 @@ describe('the results screen and the lobby after it', () => {
         await session.stepUntil(() => phaseOf(tab) === 'results', 3200);
 
         // This one is spawned by the join handler while everyone else is spectating, so the reopen
-        // finds it already holding an avatar — `spawn` would mint a second and orphan the first.
+        // finds it already holding an avatar; `spawn` would mint a second and orphan the first.
         const late = await session.join('late');
         await session.live(late);
         await session.stepUntil(() => phaseOf(tab) === 'lobby', 900);
@@ -775,7 +775,7 @@ describe('the HUD', () => {
         await session.step(4);
 
         // `hud.open` dispatches `LobbyScreen.@onStart` inside the call, and that writes a static
-        // 'ready up'. The bridge opens the screen BEFORE its own widget writes for this reason —
+        // 'ready up'. The bridge opens the screen BEFORE its own widget writes for this reason:
         // opened after, the placeholder would stand until the authority's answer next changed.
         expect(tab.client.hud.widgetOf(WIDGET_READY)?.text).toContain('0/1');
     });
@@ -787,7 +787,7 @@ describe('the HUD', () => {
         await session.live(a, b);
         await session.step(2);
 
-        // `LobbyScreen.@onPress` runs on this call — a screen's `@onStart` and its presses are the
+        // `LobbyScreen.@onPress` runs on this call; a screen's `@onStart` and its presses are the
         // only client-located handlers anything dispatches.
         pressWidget(a.client, WIDGET_READY, SCREEN_LOBBY);
         expect(a.client.hud.widgetOf(WIDGET_READY)?.enabled).toBe(false);
@@ -828,7 +828,7 @@ describe('what outlives a session', () => {
         await session.stepUntil(() => scoreWidget(tab) > 0, 120);
 
         // The round has to END for a total to be banked, and the socket has to close for it to be
-        // written through — that leave is the only session boundary this server owns.
+        // written through; that leave is the only session boundary this server owns.
         await session.stepUntil(() => phaseOf(tab) === 'results', 3200);
         await session.step(4);
         const banked = playerField<number>(tab, STATE_LIFETIME) ?? 0;
@@ -868,7 +868,7 @@ describe('what outlives a session', () => {
         await flushMicrotasks();
 
         // `ready` rides the same host record `lifetimeLeaves` does, so it is written through on the
-        // leave — a rejoin that trusted the save would come back already readied, and the first
+        // leave; a rejoin that trusted the save would come back already readied, and the first
         // press would UN-ready them rather than start anything.
         session = new Session(store);
         const back = await session.join('one', 'stable-id');
