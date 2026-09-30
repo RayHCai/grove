@@ -78,7 +78,7 @@ resource "aws_security_group" "fleet" {
 }
 
 # The one rule the outside world gets. A game process binds a port the kernel picked, so the range
-# rather than a port — and the process itself verifies a signed join ticket before a frame crosses,
+# rather than a port, and the process itself verifies a signed join ticket before a frame crosses,
 # which is what makes an open range safe rather than merely necessary.
 resource "aws_vpc_security_group_ingress_rule" "game_sessions" {
   security_group_id = aws_security_group.fleet.id

@@ -26,14 +26,18 @@ variable "server_manager_url" {
   type        = string
 }
 
-variable "task_alarm_actions" {
-  description = "SNS topics notified when the task streams stop answering."
-  type        = list(string)
-  default     = []
+variable "game_manager_url" {
+  description = "Where every game process reads and writes its state."
+  type        = string
 }
 
-variable "task_client_cidrs" {
-  description = "Blocks the services that queue and claim work are deployed into."
-  type        = list(string)
-  default     = []
+variable "fleet_ami_parameter" {
+  description = "SSM parameter holding the fleet image's id, in every fleet region."
+  type        = string
 }
+
+variable "browser_origins" {
+  description = "Origins a signed-in browser presigns against the games bucket from."
+  type        = list(string)
+}
+

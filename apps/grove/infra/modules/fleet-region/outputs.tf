@@ -23,11 +23,6 @@ output "autoscaling_group_name" {
   value       = aws_autoscaling_group.fleet.name
 }
 
-output "role_arn" {
-  description = "ARN of the role a box assumes."
-  value       = aws_iam_role.fleet.arn
-}
-
 output "secret_path" {
   description = "Parameter Store prefix holding this region's copy of the two shared secrets."
   value       = local.secret_path

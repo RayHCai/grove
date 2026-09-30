@@ -43,9 +43,8 @@ variable "root_volume_gb" {
 }
 
 variable "ami_ssm_parameter" {
-  description = "Public SSM parameter naming the AMI a box boots. Resolved at plan time, so a new image is a visible diff rather than a silent replacement."
+  description = "SSM parameter, in this region, holding the id of the fleet image: one built with both binaries under /opt/grove/bin. No default, because a stock image boots a box with no agent on it. Resolved at plan time, so a new image is a visible diff rather than a silent replacement."
   type        = string
-  default     = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 }
 
 variable "max_instances_per_box" {
@@ -67,13 +66,18 @@ variable "instance_manager_port" {
 }
 
 variable "game_port_range" {
-  description = "Ports the game processes bind. The agent asks the kernel for a free one, so this is the kernel's ephemeral range — and it is open to the internet because a player dials their game process directly."
+  description = "Ports the game processes bind. The agent asks the kernel for a free one, so this is the kernel's ephemeral range, and it is open to the internet because a player dials their game process directly."
   type        = list(number)
   default     = [32768, 60999]
 }
 
 variable "server_manager_url" {
   description = "Where a box's heartbeat goes; `SERVER_MANAGER_URL` for the agent."
+  type        = string
+}
+
+variable "game_manager_url" {
+  description = "Where every game process on a box reads and writes its state; `GAME_MANAGER_URL` for the agent."
   type        = string
 }
 
@@ -89,14 +93,8 @@ variable "fleet_cidrs" {
 }
 
 variable "artifact_bucket_arn" {
-  description = "Games bucket a box pulls bundle sets from."
+  description = "Games bucket a box may read build output and assets from."
   type        = string
-}
-
-variable "dynamodb_arn_patterns" {
-  description = "Tables and indexes a box may reach, as ARN patterns spanning every replica region."
-  type        = list(string)
-  default     = []
 }
 
 variable "tags" {

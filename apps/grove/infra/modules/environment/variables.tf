@@ -45,6 +45,21 @@ variable "server_manager_url" {
   type        = string
 }
 
+variable "game_manager_url" {
+  description = "Where every game process reads and writes its state. One of it, for the whole fleet."
+  type        = string
+}
+
+variable "fleet_ami_parameter" {
+  description = "SSM parameter holding the fleet image's id, present under this name in every fleet region. No default: a stock image carries no agent."
+  type        = string
+}
+
+variable "browser_origins" {
+  description = "Origins a signed-in browser presigns a PUT or GET against the games bucket from: the platform, the editor and the player."
+  type        = list(string)
+}
+
 variable "dynamodb_replica_regions" {
   description = "Regions the tables are replicated into. A box reading its own region's replica is the difference between a tick's store call and a cross-continent one."
   type        = list(string)
@@ -81,14 +96,3 @@ variable "tags" {
   default     = {}
 }
 
-variable "task_alarm_actions" {
-  description = "SNS topics notified when the task streams stop answering."
-  type        = list(string)
-  default     = []
-}
-
-variable "task_client_cidrs" {
-  description = "Blocks `@grove/api`, `@grove/game-builder` and `@grove/asset-upload-service` are deployed into. Empty leaves the streams reachable from nothing."
-  type        = list(string)
-  default     = []
-}

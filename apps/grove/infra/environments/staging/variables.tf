@@ -25,3 +25,19 @@ variable "server_manager_url" {
   description = "Where every box's heartbeat goes."
   type        = string
 }
+
+variable "game_manager_url" {
+  description = "Where every game process reads and writes its state."
+  type        = string
+}
+
+variable "fleet_ami_parameter" {
+  description = "SSM parameter holding the fleet image's id, in every fleet region."
+  type        = string
+}
+
+variable "browser_origins" {
+  description = "Origins a signed-in browser presigns against the games bucket from."
+  type        = list(string)
+}
+
