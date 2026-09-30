@@ -21,9 +21,12 @@ type vectorCase struct {
 	Token   string `json:"token"`
 }
 
+// Ticket reads `hmacTicket`, not `ticket`: the latter is now the Ed25519 vector set
+// `libs/api-contract` mints game-instance tickets under too (see the note on `HmacAudience` in
+// `session-token.ts`), and this box has not been migrated off HMAC yet.
 type vectorSet struct {
 	Secret      string     `json:"secret"`
-	Ticket      vectorCase `json:"ticket"`
+	Ticket      vectorCase `json:"hmacTicket"`
 	StoreBearer vectorCase `json:"storeBearer"`
 	Another     vectorCase `json:"anotherTicketByTheSameSigner"`
 }
