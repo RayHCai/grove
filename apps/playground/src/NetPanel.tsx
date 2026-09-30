@@ -42,7 +42,7 @@ export function NetPanel({ read, state }: NetPanelProps): React.JSX.Element {
                     {/* The predicted half. `predicted tick` leads `depicted` by the span being
                         replayed, one resimulation happens per frame that carried state, and
                         `attach skipped` counts the server-located scripts this page was told about
-                        and correctly holds no class for — it is a census, not a fault. */}
+                        and correctly holds no class for; it is a census, not a fault. */}
                     <dl className="loop__grid">
                         <Metric
                             label="predicted tick"

@@ -50,7 +50,7 @@ export const PROJECT_HASH = '4';
 export const SIM_RATE = 60;
 
 /**
- * Broadcasts per second — the package default, and the rate the client interpolates over.
+ * Broadcasts per second: the package default, and the rate the client interpolates over.
  * Raising it to `SIM_RATE` buys nothing but `1 + connections` encodes per tick.
  */
 export const SEND_RATE = 20;
@@ -82,7 +82,7 @@ const badgeTemplates: TemplateRecord[] = PLAYER_TINTS.map((tint, slot) => ({
 
 /**
  * The pips of one zone: a bare pivot with three sprites beneath it. Placed entities rather than a
- * template subtree, since a zone is one arrangement — and it exercises the placed-world path.
+ * template subtree, since a zone is one arrangement, and it exercises the placed-world path.
  */
 function zonePips(
     prefix: string,
@@ -125,7 +125,7 @@ export const PROJECT: ProjectManifest = {
     formatVersion: PROJECT_FORMAT_VERSION,
     projectId: PROJECT_ID,
     // The digest the handshake compares. Hand-stamped here, because nothing in this app builds the
-    // file — a real editor would write it, and both ends read it from this one place either way.
+    // file; a real editor would write it, and both ends read it from this one place either way.
     contentHash: PROJECT_HASH,
 
     settings: {
@@ -140,7 +140,7 @@ export const PROJECT: ProjectManifest = {
     },
 
     // Fetched by the browser, never by the server, and the client admits only `http:`, `https:` and
-    // relative paths — so these resolve against the origin that served the page.
+    // relative paths, so these resolve against the origin that served the page.
     assets: [
         { id: assetId(LEAF_ASSET), kind: 'texture', url: LEAF_URL, meta: LEAF_PIXELS },
         { id: assetId(MARKER_ASSET), kind: 'texture', url: MARKER_URL, meta: MARKER_PIXELS },
@@ -246,7 +246,7 @@ export const PROJECT: ProjectManifest = {
             id: templateId(AVATAR_TEMPLATE),
             visual: { kind: 'sprite', texture: assetId(MARKER_ASSET) },
             // `Runner` rides the template rather than an `addScript` in the join handler, so the
-            // avatar is running it before that handler returns — and the resulting `attach` op is
+            // avatar is running it before that handler returns, and the resulting `attach` op is
             // what tells the browser to attach its own copy and predict.
             scripts: [
                 // The step rides the attachment, so it reaches the browser on the `attach` op and
@@ -256,7 +256,7 @@ export const PROJECT: ProjectManifest = {
             ],
             // One spawn key, two entities: the roster mints the whole subtree, so nothing has to
             // remember to parent a shadow by hand every time a player respawns. The scale is the
-            // child's own — only position and visibility inherit — and is a shade wider than the
+            // child's own (only position and visibility inherit) and is a shade wider than the
             // body it sits under, which is what makes it read as a shadow.
             children: [
                 {

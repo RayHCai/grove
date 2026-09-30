@@ -104,8 +104,8 @@ export function spawnLeaf(world: Game, worldY: number, badgeSlot: number): Entit
         isTrigger: true,
         bounds: { left: -LEAF_HALF, right: LEAF_HALF, top: LEAF_HALF, bottom: -LEAF_HALF },
     };
-    // The template attached `Leaf` inside `spawn` — attaching is synchronous, and only `@onStart`
-    // waits for a pass — so the instance is already here to write through.
+    // The template attached `Leaf` inside `spawn` (attaching is synchronous, and only `@onStart`
+    // waits for a pass), so the instance is already here to write through.
     const script = leaf.getScript(Leaf);
     if (script !== null) script.badgeSlot = badgeSlot;
 

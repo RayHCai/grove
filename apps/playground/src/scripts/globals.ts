@@ -1,4 +1,4 @@
-// Imports NOTHING — not the engine, not the host, not another script — which is what lets a
+// Imports NOTHING (not the engine, not the host, not another script), which is what lets a
 // script read it, the project file describe a world with it, and the shell draw a HUD against it.
 // A creator edits this file; everything else in `scripts/` is behaviour.
 
@@ -107,7 +107,7 @@ export const PLAYER_TINTS = [
     0xf06292, // pink
 ] as const;
 
-/** Concurrent tabs, not people — a refresh under the same id rejoins as the same player. */
+/** Concurrent tabs, not people; a refresh under the same id rejoins as the same player. */
 export const MAX_PLAYERS = PLAYER_TINTS.length;
 
 /** The seat an index falls in, wrapped so a stray number can never index out of the palette. */
@@ -135,7 +135,7 @@ export const AVATAR_STEP = 4;
 
 /**
  * Where it stands, how large it draws, and how wide its harvest reach is. `marker.png` is 8x8, so
- * the scale draws the body as wide as its collider — a narrower sprite reads as thin-air catches.
+ * the scale draws the body as wide as its collider; a narrower sprite reads as thin-air catches.
  */
 export const AVATAR_Y = -200;
 export const AVATAR_HALF = 20;
@@ -169,7 +169,7 @@ export const EDGE_MARGIN = 32;
 
 /**
  * The badge parented above each leaf: how big, how far above, and how solid.
- * `marker.png` is 8x8, so scale 2 draws it a third of a leaf — legible without competing.
+ * `marker.png` is 8x8, so scale 2 draws it a third of a leaf, legible without competing.
  */
 export const MARKER_SCALE = 2;
 export const MARKER_OFFSET_Y = 34;

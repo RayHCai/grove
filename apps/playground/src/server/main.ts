@@ -15,7 +15,7 @@ const port = raw === undefined ? DEFAULT_GAME_PORT : Number(raw);
 const log = (line: string): void => void console.log(`[game] ${line}`);
 
 /**
- * Who the server should think this socket is — a toy's answer, from the peer's own query.
+ * Who the server should think this socket is: a toy's answer, from the peer's own query.
  * This one believes the claim, and the server keys persisted `@serverState` by it.
  */
 function playerIdentity(request: IncomingMessage): string {
@@ -38,7 +38,7 @@ const game = listenOn(
 game.listening.then(
     () => {
         const { simRate, sendRate } = PROJECT.settings;
-        log(`ws://localhost:${port} — ${simRate}Hz sim, ${sendRate} sends/s`);
+        log(`ws://localhost:${port}: ${simRate}Hz sim, ${sendRate} sends/s`);
     },
     (cause: Error) => {
         log(`could not listen on ${port}: ${cause.message}`);
