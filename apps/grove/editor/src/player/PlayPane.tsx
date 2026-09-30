@@ -1,14 +1,6 @@
 import { useRef, useSyncExternalStore } from 'react';
 import type { Ref } from 'react';
-import {
-    IconButton,
-    MaximizeIcon,
-    MinimizeIcon,
-    Panel,
-    PopoutIcon,
-    VisuallyHidden,
-    cx,
-} from '@grove/ui';
+import { IconButton, MaximizeIcon, MinimizeIcon, Panel, VisuallyHidden, cx } from '@grove/ui';
 import { Transport } from '../shell/Transport';
 import type { TransportAction, TransportState } from '../shell/Transport';
 
@@ -17,13 +9,11 @@ export interface PlayPaneProps {
     dispatch: (action: TransportAction) => void;
     /** Reaches the frame a local run is written into; the run host owns what goes in it. */
     frameRef?: Ref<HTMLIFrameElement> | undefined;
-    /** Starts the same run in a window of its own, at whatever size the creator gives it. */
-    onOpenWindow?: (() => void) | undefined;
     /**
      * A stage of the caller's own, shown instead of the frame.
      *
      * A game the engine drives runs in this page rather than in a sandbox, because the world and
-     * the session are both here — so the stage it plays on is a React tree, not a document.
+     * the session are both here, so the stage it plays on is a React tree, not a document.
      */
     children?: React.ReactNode;
     className?: string | undefined;
@@ -49,7 +39,6 @@ export function PlayPane({
     status,
     dispatch,
     frameRef,
-    onOpenWindow,
     children,
     className,
 }: PlayPaneProps): React.JSX.Element {
@@ -103,16 +92,6 @@ export function PlayPane({
                     />
                 )}
                 <div className="play-tools">
-                    {onOpenWindow !== undefined && (
-                        <IconButton
-                            size="sm"
-                            className="play-popout"
-                            label="Full page"
-                            onClick={onOpenWindow}
-                        >
-                            <PopoutIcon />
-                        </IconButton>
-                    )}
                     <IconButton
                         size="sm"
                         className="play-fullscreen"

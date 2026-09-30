@@ -29,7 +29,7 @@ export interface GameTemplate {
  * A new game's whole file set: the template's sources, and the manifest beside them.
  *
  * The manifest's `scriptModules` are read back off those same sources rather than written out
- * here, so a template cannot declare a class it does not have — and the project id is the game's
+ * here, so a template cannot declare a class it does not have, and the project id is the game's
  * own, which is what a build, a share link and a save file agree on.
  */
 export async function seedFrom(

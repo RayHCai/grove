@@ -1,7 +1,7 @@
 // Turning what a compile emitted into classes a world can attach.
 //
-// The modules are evaluated for real — `data:` urls rather than the browser's `blob:` ones, because
-// that is what node's loader can fetch — so what is asserted is a live class, not a plan to make
+// The modules are evaluated for real (`data:` urls rather than the browser's `blob:` ones, because
+// that is what node's loader can fetch), so what is asserted is a live class, not a plan to make
 // one. The engine handed in is a stand-in: this file is about the wiring, and the real engine is
 // what the editor passes in its place.
 

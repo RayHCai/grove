@@ -5,7 +5,6 @@ import type {
     SourceUpsert,
     Workspace,
     WorkspaceFile,
-    WorkspacePath,
     WorkspaceSave,
 } from '@grove/api-contract';
 import type { ProjectManifest } from '@platform/project';
@@ -29,7 +28,7 @@ export interface OpenGame {
     /** The set the service last saved, which is what a reload is measured against. */
     saved: WorkspaceFile[];
     files: DraftFile[];
-    /** The manifest, which is one of those files — the settings gear's, and a build's. */
+    /** The manifest, which is one of those files: the settings gear's, and a build's. */
     project: ProjectManifest;
     /** The file the workbench opens on; a game whose template said nothing opens on its first. */
     openPath: string | undefined;
@@ -83,7 +82,7 @@ export async function openGame(api: Api, report: (step: OpenStep) => void): Prom
  * The manifest a stored game holds, or one made for a game saved before it had any.
  *
  * A game with sources and no manifest is given the default template's settings and the classes its
- * own code declares — the alternative is refusing to open a game over a file the creator never
+ * own code declares; the alternative is refusing to open a game over a file the creator never
  * typed. It is left for the first save to store, like anything else that changed.
  */
 async function projectOf(files: readonly DraftFile[], projectId: string): Promise<ProjectManifest> {
@@ -150,7 +149,7 @@ export function saveOf(
     const sources: SourceUpsert[] = upserted
         .filter((draft) => isText(draft.contentType))
         .map((draft) => ({
-            path: draft.path as WorkspacePath,
+            path: draft.path,
             contentType: draft.contentType,
             text: draft.text ?? '',
         }));
@@ -160,11 +159,25 @@ export function saveOf(
         save: {
             baseRevision,
             sources,
-            assets: assets.map((draft) => draft.path as WorkspacePath),
-            deletes: [...pending.removed] as WorkspacePath[],
+            assets: assets.map((draft) => draft.path),
+            deletes: [...pending.removed],
         },
         assets,
     };
+}
+
+/**
+ * The save a closing tab sends: its text and its deletes, and none of its assets.
+ *
+ * There is no time left to upload one, and the service refuses a whole save that names an asset
+ * which never landed, so naming them here would lose the text edits along with them.
+ */
+export function exitSaveOf(
+    baseRevision: number,
+    drafts: readonly DraftFile[],
+    pending: Pending,
+): WorkspaceSave {
+    return { ...saveOf(baseRevision, drafts, pending).save, assets: [] };
 }
 
 /**
@@ -187,7 +200,7 @@ export async function saveGame(
         // One at a time on purpose: a burst of multi-megabyte bodies is a worse neighbour on a
         // creator's own uplink than an upload that takes a moment longer.
         // oxlint-disable-next-line no-await-in-loop
-        const upload = await api.assetUpload(game, draft.path as WorkspacePath, draft.contentType);
+        const upload = await api.assetUpload(game, draft.path, draft.contentType);
         // oxlint-disable-next-line no-await-in-loop
         await api.putAsset(upload, bytesOf(draft), draft.contentType);
     }

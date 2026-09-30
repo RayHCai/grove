@@ -1,4 +1,4 @@
-import { act, useReducer, useState } from 'react';
+import { act, useReducer } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@grove/ui';
 import { EditorPane } from '../src/editor/EditorPane';
@@ -32,8 +32,6 @@ async function pane(options: PaneOptions = {}): Promise<HTMLElement> {
                 activePath={activePath}
                 onSelect={onSelect}
                 onClose={onClose}
-                mode="ts"
-                onModeChange={vi.fn()}
                 className={className}
             />
         </ThemeProvider>,
@@ -56,7 +54,6 @@ function Stateful(): React.JSX.Element {
         open: ['src/main.ts', 'src/sprout.ts', 'src/garden.ts'],
         active: path,
     }));
-    const [mode, setMode] = useState<'ts' | 'blocks'>('ts');
     const open = [main, sprout, garden].filter((file) => tabs.open.includes(file.path));
     return (
         <EditorPane
@@ -64,8 +61,6 @@ function Stateful(): React.JSX.Element {
             activePath={tabs.active}
             onSelect={(path) => dispatch({ type: 'select', path })}
             onClose={(path) => dispatch({ type: 'close', path })}
-            mode={mode}
-            onModeChange={setMode}
         />
     );
 }
@@ -158,27 +153,6 @@ describe('EditorPane', () => {
 
         await press(host.querySelector('[role="tablist"]'), 'Delete');
         expect(onClose).toHaveBeenLastCalledWith('src/main.ts');
-    });
-
-    it('puts the mode combobox in the header, named Mode with the label hidden', async () => {
-        const host = await pane();
-        const trigger = host.querySelector<HTMLElement>('.pane__header [role="combobox"]');
-        expect(trigger?.getAttribute('aria-labelledby')).toBe(
-            'editor-mode-label editor-mode-value',
-        );
-        expect(trigger?.title).toBe('Mode');
-        expect(host.querySelector('#editor-mode-label')?.className).toBe('pg-visually-hidden');
-        expect(host.querySelector('#editor-mode-value')?.textContent).toBe('TypeScript');
-
-        await act(async () => {
-            trigger?.click();
-        });
-        const options = host.querySelectorAll('[role="option"]');
-        expect(options.length).toBe(2);
-        expect(options[1]?.getAttribute('aria-disabled')).toBe('true');
-        expect(options[1]?.querySelector('.pg-select__description')?.textContent).toBe(
-            'Coming soon',
-        );
     });
 
     it('fills the body with the tab panel the active tab names', async () => {

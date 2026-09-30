@@ -1,5 +1,6 @@
 import type { Ref } from 'react';
 import { FilesIcon, IconButton, SettingsIcon, SparkIcon, ThemeToggle, cx } from '@grove/ui';
+import { UNFINISHED } from '../unfinished';
 
 /** The panels the rail discloses, one at a time. */
 export type PanelId = 'files' | 'ai' | 'settings';
@@ -13,17 +14,25 @@ export interface SideRailProps {
 
 // Settings sits at the foot rather than in the stack: it is the project's own dialog, not another
 // view of the game's files.
-const views = [
-    { id: 'files', label: 'Explorer', controls: 'explorer-panel', Glyph: FilesIcon, foot: false },
-    { id: 'ai', label: 'Grove AI', controls: 'grove-ai-panel', Glyph: SparkIcon, foot: false },
-    {
-        id: 'settings',
-        label: 'Settings',
-        controls: 'settings-panel',
-        Glyph: SettingsIcon,
-        foot: true,
-    },
-] as const;
+const views = (
+    [
+        {
+            id: 'files',
+            label: 'Explorer',
+            controls: 'explorer-panel',
+            Glyph: FilesIcon,
+            foot: false,
+        },
+        { id: 'ai', label: 'Grove AI', controls: 'grove-ai-panel', Glyph: SparkIcon, foot: false },
+        {
+            id: 'settings',
+            label: 'Settings',
+            controls: 'settings-panel',
+            Glyph: SettingsIcon,
+            foot: true,
+        },
+    ] as const
+).filter((view) => view.id !== 'ai' || UNFINISHED);
 
 /** The rail beside the workspace: the view disclosures on top, settings and the theme at the foot. */
 export function SideRail({ panel, onToggle, buttonRefs }: SideRailProps): React.JSX.Element {

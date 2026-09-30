@@ -230,7 +230,19 @@ describe('saving a game', () => {
 describe('the tree the explorer lists', () => {
     it('is folders above files, each side alphabetical, however the paths arrived', () => {
         const nodes = treeOf(project());
-        expect(nodes.map((node) => node.path)).toEqual(['hud', 'src', 'game.config.ts']);
+        expect(nodes.map((node) => node.path)).toEqual([
+            'hud',
+            'game.config.ts',
+            'src/garden.ts',
+            'src/main.ts',
+            'src/sprout.ts',
+        ]);
+    });
+
+    it('hangs the source folder’s own files from the root rather than listing the folder', () => {
+        const nodes = treeOf(project([draftFromText('src/hud/bar.ts', '')]));
+        expect(nodes.map((node) => node.path)).toEqual(['src/hud']);
+        expect(nodes.every((node) => node.name !== 'src')).toBe(true);
     });
 
     it('nests a folder inside a folder from the slashes alone', () => {

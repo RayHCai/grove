@@ -2,18 +2,16 @@ import {
     Account,
     AssetUpload,
     Game,
-    Task,
     Workspace,
     type GameId,
     type SignedIn,
-    type TaskId,
     type WorkspacePath,
     type WorkspaceSave,
 } from '@grove/api-contract';
-import { ApiError, apiBaseUrl, createApiBase, isLapsedSession } from '@grove/api-contract/client';
+import { ApiError, createApiBase, isLapsedSession } from '@grove/api-contract/client';
 import type { ApiClientOptions } from '@grove/api-contract/client';
 
-export { ApiError, apiBaseUrl, isLapsedSession };
+export { ApiError, isLapsedSession };
 
 export type ApiOptions = ApiClientOptions;
 
@@ -28,7 +26,6 @@ export type ApiOptions = ApiClientOptions;
 export interface Api {
     /** The current session, or nothing at all when the cookie names nobody. */
     session(): Promise<SignedIn | undefined>;
-    signOut(): Promise<void>;
 
     me(): Promise<Account>;
     games(): Promise<Game[]>;
@@ -50,9 +47,6 @@ export interface Api {
     assetUpload(game: GameId, path: WorkspacePath, contentType: string): Promise<AssetUpload>;
     /** Straight to the bucket, carrying no cookie and no token: the URL is the whole credential. */
     putAsset(upload: AssetUpload, bytes: Uint8Array, contentType: string): Promise<void>;
-
-    publish(game: GameId): Promise<Task>;
-    task(game: GameId, task: TaskId): Promise<Task>;
 }
 
 export function createApi(options: ApiOptions): Api {
@@ -62,24 +56,20 @@ export function createApi(options: ApiOptions): Api {
     return {
         session: async () => base.signedIn(await base.attempt('/v1/auth/session', {}, 401)),
 
-        signOut: async () => {
-            await base.call('/v1/auth/sessions/current', { method: 'DELETE' });
-            base.forget();
-        },
-
         me: async () => base.read('/v1/players/me', Account),
         games: async () => base.read('/v1/games', Game.array()),
         createGame: async (title) => base.write('/v1/games', 'POST', { title }, Game),
 
-        workspace: async (game) => base.read(`/v1/games/${game}/workspace`, Workspace),
+        workspace: async (game) =>
+            base.read(`/v1/games/${encodeURIComponent(game)}/workspace`, Workspace),
 
         save: async (game, save) =>
-            base.write(`/v1/games/${game}/workspace`, 'PUT', save, Workspace),
+            base.write(`/v1/games/${encodeURIComponent(game)}/workspace`, 'PUT', save, Workspace),
 
         saveOnExit: async (game, save) => {
             // Deliberately unchecked: the page is going, and there is nobody left to tell. What
             // this buys is the request leaving at all, which an ordinary one would not.
-            await fetch(`${baseUrl}/v1/games/${game}/workspace`, {
+            await fetch(`${baseUrl}/v1/games/${encodeURIComponent(game)}/workspace`, {
                 method: 'PUT',
                 credentials: 'include',
                 keepalive: true,
@@ -90,11 +80,18 @@ export function createApi(options: ApiOptions): Api {
 
         file: async (game, path) =>
             new Uint8Array(
-                await (await base.call(`/v1/games/${game}/files/${path}`)).arrayBuffer(),
+                await (
+                    await base.call(`/v1/games/${encodeURIComponent(game)}/files/${path}`)
+                ).arrayBuffer(),
             ),
 
         assetUpload: async (game, path, contentType) =>
-            base.write(`/v1/games/${game}/assets`, 'POST', { path, contentType }, AssetUpload),
+            base.write(
+                `/v1/games/${encodeURIComponent(game)}/assets`,
+                'POST',
+                { path, contentType },
+                AssetUpload,
+            ),
 
         putAsset: async (upload, bytes, contentType) => {
             const response = await fetch(upload.url, {
@@ -115,8 +112,5 @@ export function createApi(options: ApiOptions): Api {
                 );
             }
         },
-
-        publish: async (game) => base.write(`/v1/games/${game}/versions`, 'POST', undefined, Task),
-        task: async (game, task) => base.read(`/v1/games/${game}/tasks/${task}`, Task),
     };
 }
