@@ -16,7 +16,7 @@ import type {
 } from './transport.js';
 
 /**
- * Drain passes a `latency: 0` `deliver()` makes before calling the exchange non-quiescent —
+ * Drain passes a `latency: 0` `deliver()` makes before calling the exchange non-quiescent:
  * above any real request/response depth, low enough that a cycle is a prompt error.
  */
 const MAX_QUIESCENCE_PASSES = 1000;
@@ -53,7 +53,7 @@ class LoopbackEnd implements Transport {
                 );
             },
             onDecodeFailure: (error) => {
-                // A hostile frame cannot arrive here — the sender's own encode produced it — so a
+                // A hostile frame cannot arrive here (the sender's own encode produced it), so a
                 // rejection is the sender's bug and propagates to whoever called deliver().
                 throw error;
             },
@@ -76,6 +76,11 @@ class LoopbackEnd implements Transport {
         if (this.#closed) return;
         const peer = this.#peer;
         if (peer !== undefined) peer.#receive(frame);
+    }
+
+    get bufferedBytes(): number {
+        const peer = this.#peer;
+        return this.#closed || peer === undefined ? 0 : peer.#inbox.queuedBytes;
     }
 
     onMessage(handler: (message: Message) => void): () => void {
@@ -134,7 +139,7 @@ class LoopbackEnd implements Transport {
         this.#inbox.drain();
     }
 
-    /** True while anything is eligible and a handler exists — the `latency: 0` loop's test. */
+    /** True while anything is eligible and a handler exists, the `latency: 0` loop's test. */
     get deliverable(): boolean {
         return this.#inbox.deliverable;
     }
@@ -142,12 +147,15 @@ class LoopbackEnd implements Transport {
 
 /**
  * Hands out only the `Transport` surface, so `link` / `age` / `drain` stay unreachable from a
- * consumer — `link` in particular can re-point a live pair at a third end.
+ * consumer; `link` in particular can re-point a live pair at a third end.
  */
 function transportFacade(end: LoopbackEnd): Transport {
     return {
         send: (message) => end.send(message),
         sendEncoded: (frame) => end.sendEncoded(frame),
+        get bufferedBytes(): number {
+            return end.bufferedBytes;
+        },
         onMessage: (handler) => end.onMessage(handler),
         onClose: (handler) => end.onClose(handler),
         close: () => end.close(),
@@ -156,7 +164,7 @@ function transportFacade(end: LoopbackEnd): Transport {
 
 /**
  * Loopback: a pair connected at construction, because a socket has a connecting phase and this
- * does not — so a `Transport` is only handed out connected. The host app owns `deliver()`.
+ * does not, so a `Transport` is only handed out connected. The host app owns `deliver()`.
  */
 export function loopbackPair(opts?: LoopbackOptions): LoopbackPair {
     const codec = opts?.codec ?? jsonCodec;

@@ -18,7 +18,7 @@ import type {
 } from './transport.js';
 
 /**
- * Declared rather than imported, since `src/` pulls in neither `node` nor `DOM` types — and only
+ * Declared rather than imported, since `src/` pulls in neither `node` nor `DOM` types, and only
  * the members named here are touched, so one file compiles against all three implementations.
  */
 declare const WebSocket: { new (url: string, protocols?: string[]): WebSocketLike };
@@ -30,7 +30,7 @@ declare const clearInterval: (handle: unknown) => void;
  * `addEventListener`, not an `onmessage` assignment, which would replace the root's listener.
  */
 export interface WebSocketLike {
-    /** 0 CONNECTING, 1 OPEN, 2 CLOSING, 3 CLOSED — fixed by the standard. */
+    /** 0 CONNECTING, 1 OPEN, 2 CLOSING, 3 CLOSED. Fixed by the standard. */
     readonly readyState: number;
     /** Bytes sitting in the socket's own send buffer, which is what the outbound cap reads. */
     readonly bufferedAmount: number;
@@ -77,7 +77,7 @@ const OPEN = 1;
 
 /**
  * Close codes this end reads or writes. `close()` always writes `NORMAL_CLOSURE`: a close code
- * is not a protocol channel here. Inbound, `GOING_AWAY` is as clean as normal — a tab leaving.
+ * is not a protocol channel here. Inbound, `GOING_AWAY` is as clean as normal: a tab leaving.
  */
 const NORMAL_CLOSURE = 1000;
 const GOING_AWAY = 1001;
@@ -128,7 +128,7 @@ function resolve(opts: WebSocketOptions | undefined): Resolved {
 
 /**
  * Reads a frame off a message event. `binaryType` is `'arraybuffer'`, so a conforming socket
- * hands over a string or a view — never a `Blob`, which would have to be awaited, reordering.
+ * hands over a string or a view, never a `Blob`, which would have to be awaited, reordering.
  */
 function frameOf(event: unknown): Frame | undefined {
     const data = (event as { data?: unknown } | null)?.data;
@@ -230,6 +230,10 @@ class WebSocketEnd implements Transport {
         this.#socket.send(frame as string | Uint8Array<ArrayBuffer>);
     }
 
+    get bufferedBytes(): number {
+        return this.#socket.bufferedAmount;
+    }
+
     onMessage(handler: (message: Message) => void): () => void {
         return this.#inbox.registerMessage(handler);
     }
@@ -244,7 +248,7 @@ class WebSocketEnd implements Transport {
         this.#stopHeartbeat();
         // No marker is queued here: the socket's own close event is the single source of one. That
         // event always arrives, because this end is only ever built around an OPEN socket it is
-        // already listening to, and the standard queues it as a task rather than firing it inline —
+        // already listening to, and the standard queues it as a task rather than firing it inline,
         // which is what keeps `onClose` out of this call's own stack.
         this.#socket.close(NORMAL_CLOSURE);
     }
@@ -271,7 +275,7 @@ class WebSocketEnd implements Transport {
         if (this.#state !== 'open') return;
 
         this.#inbox.enqueue(frame);
-        // The event loop is the pump here, so a drain follows every arrival — which is why a
+        // The event loop is the pump here, so a drain follows every arrival, which is why a
         // backlog behind a live handler cannot build up on this wire.
         this.#inbox.drain();
     }
@@ -284,7 +288,7 @@ class WebSocketEnd implements Transport {
             this.#reportCause(
                 new TransportError(
                     'socket-error',
-                    `The connection closed with code ${code}, which neither end asked for — 1006 is a link that dropped without a close frame. onClose alone cannot tell this from a clean quit.`,
+                    `The connection closed with code ${code}, which neither end asked for: 1006 is a link that dropped without a close frame. onClose alone cannot tell this from a clean quit.`,
                 ),
             );
         }
@@ -318,7 +322,7 @@ class WebSocketEnd implements Transport {
         this.#opts.report?.(error);
     }
 
-    /** One silence window. Counts inbound frames, sends nothing — the wire has no ping to send. */
+    /** One silence window. Counts inbound frames, sends nothing: the wire has no ping to send. */
     #check(): void {
         if (!this.#silent) {
             this.#silent = true;
@@ -331,7 +335,7 @@ class WebSocketEnd implements Transport {
 
         this.#fail(
             'heartbeat-timeout',
-            `Nothing arrived in ${MAX_MISSED_HEARTBEATS} consecutive ${HEARTBEAT_INTERVAL_MS} ms windows. Both directions carry unprompted traffic, so this is a half-open socket — a killed tab or a yanked cable — that TCP has not given up on yet and never may.`,
+            `Nothing arrived in ${MAX_MISSED_HEARTBEATS} consecutive ${HEARTBEAT_INTERVAL_MS} ms windows. Both directions carry unprompted traffic, so this is a half-open socket (a killed tab or a yanked cable) that TCP has not given up on yet and never may.`,
         );
     }
 
@@ -342,7 +346,7 @@ class WebSocketEnd implements Transport {
         this.#heartbeat = undefined;
     }
 
-    /** Reports a coded cause the seam cannot carry, then closes — ordered so the cause survives. */
+    /** Reports a coded cause the seam cannot carry, then closes, ordered so the cause survives. */
     #fail(code: TransportErrorCode, message: string): void {
         this.#reportCause(new TransportError(code, message));
         this.close();
@@ -350,7 +354,7 @@ class WebSocketEnd implements Transport {
 }
 
 /**
- * Dials `url` and resolves once the socket is OPEN — the networked `Connect`.
+ * Dials `url` and resolves once the socket is OPEN, the networked `Connect`.
  * Rejects with `connect-failed` before OPEN; after it, faults go to `onError` instead.
  */
 export function connectWebSocket(url: string, opts?: ConnectWebSocketOptions): Promise<Transport> {
@@ -384,7 +388,7 @@ export function connectWebSocket(url: string, opts?: ConnectWebSocketOptions): P
             return;
         }
 
-        // All three listeners outlive the settle — the transport registers its own for the rest of
+        // All three listeners outlive the settle: the transport registers its own for the rest of
         // the connection's life, and these become no-ops rather than a second reporting path.
         let settled = false;
 
@@ -427,7 +431,7 @@ export function webSocketTransport(socket: WebSocketLike, opts?: WebSocketOption
     if (socket.readyState !== OPEN) {
         transportError(
             'invalid-option',
-            `webSocketTransport takes an OPEN socket (readyState ${OPEN}); received readyState ${socket.readyState}. A Transport is one end of an ESTABLISHED connection — dial with connectWebSocket, which resolves on open.`,
+            `webSocketTransport takes an OPEN socket (readyState ${OPEN}); received readyState ${socket.readyState}. A Transport is one end of an ESTABLISHED connection: dial with connectWebSocket, which resolves on open.`,
         );
     }
     return new WebSocketEnd(socket, resolve(opts));
