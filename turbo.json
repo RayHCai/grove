@@ -4,13 +4,13 @@
     // Global for the same reason `tsconfig.base.json` is: `go.mod` is the root file that puts every
     // service and libs/go-grove in one module, so each resolves the others from the tree it is
     // checked out with rather than from a proxy.
-    "globalDependencies": ["tsconfig.base.json", ".oxlintrc.json", "scripts/*.mjs", "go.mod"],
+    "globalDependencies": ["tsconfig.base.json", "scripts/*.mjs", "go.mod"],
     // Hashed, not passed through: it decides whether a missing toolchain is a skip or a failure, so
     // a cached pass produced by a skip must not be replayed for a run that requires the real thing.
     "globalEnv": ["GROVE_REQUIRE_TOOLCHAIN"],
     // Passed through rather than hashed: these say where a native toolchain keeps its caches, not
     // what it builds. Without them turbo strict mode hands `go build` an environment with no home
-    // directory in it, and it fails on a cache it cannot place — a Go task that never runs, on the
+    // directory in it, and it fails on a cache it cannot place: a Go task that never runs, on the
     // one gate that exists to run it.
     "globalPassThroughEnv": [
         "HOME",
@@ -38,13 +38,14 @@
             // Own `build`, not just `^build`: a suite imports its decorated worlds from `../dist`,
             // because only `tsc` lowers standard decorators. Without the package's own build those
             // specifiers resolve to nothing on a clean checkout, which is a red CI job against a
-            // tree that is fine — and a green one locally, off a `dist/` left behind by a build.
+            // tree that is fine, and a green one locally, off a `dist/` left behind by a build.
             "dependsOn": ["^build", "build"],
             "inputs": ["src/**", "tests/**", "tsconfig*.json"],
             "outputs": []
         },
         "test": {
-            "dependsOn": ["^build"],
+            // Own `build` too, for the same `../dist` imports `typecheck` builds for.
+            "dependsOn": ["^build", "build"],
             "inputs": ["src/**", "tests/**", "tsconfig*.json", "vitest.config.ts"],
             "outputs": []
         },
