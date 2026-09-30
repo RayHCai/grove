@@ -22,7 +22,7 @@
     "scripts": {
         "build": "tsc -b",
         "typecheck": "tsc -p tsconfig.test.json",
-        "test": "vitest run --passWithNoTests",
+        "test": "vitest run",
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
@@ -30,13 +30,13 @@
         "@platform/math": "workspace:*",
         "@platform/project": "workspace:*",
         "@platform/scripting": "workspace:*",
-        "@platform/transport": "workspace:*",
         "@platform/sim": "workspace:*",
         "@platform/client": "workspace:*"
     },
     "devDependencies": {
         "@platform/renderer": "workspace:*",
+        "@platform/transport": "workspace:*",
         "typescript": "^7.0.2",
-        "vitest": "^4.1.10"
+        "vitest": "^5.0.1"
     }
 }
