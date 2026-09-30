@@ -1,12 +1,12 @@
 // Separate from `Rules` so the scripts that SCORE can reach a ledger without reaching what spawns
-// them — one import each way would be a cycle.
+// them; one import each way would be a cycle.
 
 import type { Game, Player } from '@platform/engine';
 import { Scoreboard, ServerScript, serverState } from '@platform/engine';
 import { Profile } from './profile.js';
 
 export class Ledger extends ServerScript<Game> {
-    /** Game-hosted, so every peer sees these — a player-hosted field reaches only its owner. */
+    /** Game-hosted, so every peer sees these; a player-hosted field reaches only its owner. */
     @serverState collected = 0;
     /** The same total split by route: walked into, and clicked from wherever the clicker stood. */
     @serverState walked = 0;

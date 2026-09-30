@@ -12,7 +12,7 @@ export const SCRIPT_DEALER = 'dealer';
 export const REGION_POOL = 'pool';
 /** Off the origin on both axes, so a point that fell back to (0, 0) cannot pass for one drawn. */
 export const POOL_BOUNDS: ProjectBounds = { left: 100, right: 180, top: 90, bottom: 40 };
-/** A name the project never declares — the authoring typo `pointIn` has to answer for. */
+/** A name the project never declares, the authoring typo `pointIn` has to answer for. */
 export const REGION_ABSENT = 'lagoon';
 
 export const SEED_A = 20260901;

@@ -1,4 +1,4 @@
-// Every verb runs inside a handler with an engine-supplied `ctx.player` — the only place
+// Every verb runs inside a handler with an engine-supplied `ctx.player`, the only place
 // `Scoreboard.add`'s acting-player default exists at all.
 
 import type { Ctx, Game, Player } from '@platform/engine';
@@ -90,7 +90,7 @@ export const F = {
 
 /**
  * The player the next `Pack` is built for. `Inventory` takes a `Player`, wiring binds only what a
- * field initializer built, and that runs before `this.host` — so a join-filled slot is the way.
+ * field initializer built, and that runs before `this.host`, so a join-filled slot is the way.
  */
 let joining: Player | null = null;
 
@@ -157,7 +157,7 @@ export class Vault extends ServerScript<Game> {
         const pack = player.getScript(Pack);
         if (!pack) return;
         // The hoist seeded this from the last session's record, and the reading is about what the
-        // store answers THIS one — so it starts unread however much was banked.
+        // store answers THIS one, so it starts unread however much was banked.
         pack.stored = UNREAD;
         pack.read();
     }

@@ -8,7 +8,7 @@ export interface HostOptions {
     kv?: KVStore;
     /** The loopback pairs' `deliver`; omitted networked, where each socket delivers itself. */
     deliver?: () => void;
-    /** Wall-clock seconds. Omitted, the real clock — the suite turns its own by hand. */
+    /** Wall-clock seconds. Omitted, the real clock; the suite turns its own by hand. */
     now?: () => number;
     /** The dev channel for a handler the breaker gave up on. Not an envelope, deliberately. */
     onBreakerTrip?: (trip: BreakerTrip) => void;

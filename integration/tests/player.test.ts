@@ -2,8 +2,18 @@
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
-import type { Session, Tab } from './harness.js';
-import { avatarOf, gameField, mineField, newSession, runtimeOf, transformIn } from './harness.js';
+import type { Tab } from './harness.js';
+import {
+    avatarOf,
+    mineField,
+    newSession,
+    openWorld,
+    press,
+    reading,
+    runtimeOf,
+    SETTLE,
+    transformIn,
+} from './harness.js';
 import {
     CODE_AIM,
     CODE_SPARE,
@@ -18,27 +28,13 @@ import {
     W,
 } from '../dist/worlds/player.js';
 
-/** Ticks that comfortably outlast one send interval, so a press has been answered. */
-const SETTLE = 12;
 /** Ticks that outlast the lead a client sends input at, plus the interval it is answered in. */
 const KEY_TICKS = 40;
 
 /** What the two actions are bound to on the authority once `bind` has run. */
 const REBOUND = `${CODE_STRANGE} ${CODE_SPARE}/${CODE_AIM}`;
 
-async function open(name = 'ada'): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(PLAYER_WORLD);
-    const tab = await session.join(name);
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
-
-/** Presses one widget and settles, which is the whole shape of every case below. */
-async function press(session: Session, tab: Tab, widget: string, ticks = SETTLE): Promise<void> {
-    session.press(tab, widget);
-    await session.step(ticks);
-}
+const open = (name = 'ada'): ReturnType<typeof openWorld> => openWorld(PLAYER_WORLD, name);
 
 /** This tab's own avatar as its own mirror holds it. */
 function mine(tab: Tab): EntityId {
@@ -51,11 +47,7 @@ function drawn(tab: Tab): ReturnType<typeof transformIn> {
     return transformIn(runtimeOf(tab), mine(tab));
 }
 
-function reading<T>(tab: Tab, field: string): T | undefined {
-    return gameField<T>(runtimeOf(tab), field);
-}
-
-/** What one tab's roster calls a player — the only place a name reaches a peer at all. */
+/** What one tab's roster calls a player, the only place a name reaches a peer at all. */
 function rosterName(tab: Tab, playerId: string): string | undefined {
     return runtimeOf(tab).playerManager.byId(playerId)?.name;
 }
@@ -171,7 +163,7 @@ describe('the roster a tab is told about', () => {
         await press(session, one, W.rename);
         expect(reading<string>(one, S.who)).toBe(RENAMED);
         // A name crosses the wire on the join op and in a joiner's snapshot, and by no third
-        // route — there is no rename op, so the renamed player's own tab is the one never told.
+        // route: there is no rename op, so the renamed player's own tab is the one never told.
         expect(one.client.localPlayer?.name).toBe('ada');
 
         const two = await session.join('brin');
@@ -212,7 +204,7 @@ describe('the cursor a player carries', () => {
         await press(session, tab, W.spawn, SETTLE * 2);
         const body = mine(tab);
         const at = drawn(tab);
-        // A real hover, resolved against what is DRAWN — the path a click takes to an entity.
+        // A real hover, resolved against what is DRAWN, the path a click takes to an entity.
         expect(session.hover(tab, { x: at.x, y: at.y })).toBe(body);
 
         await press(session, tab, W.readCursor);

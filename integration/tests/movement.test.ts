@@ -5,7 +5,16 @@ import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
 import { BREAKER_THRESHOLD, entityKey } from '@platform/core';
 import type { Session, Tab } from './harness.js';
-import { avatarIn, avatarOf, mineField, newSession, runtimeOf, transformIn } from './harness.js';
+import {
+    avatarIn,
+    avatarOf,
+    mineField,
+    openWorld,
+    press,
+    runtimeOf,
+    SETTLE,
+    transformIn,
+} from './harness.js';
 import {
     ACCEL_STEP,
     AVATAR_AT,
@@ -31,24 +40,10 @@ import {
     Walker,
 } from '../dist/worlds/movement.js';
 
-/** Ticks that comfortably outlast one send interval, so a press has been answered. */
-const SETTLE = 12;
-
 /** Where the test-side floor sits, far enough under the spawn that the fall is unmistakable. */
 const FLOOR_Y = -60;
 
-async function open(): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(MOVEMENT_WORLD);
-    const tab = await session.join('one');
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
-
-async function press(session: Session, tab: Tab, widget: string, ticks = SETTLE): Promise<void> {
-    session.press(tab, widget);
-    await session.step(ticks);
-}
+const open = (): ReturnType<typeof openWorld> => openWorld(MOVEMENT_WORLD);
 
 /** A joined tab whose avatar carries one movement type, which is where every case below starts. */
 async function installed(widget: string): Promise<{ session: Session; tab: Tab }> {
@@ -218,7 +213,7 @@ describe('a top-down mover on a bound key', () => {
         session.hold(tab, CODE_RIGHT);
         await session.step(SETTLE);
 
-        // Rebuilt every tick, so this is the order a real tick ran them in — `readIntent` is in it
+        // Rebuilt every tick, so this is the order a real tick ran them in; `readIntent` is in it
         // because `tick` evaluates it as accelerate's argument.
         expect(reading<string>(tab, S.stages)).toBe(STAGE_ORDER);
     });
@@ -244,7 +239,7 @@ describe('a top-down mover on a bound key', () => {
         const from = drawn(tab).x;
 
         // One tick's worth and no more: the input pass refills the intent from this player's axes
-        // every tick, and nothing is held — so a `setIntent` is gone by the tick after it.
+        // every tick, and nothing is held, so a `setIntent` is gone by the tick after it.
         await press(session, tab, W.aim);
         expect(drawn(tab).x - from).toBeCloseTo(WALK_STEP, 6);
         await session.step(60);
@@ -290,7 +285,7 @@ describe('a platformer', () => {
         await session.step(60);
 
         // `grounded` is `blocked.down`, so on the shipped sink gravity never stops pulling and the
-        // ground `jump` tests for never arrives — a platformer is not buildable on it.
+        // ground `jump` tests for never arrives; a platformer is not buildable on it.
         expect(reading<boolean>(tab, S.floor)).toBe(false);
         expect(drawn(tab).y).toBeLessThan(AVATAR_AT.y - 100);
 

@@ -2,9 +2,8 @@
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
-import { hud, withRuntime } from '@platform/core';
 import type { Session, Tab } from './harness.js';
-import { gameField, newSession, runtimeOf, taggedIn } from './harness.js';
+import { newSession, reading, runtimeOf, SETTLE, taggedIn } from './harness.js';
 import {
     ASSETS_WORLD,
     ASSET_CHIME,
@@ -21,9 +20,6 @@ import {
     TAG_SPEAKER,
     W,
 } from '../dist/worlds/assets.js';
-
-/** Ticks that comfortably outlast one send interval, so a press has been answered. */
-const SETTLE = 12;
 
 /** One call as the sink received it; `opts` is undefined for a verb that passes no payload. */
 interface Effect {
@@ -46,22 +42,10 @@ function payload(effect: Effect | undefined): Record<string, unknown> {
     return (effect?.opts ?? {}) as Record<string, unknown>;
 }
 
-/**
- * Re-opens the screen, which is what puts the registered class on it: `hud.open` wires whatever
- * is registered when it runs, and the harness registers after its own open.
- */
-function wireScreen(tab: Tab): void {
-    withRuntime(runtimeOf(tab), () => {
-        hud.close(SCREEN_AUDIO);
-        hud.open(SCREEN_AUDIO);
-    });
-}
-
 async function open(): Promise<{ session: Session; tab: Tab; played: Effect[] }> {
     const session = newSession(ASSETS_WORLD);
     const tab = await session.join('one');
     await session.live(tab);
-    wireScreen(tab);
     await session.step(SETTLE);
     return { session, tab, played: record(tab) };
 }
@@ -72,8 +56,6 @@ async function openPair(): Promise<{ session: Session; one: Tab; two: Tab }> {
     const one = await session.join('one');
     const two = await session.join('two');
     await session.live(one, two);
-    wireScreen(one);
-    wireScreen(two);
     await session.step(SETTLE);
     return { session, one, two };
 }
@@ -82,11 +64,6 @@ async function openPair(): Promise<{ session: Session; one: Tab; two: Tab }> {
 async function press(session: Session, tab: Tab, widget: string): Promise<void> {
     session.press(tab, widget, SCREEN_AUDIO);
     await session.step(SETTLE);
-}
-
-/** A replicated reading, as this tab's own mirror holds it. */
-function reading<T>(tab: Tab, field: string): T | undefined {
-    return gameField<T>(runtimeOf(tab), field);
 }
 
 /** What the screen script wrote, read off the sink a browser's UI would draw from. */
@@ -134,7 +111,7 @@ describe('the declared asset table', () => {
     it("drops each asset's url on the way in, so no script can ever read one", async () => {
         const { session, tab } = await open();
         await press(session, tab, W.readAsset);
-        // The url is declared, travels to the client and is what the renderer fetches from — but
+        // The url is declared, travels to the client and is what the renderer fetches from, but
         // the runtime narrowing drops it and `Asset` is built from key, kind and meta, so the
         // object a creator holds has no such member at all.
         expect(reading<boolean>(tab, S.urlOnAsset)).toBe(false);
@@ -144,7 +121,7 @@ describe('the declared asset table', () => {
         const { session, tab } = await open();
         await press(session, tab, W.readMirror);
         // The mirror loads its world with no assets declared in it, so a `ClientScript` asking for
-        // the chime it can hear gets null — the table is the authority's and only the authority's.
+        // the chime it can hear gets null: the table is the authority's and only the authority's.
         expect(shown(tab, R.mirror)).toBe('0|null');
     });
 });

@@ -1,4 +1,4 @@
-// A camera is client-local — no snapshot captures it and no write marks a channel — so the verbs
+// A camera is client-local (no snapshot captures it and no write marks a channel), so the verbs
 // are reached from a `ClientScript<Camera>` and readings leave as HUD widgets.
 
 import type { Bounds, Camera, Ctx, Game, Player } from '@platform/engine';
@@ -24,7 +24,7 @@ export const SCRIPT_LENS = 'lens';
 
 /** Where a joining avatar is put, so a camera that follows it has a known place to be. */
 export const AVATAR_AT = { x: 90, y: -40 };
-/** Where the console stands — nowhere near the avatar, so a follow is told from a pan. */
+/** Where the console stands: nowhere near the avatar, so a follow is told from a pan. */
 export const CONSOLE_AT = { x: -140, y: 60 };
 
 export const PAN_TO = { x: 55, y: 25 };
@@ -83,7 +83,7 @@ export class Stage extends ServerScript<Game> {
  * is asked of the authority: each handler runs on the client whose player pressed.
  */
 export class Lens extends ClientScript<Camera> {
-    /** Shakes that answered with the camera itself — the only trace the call leaves anywhere. */
+    /** Shakes that answered with the camera itself, the only trace the call leaves anywhere. */
     #shakes = 0;
 
     @onPress(W.glideTo)

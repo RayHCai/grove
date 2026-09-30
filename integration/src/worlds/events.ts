@@ -1,4 +1,4 @@
-// Each handler sits on the host the engine dispatches that kind at — hanging them all on the Game
+// Each handler sits on the host the engine dispatches that kind at; hanging them all on the Game
 // would prove only that the decorators exist.
 
 import type { Collider, Ctx, Entity, Game, HUDScreen, Player } from '@platform/engine';
@@ -35,6 +35,11 @@ export const TAG_BEACON = 'beacon';
 /** A custom event name, carried by `Entity.send` rather than by any binding or widget. */
 export const EVENT_PING = 'ping';
 export const PING_TIMES = 3;
+/** Sent to the pressing player's avatar, whose own handler then sends the ping onward. */
+export const EVENT_ECHO = 'echo';
+/** What `S.sender` holds for a ping no entity sent, and for one an unowned entity sent. */
+export const SENDER_NONE = 'none';
+export const SENDER_UNOWNED = 'unowned';
 
 export const SCRIPT_DIRECTOR = 'director';
 export const SCRIPT_BODY = 'body';
@@ -52,7 +57,7 @@ export const ACTION_GATE = 'gate';
 export const CODE_PULSE = 'KeyP';
 export const CODE_GATE = 'KeyG';
 
-/** Long enough that several taps land inside one invocation — what the three modes differ on. */
+/** Long enough that several taps land inside one invocation: what the three modes differ on. */
 export const GATE_SECONDS = 1;
 
 export const REGION_PIT = 'pit';
@@ -73,9 +78,10 @@ export const W = {
     toBeacon: 'to-beacon',
     relay: 'relay',
     ring: 'ring',
+    echo: 'echo',
 } as const;
 
-/** Game-hosted readings — every peer is told these, so any tab may be asked. */
+/** Game-hosted readings: every peer is told these, so any tab may be asked. */
 export const S = {
     starts: 'starts',
     equips: 'equips',
@@ -92,9 +98,10 @@ export const S = {
     presser: 'presser',
     pings: 'pings',
     pinged: 'pinged',
+    sender: 'sender',
 } as const;
 
-/** Player-hosted readings — an action edge dispatches at the player, so its tallies live there. */
+/** Player-hosted readings: an action edge dispatches at the player, so its tallies live there. */
 export const P = {
     presses: 'presses',
     releases: 'releases',
@@ -134,6 +141,8 @@ export class Director extends ServerScript<Game> {
     @serverState pings = 0;
     /** What the payload carried, so a send that dropped its data is not read as one that worked. */
     @serverState pinged = 0;
+    /** Whose avatar `ctx.from` named on the last ping, or one of the two `SENDER_` markers. */
+    @serverState sender = '';
 
     /** Counted rather than set to true, so a second joiner re-running it would be visible. */
     @onStart
@@ -176,7 +185,7 @@ export class Director extends ServerScript<Game> {
     }
 
     /**
-     * Sends a custom event to an entity — the one dispatch a creator raises by hand.
+     * Sends a custom event to an entity, the one dispatch a creator raises by hand.
      * No binding names it and no frame carries it, so only this call puts `@onEvent` into a run.
      */
     @onPress(W.ring)
@@ -185,9 +194,16 @@ export class Director extends ServerScript<Game> {
         if (beacon) void beacon.send(EVENT_PING, { times: PING_TIMES });
     }
 
-    notePing(times: number): void {
+    /** The same ping, sent from an entity's handler, so `ctx.from` has a sender to name. */
+    @onPress(W.echo)
+    echo(ctx: Ctx): void {
+        if (ctx.player?.hasAvatar) void ctx.player.avatar.send(EVENT_ECHO);
+    }
+
+    notePing(times: number, from: Entity | null | undefined): void {
         this.pings = this.pings + 1;
         this.pinged = times;
+        this.sender = from ? (from.owner?.id ?? SENDER_UNOWNED) : SENDER_NONE;
     }
 
     /**
@@ -262,6 +278,12 @@ export class Body extends ServerScript<Entity> {
     climbed(): void {
         game.getScript(Director)?.noteExit();
     }
+
+    @onEvent(EVENT_ECHO)
+    async relay(): Promise<void> {
+        const beacon = game.find({ tag: TAG_BEACON })[0];
+        if (beacon) await beacon.send(EVENT_PING, { times: PING_TIMES });
+    }
 }
 
 /** The one thing in this world a pointer can land on, and the one thing an avatar can walk into. */
@@ -275,7 +297,7 @@ export class Beacon extends ServerScript<Entity> {
     @onEvent(EVENT_PING)
     heard(ctx: Ctx): void {
         const times = ctx.data.times;
-        game.getScript(Director)?.notePing(typeof times === 'number' ? times : -1);
+        game.getScript(Director)?.notePing(typeof times === 'number' ? times : -1, ctx.from);
     }
 
     @onClick
@@ -324,7 +346,7 @@ export class Seat extends ServerScript<Player> {
         this.holds = this.holds + 1;
     }
 
-    /** Each mode counts entries and completions apart — the whole difference between them. */
+    /** Each mode counts entries and completions apart, the whole difference between them. */
     @onEvent(ACTION_GATE, { concurrency: 'ignore' })
     async once(): Promise<void> {
         this.ignoreIn = this.ignoreIn + 1;

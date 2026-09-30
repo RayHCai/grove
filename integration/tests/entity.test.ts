@@ -3,15 +3,17 @@
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
-import type { Session, Tab } from './harness.js';
+import type { Tab } from './harness.js';
 import {
     avatarOf,
-    gameField,
-    newSession,
     ofTemplate,
-    runtimeOf,
-    transformIn,
+    openWorld,
     parentIn,
+    press,
+    reading,
+    runtimeOf,
+    SETTLE,
+    transformIn,
 } from './harness.js';
 import {
     AVATAR_AT,
@@ -25,24 +27,10 @@ import {
     W,
 } from '../dist/worlds/entity.js';
 
-/** Ticks that comfortably outlast one send interval, so a press has been answered. */
-const SETTLE = 12;
 /** Ticks that outlast the tweens this world starts, whatever the send rate rounds them to. */
 const TWEEN_TICKS = Math.ceil(TWEEN_SECONDS * 60) + SETTLE;
 
-async function open(): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(ENTITY_WORLD);
-    const tab = await session.join('one');
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
-
-/** Presses one widget and settles, which is the whole shape of every case below. */
-async function press(session: Session, tab: Tab, widget: string, ticks = SETTLE): Promise<void> {
-    session.press(tab, widget);
-    await session.step(ticks);
-}
+const open = (): ReturnType<typeof openWorld> => openWorld(ENTITY_WORLD);
 
 /** This tab's own avatar as its own mirror holds it. */
 function mine(tab: Tab): EntityId {
@@ -53,10 +41,6 @@ function mine(tab: Tab): EntityId {
 
 function drawn(tab: Tab): ReturnType<typeof transformIn> {
     return transformIn(runtimeOf(tab), mine(tab));
-}
-
-function reading<T>(tab: Tab, field: string): T | undefined {
-    return gameField<T>(runtimeOf(tab), field);
 }
 
 describe("an entity's transform", () => {
@@ -102,7 +86,7 @@ describe("an entity's transform", () => {
 
     it('faces a target by bearing, not by turning some fixed amount', async () => {
         const { session, tab } = await open();
-        // Due east of the avatar, so the bearing is zero — and a `faceToward` that added instead of
+        // Due east of the avatar, so the bearing is zero, and a `faceToward` that added instead of
         // assigning would leave a non-zero rotation here.
         await press(session, tab, W.faceToward);
         expect(drawn(tab).rotation).toBeCloseTo(0, 5);
