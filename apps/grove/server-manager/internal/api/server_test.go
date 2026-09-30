@@ -94,7 +94,7 @@ func newHarnessWithProbe(t *testing.T, ready func(context.Context) error) *harne
 	t.Helper()
 
 	h := &harness{now: epoch, agent: &stubAgent{}}
-	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
+	discard := slog.New(slog.DiscardHandler)
 	registry := fleet.NewRegistry(staleAfter)
 
 	// The real line and the real ranking, wired the way main.go wires them: a fake line would only
@@ -234,7 +234,7 @@ func (h *harness) send(t *testing.T, method, path string, body any, bearer strin
 	return rec
 }
 
-// box is one seeded host, whose beat arrived age before now — a large age is a box that went quiet.
+// box is one seeded host, whose beat arrived age before now; a large age is a box that went quiet.
 type box struct {
 	id        string
 	region    string
@@ -591,7 +591,7 @@ func TestConcurrentJoinsAllLandWhileTheFleetHasFreeSlots(t *testing.T) {
 
 		for i, code := range codes {
 			if code != http.StatusOK {
-				t.Fatalf("round %d, join %d: got %d, want 200 — %d boxes each with a slot free took %d joins",
+				t.Fatalf("round %d, join %d: got %d, want 200: %d boxes each with a slot free took %d joins",
 					round, i, code, joins, joins)
 			}
 		}
@@ -667,7 +667,7 @@ func TestPlaceStartsOneWorldForTwoJoins(t *testing.T) {
 		t.Fatalf("second join: got session %q, want the first's %q", second.SessionID, first.SessionID)
 	}
 	if len(h.agent.startsAsked()) != 1 {
-		t.Fatalf("starts: got %d, want one — a second is a second world", len(h.agent.startsAsked()))
+		t.Fatalf("starts: got %d, want one: a second is a second world", len(h.agent.startsAsked()))
 	}
 }
 
@@ -1137,6 +1137,21 @@ func TestRefusedRequests(t *testing.T) {
 			},
 		},
 		{
+			// Joins match on revision, so a world with none is one the router would route as a wrong
+			// version, and a box that came back from a restart must never be able to report one.
+			name: "a heartbeat reporting an instance on no revision", method: http.MethodPost,
+			path: "/v1/hosts/" + hostA + "/heartbeat",
+			body: contract.HostHeartbeat{
+				HostID: hostA, Region: "us-east-1", AgentPort: agentPort,
+				Capacity:   contract.HostCapacity{MaxInstances: 4},
+				ReportedAt: contract.Timestamp(epoch),
+				Instances: []contract.InstanceReport{{
+					InstanceID: instanceID, GameID: gameID, SessionID: sessionID,
+					State: contract.InstanceHealthy, Port: gamePort,
+				}},
+			},
+		},
+		{
 			name: "a placement for something that is not a game", method: http.MethodPost,
 			path: "/v1/placements",
 			body: join("game-7", ""),
@@ -1208,7 +1223,7 @@ func TestPlaceJoinsTheRunningBoxOverAnEmptierOne(t *testing.T) {
 
 	placement := decode[contract.Placement](t, rec)
 	if placement.HostID != hostA {
-		t.Errorf("hostId: got %q, want %q — the box already running the game", placement.HostID, hostA)
+		t.Errorf("hostId: got %q, want %q: the box already running the game", placement.HostID, hostA)
 	}
 	if placement.SessionID != sessionID {
 		t.Errorf("sessionId: got %q, want the running session %q", placement.SessionID, sessionID)
@@ -1217,7 +1232,7 @@ func TestPlaceJoinsTheRunningBoxOverAnEmptierOne(t *testing.T) {
 
 func TestAFullBoxStillTakesAJoinerForAGameItRuns(t *testing.T) {
 	h := newHarness(t)
-	// At its cap, so Candidates excludes it — joining a world that is already running starts no
+	// At its cap, so Candidates excludes it; joining a world that is already running starts no
 	// process, so the cap is not the question being asked.
 	h.seed(t, []box{{
 		id: hostA, region: "us-east-1", max: 1, running: 1,
@@ -1258,7 +1273,7 @@ func TestAStaleBoxRunningTheGameIsNotJoined(t *testing.T) {
 
 	placement := decode[contract.Placement](t, rec)
 	if placement.HostID != hostB {
-		t.Errorf("hostId: got %q, want %q — the box that answered its last beat", placement.HostID, hostB)
+		t.Errorf("hostId: got %q, want %q: the box that answered its last beat", placement.HostID, hostB)
 	}
 	if placement.SessionID == sessionID {
 		t.Error("joined a session on a box that has gone quiet")

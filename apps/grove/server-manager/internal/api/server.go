@@ -23,7 +23,7 @@ type Options struct {
 	Registry *fleet.Registry
 	// The line every join waits in, which holds the placement decision behind it.
 	Joins *joins.Line
-	// What this service says to a box, and the only thing it ever says.
+	// How a redeploy reaches each box; a join's start goes through the line's Router instead.
 	Agent  fleet.Agent
 	Secret []byte
 	Log    *slog.Logger
@@ -77,18 +77,9 @@ func (s *Server) Handler() http.Handler {
 	v1.HandleFunc("GET /v1/hosts", s.listHosts)
 	v1.HandleFunc("POST /v1/placements", s.place)
 	v1.HandleFunc("POST /v1/deployments", s.deploy)
-	v1.HandleFunc("/", httpx.NotFound)
 
-	root := http.NewServeMux()
-	// Outside the gate: a supervisor polls these before the process has any credential to check.
-	root.HandleFunc("GET /health", httpx.Health)
-	root.HandleFunc("GET /ready", httpx.Ready(s.ready, s.log))
-	// A different secret from GAME_TOKEN_SECRET, and deliberately so: that one signs a browser's
-	// join ticket, where this service is reachable only from inside the fleet and never sees one.
-	root.Handle("/v1/", httpx.Chain(v1, httpx.FleetBearer(s.secret, s.log)))
-	root.HandleFunc("/", httpx.NotFound)
-
-	return httpx.Chain(root, httpx.RequestID(), httpx.Recover(s.log), httpx.RequestLog(s.log))
+	// A different secret from GAME_TOKEN_SECRET, which signs a browser's ticket this service never sees.
+	return httpx.Service(v1, s.ready, s.log, httpx.FleetBearer(s.secret, s.log))
 }
 
 // nothingToWaitFor is this service's readiness probe, and it never fails. An empty registry

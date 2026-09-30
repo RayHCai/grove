@@ -28,5 +28,5 @@ COPY --from=build /out/grove-healthcheck /usr/local/bin/grove-healthcheck
 COPY --from=build /out/grove-server-manager /usr/local/bin/grove-server-manager
 EXPOSE 4003
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/usr/local/bin/grove-healthcheck", "-port-env", "SERVER_MANAGER_PORT", "-port", "4003"]
+    CMD ["/usr/local/bin/grove-healthcheck", "-port-env", "SERVER_MANAGER_PORT,PORT", "-port", "4003"]
 ENTRYPOINT ["/usr/local/bin/grove-server-manager"]

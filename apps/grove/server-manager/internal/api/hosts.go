@@ -13,7 +13,7 @@ import (
 func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("hostId")
 	if !contract.ValidUUID(hostID) {
-		httpx.WriteError(w, http.StatusBadRequest, httpx.CodeInvalidRequest, "hostId must be a uuid")
+		httpx.BadRequest(w, "hostId must be a uuid")
 		return
 	}
 
@@ -22,7 +22,7 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if problem, ok := checkHeartbeat(beat, hostID); !ok {
-		httpx.WriteError(w, http.StatusBadRequest, httpx.CodeInvalidRequest, problem)
+		httpx.BadRequest(w, problem)
 		return
 	}
 
@@ -44,7 +44,7 @@ func checkHeartbeat(beat contract.HostHeartbeat, hostID string) (string, bool) {
 		return "region must be set and at most 32 characters", false
 	}
 	// The bounds HostCapacity carries in libs/api-contract, enforced here because whatever this
-	// stores is re-served verbatim as a HostView — a beat this accepted but that schema rejects is
+	// stores is re-served verbatim as a HostView; a beat this accepted but that schema rejects is
 	// a box only the Go half can read.
 	if beat.Capacity.MaxInstances <= 0 || beat.Capacity.RunningInstances < 0 {
 		return "maxInstances must be positive and runningInstances must not be negative", false
@@ -74,6 +74,10 @@ func checkHeartbeat(beat contract.HostHeartbeat, hostID string) (string, bool) {
 		}
 		if inst.Players < 0 || inst.UptimeSeconds < 0 {
 			return "instance players and uptimeSeconds must not be negative", false
+		}
+		// Joins match on revision, so a world reported without one would be routed as a wrong version.
+		if inst.Revision < 1 {
+			return "every instance must carry the revision it runs", false
 		}
 		// A report the router keeps without one is a session it can name and no player can dial.
 		if !validPort(inst.Port) {

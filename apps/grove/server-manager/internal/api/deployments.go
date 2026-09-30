@@ -27,7 +27,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if problem, ok := checkDeployment(req); !ok {
-		httpx.WriteError(w, http.StatusBadRequest, httpx.CodeInvalidRequest, problem)
+		httpx.BadRequest(w, problem)
 		return
 	}
 
@@ -96,56 +96,13 @@ func checkDeployment(req contract.DeploymentRequest) (string, bool) {
 	if !contract.ValidUUID(req.GameID) {
 		return "gameId must be a uuid", false
 	}
-	if problem, ok := checkBundleSet(req.Bundles); !ok {
+	if problem := req.Bundles.Problem(); problem != "" {
 		return problem, false
 	}
 	for _, region := range req.Regions {
 		if region == "" || len(region) > contract.RegionMaxLen {
 			return "every region must be set and at most 32 characters", false
 		}
-	}
-	return "", true
-}
-
-// checkBundleSet holds a set to everything a box will need of it. One validator for both routes:
-// a placement and a deployment hand the same set to the same agent, so a set one route passed and
-// the other refused would fail at the box instead of at the edge.
-func checkBundleSet(set contract.BundleSet) (string, bool) {
-	if problem, ok := checkBundle(set.Server, contract.SideServer); !ok {
-		return problem, false
-	}
-	if problem, ok := checkBundle(set.Client, contract.SideClient); !ok {
-		return problem, false
-	}
-	if !contract.ValidContentHash(set.SimConfig.Hash) {
-		return "bundles.simConfig.hash must be a content hash", false
-	}
-	if !contract.ValidURL(set.SimConfig.URL) {
-		return "bundles.simConfig.url must be a url", false
-	}
-	if set.SimConfig.ByteLength <= 0 {
-		return "bundles.simConfig.byteLength must be positive", false
-	}
-	// The hash both halves were built from. A session compares it at the handshake, so a set whose
-	// two halves came from different sources must not reach a box at all.
-	if !contract.ValidContentHash(set.SyncedHash) {
-		return "bundles.syncedHash must be a content hash", false
-	}
-	return "", true
-}
-
-func checkBundle(ref contract.BundleRef, side contract.BundleSide) (string, bool) {
-	if ref.Side != side {
-		return "bundles." + string(side) + " must carry side " + string(side), false
-	}
-	if !contract.ValidContentHash(ref.Hash) {
-		return "bundles." + string(side) + ".hash must be a content hash", false
-	}
-	if !contract.ValidURL(ref.URL) {
-		return "bundles." + string(side) + ".url must be a url", false
-	}
-	if ref.ByteLength <= 0 {
-		return "bundles." + string(side) + ".byteLength must be positive", false
 	}
 	return "", true
 }

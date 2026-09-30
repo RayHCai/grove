@@ -157,3 +157,35 @@ func TestDirectIngressDefaultsToTheSecureScheme(t *testing.T) {
 		t.Errorf("named scheme: got %q", url)
 	}
 }
+
+// A box beats on its own clock, so a beat landing while Agent.Start is still running cannot name the
+// session yet. Read as a refusal, it would free the slot under a world about to exist, and the next
+// joiner would be sent into a second one.
+func TestABeatMidStartKeepsTheReservation(t *testing.T) {
+	reg := NewRegistry(staleAfter)
+	beat := oneSlot(hostA)
+	beat.Capacity.MaxInstances = 2
+	reg.Beat(beat, "192.0.2.1", epoch)
+
+	first, ok := reg.Place(request(gameID), reg.Candidates("", epoch), epoch)
+	if !ok || !first.Starts {
+		t.Fatalf("first join: got %+v, want a world to start", first)
+	}
+
+	reg.Beat(beat, "192.0.2.1", epoch.Add(time.Second))
+
+	second, ok := reg.Place(request(gameID), reg.Candidates("", epoch), epoch.Add(time.Second))
+	if !ok || second.SessionID != first.SessionID || second.Starts {
+		t.Fatalf("a join during the start: got %+v, want the reserved session %q", second, first.SessionID)
+	}
+
+	// Once the box has answered the start, a beat that still does not name the session is a box
+	// that has lost the work, and the next join ranks again.
+	reg.Started(gameID, 0, first.SessionID, gamePort)
+	reg.Beat(beat, "192.0.2.1", epoch.Add(2*time.Second))
+
+	third, ok := reg.Place(request(gameID), reg.Candidates("", epoch), epoch.Add(2*time.Second))
+	if !ok || third.SessionID == first.SessionID {
+		t.Fatalf("a join after a started session went missing: got %+v, want a fresh session", third)
+	}
+}
