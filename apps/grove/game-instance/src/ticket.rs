@@ -7,7 +7,6 @@ use base64::Engine as _;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
-use subtle::ConstantTimeEq;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -71,7 +70,7 @@ impl TicketFailure {
     }
 
     /// The expiry a refusal about time was measured against, for the log line to print beside the
-    /// reading this box took — which is the only place the two clocks are ever compared.
+    /// reading this box took, which is the only place the two clocks are ever compared.
     pub fn expiry(self) -> Option<i64> {
         match self {
             Self::Expired(exp) | Self::ClockSkew(exp) => Some(exp),
@@ -98,7 +97,7 @@ pub fn verify(
         return Err(TicketFailure::Malformed);
     }
 
-    // A signature segment that is not base64 is a bad signature, not a bad shape — which is the
+    // A signature segment that is not base64 is a bad signature, not a bad shape, which is the
     // verdict the TypeScript and Go halves reach for the same bytes.
     let provided = URL_SAFE_NO_PAD
         .decode(signature)
@@ -106,16 +105,10 @@ pub fn verify(
 
     let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC takes a key of any length");
     mac.update(payload.as_bytes());
-    let expected = mac.finalize().into_bytes();
-
-    // Constant time over the whole comparison, and the length is compared the same way: the format
-    // fixes the length, so a mismatch there is already a forgery rather than a fact worth leaking.
-    if provided.len() != expected.len() {
-        return Err(TicketFailure::BadSignature);
-    }
-    if provided.ct_eq(expected.as_slice()).unwrap_u8() != 1 {
-        return Err(TicketFailure::BadSignature);
-    }
+    // Constant time, and a wrong length is refused the same way: the format fixes the length, so a
+    // mismatch there is already a forgery rather than a fact worth leaking.
+    mac.verify_slice(&provided)
+        .map_err(|_| TicketFailure::BadSignature)?;
 
     let decoded = URL_SAFE_NO_PAD
         .decode(payload)
@@ -131,7 +124,7 @@ pub fn verify(
     let claims: Claims = serde_json::from_slice(&decoded).map_err(|_| TicketFailure::Malformed)?;
     if claims.exp <= now_seconds {
         // A ticket cannot be handed over later than it lived, so a wider gap is two boxes
-        // disagreeing about the time — which `expired` alone gives an operator no way to see.
+        // disagreeing about the time, which `expired` alone gives an operator no way to see.
         if now_seconds - claims.exp > TICKET_LIFETIME_SECONDS {
             return Err(TicketFailure::ClockSkew(claims.exp));
         }

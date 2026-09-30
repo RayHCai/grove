@@ -21,7 +21,7 @@ use anyhow::{Context, Result};
 use tokio::sync::mpsc;
 
 use crate::config::Config;
-use crate::session::{HostEvent, SessionOptions};
+use crate::session::{HostEvent, SessionOptions, EVENT_QUEUE_DEPTH};
 
 /// What the bundle's own config file must name, beside whatever `SimConfig` it carries.
 /// camelCase because the file IS that `SimConfig`, and serde discards an unknown field without a
@@ -44,12 +44,7 @@ fn default_send_rate() -> f64 {
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    request_id::init_tracing();
 
     let config = Config::from_env()?;
     let bundle = std::fs::read_to_string(&config.bundle_path)
@@ -65,8 +60,8 @@ fn main() -> Result<()> {
         .build()
         .context("starting the async runtime")?;
 
-    let (events, receiver) = mpsc::unbounded_channel::<HostEvent>();
-    let store = store::Store::new(config.manager_url.clone(), config.manager_token.clone());
+    let (events, receiver) = mpsc::channel::<HostEvent>(EVENT_QUEUE_DEPTH);
+    let store = store::Store::new(config.manager_url.clone(), config.manager_token.clone())?;
 
     // One counter, written by the session thread and read by `/healthz`: the agent on this box
     // polls that route for the roster, and a bare 200 reports every full session as empty.
@@ -104,21 +99,29 @@ fn main() -> Result<()> {
         // A socket nobody bound is a slot only an operator can reclaim: the session would otherwise
         // tick an unreachable world until the agent's probe gave up on it.
         if let Err(error) = listening.await {
-            let _ = faults.send(HostEvent::Fatal {
-                error: format!("serving {bind}: {error}"),
-            });
+            let _ = faults
+                .send(HostEvent::Fatal {
+                    error: format!("serving {bind}: {error}"),
+                })
+                .await;
         }
     });
 
     // A deploy is a drain, not a kill: stop taking connections, let the session end, and only then
-    // exit — so the saves the last batch carries are actually written.
+    // exit, so the saves the last batch carries are actually written.
     let drain = events.clone();
     io.spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            tracing::info!("draining");
-            draining.store(true, Ordering::Relaxed);
-            let _ = drain.send(HostEvent::Drain);
+        tokio::select! {
+            signalled = tokio::signal::ctrl_c() => {
+                if signalled.is_err() {
+                    return;
+                }
+            }
+            () = terminate() => {}
         }
+        tracing::info!("draining");
+        draining.store(true, Ordering::Relaxed);
+        let _ = drain.send(HostEvent::Drain).await;
     });
 
     let outcome = session::run(
@@ -139,6 +142,30 @@ fn main() -> Result<()> {
 
     serving.abort();
     outcome
+}
+
+/// Resolves on SIGTERM, which systemd sends every process in the unit on a stop, where the agent
+/// and a keyboard send SIGINT.
+#[cfg(unix)]
+async fn terminate() {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    match signal(SignalKind::terminate()) {
+        Ok(mut sigterm) => {
+            let _ = sigterm.recv().await;
+        }
+        // A handler this process could not register is not a drain it can ever start.
+        Err(err) => {
+            tracing::error!(error = ?err, "cannot listen for SIGTERM");
+            std::future::pending().await
+        }
+    }
+}
+
+/// Windows has no SIGTERM, so the drain there is the console signal alone.
+#[cfg(not(unix))]
+async fn terminate() {
+    std::future::pending().await
 }
 
 #[cfg(test)]

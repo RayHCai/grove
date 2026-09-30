@@ -15,14 +15,14 @@
                 "$TURBO_ROOT$/apps/grove/rust-toolchain.toml"
             ],
             // `dist/` is everything this task writes outside target/, which is cargo's own
-            // incremental cache — declaring that here warns on every machine without a Rust
+            // incremental cache; declaring that here warns on every machine without a Rust
             // toolchain, where the task correctly produces nothing.
             "outputs": ["dist/**"]
         },
         "typecheck": {
             // Back to `^build` alone. The root adds the package's own `build` so a suite can import
             // its `../dist`, but this one is `cargo clippy` and its build is a release compile of
-            // the whole crate — the check does not need it, and waiting for it is minutes.
+            // the whole crate; the check does not need it, and waiting for it is minutes.
             "dependsOn": ["^build"],
             "inputs": [
                 "src/**",
@@ -35,6 +35,9 @@
             "outputs": []
         },
         "test": {
+            // `^build` alone, as `typecheck`: `cargo test` compiles what it needs, and the root's
+            // own `build` here is a release compile it would wait minutes for.
+            "dependsOn": ["^build"],
             "inputs": [
                 "src/**",
                 "Cargo.toml",
