@@ -1,9 +1,14 @@
-// The one credential the routes inside the fleet are behind.
+// The one credential the routes inside the fleet are behind, on both ends of a call.
 
 package httpx
 
 import (
+	"bytes"
+	"context"
 	"crypto/hmac"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -29,4 +34,59 @@ func FleetBearer(secret []byte, l *slog.Logger) Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// StatusError is a call that was answered, with a status the caller refused.
+type StatusError struct{ Status int }
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("answered %d", e.Status)
+}
+
+// FleetClient is the calling end of FleetBearer: one service posting to another inside the fleet.
+type FleetClient struct {
+	Client *http.Client
+	Secret []byte
+}
+
+// PostJSON posts in (nil sends no body) and decodes up to maxAnswer bytes into a non-nil out.
+func (c FleetClient) PostJSON(ctx context.Context, url string, in, out any, maxAnswer int64) (string, error) {
+	var body io.Reader
+	if in != nil {
+		encoded, err := json.Marshal(in)
+		if err != nil {
+			return "", fmt.Errorf("encode: %w", err)
+		}
+		body = bytes.NewReader(encoded)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	if err != nil {
+		return "", fmt.Errorf("build: %w", err)
+	}
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Authorization", "Bearer "+string(c.Secret))
+	requestID := Forward(req)
+
+	res, err := c.Client.Do(req)
+	if err != nil {
+		return requestID, err
+	}
+	defer res.Body.Close()
+
+	answer, err := io.ReadAll(io.LimitReader(res.Body, maxAnswer))
+	if err != nil {
+		return requestID, fmt.Errorf("read the answer: %w", err)
+	}
+	if res.StatusCode >= http.StatusBadRequest {
+		return requestID, &StatusError{Status: res.StatusCode}
+	}
+	if out != nil {
+		if err := json.Unmarshal(answer, out); err != nil {
+			return requestID, fmt.Errorf("decode the answer: %w", err)
+		}
+	}
+	return requestID, nil
 }

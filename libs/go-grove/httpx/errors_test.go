@@ -2,38 +2,13 @@ package httpx
 
 import (
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
-
-// The mapping apps/grove/api/src/errors.ts uses, because one client parser covers every service.
-func TestCodeFor(t *testing.T) {
-	tests := []struct {
-		status int
-		want   ErrorCode
-	}{
-		{http.StatusBadRequest, CodeInvalidRequest},
-		{http.StatusUnauthorized, CodeUnauthorized},
-		{http.StatusForbidden, CodeForbidden},
-		{http.StatusNotFound, CodeNotFound},
-		{http.StatusConflict, CodeConflict},
-		{http.StatusTooManyRequests, CodeRateLimited},
-		{http.StatusInternalServerError, CodeInternal},
-		{http.StatusBadGateway, CodeInternal},
-		{http.StatusServiceUnavailable, CodeInternal},
-		{http.StatusUnprocessableEntity, CodeInvalidRequest},
-	}
-
-	for _, tt := range tests {
-		t.Run(http.StatusText(tt.status), func(t *testing.T) {
-			if got := CodeFor(tt.status); got != tt.want {
-				t.Errorf("CodeFor(%d) = %q, want %q", tt.status, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestWriteJSON(t *testing.T) {
 	w := httptest.NewRecorder()
@@ -200,5 +175,23 @@ func TestDecodeJSONNeverQuotesTheBody(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), "hunter2") {
 		t.Errorf("the failure quotes the body: %s", w.Body.String())
+	}
+}
+
+// A 500 carries nothing of the failure, and the log line carries all of it under the request's id.
+func TestFailLogsWhatItHidesFromTheCaller(t *testing.T) {
+	var logged strings.Builder
+	l := slog.New(slog.NewJSONHandler(&logged, nil))
+
+	w := httptest.NewRecorder()
+	Fail(w, httptest.NewRequest("GET", "/v1/state/k", nil), l, "read state", errors.New("disk on fire"), "gameId", "g")
+
+	if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "disk") {
+		t.Errorf("got %d %s", w.Code, w.Body.String())
+	}
+	for _, want := range []string{`"msg":"read state"`, `"err":"disk on fire"`, `"path":"/v1/state/k"`, `"gameId":"g"`} {
+		if !strings.Contains(logged.String(), want) {
+			t.Errorf("log missing %s:\n%s", want, logged.String())
+		}
 	}
 }

@@ -253,3 +253,49 @@ func TestTheListenerDeadlinesHoldTogether(t *testing.T) {
 		t.Errorf("readyTimeout %s must be well under readTimeout %s", readyTimeout, readTimeout)
 	}
 }
+
+// The access line sits outside the panic net, so a handler that panicked is still a logged 500.
+func TestServiceLogsARequestThatPanicked(t *testing.T) {
+	var logged bytes.Buffer
+	l := slog.New(slog.NewJSONHandler(&logged, nil))
+
+	scope := http.NewServeMux()
+	scope.HandleFunc("GET /v1/boom", func(http.ResponseWriter, *http.Request) { panic("boom") })
+	h := Service(scope, func(context.Context) error { return nil }, l)
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/v1/boom", nil))
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status: got %d, want 500", w.Code)
+	}
+	if !strings.Contains(logged.String(), `"msg":"request"`) || !strings.Contains(logged.String(), `"status":500`) {
+		t.Errorf("no access line for the panic:\n%s", logged.String())
+	}
+}
+
+// The probes answer without a credential, and every /v1 path (routed or not) answers the gate first.
+func TestServiceGatesOnlyTheScope(t *testing.T) {
+	refuse := func(http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			WriteError(w, http.StatusUnauthorized, CodeUnauthorized, "no")
+		})
+	}
+	scope := http.NewServeMux()
+	scope.HandleFunc("GET /v1/thing", func(http.ResponseWriter, *http.Request) {})
+	h := Service(scope, func(context.Context) error { return nil }, slog.New(slog.DiscardHandler), refuse)
+
+	for path, want := range map[string]int{
+		"/health":     http.StatusOK,
+		"/ready":      http.StatusOK,
+		"/v1/thing":   http.StatusUnauthorized,
+		"/v1/nothing": http.StatusUnauthorized,
+		"/elsewhere":  http.StatusNotFound,
+	} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != want {
+			t.Errorf("%s: got %d, want %d", path, w.Code, want)
+		}
+	}
+}

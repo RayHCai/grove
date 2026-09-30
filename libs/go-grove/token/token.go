@@ -34,7 +34,7 @@ type Claims struct {
 	PlayerID string `json:"playerId,omitempty"`
 	// Which service may accept this. Checked against what the verifier is, never against the URL.
 	Aud string `json:"aud"`
-	// Seconds since the epoch. Short — a session outliving its token re-asks the allocator.
+	// Seconds since the epoch. Short: a session outliving its token re-asks the allocator.
 	Exp int64 `json:"exp"`
 }
 
@@ -71,7 +71,7 @@ func Verify(tok string, secret []byte, audience string, nowUnix int64) (Claims, 
 		return Claims{}, ErrMalformed
 	}
 
-	// A signature segment that is not base64 is a bad signature, not a bad shape — which is the
+	// A signature segment that is not base64 is a bad signature, not a bad shape, which is the
 	// verdict the TypeScript and Rust halves reach too.
 	provided, err := base64.RawURLEncoding.DecodeString(signature)
 	if err != nil {

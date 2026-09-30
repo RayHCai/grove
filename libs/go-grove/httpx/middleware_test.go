@@ -2,8 +2,8 @@ package httpx
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +13,7 @@ import (
 )
 
 func discardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func TestChainAppliesTheFirstOutermost(t *testing.T) {
@@ -107,7 +107,7 @@ func TestRecoverAbortsOnceAStatusIsOut(t *testing.T) {
 	t.Error("want a re-panic, got a normal return")
 }
 
-// net/http swallows this one on purpose — it is a deliberate abort, not a fault to answer.
+// net/http swallows this one on purpose: it is a deliberate abort, not a fault to answer.
 func TestRecoverPassesAbortHandlerThrough(t *testing.T) {
 	h := Recover(discardLogger())(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic(http.ErrAbortHandler)
@@ -191,7 +191,7 @@ func TestRequestLogRaisesTheLevelOnA500(t *testing.T) {
 
 func TestRateLimit(t *testing.T) {
 	byHeader := func(r *http.Request) string { return r.Header.Get("X-Caller") }
-	h := RateLimit(2, time.Minute, byHeader)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	h := RateLimit(t.Context(), 2, time.Minute, byHeader)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
 	call := func(caller string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
@@ -300,4 +300,23 @@ func TestRecorderUnwraps(t *testing.T) {
 		Recover(discardLogger()), RequestLog(discardLogger()),
 	)
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+}
+
+// A limiter built for a scope that ends must not leave its sweep running behind it.
+func TestRateLimitSweepEndsWithItsContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	l := newLimiter(1, time.Millisecond)
+
+	swept := make(chan struct{})
+	go func() {
+		l.sweep(ctx)
+		close(swept)
+	}()
+	cancel()
+
+	select {
+	case <-swept:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sweep outlived its context")
+	}
 }
