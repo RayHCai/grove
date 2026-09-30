@@ -1,5 +1,5 @@
 /**
- * Server-minted entity identity, opaque to the client — the server's `EntityId` at the boundary.
+ * Server-minted entity identity, opaque to the client: the server's `EntityId` at the boundary.
  * Branded: two runtimes mint different handles for one entity, so shipping a local one is a bug.
  */
 export type NetId = number & { readonly __netId: unique symbol };
