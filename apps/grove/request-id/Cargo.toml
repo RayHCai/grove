@@ -1,6 +1,6 @@
 [package]
 name = "grove-request-id"
-description = "The correlation id the fleet's Rust services read, mint and echo, held once for both."
+description = "The correlation id the fleet's Rust services read, mint and echo, and with `service` the startup both of them share."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,15 @@ publish.workspace = true
 [lib]
 name = "request_id"
 path = "src/lib.rs"
+
+[features]
+# Off by default, so the id alone stays dependency-free for anything that only needs to mint one.
+service = ["dep:axum", "dep:anyhow", "dep:tracing-subscriber"]
+
+[dependencies]
+axum = { workspace = true, optional = true }
+anyhow = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 
 [lints]
 workspace = true
