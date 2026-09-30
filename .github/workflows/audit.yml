@@ -27,11 +27,11 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 10
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-            - uses: pnpm/action-setup@v4
+            - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
-            - uses: actions/setup-node@v6
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
               with:
                   node-version-file: .node-version
                   cache: pnpm
@@ -48,14 +48,14 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
             # setup-go reads go.mod's `toolchain` line ahead of its `go` line, so the scan
             # runs on the toolchain the services ship, not whatever 1.24.x the runner cached.
-            - uses: actions/setup-go@v6
+            - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
               with:
                   go-version-file: go.mod
-                  # No go.sum exists to hash — the Go half takes no third-party dependency.
+                  # No go.sum exists to hash: the Go half takes no third-party dependency.
                   cache-dependency-path: go.mod
 
             # Pinned like every other toolchain here: `@latest` would change what this job reports
@@ -67,3 +67,20 @@ jobs:
             # cannot join it unscanned.
             - name: govulncheck
               run: govulncheck ./...
+
+    rust-advisories:
+        name: Rust advisories
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+            # Pinned and `--locked` for the reason govulncheck is: `@latest` would change what this
+            # job reports without a commit. Installed from the root, outside the pinned toolchain.
+            - name: Install cargo-audit
+              run: cargo install cargo-audit --version 0.22.2 --locked
+
+            # One lock for the whole Rust half, so this is every crate the fleet ships.
+            - name: cargo audit
+              working-directory: apps/grove
+              run: cargo audit
