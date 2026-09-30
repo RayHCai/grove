@@ -30,7 +30,7 @@ jobs:
             # Not set on `determinism`, which installs none.
             GROVE_REQUIRE_TOOLCHAIN: go,cargo,staticcheck,terraform
 
-            # What the change reaches, rather than the whole tree — but only on a pull request. A
+            # What the change reaches, rather than the whole tree, but only on a pull request. A
             # push to main runs everything, so a package the affected graph failed to reach is red
             # on main within the minute rather than never. A file in no package is a root change and
             # selects every package, which is what keeps a `tsconfig.base.json` or a `go.mod` edit
@@ -42,10 +42,10 @@ jobs:
             matrix:
                 task:
                     # oxlint and prettier read the tree directly rather than through turbo, so
-                    # neither narrows — and neither is slow enough to want to.
+                    # neither narrows, and neither is slow enough to want to.
                     - name: lint
-                      # Warn-tier rules only ratchet if they exit non-zero somewhere.
-                      run: pnpm run lint --deny-warnings
+                      # A disable that suppresses nothing is a rule off for whatever lands there next.
+                      run: pnpm run lint --report-unused-disable-directives
                     - name: format
                       run: pnpm run format:check && pnpm -r --if-present run format:check
                     - name: typecheck
@@ -55,32 +55,33 @@ jobs:
                     - name: test
                       run: pnpm run test $AFFECTED
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
               with:
                   fetch-depth: 0
 
-            - uses: pnpm/action-setup@v4
+            - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
-            - uses: actions/setup-node@v6
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
               with:
                   node-version-file: .node-version
                   cache: pnpm
 
             # The native services shell to cargo and go. Without a toolchain their scripts skip with a
             # line rather than failing, which would make the gate green over a half that was never
-            # compiled — so both are installed here even though only some jobs reach them.
-            - uses: dtolnay/rust-toolchain@stable
-              with:
-                  toolchain: 1.98.1
-                  components: clippy, rustfmt
+            # compiled, so both are installed here even though only some jobs reach them.
+            # rustup ships on the runner and reads the channel and components from
+            # apps/grove/rust-toolchain.toml, so the pin lives in that one file.
+            - name: Install the pinned Rust toolchain
+              working-directory: apps/grove
+              run: rustup toolchain install && rustc --version
 
-            - uses: Swatinem/rust-cache@v2
+            - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
               with:
                   workspaces: apps/grove
 
             # Keyed on go.mod rather than go.sum: the Go half takes no third-party dependency, so no
             # go.sum exists to hash.
-            - uses: actions/setup-go@v6
+            - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
               with:
                   go-version-file: go.mod
                   cache-dependency-path: go.mod
@@ -90,23 +91,24 @@ jobs:
             # second invocation of it that exists only here.
             - name: Install staticcheck
               run: |
-                  go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
+                  version=$(sed -n "s/^const version = '\(.*\)';$/\1/p" scripts/staticcheck.mjs)
+                  go install "honnef.co/go/tools/cmd/staticcheck@${version:?no version in scripts/staticcheck.mjs}"
                   echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
             # Without a Terraform on `PATH`, `@grove/infra` skips its own validate and fmt gates, so
             # every `.tf` file would land on main read by nothing. Unwrapped, so the exit code the
             # scripts read is Terraform's own rather than the wrapper's.
-            - uses: hashicorp/setup-terraform@v3
+            - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
               with:
                   terraform_version: 1.14.3
                   terraform_wrapper: false
 
             # Only `typecheck` runs `terraform init`, and uncached it pays one unretried provider
-            # download per root — twice a run, inside a timeout the whole TS, Go and Rust typecheck
+            # download per root: twice a run, inside a timeout the whole TS, Go and Rust typecheck
             # already shares.
             - name: Cache Terraform providers
               if: matrix.task.name == 'typecheck'
-              uses: actions/cache@v4
+              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
               with:
                   path: ${{ runner.temp }}/terraform-plugins
                   key: terraform-plugins-${{ runner.os }}-${{ hashFiles('apps/grove/infra/environments/*/.terraform.lock.hcl') }}
@@ -123,7 +125,7 @@ jobs:
               run: pnpm install --frozen-lockfile
 
             - name: Cache turbo
-              uses: actions/cache@v4
+              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
               with:
                   path: .turbo
                   key: turbo-${{ matrix.task.name }}-${{ runner.os }}-${{ github.sha }}
@@ -134,7 +136,7 @@ jobs:
               run: ${{ matrix.task.run }}
 
     # Identical floats across machines is the whole premise, and one runner on one V8 never tests it.
-    # Only the test task repeats here — lint, format, typecheck and build cannot see a divergence.
+    # Only the test task repeats here: lint, format, typecheck and build cannot see a divergence.
     determinism:
         name: test (${{ matrix.os }}, node ${{ matrix.node }})
         runs-on: ${{ matrix.os }}
@@ -150,11 +152,11 @@ jobs:
                     - os: ubuntu-latest
                       node: 26
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-            - uses: pnpm/action-setup@v4
+            - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
-            - uses: actions/setup-node@v6
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
               with:
                   node-version: ${{ matrix.node }}
                   cache: pnpm
@@ -163,7 +165,7 @@ jobs:
               run: pnpm install --frozen-lockfile
 
             - name: Cache turbo
-              uses: actions/cache@v4
+              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
               with:
                   path: .turbo
                   # Namespaced away from `turbo-test-`: restore-keys match by prefix, so the ci
@@ -173,26 +175,22 @@ jobs:
                       turbo-determinism-${{ runner.os }}-node${{ matrix.node }}-
 
             - name: test
-              # The TypeScript half only — this job exists to run one simulation on two V8 builds, and
-              # no native service's tests answer a question a second architecture changes. Every native
-              # package is named: these runners ship Go and Rust on PATH, so nothing here would skip, and
-              # the toolchains go.mod and rust-toolchain.toml pin are one download apiece per leg.
+              # The engine and what composes it, chosen by directory so no native package is ever in it.
               run: >-
-                  pnpm run test --filter='!@grove/game-instance' --filter='!@grove/asset-upload-service'
-                  --filter='!@grove/go-grove' --filter='!@grove/game-manager'
-                  --filter='!@grove/instance-manager' --filter='!@grove/server-manager'
+                  pnpm run test --filter='./packages/*' --filter='./libs/*' --filter='!./libs/go-grove'
+                  --filter=./integration --filter=./bench --filter=./apps/playground
 
     # `-race` needs cgo and therefore a C compiler, so it stays out of the shared `test` script:
     # folded in there it would fail `pnpm run test`, and the pre-push hook, on every machine
-    # without one — the outcome scripts/toolchain.mjs exists to avoid.
+    # without one, the outcome scripts/toolchain.mjs exists to avoid.
     race:
         name: race detector
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-            - uses: actions/setup-go@v6
+            - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
               with:
                   go-version-file: go.mod
                   cache-dependency-path: go.mod
@@ -208,7 +206,7 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 5
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
             # The same script the pre-commit hook runs. Driven off everything git tracks rather than
             # a list of trees to scan, so a new top-level directory is covered the day it appears.
@@ -217,29 +215,49 @@ jobs:
             - name: Reject section citations outside docs/
               run: node scripts/check-citations.mjs
 
+    # Every image the repository deploys, built to its runtime stage: a Dockerfile is otherwise read
+    # by nothing until a deploy, which is the worst place to learn it no longer builds.
+    docker:
+        name: image (${{ matrix.image.name }})
+        runs-on: ubuntu-latest
+        timeout-minutes: 45
+        strategy:
+            fail-fast: false
+            matrix:
+                image:
+                    - name: api
+                      file: apps/grove/api/Dockerfile
+                    - name: game-builder
+                      file: apps/grove/game-builder/Dockerfile
+                    - name: game-manager
+                      file: apps/grove/game-manager/Dockerfile
+                    - name: server-manager
+                      file: apps/grove/server-manager/Dockerfile
+                    - name: asset-upload-service
+                      file: apps/grove/asset-upload-service/Dockerfile
+                    - name: local-fleet-box
+                      file: docker/local-fleet-box.Dockerfile
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+            - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+            - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+              with:
+                  context: .
+                  file: ${{ matrix.image.file }}
+                  target: runtime
+                  push: false
+                  cache-from: type=gha,scope=${{ matrix.image.name }}
+                  cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+
     # Single required status check, so branch protection needs only one entry.
     ci-ok:
         name: CI passed
         if: always()
-        needs: [ci, determinism, race, citations]
+        needs: [ci, determinism, race, citations, docker]
         runs-on: ubuntu-latest
         steps:
-            - name: Verify all matrix jobs succeeded
-              run: |
-                  if [ "${{ needs.ci.result }}" != "success" ]; then
-                    echo "CI matrix result: ${{ needs.ci.result }}"
-                    exit 1
-                  fi
-                  if [ "${{ needs.determinism.result }}" != "success" ]; then
-                    echo "Cross-platform test result: ${{ needs.determinism.result }}"
-                    exit 1
-                  fi
-                  if [ "${{ needs.race.result }}" != "success" ]; then
-                    echo "Race detector result: ${{ needs.race.result }}"
-                    exit 1
-                  fi
-                  if [ "${{ needs.citations.result }}" != "success" ]; then
-                    echo "Citation gate result: ${{ needs.citations.result }}"
-                    exit 1
-                  fi
-                  echo "All CI jobs passed."
+            - name: Verify every job succeeded
+              if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+              run: exit 1

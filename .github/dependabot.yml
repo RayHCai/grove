@@ -30,3 +30,21 @@ updates:
       directory: /
       schedule:
           interval: weekly
+
+    - package-ecosystem: docker
+      directories:
+          - /apps/grove/api
+          - /apps/grove/asset-upload-service
+          - /apps/grove/game-builder
+          - /apps/grove/game-manager
+          - /apps/grove/server-manager
+          - /docker
+      schedule:
+          interval: weekly
+
+    - package-ecosystem: terraform
+      directories:
+          - /apps/grove/infra/environments/*
+          - /apps/grove/infra/modules/*
+      schedule:
+          interval: weekly
