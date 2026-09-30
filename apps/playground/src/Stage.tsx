@@ -1,4 +1,4 @@
-// NOTHING HERE SIMULATES ANYTHING: a click becomes an input frame and the server decides.
+// Nothing here simulates anything: a click becomes an input frame and the server decides.
 // This component owns no entities, no node ids and no clock.
 
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -30,7 +30,7 @@ export function Stage(): React.JSX.Element {
 
     // The textures must be resident BEFORE the first welcome. The client's bridge starts its own
     // manifest load without awaiting it and reconciles the join snapshot on the next statement, and
-    // a sprite whose texture arrives after its node was created is never repointed — so every leaf
+    // a sprite whose texture arrives after its node was created is never repointed, so every leaf
     // already in the world at join would draw the placeholder for the rest of the session.
     const onReady = useCallback(async (renderer: IRenderer) => {
         const result = await renderer.loadAssets([
@@ -78,7 +78,7 @@ export function Stage(): React.JSX.Element {
     return (
         <div className="stage">
             {/* The HUD overlays the canvas rather than living inside it: the renderer owns that
-                element, and the DOM input device is bound to it — a button inside would arrive as a
+                element, and the DOM input device is bound to it; a button inside would arrive as a
                 stage click as well as a press. */}
             <div className="stage__view">
                 <div className="stage__canvas" ref={containerRef} role="presentation" />
@@ -109,7 +109,7 @@ export function Stage(): React.JSX.Element {
 
                 {/* Clearing is a server action like any other, so the button takes the same path a
                     keypress does rather than reaching into the world. It clears it for everyone,
-                    and only in the lobby — during a round the leaves are the round's. */}
+                    and only in the lobby; during a round the leaves are the round's. */}
                 <button type="button" onClick={requestClear} disabled={state !== 'live'}>
                     clear planted (C)
                 </button>

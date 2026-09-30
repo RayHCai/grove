@@ -1,4 +1,4 @@
-// The client owns the frame — `GameClient.frame()` drains, advances, flushes and renders — so
+// The client owns the frame (`GameClient.frame()` drains, advances, flushes and renders), so
 // this hook only supplies the loop. Panels poll `stats()`; the HUD does not, as the sink notifies.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -57,7 +57,7 @@ export interface UseGameResult {
     readStats: () => GameStats | null;
     /** Synthesizes the clear key, so the HUD button and the keyboard take the same path. */
     requestClear: () => void;
-    /** Presses the ready widget — the interaction frame, not an input action. */
+    /** Presses the ready widget: the interaction frame, not an input action. */
     pressReady: () => void;
 }
 
@@ -70,7 +70,7 @@ export function useGame(opts: UseGameOptions): UseGameResult {
     const [failure, setFailure] = useState<string | null>(null);
     const [hud, setHud] = useState<ClientHUDSink | null>(null);
 
-    // The camera resolver is captured once by the session, so it is read through a ref — a fresh
+    // The camera resolver is captured once by the session, so it is read through a ref; a fresh
     // closure per render would be ignored, and re-creating the session would resync the world.
     const cameraRef = useRef(opts.camera);
     cameraRef.current = opts.camera;
@@ -83,7 +83,7 @@ export function useGame(opts: UseGameOptions): UseGameResult {
         if (renderer === null || container === null) return;
 
         // StrictMode mounts twice, and a dial resolves on its own schedule. The signal is what
-        // `connectTo` abandons an unwanted dial by — and what closes a session that was built
+        // `connectTo` abandons an unwanted dial by, and what closes a session that was built
         // between this effect being torn down and its own continuation running.
         const abort = new AbortController();
         let session: ClientInstance | null = null;
@@ -93,7 +93,7 @@ export function useGame(opts: UseGameOptions): UseGameResult {
             container,
             renderer,
             // The entity a click landed on is a claim about this tab's own camera, which no
-            // authority can recompute — but the client resolves it, because only the client holds
+            // authority can recompute, but the client resolves it, because only the client holds
             // both the node map and the interpolation delay the drawn pose carries.
             onScreenPress: (x, y) => {
                 const hit = session?.client.entityAt({ x, y });
@@ -130,7 +130,7 @@ export function useGame(opts: UseGameOptions): UseGameResult {
                         setState(next);
                         setFailure(describeFailure(reason));
                         // The mirror exists from the welcome onward, and the screens are registered
-                        // against it — a resync builds a new one, so this runs again for that too.
+                        // against it; a resync builds a new one, so this runs again for that too.
                         if (next === 'live' && session !== null) openHud(session.client);
                     },
                 });
@@ -253,7 +253,7 @@ function describeFailure(reason: FailureReason | undefined): string | null {
 
 /**
  * A per-tab id that survives a reload, so this tab rejoins as the player it saved.
- * `sessionStorage`, not `localStorage` — but a duplicated tab COPIES it, and loses the race.
+ * `sessionStorage`, not `localStorage`, but a duplicated tab COPIES it, and loses the race.
  */
 function tabIdentity(): string {
     const held = sessionStorage.getItem(IDENTITY_KEY);
@@ -266,7 +266,7 @@ function tabIdentity(): string {
     return minted;
 }
 
-/** The peer's own claim, which only a toy host would take — this one says so where it reads it. */
+/** The peer's own claim, which only a toy host would take; this one says so where it reads it. */
 function withPlayer(url: string, identity: string): string {
     const parsed = new URL(url);
     parsed.searchParams.set('player', identity);

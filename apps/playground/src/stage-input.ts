@@ -1,4 +1,4 @@
-// The geometry belongs to `createCanvasInputDevice`; what is left here is the aim axis — which
+// The geometry belongs to `createCanvasInputDevice`; what is left here is the aim axis: which
 // action carries the click's height, and the bias that keeps it off zero.
 
 import type { EmittingInputDevice } from '@platform/glue/client';
@@ -12,7 +12,7 @@ export interface StageInputOptions {
     /** Read for `screenToWorld`, which needs the live camera and viewport. */
     renderer: IRenderer;
     /**
-     * The press in CANVAS space, for the caller that resolves a pointer hit — screen space, not
+     * The press in CANVAS space, for the caller that resolves a pointer hit: screen space, not
      * world, since that is what `client.entityAt` takes. A pointer hit never rides a binding.
      */
     onScreenPress?: (x: number, y: number) => void;
@@ -24,7 +24,7 @@ export interface StageInputOptions {
  */
 export function createStageInputDevice(opts: StageInputOptions): EmittingInputDevice {
     // `onPress` runs ahead of the press event's own forward, so emitting from inside it puts the
-    // axis on the wire before the button — which is the order the aim is wanted in.
+    // axis on the wire before the button, which is the order the aim is wanted in.
     const device: EmittingInputDevice = createCanvasInputDevice({
         container: opts.container,
         renderer: opts.renderer,

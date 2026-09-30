@@ -1,15 +1,15 @@
-// POLLED, NOT PER FRAME: both callers' reads allocate and neither publishes a change event, so
+// Polled, not per frame: both callers' reads allocate and neither publishes a change event, so
 // sampling on every frame would make the debugger the most expensive thing on screen.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-/** Poll rates offered in the UI, in Hz. `0` freezes — useful for reading a busy tree. */
+/** Poll rates offered in the UI, in Hz. `0` freezes, useful for reading a busy tree. */
 export const RATES = [0, 2, 4, 10] as const;
 
 /**
  * Samples `read` on an interval, plus once up front, and hands back a way to sample it on demand.
  *
- * `read` is taken through a ref so a fresh closure every render does not re-arm the interval — only
+ * `read` is taken through a ref so a fresh closure every render does not re-arm the interval; only
  * `rate` does that. `deps` is for a value `read` closes over that should still trigger an immediate
  * resample when it changes, the way the inspector's bounds toggle does; a caller with nothing like
  * that passes none.

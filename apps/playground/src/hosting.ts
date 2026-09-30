@@ -1,4 +1,4 @@
-// The address a browser dials, which neither the game nor its project file describes — and which
+// The address a browser dials, which neither the game nor its project file describes, and which
 // both halves need, so this is the one file outside `scripts/` that both compilers include.
 
 /** Where the game server listens, and what a browser dials when nothing overrides it. */

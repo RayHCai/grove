@@ -1,5 +1,5 @@
-// The two things a script cannot do: open the first screen — a panel would, and this app has
-// none — and touch the renderer, since a node on the `ui` surface is drawing.
+// The two things a script cannot do: open the first screen (a panel would, and this app has
+// none) and touch the renderer, since a node on the `ui` surface is drawing.
 
 import type { GameClient } from '@platform/glue/client';
 import { hud, withRuntime } from '@platform/core';

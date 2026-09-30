@@ -71,7 +71,7 @@ export function Inspector({ renderer }: InspectorProps): React.JSX.Element {
                                         </span>
                                     </div>
                                     {roots.length === 0 ? (
-                                        <div className="tree__empty">—</div>
+                                        <div className="tree__empty">-</div>
                                     ) : (
                                         <ul className="tree">
                                             {roots.map((id) => (
@@ -115,7 +115,7 @@ interface TreeNodeProps {
     onSelect: (id: NodeId) => void;
 }
 
-/** One row plus its subtree. A cycle is impossible — the core rejects one — so no visited set. */
+/** One row plus its subtree. A cycle is impossible (the core rejects one), so no visited set. */
 function TreeNode({ id, snapshot, depth, selected, onSelect }: TreeNodeProps): React.JSX.Element {
     const node = snapshot.nodes.get(id);
     if (node === undefined) return <li className="tree__row tree__row--stale">{id} (missing)</li>;
@@ -143,7 +143,7 @@ function TreeNode({ id, snapshot, depth, selected, onSelect }: TreeNodeProps): R
                     {node.kind === 'text'
                         ? `“${truncate(node.text)}”`
                         : node.texture === ''
-                          ? '—'
+                          ? '-'
                           : node.texture}
                 </span>
                 <span className="tree__pos">
@@ -192,11 +192,11 @@ function NodeDetail({ node }: { node: NodeSnapshot }): React.JSX.Element {
             {node.uiAnchor !== undefined && <Row label="uiAnchor" value={node.uiAnchor} />}
             <Row
                 label="parent"
-                value={node.parent === NO_NODE ? '— (root)' : String(node.parent)}
+                value={node.parent === NO_NODE ? '- (root)' : String(node.parent)}
             />
             <Row
                 label="children"
-                value={node.children.length === 0 ? '—' : String(node.children.length)}
+                value={node.children.length === 0 ? '-' : String(node.children.length)}
             />
 
             <Row label="local pos" value={vec(node.local.position)} />
@@ -246,7 +246,7 @@ function ViewDetail({ snapshot }: { snapshot: SceneSnapshot }): React.JSX.Elemen
                 label="assets"
                 value={
                     snapshot.assets.length === 0
-                        ? '—'
+                        ? '-'
                         : snapshot.assets
                               .map(
                                   (a) => `${a.name} ${round(a.size.width)}x${round(a.size.height)}`,
@@ -267,7 +267,7 @@ function Row({ label, value }: { label: string; value: string }): React.JSX.Elem
     );
 }
 
-/** Fixed decimals without trailing zeros — `1.5` not `1.50`, `12` not `12.00`. */
+/** Fixed decimals without trailing zeros: `1.5` not `1.50`, `12` not `12.00`. */
 function round(value: number, places = 1): string {
     if (!Number.isFinite(value)) return String(value);
     return String(Number(value.toFixed(places)));
