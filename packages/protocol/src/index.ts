@@ -1,9 +1,10 @@
-// Types only, one dependency: both endpoints agree here and nowhere else.
+// Types, plus the two values both endpoints must agree on: here and nowhere else.
 
 export type { NetId, PlayerId, ProjectId } from './ids.js';
 export { PROTOCOL_VERSION } from './version.js';
+export { MAX_REQUESTS_PER_FRAME } from './limits.js';
 
-export type { ClientToServer, Envelope, ServerToClient } from './envelopes.js';
+export type { ClientToServer, ServerToClient } from './envelopes.js';
 
 export type {
     JoinRequest,
