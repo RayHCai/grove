@@ -26,7 +26,7 @@ const readHeaderTimeout = 10 * time.Second
 // which no link inside the fleet is under.
 const readTimeout = 15 * time.Second
 
-// Absolute from the end of the header read rather than idle, so it bounds the handler too — a
+// Absolute from the end of the header read rather than idle, so it bounds the handler too; a
 // route that legitimately blocks longer sets its own with http.ResponseController.
 const writeTimeout = 25 * time.Second
 
@@ -43,7 +43,7 @@ const maxHeaderBytes = 16 << 10
 // place it can get stuck.
 const readyTimeout = 2 * time.Second
 
-// newServer is the listener's whole configuration, in one place a test can read back — four
+// newServer is the listener's whole configuration, in one place a test can read back: four
 // deadlines that are only correct together are four a reader has to be able to see at once.
 func newServer(h http.Handler, l *slog.Logger) *http.Server {
 	return &http.Server{
@@ -81,10 +81,25 @@ func Ready(probe func(context.Context) error, l *slog.Logger) http.HandlerFunc {
 	}
 }
 
+// Service is every service's handler: the open probes, one /v1 scope behind gate, and the shared 404.
+func Service(scope *http.ServeMux, ready func(context.Context) error, l *slog.Logger, gate ...Middleware) http.Handler {
+	// Inside the gate, so a caller without a credential cannot map the scope's routes by their 404s.
+	scope.HandleFunc("/v1/", NotFound)
+
+	root := http.NewServeMux()
+	root.HandleFunc("GET /health", Health)
+	root.HandleFunc("GET /ready", Ready(ready, l))
+	root.Handle("/v1/", Chain(scope, gate...))
+	root.HandleFunc("/", NotFound)
+
+	// RequestLog outside Recover, so a panic's 500 still gets its access line.
+	return Chain(root, RequestID(), RequestLog(l), Recover(l))
+}
+
 // Serve listens until ctx is done or a signal arrives, then finishes what is in flight.
 //
-// The drain is what makes a rolling deploy invisible — a request already inside a handler runs to
-// its end — and is this service's half of what the Fastify ones do with `app.close()`.
+// The drain is what makes a rolling deploy invisible (a request already inside a handler runs to
+// its end), and is this service's half of what the Fastify ones do with `app.close()`.
 func Serve(ctx context.Context, addr string, h http.Handler, l *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()

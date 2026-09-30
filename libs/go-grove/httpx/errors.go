@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 )
 
@@ -15,7 +16,6 @@ type ErrorCode string
 
 const (
 	CodeUnauthorized   ErrorCode = "unauthorized"
-	CodeForbidden      ErrorCode = "forbidden"
 	CodeNotFound       ErrorCode = "not_found"
 	CodeConflict       ErrorCode = "conflict"
 	CodeRateLimited    ErrorCode = "rate_limited"
@@ -27,26 +27,6 @@ const (
 type ErrorBody struct {
 	Code    ErrorCode `json:"code"`
 	Message string    `json:"message"`
-}
-
-// CodeFor maps a status exactly as apps/grove/api/src/errors.ts does, for a handler relaying one.
-func CodeFor(status int) ErrorCode {
-	switch status {
-	case http.StatusUnauthorized:
-		return CodeUnauthorized
-	case http.StatusForbidden:
-		return CodeForbidden
-	case http.StatusNotFound:
-		return CodeNotFound
-	case http.StatusConflict:
-		return CodeConflict
-	case http.StatusTooManyRequests:
-		return CodeRateLimited
-	}
-	if status >= http.StatusInternalServerError {
-		return CodeInternal
-	}
-	return CodeInvalidRequest
 }
 
 // WriteJSON is the only way a body leaves a handler, so every response carries the same header.
@@ -71,6 +51,18 @@ func WriteError(w http.ResponseWriter, status int, code ErrorCode, message strin
 		code, message = CodeInternal, "internal error"
 	}
 	WriteJSON(w, status, ErrorBody{Code: code, Message: message})
+}
+
+// BadRequest is the 400 for a request refused before any work was done for it.
+func BadRequest(w http.ResponseWriter, message string) {
+	WriteError(w, http.StatusBadRequest, CodeInvalidRequest, message)
+}
+
+// Fail keeps what went wrong in the log and tells the caller only that something did.
+func Fail(w http.ResponseWriter, r *http.Request, l *slog.Logger, what string, err error, attrs ...any) {
+	attrs = append([]any{"err", err, "path", r.URL.Path, "requestId", RequestIDFrom(r.Context())}, attrs...)
+	l.ErrorContext(r.Context(), what, attrs...)
+	WriteError(w, http.StatusInternalServerError, CodeInternal, "internal error")
 }
 
 // DecodeJSON fills dst from the body, and writes the 400 itself: a handler only has to return.

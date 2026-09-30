@@ -3,6 +3,7 @@
 package httpx
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -46,7 +47,7 @@ func Recover(l *slog.Logger) Middleware {
 					"stack", string(debug.Stack()),
 				)
 
-				// A status already went out, so the only honest ending is a dead connection —
+				// A status already went out, so the only honest ending is a dead connection:
 				// returning normally would frame a truncated body as a complete one.
 				if rec.status != 0 {
 					panic(http.ErrAbortHandler)
@@ -66,32 +67,35 @@ func RequestLog(l *slog.Logger) Middleware {
 			rec := &recorder{ResponseWriter: w}
 			started := time.Now()
 
-			next.ServeHTTP(rec, r)
+			// Deferred so a response Recover aborted mid-body still gets its line on the way out.
+			defer func() {
+				level := slog.LevelInfo
+				if rec.code() >= http.StatusInternalServerError {
+					level = slog.LevelError
+				}
+				// The path without its query: a ticket and a cursor both end up there, and neither
+				// belongs in a log a whole team reads.
+				l.LogAttrs(r.Context(), level, "request",
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+					slog.Int("status", rec.code()),
+					slog.Int64("bytes", rec.written),
+					slog.Duration("took", time.Since(started)),
+					slog.String("requestId", RequestIDFrom(r.Context())),
+				)
+			}()
 
-			level := slog.LevelInfo
-			if rec.code() >= http.StatusInternalServerError {
-				level = slog.LevelError
-			}
-			// The path without its query: a ticket and a cursor both end up there, and neither
-			// belongs in a log a whole team reads.
-			l.LogAttrs(r.Context(), level, "request",
-				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
-				slog.Int("status", rec.code()),
-				slog.Int64("bytes", rec.written),
-				slog.Duration("took", time.Since(started)),
-				slog.String("requestId", RequestIDFrom(r.Context())),
-			)
+			next.ServeHTTP(rec, r)
 		})
 	}
 }
 
 // RateLimit caps how many requests one key may make in a window, and answers 429 past that.
 // The window is fixed rather than sliding: a fixed one costs a counter per key where a sliding
-// one costs a timestamp per request — the memory a limiter exists to protect.
-func RateLimit(max int, window time.Duration, key func(*http.Request) string) Middleware {
+// one costs a timestamp per request: the memory a limiter exists to protect. Its sweep ends with ctx.
+func RateLimit(ctx context.Context, max int, window time.Duration, key func(*http.Request) string) Middleware {
 	limit := newLimiter(max, window)
-	go limit.sweep()
+	go limit.sweep(ctx)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -174,13 +178,17 @@ func (l *limiter) allow(key string, now time.Time) (int, bool) {
 	return int((l.window - now.Sub(c.start)).Seconds()) + 1, false
 }
 
-// sweep runs for the life of the process: a limiter is built once, at startup, and never replaced.
-func (l *limiter) sweep() {
+func (l *limiter) sweep(ctx context.Context) {
 	tick := time.NewTicker(l.window)
 	defer tick.Stop()
 
-	for now := range tick.C {
-		l.evictBefore(now.Add(-l.window))
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-tick.C:
+			l.evictBefore(now.Add(-l.window))
+		}
 	}
 }
 
