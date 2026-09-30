@@ -84,7 +84,7 @@ func (r *Reader) Port(name string, fallback int) int {
 	return port
 }
 
-// Duration returns the variable parsed the way Go writes one — "30s", "5m" — or fallback when
+// Duration returns the variable parsed the way Go writes one ("30s", "5m"), or fallback when
 // unset.
 func (r *Reader) Duration(name string, fallback time.Duration) time.Duration {
 	value, ok := r.lookup(name)
@@ -113,12 +113,20 @@ func (r *Reader) Secret(name string, minLen int) []byte {
 	return []byte(value)
 }
 
-// URL returns the variable, required to be absolute — which is all `z.url()` asks on the other
+// URL returns the variable, required to be absolute, which is all `z.url()` asks on the other
 // side.
 func (r *Reader) URL(name string) string {
+	if _, ok := r.lookup(name); !ok {
+		r.miss(name)
+		return ""
+	}
+	return r.OptionalURL(name)
+}
+
+// OptionalURL is URL for a variable whose absence is a choice: empty when unset, checked when set.
+func (r *Reader) OptionalURL(name string) string {
 	value, ok := r.lookup(name)
 	if !ok {
-		r.miss(name)
 		return ""
 	}
 	parsed, err := url.Parse(value)

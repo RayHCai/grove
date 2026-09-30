@@ -46,7 +46,7 @@ func ValidUUID(s string) bool {
 	return uuidPattern.MatchString(s)
 }
 
-// ValidContentHash reports whether s names an object. Lowercase hex only — a hash is a name, and
+// ValidContentHash reports whether s names an object. Lowercase hex only: a hash is a name, and
 // two spellings of one name is two names.
 func ValidContentHash(s string) bool {
 	return contentHashPattern.MatchString(s)
@@ -84,7 +84,7 @@ func Timestamp(t time.Time) string {
 
 // ParseTimestamp reads one back, which is how a router decides `healthy` from a heartbeat's age.
 // A trailing Z and no numeric offset, because that is all `z.iso.datetime()` admits with no
-// options — a box whose clock formats an offset must fail here rather than split the fleet.
+// options; a box whose clock formats an offset must fail here rather than split the fleet.
 func ParseTimestamp(s string) (time.Time, error) {
 	if !strings.HasSuffix(s, "Z") {
 		return time.Time{}, fmt.Errorf("parse timestamp %q: must be UTC, ending in Z", s)
@@ -152,10 +152,6 @@ const (
 	SideClient BundleSide = "client"
 )
 
-func (s BundleSide) Valid() bool {
-	return s == SideServer || s == SideClient
-}
-
 // BundleRef is where a session fetches the code every peer must be running.
 type BundleRef struct {
 	Side       BundleSide `json:"side"`
@@ -178,6 +174,45 @@ type BundleSet struct {
 	SimConfig ConfigRef `json:"simConfig"`
 	// Compared at the handshake: prediction is unsound exactly when the two ends differ here.
 	SyncedHash string `json:"syncedHash"`
+}
+
+// Problem names the first thing wrong with a set, or is empty for one every box can run. One check
+// for the router and the box, so a set one passed and the other refused cannot exist.
+func (s BundleSet) Problem() string {
+	if problem := s.Server.problem(SideServer); problem != "" {
+		return problem
+	}
+	if problem := s.Client.problem(SideClient); problem != "" {
+		return problem
+	}
+	switch {
+	// Hashes become filenames under a box's cache directory, so their spelling is checked first.
+	case !ValidContentHash(s.SimConfig.Hash):
+		return "bundles.simConfig.hash must be a content hash"
+	case !ValidURL(s.SimConfig.URL):
+		return "bundles.simConfig.url must be a url"
+	case s.SimConfig.ByteLength <= 0:
+		return "bundles.simConfig.byteLength must be positive"
+	// A session compares it at the handshake, so a set whose halves came from two sources is refused.
+	case !ValidContentHash(s.SyncedHash):
+		return "bundles.syncedHash must be a content hash"
+	}
+	return ""
+}
+
+func (r BundleRef) problem(side BundleSide) string {
+	field := "bundles." + string(side)
+	switch {
+	case r.Side != side:
+		return field + " must carry side " + string(side)
+	case !ValidContentHash(r.Hash):
+		return field + ".hash must be a content hash"
+	case !ValidURL(r.URL):
+		return field + ".url must be a url"
+	case r.ByteLength <= 0:
+		return field + ".byteLength must be positive"
+	}
+	return ""
 }
 
 type PlacementRequest struct {
@@ -273,7 +308,7 @@ type HostHeartbeat struct {
 	// inside the staleness window is otherwise a restart nothing upward can see.
 	Incarnation string `json:"incarnation"`
 	// The last beat of a deliberate shutdown, which is the whole of what separates a deploy from a
-	// crash — both go silent, and only one of them is an incident.
+	// crash: both go silent, and only one of them is an incident.
 	Leaving    bool   `json:"leaving,omitempty"`
 	ReportedAt string `json:"reportedAt"`
 }
@@ -291,15 +326,7 @@ const (
 	HostFailed    HostLiveness = "failed"
 )
 
-func (l HostLiveness) Valid() bool {
-	switch l {
-	case HostHealthy, HostSuspected, HostLeft, HostFailed:
-		return true
-	}
-	return false
-}
-
-// HostView is one row of the fleet as the router sees it — liveness follows `lastSeenAt`, never a
+// HostView is one row of the fleet as the router sees it: liveness follows `lastSeenAt`, never a
 // claim a box made about itself.
 type HostView struct {
 	HostID      string       `json:"hostId"`
@@ -322,14 +349,6 @@ const (
 	FleetReturned   FleetEventKind = "returned"
 )
 
-func (k FleetEventKind) Valid() bool {
-	switch k {
-	case FleetRegistered, FleetRestarted, FleetSuspected, FleetLeft, FleetFailed, FleetReturned:
-		return true
-	}
-	return false
-}
-
 // FleetEvent is one transition a box made, which is the only thing about a box worth keeping: the
 // state it is in now is on its next beat, and the state it was in is on no beat at all.
 type FleetEvent struct {
@@ -343,7 +362,7 @@ type FleetEvent struct {
 	// the previous life's.
 	Incarnation string `json:"incarnation"`
 	At          string `json:"at"`
-	// Why, where a kind alone does not say it — the signal a suspicion came from, say.
+	// Why, where a kind alone does not say it: the signal a suspicion came from, say.
 	Detail string `json:"detail,omitempty"`
 }
 
@@ -370,7 +389,7 @@ type HostDeploymentStatus string
 const (
 	// DeployDraining is the box's own answer: these instances end when their last player leaves.
 	DeployDraining HostDeploymentStatus = "draining"
-	// DeploySkipped is the box's own answer too — it holds no world of this game to end.
+	// DeploySkipped is the box's own answer too: it holds no world of this game to end.
 	DeploySkipped HostDeploymentStatus = "skipped"
 	// DeployFailed is the only verdict the fleet router writes itself, for a box that never
 	// answered: a box cannot report that it was unreachable.

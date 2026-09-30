@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -118,16 +119,38 @@ func TestParseTimestamp(t *testing.T) {
 	}
 }
 
-func TestEnumsValid(t *testing.T) {
-	for _, s := range []BundleSide{SideServer, SideClient} {
-		if !s.Valid() {
-			t.Errorf("BundleSide %q is one of the two", s)
+func TestBundleSetProblem(t *testing.T) {
+	hash := func(c string) string { return strings.Repeat(c, 64) }
+	valid := func() BundleSet {
+		return BundleSet{
+			Server:     BundleRef{Side: SideServer, Hash: hash("a"), URL: "https://cdn.test/a.js", ByteLength: 1},
+			Client:     BundleRef{Side: SideClient, Hash: hash("b"), URL: "https://cdn.test/b.js", ByteLength: 1},
+			SimConfig:  ConfigRef{Hash: hash("c"), URL: "https://cdn.test/c.json", ByteLength: 1},
+			SyncedHash: hash("d"),
 		}
 	}
-	if BundleSide("both").Valid() {
-		t.Error("BundleSide accepted a value the zod enum does not")
+	if got := valid().Problem(); got != "" {
+		t.Fatalf("a whole set: got %q", got)
 	}
 
+	for name, spoil := range map[string]func(*BundleSet){
+		"bundles.server must carry side server":         func(s *BundleSet) { s.Server.Side = SideClient },
+		"bundles.server.hash must be a content hash":    func(s *BundleSet) { s.Server.Hash = strings.ToUpper(hash("a")) },
+		"bundles.client.url must be a url":              func(s *BundleSet) { s.Client.URL = "b.js" },
+		"bundles.client.byteLength must be positive":    func(s *BundleSet) { s.Client.ByteLength = 0 },
+		"bundles.simConfig.hash must be a content hash": func(s *BundleSet) { s.SimConfig.Hash = "../etc" },
+		"bundles.simConfig.url must be a url":           func(s *BundleSet) { s.SimConfig.URL = "" },
+		"bundles.syncedHash must be a content hash":     func(s *BundleSet) { s.SyncedHash = "" },
+	} {
+		set := valid()
+		spoil(&set)
+		if got := set.Problem(); got != name {
+			t.Errorf("got %q, want %q", got, name)
+		}
+	}
+}
+
+func TestEnumsValid(t *testing.T) {
 	for _, s := range []InstanceState{InstanceStarting, InstanceHealthy, InstanceDraining, InstanceUnhealthy} {
 		if !s.Valid() {
 			t.Errorf("InstanceState %q is one of the four", s)

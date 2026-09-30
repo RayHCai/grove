@@ -263,3 +263,46 @@ func TestPortRefusesWhatAListenerWouldAccept(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvironment(t *testing.T) {
+	if got := FromMap(nil).Environment(); got != "development" {
+		t.Errorf("unset: got %q", got)
+	}
+	r := FromMap(map[string]string{"GROVE_ENV": "staging"})
+	r.Environment()
+	if r.Err() == nil {
+		t.Error("an environment outside the three was accepted")
+	}
+}
+
+// A platform that assigns PORT routes to the process from outside it, which the second result says.
+func TestPlatformPort(t *testing.T) {
+	if port, hosted := FromMap(nil).PlatformPort(4001); port != 4001 || hosted {
+		t.Errorf("unset: got %d, %t", port, hosted)
+	}
+	if port, hosted := FromMap(map[string]string{"PORT": "8080"}).PlatformPort(4001); port != 8080 || !hosted {
+		t.Errorf("set: got %d, %t", port, hosted)
+	}
+	r := FromMap(map[string]string{"PORT": "0"})
+	r.PlatformPort(4001)
+	if r.Err() == nil {
+		t.Error("PORT=0 was accepted")
+	}
+}
+
+func TestOptionalURL(t *testing.T) {
+	r := FromMap(map[string]string{"SET": "https://api.test", "BAD": "api.test"})
+	if got := r.OptionalURL("UNSET"); got != "" {
+		t.Errorf("unset: got %q", got)
+	}
+	if got := r.OptionalURL("SET"); got != "https://api.test" {
+		t.Errorf("set: got %q", got)
+	}
+	if r.Err() != nil {
+		t.Fatalf("a good url or none is no problem: %v", r.Err())
+	}
+	r.OptionalURL("BAD")
+	if r.Err() == nil {
+		t.Error("a relative url was accepted")
+	}
+}

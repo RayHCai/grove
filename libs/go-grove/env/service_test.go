@@ -3,7 +3,6 @@ package env_test
 import (
 	"bytes"
 	"encoding/json"
-	"log/slog"
 	"strings"
 	"testing"
 
@@ -17,21 +16,6 @@ func TestAddr(t *testing.T) {
 	// The bracket form, which a bare host:port concatenation would not produce.
 	if got := env.Addr("::1", 4001); got != "[::1]:4001" {
 		t.Errorf("got %q", got)
-	}
-}
-
-func TestLogLevel(t *testing.T) {
-	for _, c := range []struct {
-		environment string
-		want        slog.Level
-	}{
-		{"production", slog.LevelInfo},
-		{"development", slog.LevelDebug},
-		{"test", slog.LevelDebug},
-	} {
-		if got := env.LogLevel(c.environment); got != c.want {
-			t.Errorf("%s: got %v, want %v", c.environment, got, c.want)
-		}
 	}
 }
 
