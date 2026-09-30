@@ -1,0 +1,21 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "extends": ["//"],
+    "tasks": {
+        "build": {
+            // The root's inputs are a TypeScript package's, and none of them match a Go tree.
+            "inputs": ["**/*.go", "package.json"],
+            // The binary goes to dist/, but declaring it makes turbo warn on every machine without
+            // a Go toolchain, where the task correctly produces nothing at all.
+            "outputs": []
+        },
+        "typecheck": {
+            "inputs": ["**/*.go", "package.json"],
+            "outputs": []
+        },
+        "test": {
+            "inputs": ["**/*.go", "package.json"],
+            "outputs": []
+        }
+    }
+}
