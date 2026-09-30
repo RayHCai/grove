@@ -268,8 +268,8 @@ impl FileStore {
 
         if let Err(err) = fs::rename(temp, &target).await {
             let _ = fs::remove_file(temp).await;
-            // A rename can still lose to a concurrent put of the same bytes — a directory that
-            // went away, a handle held open — and identical content under the name it hashes to is
+            // A rename can still lose to a concurrent put of the same bytes (a directory that
+            // went away, a handle held open) and identical content under the name it hashes to is
             // the result either way, so the object is present rather than the write failed.
             if !fs::try_exists(&target).await.unwrap_or(false) {
                 return Err(storage(err, "publishing an object"));

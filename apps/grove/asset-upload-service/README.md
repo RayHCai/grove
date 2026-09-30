@@ -16,7 +16,7 @@ rather than a body, which is what lets one box hold a publish burst without sizi
 
 | Route                       | Answers                                                               |
 | --------------------------- | --------------------------------------------------------------------- |
-| `GET /health`               | `{"ok":true}`, outside the bearer layer                               |
+| `GET /health`               | `{"ok":true}`, or 503 while the asset consumer is down; no bearer     |
 | `PUT /v1/objects/{hash}`    | 201 for a first store, 200 for bytes already held, 400 for a mismatch |
 | `HEAD /v1/objects/{hash}`   | 200 with `Content-Length` and `Content-Type`, or 404                  |
 | `GET /v1/objects/{hash}`    | the bytes, streamed, under an immutable cache header, or 404          |
@@ -31,7 +31,7 @@ skipped the write because the object was already held answers 409 if that copy i
 longer whole by the end of the body. Sixty-four object requests run at once and the rest wait,
 because an upload in flight is a descriptor and a file in `incoming/`. A `SIGTERM` drains for thirty
 seconds and then drops whatever is still open, because a peer that has stopped reading is never
-polled again. Refusals carry `ErrorBody` from `libs/api-contract` — a `code`
+polled again. Refusals carry `ErrorBody` from `libs/api-contract`: a `code`
 a caller matches on and a `message` a human reads, on an unknown path or an unanswered method as much
 as on a bad body.
 
@@ -39,7 +39,7 @@ as on a bad body.
 
 `objects/<ab>/<hash>` holds the bytes and a `.type` sidecar beside it holds the content type; one
 directory per two-hex prefix keeps a shard to a listing a tool will open. An upload lands in
-`incoming/` under a name of its own and is renamed into place only once its hash is its name — a
+`incoming/` under a name of its own and is renamed into place only once its hash is its name: a
 partial object must never be readable under its final name, and a rename is the only atomic step a
 filesystem gives you. `incoming/` is a sibling of `objects/` because that atomicity holds only within
 one filesystem. Opening a root sweeps the temp files in it that have sat untouched for an hour, which
@@ -57,18 +57,20 @@ because a worker that dies mid-asset has to hand its claim back instead of takin
 two workers sharing a name share their claims, which is why `UPLOAD_WORKER_NAME` falls back to the
 hostname.
 
-What happens to a claimed asset is the seam: the task is moved to `IN_PROGRESS` and then settled, and
-nothing is processed yet. Thumbnailing, transcoding and format validation land behind it without the
-seam moving, and a worker that settles honestly is what lets a creator's editor stop watching.
+A claimed asset is a pass-through: the task is moved to `IN_PROGRESS` and then to `SUCCESSFUL`, and
+this service never reads the asset's bytes, its size or its type: they are in the games bucket,
+which this crate has no client for. A task id outside the request-id alphabet is acknowledged and
+dropped, because it becomes a path segment and a header on the settle call.
 
 Settling one successfully is what marks the asset verified in `@grove/api`, and a publish of a game
-holding an unverified asset is refused — so what this service says about one now decides whether the
+holding an unverified asset is refused, so what this service says about one now decides whether the
 game holding it is ever compiled. The verdict is written against the byte-set the task named rather
 than against the path, and `@grove/api` is what keeps that honest: a worker coming back to settle an
 upload whose bytes have since been replaced vouches for nothing.
 
-A message is acknowledged once the outcome is written down. A claim that was refused is work
-somebody already settled — acknowledged, or it comes back forever. A claim or an outcome that could
+The connection redials on its own, `rediss://` included, and a consumer that fails outright is
+started again five seconds later. A message is acknowledged once the outcome is written down. A claim that was refused is work
+somebody already settled: acknowledged, or it comes back forever. A claim or an outcome that could
 not be written at all is left claimed for another worker to take back. Settling is the one call this
 service makes out, behind the same fleet bearer its own routes compare, and the transitions are
 checked at `@grove/api`: a worker that comes back from the dead cannot overwrite an outcome another
@@ -80,12 +82,11 @@ a presigned PUT, and what reaches this service is the task naming one.
 ## The bearer
 
 Every `/v1` route is behind one shared fleet secret, compared in constant time. One secret rather
-than a credential per caller: nothing outside the fleet can route here, and the callers are
-`@grove/game-builder`, `@grove/game-instance` and `@grove/api` rather than a population.
+than a credential per caller, because nothing outside the fleet can route here.
 
 ## What it does not own
 
-What an object means. A bundle set, a manifest, which build produced which hash — those are
+What an object means. A bundle set, a manifest, which build produced which hash: those are
 `@grove/game-manager`'s and `@grove/game-builder`'s. This service is told a name and given bytes, and
 its whole judgement is whether the two agree.
 
@@ -105,21 +106,21 @@ its whole judgement is whether the two agree.
 cargo run --release
 ```
 
-| Variable                    | What                                                                             |
-| --------------------------- | -------------------------------------------------------------------------------- |
-| `ASSET_UPLOAD_SERVICE_BIND` | address to bind, `127.0.0.1:4005` by default                                     |
-| `UPLOAD_ROOT`               | the directory objects live under                                                 |
-| `FLEET_SECRET`              | the shared bearer every `/v1` caller presents, and the one this process presents |
-| `UPLOAD_MAX_BYTES`          | bytes one object may reach, 64 MiB by default                                    |
-| `API_URL`                   | where a claimed asset upload is settled                                          |
-| `REDIS_URL`                 | the asset stream; absent, this process serves objects and claims nothing         |
-| `UPLOAD_WORKER_NAME`        | this process's name in the consumer group; the hostname when it is not set       |
+| Variable                    | What                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------ |
+| `ASSET_UPLOAD_SERVICE_BIND` | address to bind; `0.0.0.0:$PORT` where a platform sets `PORT`, else `127.0.0.1:4005` |
+| `UPLOAD_ROOT`               | the directory objects live under                                                     |
+| `FLEET_SECRET`              | the shared bearer every `/v1` caller presents, and the one this process presents     |
+| `UPLOAD_MAX_BYTES`          | bytes one object may reach, 64 MiB by default                                        |
+| `API_URL`                   | where a claimed asset upload is settled                                              |
+| `REDIS_URL`                 | the asset stream; absent, this process serves objects and claims nothing             |
+| `UPLOAD_WORKER_NAME`        | this process's name in the consumer group; the hostname when it is not set           |
 
 `pnpm run build | test | typecheck` at the repo root reach this crate through `package.json`, whose
-scripts shell to cargo — `typecheck` is `clippy -D warnings`. With no Rust toolchain on `PATH` they
+scripts shell to cargo: `typecheck` is `clippy -D warnings`. With no Rust toolchain on `PATH` they
 print one `skipped:` line and succeed, so working on the TypeScript half does not require installing
 Rust.
 
 This crate, `@grove/game-instance` and the `request-id` crate they share are one cargo workspace
-rooted at `apps/grove`, which is where the lock, the pinned toolchain and the release profile live —
+rooted at `apps/grove`, which is where the lock, the pinned toolchain and the release profile live;
 `cargo` finds all three by walking up from here.

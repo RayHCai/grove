@@ -14,7 +14,7 @@ const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// What the status route took.
 ///
-/// `Refused` is `@grove/api` declining to move the task — already settled, or gone — which is the
+/// `Refused` is `@grove/api` declining to move the task (already settled, or gone), which is the
 /// one failure a worker must acknowledge rather than retry.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Settled {
@@ -26,20 +26,12 @@ pub enum Settled {
 #[derive(Serialize)]
 struct StatusUpdate<'a> {
     status: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    detail: Option<Detail<'a>>,
-}
-
-#[derive(Serialize)]
-struct Detail<'a> {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    message: Option<&'a str>,
 }
 
 /// The status route, as this service sees it.
 #[async_trait::async_trait]
 pub trait Tasks: Send + Sync {
-    async fn advance(&self, task: &str, status: &str, message: Option<&str>) -> Settled;
+    async fn advance(&self, task: &str, status: &str) -> Settled;
 }
 
 /// `@grove/api` over HTTP, behind the bearer its gate compares.
@@ -64,13 +56,8 @@ impl HttpTasks {
 
 #[async_trait::async_trait]
 impl Tasks for HttpTasks {
-    async fn advance(&self, task: &str, status: &str, message: Option<&str>) -> Settled {
-        let body = StatusUpdate {
-            status,
-            detail: message.map(|message| Detail {
-                message: Some(message),
-            }),
-        };
+    async fn advance(&self, task: &str, status: &str) -> Settled {
+        let body = StatusUpdate { status };
 
         let answered = self
             .client

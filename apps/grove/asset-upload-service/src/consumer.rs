@@ -1,15 +1,14 @@
-//! The asset stream, read with a consumer group.
-//!
-//! A save that lands an asset writes a row and pushes its id here, so this is where every asset a
-//! creator uploads arrives. What happens to one is the seam being built: the task is claimed and
-//! settled, and thumbnailing, transcoding and format validation land behind it later.
+//! The asset stream, read with a consumer group. A save that lands an asset writes a row and pushes
+//! its id here, and a claimed task is settled without this service reading the asset's bytes.
 //!
 //! A group rather than a list, because a worker that dies mid-asset has to hand its claim back
 //! instead of taking the asset with it.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use redis::aio::{ConnectionManager, ConnectionManagerConfig};
 use redis::streams::{StreamAutoClaimReply, StreamReadOptions, StreamReadReply};
 use redis::AsyncCommands;
 use tokio::sync::watch;
@@ -31,9 +30,18 @@ const BATCH: usize = 1;
 /// How long a claimed asset may sit before another worker may take it back.
 const RECLAIM_AFTER: Duration = Duration::from_secs(300);
 
+/// Past `BLOCK`, because the driver's own default would time out every blocking read it is sent.
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Long enough for a TLS handshake to a managed cache in another zone.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a consumer that failed waits before it is started again.
+const RESTART_AFTER: Duration = Duration::from_secs(5);
+
 /// What one asset did with its message.
 ///
-/// `Ack` is acknowledged — the outcome is written down, whatever it was. `Retry` leaves it claimed
+/// `Ack` is acknowledged: the outcome is written down, whatever it was. `Retry` leaves it claimed
 /// so another worker takes it back after the reclaim window, which is what a failure of the fleet
 /// rather than of the asset earns.
 #[derive(Debug, PartialEq, Eq)]
@@ -42,12 +50,9 @@ pub enum Handled {
     Retry,
 }
 
-/// Claims one asset upload and settles it.
-///
-/// Nothing is processed yet, and that is deliberate: a worker that settles honestly is what lets a
-/// creator's editor stop watching, and the processing lands behind this without the seam moving.
+/// Claims one asset upload and settles it as successful.
 pub async fn run_upload(task: &str, tasks: &dyn Tasks) -> Handled {
-    match tasks.advance(task, "IN_PROGRESS", None).await {
+    match tasks.advance(task, "IN_PROGRESS").await {
         // Somebody already settled it, so this is a redelivery of finished work: acknowledged
         // rather than retried, or it comes back forever.
         Settled::Refused => {
@@ -58,7 +63,7 @@ pub async fn run_upload(task: &str, tasks: &dyn Tasks) -> Handled {
         Settled::Written => {}
     }
 
-    match tasks.advance(task, "SUCCESSFUL", None).await {
+    match tasks.advance(task, "SUCCESSFUL").await {
         // The outcome could not be written down, so the work has to come back: acknowledging here
         // would leave a creator watching a task nothing will ever move.
         Settled::Unavailable => Handled::Retry,
@@ -66,14 +71,51 @@ pub async fn run_upload(task: &str, tasks: &dyn Tasks) -> Handled {
     }
 }
 
-/// Reads the asset stream until `stop` is sent.
-pub async fn consume(
+/// Runs the consumer until `stop` is sent, starting it again whenever it fails or panics.
+/// `alive` is true only while one is connected, which is what `/health` reports.
+pub async fn supervise(
     client: redis::Client,
     tasks: Arc<dyn Tasks>,
     name: String,
     mut stop: watch::Receiver<bool>,
+    alive: Arc<AtomicBool>,
+) {
+    loop {
+        let run = tokio::spawn(consume(
+            client.clone(),
+            tasks.clone(),
+            name.clone(),
+            stop.clone(),
+            alive.clone(),
+        ));
+        let failure = match run.await {
+            Ok(Ok(())) => return,
+            Ok(Err(err)) => format!("{err:?}"),
+            Err(join) => join.to_string(),
+        };
+        alive.store(false, Ordering::Relaxed);
+        tracing::error!(error = %failure, "asset consumer stopped; restarting");
+
+        let _ = tokio::time::timeout(RESTART_AFTER, stop.changed()).await;
+        if *stop.borrow() {
+            return;
+        }
+    }
+}
+
+/// Reads the asset stream until `stop` is sent.
+async fn consume(
+    client: redis::Client,
+    tasks: Arc<dyn Tasks>,
+    name: String,
+    mut stop: watch::Receiver<bool>,
+    alive: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
-    let mut redis = client.get_multiplexed_async_connection().await?;
+    let config = ConnectionManagerConfig::new()
+        .set_response_timeout(Some(RESPONSE_TIMEOUT))
+        .set_connection_timeout(Some(CONNECT_TIMEOUT));
+    let mut redis = ConnectionManager::new_with_config(client, config).await?;
+    alive.store(true, Ordering::Relaxed);
 
     // MKSTREAM, because the group has to exist before the first push rather than after it.
     let _: Result<String, _> = redis.xgroup_create_mkstream(STREAM, GROUP, "0").await;
@@ -126,7 +168,7 @@ pub async fn consume(
 
 /// Runs one message and acknowledges it if its outcome is written down.
 async fn settle(
-    redis: &mut redis::aio::MultiplexedConnection,
+    redis: &mut ConnectionManager,
     id: &str,
     fields: &std::collections::HashMap<String, redis::Value>,
     tasks: &dyn Tasks,
@@ -145,12 +187,14 @@ async fn settle(
 }
 
 /// A field as the driver hands it over, which for a string is bulk bytes rather than a `String`.
+/// Held to the request-id alphabet, because the id becomes a URL path segment and a header value.
 fn task_id(value: &redis::Value) -> Option<String> {
-    match value {
+    let id = match value {
         redis::Value::BulkString(bytes) => String::from_utf8(bytes.clone()).ok(),
         redis::Value::SimpleString(text) => Some(text.clone()),
         _ => None,
-    }
+    }?;
+    request_id::valid(&id).then_some(id)
 }
 
 #[cfg(test)]
@@ -175,7 +219,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Tasks for Writing {
-        async fn advance(&self, _task: &str, status: &str, _message: Option<&str>) -> Settled {
+        async fn advance(&self, _task: &str, status: &str) -> Settled {
             self.wrote.lock().unwrap().push(status.to_owned());
             self.answers
                 .lock()
@@ -209,6 +253,20 @@ mod tests {
     async fn leaves_the_message_claimed_when_the_claim_could_not_be_written() {
         let tasks = Writing::new(vec![Settled::Unavailable]);
         assert_eq!(run_upload(TASK, &tasks).await, Handled::Retry);
+    }
+
+    #[test]
+    fn refuses_a_task_id_that_would_leave_its_path_segment() {
+        let named = |raw: &str| task_id(&redis::Value::BulkString(raw.as_bytes().to_vec()));
+        assert_eq!(named(TASK), Some(TASK.to_owned()));
+        assert_eq!(named("../accounts"), None);
+        assert_eq!(
+            named(
+                "a
+x-injected: yes"
+            ),
+            None
+        );
     }
 
     #[tokio::test]
