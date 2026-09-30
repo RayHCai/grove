@@ -36,7 +36,7 @@ function createTransformBuffer(capacity = INITIAL_CAPACITY): TransformBuffer {
     };
 }
 
-/** Regrows `into` in place, keeping the caller's reference — a ring slot reuses its buffer. */
+/** Regrows `into` in place, keeping the caller's reference; a ring slot reuses its buffer. */
 function growBuffer(into: TransformBuffer, capacity: number): void {
     into.posX = growF64(into.posX, capacity);
     into.posY = growF64(into.posY, capacity);
@@ -157,7 +157,7 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
         return createTransformBuffer(this.#count || INITIAL_CAPACITY);
     }
 
-    /** Slots this store addresses — the high-water index, which never falls, not the live count. */
+    /** Slots this store addresses: the high-water index, which never falls, not the live count. */
     get slotCount(): number {
         return this.#count;
     }

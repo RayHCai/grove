@@ -3,7 +3,7 @@
 
 import type { EntityId } from '../ids.js';
 
-/** The minimal transform read surface a Broadphase needs — the live store or a ring buffer. */
+/** The minimal transform read surface a Broadphase needs: the live store or a ring buffer. */
 export interface TransformView {
     liveIds(out?: EntityId[]): EntityId[];
     posX(id: EntityId): number;
@@ -29,7 +29,7 @@ export class Broadphase {
             const ey = this.#view.posY(id);
             const dx = ex - x;
             const dy = ey - y;
-            // Ignores z on purpose — proximity is a planar question here.
+            // Ignores z on purpose; proximity is a planar question here.
             const reach = radius + Math.max(this.#view.halfWidth(id), this.#view.halfHeight(id));
             if (dx * dx + dy * dy <= reach * reach) out.push(id);
         }

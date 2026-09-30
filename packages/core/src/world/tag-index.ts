@@ -1,4 +1,4 @@
-// Iteration is insertion order — the stable order determinism needs.
+// Iteration is insertion order, the stable order determinism needs.
 
 import type { EntityId } from '../ids.js';
 import { entityIndex } from '../ids.js';

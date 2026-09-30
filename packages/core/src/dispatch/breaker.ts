@@ -1,4 +1,4 @@
-// A per-(instance, method) throw count is simulation state and registers with the snapshot —
+// A per-(instance, method) throw count is simulation state and registers with the snapshot:
 // an unrestored counter makes a replay diverge from the original run.
 
 import type { Scope, ScopeMode, SnapshotStore } from '../loop/store-registry.js';

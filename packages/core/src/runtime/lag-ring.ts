@@ -77,7 +77,7 @@ export class LagRing {
         return new Broadphase(bufferView(slot, halfExtent));
     }
 
-    /** The most recent capture — used when a caller has no specific view tick. */
+    /** The most recent capture, used when a caller has no specific view tick. */
     broadphaseAtLatest(
         halfExtent: (id: EntityId, axis: 'w' | 'h') => number = () => 0,
     ): Broadphase | null {

@@ -19,14 +19,14 @@ export abstract class StatefulWrapper {
     bind(record: object, fieldName: string): void {
         if (this.#record) {
             throw new Error(
-                `wrapper already bound to "${this.#field}" — sharing one instance between hosts is a load-time error`,
+                `wrapper already bound to "${this.#field}": sharing one instance between hosts is a load-time error`,
             );
         }
         this.#record = record as HostRecord;
         this.#field = fieldName;
     }
 
-    /** Marks this wrapper's key on the state channel — every mutating method calls it. */
+    /** Marks this wrapper's key on the state channel; every mutating method calls it. */
     protected mark(): void {
         this.#record?.markDirty?.(this.#field);
     }
@@ -37,7 +37,7 @@ export abstract class StatefulWrapper {
     protected requireBound(): void {
         if (!this.#record) {
             throw new Error(
-                'wrapper used before assignment to a field — nothing to mark or persist',
+                'wrapper used before assignment to a field: nothing to mark or persist',
             );
         }
     }
@@ -66,7 +66,7 @@ export class Scoreboard extends StatefulWrapper {
         const p = player ?? (currentActingPlayer() as Player | null);
         if (!p) {
             throw new Error(
-                `Scoreboard.${method} needs a player — there is no acting player outside a handler driven by one`,
+                `Scoreboard.${method} needs a player: there is no acting player outside a handler driven by one`,
             );
         }
         return p;
@@ -330,9 +330,9 @@ export class Countdown {
     /** The runtime whose countdowns pass advances this one; captured, not resolved per call. */
     readonly #rt: Runtime | null;
 
-    /** @internal — who registered it, so a throw in `onZero` is charged like a timer callback's. */
+    /** @internal who registered it, so a throw in `onZero` is charged like a timer callback's. */
     readonly owner: GuardOwner | null;
-    /** @internal — the breaker key; `onZero` is a closure the breaker cannot otherwise name. */
+    /** @internal the breaker key; `onZero` is a closure the breaker cannot otherwise name. */
     readonly guardKey: string;
 
     constructor(seconds: number, onZero?: () => void) {
@@ -372,7 +372,7 @@ export class Countdown {
         this.#fired = false;
     }
 
-    /** @internal — driven by the loop, one tick per call. */
+    /** @internal driven by the loop, one tick per call. */
     advance(): void {
         if (!this.#running || this.#remainingTicks <= 0) return;
         this.#remainingTicks -= 1;

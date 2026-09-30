@@ -44,12 +44,12 @@ export class HUDScreen {
         return this.#visible;
     }
 
-    /** @internal — the HUD owns the open/close transition; this is the state half of it. */
+    /** @internal the HUD owns the open/close transition; this is the state half of it. */
     setVisible(visible: boolean): void {
         this.#visible = visible;
     }
 
-    /** @internal — the classes to attach on the next open, in declaration order. */
+    /** @internal the classes to attach on the next open, in declaration order. */
     get scripts(): readonly ScreenAttachment[] {
         return this.#scripts;
     }
@@ -84,7 +84,7 @@ export class HUD {
         const player = runtime()?.localPlayer;
         if (!player) {
             throw new Error(
-                'hud has no player — the HUD is one client’s, and this runtime has none',
+                'hud has no player: the HUD is one client’s, and this runtime has none',
             );
         }
         return player;
@@ -211,7 +211,7 @@ export class HUD {
             .filter((s): s is HUDScreen => s !== undefined);
     }
 
-    /** @internal — the live state of one widget, or null until a verb has written it. */
+    /** @internal the live state of one widget, or null until a verb has written it. */
     widget(name: string): Readonly<HUDWidgetState> | null {
         return hudState()?.widgets.get(name) ?? null;
     }

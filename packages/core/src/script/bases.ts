@@ -9,7 +9,7 @@ export type Host = object;
 export abstract class BaseScript<H extends Host = Host> {
     readonly host!: H;
 
-    /** @internal — declared by the location subclasses, read at wire time. */
+    /** @internal declared by the location subclasses, read at wire time. */
     static readonly __location: ScriptLocation = undefined!;
 }
 

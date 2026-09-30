@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
-// Tests run against the tsc-built `dist`: the oxc transform passes TC39 decorators through
-// untransformed, which Node cannot parse. `test` runs `tsc -b` first, so fixtures arrive lowered.
+// Decorated fixtures are imported from the tsc-built `dist`, since the test transform leaves TC39
+// decorators unlowered and Node cannot parse them; `test` runs `tsc -b` first to keep them current.
 export default defineConfig({
     test: {
         include: ['tests/**/*.test.ts'],

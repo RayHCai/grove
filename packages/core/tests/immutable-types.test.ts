@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Immutable, MutableStateRejected } from '../src/state/immutable.js';
+import { serverState } from '../src/script/decorators.js';
 
 // A helper: `Accepts<T>` is `true` only when `Immutable<T>` is T itself (not the branded
 // rejection). `tsc` errors here if the predicate mis-classifies a type.
@@ -28,6 +29,15 @@ const probes = {
     // ✗ a mutable element inside a readonly array is still rejected (recurses)
     mutInReadonly: true satisfies Rejects<readonly { hp: number }[]>,
 };
+
+// Never called: the decorator is applied here as a plain call so no decorator syntax reaches Node.
+declare const mutableField: ClassFieldDecoratorContext<object, number[]>;
+declare const readonlyField: ClassFieldDecoratorContext<object, readonly number[]>;
+export const applications = [
+    () => serverState(undefined, readonlyField),
+    // @ts-expect-error a mutable @serverState field type does not satisfy the decorator
+    () => serverState(undefined, mutableField),
+];
 
 describe('@serverState immutability predicate', () => {
     it('classifies immutable and mutable declarations at compile time', () => {

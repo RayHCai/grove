@@ -25,7 +25,7 @@ describe('parked-invocation sweep', () => {
         loop.step(6);
         void e.send('attack');
         expect(inst.fires).toBe(1);
-        void e.send('attack'); // dropped — lock held
+        void e.send('attack'); // dropped: lock held
         expect(inst.fires).toBe(1);
 
         // Rewind to tick 5: the parked invocation (started at tick 6) is swept, lock released.
@@ -33,7 +33,7 @@ describe('parked-invocation sweep', () => {
         expect(rt.tick).toBe(5);
         expect(e.alive).toBe(true); // the entity predates the snapshot, so it survives
 
-        // The same handler can now fire fresh — the lock is gone.
+        // The same handler can now fire fresh; the lock is gone.
         void e.send('attack');
         expect(inst.fires).toBe(2);
     });

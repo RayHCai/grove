@@ -25,10 +25,12 @@ import { createRuntime, withRuntime } from './runtime.js';
 import type { LogSink, Runtime, TickPasses } from './runtime.js';
 import type { DispatchCtx, DispatchOptions } from '../dispatch/dispatcher.js';
 import type { ScriptInstance } from '../dispatch/instances.js';
+import { currentInvocation } from '../dispatch/ambient.js';
 import {
     GAME_KEY,
     SCREEN_KEY_PREFIX,
     cameraKey,
+    entityIdOfKey,
     entityKey,
     playerKey,
     screenKey,
@@ -148,7 +150,7 @@ function drainStarts(rt: Runtime, dispatch: DispatchOptions): Promise<void> {
     ).then(() => undefined);
 }
 
-/** The world stopped existing, so every attached script's @onEnd runs — the mirror of startGame. */
+/** The world stopped existing, so every attached script's @onEnd runs, the mirror of startGame. */
 export function endGame(rt: Runtime): Promise<void> {
     // Ambient runtime established for the same reason `joinPlayer` establishes it; a teardown is as
     // far from a tick as an entry point gets.
@@ -160,7 +162,7 @@ export function joinPlayer(rt: Runtime, id: string, name: string): Player {
     const player = rt.wired.playerManager.create(id, name);
     // Under `rt`, for the reason `pressWidget` establishes it: a join arrives from a transport
     // callback rather than a tick, so `every`, `after` and `sleep` inside the handler would resolve
-    // whichever world `loadGame` ran last — and register a timer in it, silently.
+    // whichever world `loadGame` ran last, and register a timer in it, silently.
     withRuntime(rt, () => {
         void dispatchAt(rt, GAME_KEY, 'onPlayerJoin', '@playerJoin', { extra: { player } });
     });
@@ -188,30 +190,24 @@ export interface WidgetPress {
     widget: string;
     /** The screen the widget belongs to; absent for one outside every screen. */
     screen?: string;
-    /** Who pressed it — engine-supplied from the connection, never from the frame. */
+    /** Who pressed it: engine-supplied from the connection, never from the frame. */
     player?: Player;
 }
 
 /** Dispatches `@onPress` for one widget; a screen-hosted handler answers only its own screen. */
 export function pressWidget(rt: Runtime, press: WidgetPress): Promise<void> {
     // Under `rt`, like a tick is: a handler reached from here writes widgets through `hud`, which
-    // resolves the AMBIENT runtime — so without this a press dispatched outside a tick lands in
+    // resolves the AMBIENT runtime, so without this a press dispatched outside a tick lands in
     // whichever world `loadGame` ran last. One client per page hides it; a process holding a server
     // and two clients does not.
     return withRuntime(rt, () => {
         const onScreen = press.screen === undefined ? undefined : screenKey(press.screen);
         const pending: Promise<void>[] = [];
-        // Over a copy: `attach` pushes into the very lists this walks, so a handler that adds a
-        // script to its own host would extend this loop for as long as it kept pressing.
-        const hosts: string[] = [];
-        const instances: ScriptInstance[] = [];
-        const found = rt.instances.snapshotByKind('onPress', hosts, instances);
-        for (let i = 0; i < found; i++) {
-            const hostKey = hosts[i]!;
-            if (hostKey.startsWith(SCREEN_KEY_PREFIX) && hostKey !== onScreen) continue;
+        forEachByKind(rt, 'onPress', (si, hostKey) => {
+            if (hostKey.startsWith(SCREEN_KEY_PREFIX) && hostKey !== onScreen) return;
             pending.push(
                 rt.dispatcher.dispatch(
-                    [instances[i]!],
+                    [si],
                     'onPress',
                     press.widget,
                     hostKey,
@@ -219,34 +215,28 @@ export function pressWidget(rt: Runtime, press: WidgetPress): Promise<void> {
                     tickDispatch(rt),
                 ),
             );
-        }
+        });
         return Promise.all(pending).then(() => undefined);
     });
 }
 
 /**
  * Runs every CLIENT-located `@onUpdate` once, at display rate; no tick pass can.
- * `dt` is the DISPLAY delta, not `1 / simRate` — a handler easing a bar is drawing.
+ * `dt` is the DISPLAY delta, not `1 / simRate`; a handler easing a bar is drawing.
  */
 export function displayUpdate(rt: Runtime, dtSeconds: number): void {
     withRuntime(rt, () => {
-        // Over a copy: a handler attaching a script mid-pass would otherwise reach it on this same
-        // frame, before the starts pass has run its `@onStart`.
-        const hosts: string[] = [];
-        const instances: ScriptInstance[] = [];
-        const found = rt.instances.snapshotByKind('onUpdate', hosts, instances);
-        for (let i = 0; i < found; i++) {
-            const si = instances[i]!;
-            if (si.location !== 'client') continue;
+        forEachByKind(rt, 'onUpdate', (si, hostKey) => {
+            if (si.location !== 'client') return;
             void rt.dispatcher.dispatch(
                 [si],
                 'onUpdate',
                 '@update',
-                hosts[i]!,
+                hostKey,
                 { data: {}, dt: dtSeconds, alive: true },
                 { activeLocations: CLIENT_ONLY, tick: rt.tick },
             );
-        }
+        });
     });
 }
 
@@ -324,24 +314,27 @@ function dispatchEach(
     opts: DispatchOverrides & { only?: ScriptLocation } = {},
 ): Promise<void> {
     const dispatch = opts.dispatch ?? tickDispatch(rt);
-    // Over a copy: a handler attaching a script mid-pass would otherwise take this same dispatch —
-    // an `@onUpdate` before its own `@onStart` — and one attaching to its own host would not end.
-    // Narrowed by kind first, so an instance that declares no handler of this kind costs nothing
-    // past the set probe: the context, the promise and the reaction job below are all per-instance.
+    const pending: Promise<void>[] = [];
+    forEachByKind(rt, kind, (si, hostKey) => {
+        if (opts.only !== undefined && si.location !== opts.only) return;
+        pending.push(
+            rt.dispatcher.dispatch([si], kind, event, hostKey, tickCtx(rt, opts.extra), dispatch),
+        );
+    });
+    if (pending.length === 0) return Promise.resolve();
+    return Promise.all(pending).then(() => undefined);
+}
+
+/** Visits over a copy: a script attached mid-pass would otherwise run before its own `@onStart`. */
+function forEachByKind(
+    rt: Runtime,
+    kind: HandlerKind,
+    visit: (si: ScriptInstance, hostKey: string) => void,
+): void {
     const hosts: string[] = [];
     const instances: ScriptInstance[] = [];
     const found = rt.instances.snapshotByKind(kind, hosts, instances);
-
-    const pending: Promise<void>[] = [];
-    for (let i = 0; i < found; i++) {
-        const si = instances[i]!;
-        if (opts.only !== undefined && si.location !== opts.only) continue;
-        pending.push(
-            rt.dispatcher.dispatch([si], kind, event, hosts[i]!, tickCtx(rt, opts.extra), dispatch),
-        );
-    }
-    if (pending.length === 0) return Promise.resolve();
-    return Promise.all(pending).then(() => undefined);
+    for (let i = 0; i < found; i++) visit(instances[i]!, hosts[i]!);
 }
 
 /** One `request()`, as either endpoint hands one to core. */
@@ -349,11 +342,11 @@ export interface PlayerRequest {
     name: string;
     /** The only untrusted `ctx.data` in the API: it crossed the wire, so a handler must check. */
     payload?: Record<string, unknown>;
-    /** Who asked — engine-supplied from the connection, never from the frame. */
+    /** Who asked: engine-supplied from the connection, never from the frame. */
     player?: Player;
 }
 
-/** Dispatches `@onRequest` at every SERVER-located handler — the trust boundary itself. */
+/** Dispatches `@onRequest` at every SERVER-located handler: the trust boundary itself. */
 export function deliverRequest(rt: Runtime, request: PlayerRequest): Promise<void> {
     // Ambient runtime established for the same reason `pressWidget` establishes it.
     return withRuntime(rt, () =>
@@ -378,8 +371,17 @@ function dispatchTo(
 ): Promise<void> {
     if (!rt.entities.isAlive(id)) return Promise.resolve();
     return dispatchAt(rt, entityKey(id as number), 'onEvent', event, {
-        extra: { data: payload ?? {}, from: null },
+        extra: { data: payload ?? {}, from: senderOf(rt) },
     });
+}
+
+/** The entity hosting the invocation that is sending, or null from any other host or none. */
+function senderOf(rt: Runtime): Entity | null {
+    const invocation = currentInvocation();
+    if (invocation === null) return null;
+    const key = rt.hosts.keyForScope(invocation.hostId);
+    const id = key === undefined ? undefined : entityIdOfKey(key);
+    return id !== undefined && rt.entities.isAlive(id) ? rt.entityManager.facade(id) : null;
 }
 
 function makePasses(rt: Runtime): TickPasses {
@@ -443,7 +445,7 @@ function makePasses(rt: Runtime): TickPasses {
                 );
             }
         },
-        update(dispatch, _dt) {
+        update(dispatch) {
             // A ClientScript's @onUpdate is display-rate via frame(), never the sim step.
             const simUpdate: DispatchOptions = {
                 ...dispatch,

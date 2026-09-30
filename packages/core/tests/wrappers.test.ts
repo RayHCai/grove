@@ -13,7 +13,7 @@ import { createRuntime, clearRuntime } from '../src/runtime/runtime.js';
 import type { Wired } from '../src/runtime/runtime.js';
 import type { Player } from '../src/runtime/player.js';
 
-// A minimal Player stand-in — the wrappers key by `.id` only.
+// A minimal Player stand-in: the wrappers key by `.id` only.
 const player = (id: string) => ({ id, name: id }) as unknown as Player;
 
 // top()/players() resolve ids through the current runtime, so a lookup needs one to live on.
@@ -68,7 +68,7 @@ describe('wrapper behavior', () => {
         const lb = new Leaderboard({ order: 'high' });
         lb.bind(createHostRecord('game'), 'wins');
         lb.submit(10, player('a'));
-        lb.submit(5, player('a')); // worse — ignored
+        lb.submit(5, player('a')); // worse, ignored
         lb.submit(20, player('b'));
         expect(lb.of(player('a'))).toBe(10);
         expect(lb.rankOf(player('b'))).toBe(1);
@@ -166,7 +166,7 @@ describe('wrapper behavior', () => {
 });
 
 // The two ends both endpoints replicate a wrapper through. Without them the field's value is the
-// wrapper OBJECT, which no codec carries — so the mark is raised, the drain finds a class instance,
+// wrapper OBJECT, which no codec carries, so the mark is raised, the drain finds a class instance,
 // and the write is dropped and counted while everything upstream looks like it worked.
 
 describe('serializeHostField', () => {
@@ -205,7 +205,7 @@ describe('restoreHostField', () => {
         expect(held.of(player('x'))).toBe(7);
     });
 
-    it('revives a working wrapper when the record holds none — methods and all', () => {
+    it('revives a working wrapper when the record holds none: methods and all', () => {
         withPlayerLookup();
         const record = createHostRecord('game');
         const source = new Scoreboard();

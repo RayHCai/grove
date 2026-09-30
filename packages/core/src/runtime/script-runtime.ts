@@ -10,7 +10,7 @@ interface Owned {
     [OWNING_RUNTIME]?: Runtime;
 }
 
-/** @internal — called by wiring for every attached instance. */
+/** @internal called by wiring for every attached instance. */
 export function setScriptRuntime(instance: object, rt: Runtime): void {
     (instance as Owned)[OWNING_RUNTIME] = rt;
 }

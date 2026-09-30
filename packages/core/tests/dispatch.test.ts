@@ -94,14 +94,14 @@ describe('input phase matching', () => {
         expect([probe.presses, probe.releases, probe.holds]).toStrictEqual([1, 1, 2]);
     });
 
-    it('an UNPHASED dispatch still reaches every handler on the action — Entity.send', () => {
+    it('an UNPHASED dispatch still reaches every handler on the action: Entity.send', () => {
         const rt = loadGame();
         const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.addScript(PhaseProbe as never);
         const probe = instanceOf<PhaseProbe>(rt, e, 'PhaseProbe');
 
         // `on` is meaningless on a creator-sent event, so a send that names no edge matches any
-        // declaration — which is also what keeps this change backwards-compatible.
+        // declaration, which is also what keeps this change backwards-compatible.
         void e.send('jump');
         expect([probe.presses, probe.releases, probe.holds]).toStrictEqual([1, 1, 1]);
     });

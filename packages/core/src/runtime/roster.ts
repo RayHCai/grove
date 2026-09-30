@@ -26,7 +26,7 @@ export class Roster {
     spawnAvatar(player: Player): void {
         const cp = this.#checkpoints.get(player.id) ?? this.defaultSpawn;
         // Through `instantiate`, so the Player template's own scripts and subtree are what an
-        // avatar is — the roster configures the movement class and nothing else about it.
+        // avatar is; the roster configures the movement class and nothing else about it.
         const avatar = instantiate(this.#rt, this.avatarTemplate, {
             x: cp.x,
             y: cp.y,
@@ -61,7 +61,7 @@ export class Roster {
         this.#checkpoints.set(player.id, { x, y });
     }
 
-    /** @internal — a departed player's checkpoint, read only by a rejoin under that id. */
+    /** @internal a departed player's checkpoint, read only by a rejoin under that id. */
     forgetCheckpoint(playerId: string): void {
         this.#checkpoints.delete(playerId);
     }

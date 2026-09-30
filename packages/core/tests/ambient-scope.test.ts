@@ -60,7 +60,7 @@ describe('a timer registered past an await', () => {
         e.destroy();
         loop.step(3);
         // Zero, not one: an await that lost the invocation registered this on no host at all, and a
-        // hostless timer is nobody's to cancel — it kept firing through a released slot.
+        // hostless timer is nobody's to cancel; it kept firing through a released slot.
         expect(rt.timers.pendingCount).toBe(0);
     });
 });

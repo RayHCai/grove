@@ -273,7 +273,7 @@ describe('wire-time rejections', () => {
 
     it('refuses a movement class that overrides tick', () => {
         // The stage order in `tick` is the contract both endpoints replay, so an override is a
-        // desync rather than a customisation — and the message names the hooks that are not.
+        // desync rather than a customisation, and the message names the hooks that are not.
         const rt = loadGame();
         const player = joinPlayer(rt, 'p1', 'Ada');
         player.spawn();
