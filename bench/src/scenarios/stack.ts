@@ -1,5 +1,5 @@
 // The whole composition: the integration project's authority, N clients on loopback pairs, one
-// hand-turned clock. Core's own scenarios reach none of this — the codec, the broadcast fan-out,
+// hand-turned clock. Core's own scenarios reach none of this: the codec, the broadcast fan-out,
 // the input ring and the rewind-and-replay all live above the loop.
 
 import { ManualFrameSource, ScriptedInputDevice } from '@platform/client';
@@ -32,7 +32,7 @@ async function flush(): Promise<void> {
 interface Stack {
     /** One authority wake with no client drawing anything: the server's cost, on its own. */
     pumpOnly: Driver;
-    /** The same wake plus every tab's display frame — what one process actually pays. */
+    /** The same wake plus every tab's display frame, what one process actually pays. */
     withFrames: Driver;
     /** Tabs still live, read after a measurement rather than before it. */
     liveNow: () => number;

@@ -1,5 +1,5 @@
 // Two meters cannot run in one process: an exact byte figure needs a semi-space large enough that
-// nothing collects, and a real scavenge count needs the shipped one — so the mode is process-level.
+// nothing collects, and a real scavenge count needs the shipped one, so the mode is process-level.
 
 import { PerformanceObserver } from 'node:perf_hooks';
 import v8 from 'node:v8';
@@ -10,14 +10,14 @@ import v8 from 'node:v8';
  */
 export type Driver = (ticks: number) => void | Promise<void>;
 
-/** A driver over a step that returns nothing — core's loop, and the server's pump. */
+/** A driver over a step that returns nothing: core's loop, and the server's pump. */
 export function driverOf(step: () => void): Driver {
     return (ticks) => {
         for (let i = 0; i < ticks; i++) step();
     };
 }
 
-/** A driver over a step that must be awaited — anything that turns a client's frame. */
+/** A driver over a step that must be awaited: anything that turns a client's frame. */
 export function asyncDriverOf(step: () => Promise<void>): Driver {
     return async (ticks) => {
         for (let i = 0; i < ticks; i++) await step();
@@ -53,7 +53,7 @@ export interface GcSample {
     simSeconds: number;
     simRate: number;
     nsPerTick: number;
-    /** Net growth plus every drop a collection caused mid-run — a lower bound, by construction. */
+    /** Net growth plus every drop a collection caused mid-run, a lower bound, by construction. */
     bytesPerTick: number;
     gc: GcTally;
 }
@@ -79,7 +79,7 @@ export function emptyTally(): GcTally {
 
 /**
  * Turns the event loop once; every drain here is preceded by one. A `gc` entry reaches an
- * observer on a task, so a window that drained at once reads empty — not "nothing collected".
+ * observer on a task, so a window that drained at once reads empty, not "nothing collected".
  */
 function turn(): Promise<void> {
     return new Promise((resolve) => {
@@ -113,7 +113,7 @@ export function assertMode(mode: Mode): void {
     }
 }
 
-/** How large V8 has grown the young generation, in MiB — recorded so a run is reproducible. */
+/** How large V8 has grown the young generation, in MiB, recorded so a run is reproducible. */
 export function newSpaceMiB(): number {
     const space = v8.getHeapSpaceStatistics().find((s) => s.space_name === 'new_space');
     return (space?.space_size ?? 0) / 1024 / 1024;
@@ -135,7 +135,7 @@ const MIN_WINDOW = 4;
 
 /**
  * Watches collections for one window and nothing longer. An observer held across a session stops
- * delivering, and later windows read empty — reported as `exact: true`.
+ * delivering, and later windows read empty, reported as `exact: true`.
  */
 class GcWatch {
     readonly #obs = new PerformanceObserver(() => {
@@ -197,7 +197,7 @@ export class Meter {
             await drive(size);
             done += size;
             // Doubling keeps the clock read off the hot path for a cheap tick, and on it for a dear
-            // one — where a fixed batch would overshoot the cap by most of a batch.
+            // one, where a fixed batch would overshoot the cap by most of a batch.
             batch = Math.min(batch * 2, 64);
         }
         return done;
