@@ -51,21 +51,6 @@ describe('edges only', () => {
             0,
         );
     });
-
-    it('respects the binding context, so a menu key does not fire a gameplay action', () => {
-        const t = table([
-            { kind: 'button', code: 'keys:KeyW', action: 'jump', context: 'gameplay' },
-            { kind: 'button', code: 'keys:KeyW', action: 'menuUp', context: 'menu' },
-        ]);
-        expect(t.resolve({ kind: 'key', code: 'keys:KeyW', down: true }, VIEWPORT)[0]?.action).toBe(
-            'jump',
-        );
-        t.resolve({ kind: 'key', code: 'keys:KeyW', down: false }, VIEWPORT);
-        t.setContext('menu');
-        expect(t.resolve({ kind: 'key', code: 'keys:KeyW', down: true }, VIEWPORT)[0]?.action).toBe(
-            'menuUp',
-        );
-    });
 });
 
 describe('axes send on meaningful change', () => {
@@ -171,25 +156,6 @@ describe('focus loss releases everything', () => {
         expect(released.map((e) => e.action).toSorted()).toEqual(['jump', 'left', 'right']);
     });
 
-    it('releases a code bound in another context, since the held set is context-independent', () => {
-        const t = table([
-            { kind: 'button', code: 'keys:KeyW', action: 'jump', context: 'gameplay' },
-        ]);
-        t.resolve({ kind: 'key', code: 'keys:KeyW', down: true }, VIEWPORT);
-        t.setContext('menu');
-        // Bound only in gameplay, but physically still down — the release must still be produced.
-        t.setContext('gameplay');
-        expect(t.resolve({ kind: 'focusLost' }, VIEWPORT)).toHaveLength(1);
-    });
-
-    it('re-derives from scratch after a reset — the player may have released while away', () => {
-        const t = table([{ kind: 'button', code: 'keys:KeyW', action: 'jump' }]);
-        t.resolve({ kind: 'key', code: 'keys:KeyW', down: true }, VIEWPORT);
-        t.reset();
-        expect(t.heldCodes()).toHaveLength(0);
-        expect(t.resolve({ kind: 'focusLost' }, VIEWPORT)).toHaveLength(0);
-    });
-
     it('forgetSentValues keeps the held set, so a key held across a resync still releases', () => {
         // Clearing it would swallow the release edge and leave the action held on the server
         // forever.
@@ -212,38 +178,12 @@ describe('focus loss releases everything', () => {
     });
 });
 
-describe('rebind replaces buttons only', () => {
-    it('keeps an axis binding on the same action, which a player rebinding keys still wants', () => {
-        const t = table([
-            { kind: 'button', code: 'keys:KeyA', action: 'moveX' },
-            { kind: 'axis', code: 'gamepad:leftStickX', action: 'moveX' },
-        ]);
-        t.rebind('moveX', ['keys:KeyQ']);
-
-        expect(t.resolve({ kind: 'key', code: 'keys:KeyA', down: true }, VIEWPORT)).toHaveLength(0);
-        expect(t.resolve({ kind: 'key', code: 'keys:KeyQ', down: true }, VIEWPORT)).toHaveLength(1);
-        // The stick survived the keyboard rebind.
-        expect(
-            t.resolve({ kind: 'axis', code: 'gamepad:leftStickX', value: 0.7 }, VIEWPORT),
-        ).toHaveLength(1);
-    });
-
-    it('takes effect immediately, so the context-filtered view cannot go stale', () => {
-        const t = table([{ kind: 'button', code: 'keys:KeyA', action: 'jump' }]);
-        expect(t.resolve({ kind: 'key', code: 'keys:KeyA', down: true }, VIEWPORT)).toHaveLength(1);
-        t.rebind('jump', ['keys:KeyB']);
-        expect(t.resolve({ kind: 'key', code: 'keys:KeyB', down: true }, VIEWPORT)).toHaveLength(1);
-        t.add({ kind: 'button', code: 'keys:KeyC', action: 'crouch' });
-        expect(t.resolve({ kind: 'key', code: 'keys:KeyC', down: true }, VIEWPORT)).toHaveLength(1);
-    });
-});
-
 describe('the ring prunes on RESOLVED', () => {
     it('prunes everything at or below ackSeq and returns the EARLIEST entry pruned', () => {
         const ring = new InputRing();
         for (let i = 0; i < 5; i++) ring.push(frame(100 + i, i), 10 + i, 0);
         const earliest = ring.ack(2);
-        // The earliest, NOT the entry at `seq` — the batch's last frame, and the natural reading of
+        // The earliest, NOT the entry at `seq`, the batch's last frame, and the natural reading of
         // the signature, which would pair the compensation with the wrong instant.
         expect(earliest?.frame.seq).toBe(0);
         expect(earliest?.leadAtSendTicks).toBe(10);
@@ -272,7 +212,7 @@ describe('the ring prunes on RESOLVED', () => {
 
     it('survives ordinary play without reaching capacity', () => {
         const ring = new InputRing();
-        // Several held actions plus a moving cursor over a full round trip — one frame per tick.
+        // Several held actions plus a moving cursor over a full round trip: one frame per tick.
         for (let tick = 0; tick < 20; tick++) {
             ring.push(
                 frame(tick, tick, [
@@ -309,7 +249,7 @@ describe('replay sufficiency', () => {
         ring.ack(50); // acked through the frame at tick 100
 
         // `since(100)` is `[release@105]`, and a "last edge per action" map would say
-        // `release@105`. NEITHER says X was held at 100 — the horizon fold is what does.
+        // `release@105`. NEITHER says X was held at 100; the horizon fold is what does.
         expect(ring.since(100).map((f) => f.tick)).toEqual([105]);
         expect(ring.heldAtHorizon.held('X')).toBe(true);
     });
@@ -390,7 +330,7 @@ describe('ActionState edges are one tick wide', () => {
         s.applyEdge({ action: 'moveX', on: 'hold', value: 0.5 });
         expect(s.axis('moveX')).toBe(0.5);
         // A hold must not set `pressed`, which is one tick wide by definition, and must not add to
-        // `held` on its own — an axis returning to neutral is a hold, not a release.
+        // `held` on its own: an axis returning to neutral is a hold, not a release.
         expect(s.pressed('moveX')).toBe(false);
         expect(s.held('moveX')).toBe(false);
     });

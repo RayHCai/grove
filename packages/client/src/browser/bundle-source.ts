@@ -16,7 +16,7 @@ export function createBrowserBundleSource(): BundleSource {
         async hash(bytes: ArrayBuffer): Promise<string> {
             if (crypto.subtle === undefined) {
                 throw new Error(
-                    'this page cannot verify the game code — SubtleCrypto needs https or localhost',
+                    'this page cannot verify the game code: SubtleCrypto needs https or localhost',
                 );
             }
             const digest = await crypto.subtle.digest('SHA-256', bytes);

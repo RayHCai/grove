@@ -6,7 +6,7 @@ import { RING_TICKS } from './constants.js';
 /** One retained frame, plus the clock bookkeeping the lead loop reads back on its ack. */
 export interface RingEntry {
     frame: InputFrame;
-    /** `currentLeadTicks` when this frame was sent — the instant `headroom` describes. */
+    /** `currentLeadTicks` when this frame was sent: the instant `headroom` describes. */
     leadAtSendTicks: number;
     /** The clock epoch at send; a sample from a superseded epoch is discarded. */
     epoch: number;

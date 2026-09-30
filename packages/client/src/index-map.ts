@@ -22,7 +22,7 @@ export class MirrorIndex {
         return this.#toLocal.get(netId);
     }
 
-    /** The server identity for a local handle — what an entity's state host key is built from. */
+    /** The server identity for a local handle: what an entity's state host key is built from. */
     net(local: EntityId): NetId | undefined {
         return this.#toNet.get(local);
     }

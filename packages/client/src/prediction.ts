@@ -9,7 +9,7 @@ import type {
     Snapshot,
     SnapshotStore,
 } from '@platform/core';
-import { GAME_KEY, createActionStates, entityKey, playerKey } from '@platform/core';
+import { GAME_KEY, createActionStates, entityKey, isAvatarOf, playerKey } from '@platform/core';
 import type { InputFrame } from '@platform/protocol';
 import type { RenderBridge } from './bridge.js';
 import { CORRECTION_SNAP_DISTANCE_SQUARED, MAX_REPLAY_TICKS } from './constants.js';
@@ -62,7 +62,7 @@ export class Prediction {
     readonly #scope = new Set<EntityId>();
     readonly #liveIds: EntityId[] = [];
 
-    /** The fold a replay runs on, seeded from the ring's horizon — never the client's live one. */
+    /** The fold a replay runs on, seeded from the ring's horizon, never the client's live one. */
     #actions: ActionStates = createActionStates();
 
     /** The highest tick stepped; ticks at or below it re-simulate and suppress client handlers. */
@@ -165,10 +165,16 @@ export class Prediction {
     /** Ownership is the client's only handle on its own entities; `ownerId` names the player. */
     #refreshScope(): void {
         this.#scope.clear();
+        let avatar: EntityId | null = null;
         this.#rt.entities.liveIds(this.#liveIds);
         for (const id of this.#liveIds) {
-            if (this.#rt.entities.record(id)?.ownerId === this.#playerId) this.#scope.add(id);
+            if (this.#rt.entities.record(id)?.ownerId !== this.#playerId) continue;
+            this.#scope.add(id);
+            if (avatar === null && isAvatarOf(this.#rt, id, this.#playerId)) avatar = id;
         }
+        // The wire names no avatar, and the authority fires input at the avatar alone, not at
+        // everything the player owns.
+        this.#player()?.setAvatar(avatar === null ? null : this.#rt.entityManager.facade(avatar));
     }
 
     #capture(): void {
@@ -215,7 +221,7 @@ export class Prediction {
         return this.#matches.length === 1 ? this.#matches[0] : this.#merged();
     }
 
-    /** Two frames on one tick both apply, in send order — as the authority drains them. */
+    /** Two frames on one tick both apply, in send order, as the authority drains them. */
     #merged(): InputFrame | undefined {
         const first = this.#matches[0];
         if (first === undefined) return undefined;
@@ -258,7 +264,7 @@ export class Prediction {
         this.#poses.clear();
     }
 
-    /** A restore marks nothing dirty, and the dirty set is the bridge's work queue — mark here. */
+    /** A restore marks nothing dirty, and the dirty set is the bridge's work queue; mark here. */
     #remarkDirty(): void {
         const transforms = this.#rt.transforms;
         for (const id of this.#scope) {
@@ -276,7 +282,7 @@ export class Prediction {
 /** The `@serverState` half of the baseline, which core's snapshot registry does not carry. */
 class StateBaseline {
     readonly #rt: Runtime;
-    /** One buffer per host key, refilled in place — a capture runs at send rate. */
+    /** One buffer per host key, refilled in place; a capture runs at send rate. */
     readonly #buffers = new Map<string, Map<string, unknown>>();
     readonly #captured: string[] = [];
     /** This capture's keys, so the table is pruned to them rather than growing with the session. */
@@ -304,7 +310,7 @@ class StateBaseline {
             this.#live.add(key);
         }
 
-        // An entity key carries the slot's generation, so a respawn never reuses one — without
+        // An entity key carries the slot's generation, so a respawn never reuses one; without
         // this the table holds a buffer per entity ever owned.
         for (const key of this.#buffers.keys()) {
             if (!this.#live.has(key)) this.#buffers.delete(key);

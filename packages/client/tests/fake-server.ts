@@ -27,9 +27,9 @@ export interface FakeServerOptions {
     sendRate?: number;
     /** Answer the join with a `Reject` instead of a `Welcome`. */
     reject?: RejectReason;
-    /** Accept the connection and answer nothing at all — the peer that never gets round to it. */
+    /** Accept the connection and answer nothing at all: the peer that never gets round to it. */
     ignoreJoin?: boolean;
-    /** Send a structurally broken `Welcome` — the undecodable case. */
+    /** Send a structurally broken `Welcome`: the undecodable case. */
     malformedWelcome?: boolean;
     /** The tick the snapshot describes. */
     snapshotTick?: number;
@@ -49,14 +49,14 @@ export interface FakeServerOptions {
     bundle?: { url: string; hash: string };
     /**
      * Divides the snapshot's entities across this many `snapshot-chunk` frames sent ahead of the
-     * `Welcome` — what a real server does for a world one frame cannot carry.
+     * `Welcome`, what a real server does for a world one frame cannot carry.
      */
     snapshotChunks?: number;
     /** Sends a count the chunks do not add up to, for the short-set refusal. */
     understateChunkCount?: boolean;
 }
 
-/** Every input frame this peer received, with the tick it arrived on — for headroom arithmetic. */
+/** Every input frame this peer received, with the tick it arrived on, for headroom arithmetic. */
 export interface ReceivedInput {
     frame: InputFrame;
     arrivedAtTick: number;
@@ -66,10 +66,10 @@ export class FakeServer {
     readonly #transport: Transport;
     readonly #opts: FakeServerOptions;
 
-    readonly joins: Array<{ name: string; protocolVersion: number; token?: string }> = [];
+    readonly joins: Array<{ name: string; protocolVersion: number }> = [];
     readonly inputs: ReceivedInput[] = [];
     readonly timeSyncs: number[] = [];
-    /** Everything sent, in order — so a test can assert the first frame was a JoinRequest. */
+    /** Everything sent, in order, so a test can assert the first frame was a JoinRequest. */
     readonly received: ClientToServer[] = [];
 
     /** This peer's own tick, which a test advances. Inputs are measured against it. */
@@ -119,11 +119,10 @@ export class FakeServer {
 
         switch (envelope.kind) {
             case 'join-request': {
-                const join: { name: string; protocolVersion: number; token?: string } = {
+                const join: { name: string; protocolVersion: number } = {
                     name: envelope.name,
                     protocolVersion: envelope.protocolVersion,
                 };
-                if (envelope.token !== undefined) join.token = envelope.token;
                 this.joins.push(join);
                 this.#answerJoin(envelope.clientSentMs);
                 return;
@@ -219,7 +218,7 @@ export class FakeServer {
         this.#send(envelope);
     }
 
-    /** One send-tick's reliable envelope. Sent even when empty — a wire rule. */
+    /** One send-tick's reliable envelope. Sent even when empty: a wire rule. */
     sendState(
         structural: WireStructuralOp[] = [],
         state: StateDiff[] = [],
