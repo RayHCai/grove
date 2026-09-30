@@ -7,8 +7,8 @@ export type Delivered = { outcome: 'sent' } | { outcome: 'unattached' } | { outc
 /**
  * Where a password reset link goes.
  *
- * A seam rather than a provider, because this repo names no mail service: the whole flow — minting
- * the key, its digest, its expiry, spending it once — is decided here, and which provider carries
+ * A seam rather than a provider, because this repo names no mail service: the whole flow (minting
+ * the key, its digest, its expiry, spending it once) is decided here, and which provider carries
  * the message is one function somebody attaches in `main.ts`.
  */
 export interface Mailer {

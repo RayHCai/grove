@@ -4,9 +4,14 @@
     "private": true,
     "type": "module",
     "description": "The public API: accounts, games, social, and the allocator that mints join tickets.",
+    "files": [
+        "dist",
+        "prisma",
+        "prisma.config.ts"
+    ],
     "scripts": {
         "build": "pnpm run db:generate && tsc -p tsconfig.json",
-        "dev": "pnpm run build && node --watch dist/main.js",
+        "dev": "pnpm run db:generate && grove-dev",
         "start": "node dist/main.js",
         "typecheck": "tsc -p tsconfig.test.json",
         "test": "vitest run",
@@ -29,6 +34,7 @@
         "@fastify/swagger": "^9.8.1",
         "@fastify/swagger-ui": "^6.1.1",
         "@grove/api-contract": "workspace:*",
+        "@grove/service-kit": "workspace:*",
         "@node-rs/argon2": "^2.2.1",
         "@prisma/adapter-pg": "^7.10.0",
         "@prisma/client": "^7.10.0",
@@ -41,8 +47,8 @@
     "devDependencies": {
         "@electric-sql/pglite": "^0.5.8",
         "@electric-sql/pglite-socket": "^0.2.11",
-        "@types/node": "^26.1.2",
+        "@types/node": "^24.12.0",
         "typescript": "^7.0.2",
-        "vitest": "^4.1.10"
+        "vitest": "^5.0.1"
     }
 }

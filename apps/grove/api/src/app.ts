@@ -1,15 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import {
-    jsonSchemaTransform,
-    serializerCompiler,
-    validatorCompiler,
-} from 'fastify-type-provider-zod';
+import { jsonSchemaTransform } from 'fastify-type-provider-zod';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { REQUEST_ID_HEADER, validRequestId } from '@grove/api-contract';
+import { installServiceHandlers, serviceOptions } from '@grove/service-kit';
 import type { Env } from './env.js';
-import { installErrorHandler } from './errors.js';
 import { unattachedFleet } from './fleet.js';
 import type { Fleet } from './fleet.js';
 import { unattachedMailer } from './mailer.js';
@@ -51,18 +45,9 @@ export async function buildApp(
     social: Social = unattachedSocial,
 ): Promise<FastifyInstance> {
     const app = Fastify({
-        logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
-        // The correlation id the Go half of the fleet already carries: a caller's when it is one
-        // token a log can hold unchanged, a fresh one when it is not. Bounded here rather than
-        // through `requestIdHeader`, which hands the raw header to the logger unmeasured.
-        genReqId: (request) => {
-            const presented = request.headers[REQUEST_ID_HEADER];
-            return typeof presented === 'string' && validRequestId(presented)
-                ? presented
-                : randomUUID();
-        },
+        ...serviceOptions(env.NODE_ENV),
         // Behind a load balancer, so the client address for rate limiting comes from the forwarded
-        // header — and only from the peers named here, since everyone else writes it themselves.
+        // header, and only from the peers named here, since everyone else writes it themselves.
         trustProxy: env.TRUSTED_PROXIES,
     }).withTypeProvider<ZodTypeProvider>();
 
@@ -70,15 +55,7 @@ export async function buildApp(
     // to drop the other sessions that account is holding.
     const sessions = new ExpiringSessionStore(ONE_DAY_MS);
 
-    app.setValidatorCompiler(validatorCompiler);
-    app.setSerializerCompiler(serializerCompiler);
-    installErrorHandler(app);
-
-    // Registered before every scope below, so a refusal from one of their hooks is answered under
-    // the same id as the request that earned it.
-    app.addHook('onSend', async (request, reply) => {
-        reply.header(REQUEST_ID_HEADER, request.id);
-    });
+    installServiceHandlers(app);
 
     await app.register(import('@fastify/cors'), {
         // Only origins that hold a logged-in person. The player origin runs creator code and never
@@ -90,6 +67,8 @@ export async function buildApp(
         methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
     });
 
+    // Global, so a new browser-facing route starts limited; each fleet route opts out, because a
+    // few workers behind one address would share one browser's budget and a bearer gates them.
     await app.register(import('@fastify/rate-limit'), { max: 300, timeWindow: '1 minute' });
 
     await app.register(import('@fastify/cookie'));
@@ -128,14 +107,14 @@ export async function buildApp(
         ok: true,
     }));
 
-    // Twelve scopes, twelve sets of hooks. Sibling scopes share nothing, so the fleet's task route
+    // Thirteen scopes, thirteen sets of hooks. Sibling scopes share nothing, so the fleet's task route
     // can sit beside a creator's without either inheriting the other's gate.
     await app.register(authRoutes(records, mailer, sessions, env), {
         prefix: '/v1/auth',
     });
     await app.register(playerRoutes(records, sessions), { prefix: '/v1' });
     await app.register(gameRoutes(records), { prefix: '/v1' });
-    await app.register(gameSettingsRoutes(records), { prefix: '/v1' });
+    await app.register(gameSettingsRoutes(records, storage), { prefix: '/v1' });
     await app.register(socialRoutes(social), { prefix: '/v1/social' });
     await app.register(workspaceRoutes(records, storage, queue), { prefix: '/v1' });
     await app.register(assetRoutes(records, storage), { prefix: '/v1' });

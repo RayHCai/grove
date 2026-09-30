@@ -3,23 +3,14 @@
 
 import { describe, expect, it } from 'vitest';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import {
-    GameId,
-    PlayerId,
-    VersionId,
-    type Manifest,
-    type WorkspaceFile,
-} from '@grove/api-contract';
+import { VersionId, type Manifest, type WorkspaceFile } from '@grove/api-contract';
 import { buildApp } from '../src/app.js';
-import { readEnv } from '../src/env.js';
 import { unattachedQueue } from '../src/queue.js';
 import { unattachedRecords } from '../src/records.js';
 import type { Records, SavePlan, WorkspaceRecord } from '../src/records.js';
 import type { Storage, StoredVersion } from '../src/storage.js';
+import { CREATOR, GAME_ID, OTHER_GAME_ID, signIn as signInWith, testEnv } from './fixtures.js';
 
-const CREATOR = PlayerId.parse('f47ac10b-58cc-4372-a567-0e02b2c3d479');
-const GAME_ID = GameId.parse('9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f');
-const OTHER_GAME_ID = GameId.parse('2b6d4f8a-1c3e-4d5f-9a7b-6c8d0e2f4a1b');
 const CREDENTIALS = { email: 'creator@grove.example', password: 'correct horse' };
 
 const SOURCE = 'export const pip = { height: 1 };\n';
@@ -32,22 +23,12 @@ const MAIN: WorkspaceFile = {
     contentType: 'text/typescript',
 };
 
-const env = readEnv({
-    NODE_ENV: 'test',
-    SESSION_SECRET: 'a'.repeat(32),
-    GAME_TOKEN_SECRET: 'b'.repeat(32),
-    FLEET_SECRET: 'c'.repeat(32),
-    TRUSTED_PROXIES: 'loopback',
-    GAMES_CDN_URL: 'https://cdn.grove.example',
-    PLATFORM_ORIGIN: 'https://grove.example',
-    EDITOR_ORIGIN: 'https://editor.grove.example',
-    SERVER_MANAGER_URL: 'http://server-manager.grove.internal:4003',
-});
+const env = testEnv();
 
 /**
  * One game, owned by the signed-in creator, whose file set is whatever was last saved here.
  *
- * The save is reconciled the way the real one is — upserts applied over the set, deletes removed —
+ * The save is reconciled the way the real one is (upserts applied over the set, deletes removed)
  * and `freeze` is called before it commits, because that ordering is what the routes rely on.
  */
 function store(initial: WorkspaceFile[] = [], revision = initial.length === 0 ? 0 : 1): Records {
@@ -117,6 +98,7 @@ function bucket(): FakeStorage {
         remove: async (key) => {
             current.delete(key);
         },
+        erase: async () => ({ outcome: 'erased' }),
         presignPut: async (key) => ({
             outcome: 'signed',
             url: `https://games.example/${key}?X-Amz-Signature=fake`,
@@ -126,7 +108,7 @@ function bucket(): FakeStorage {
     return storage;
 }
 
-/** What one key holds right now, decoded — which for a manifest is the snapshot it froze. */
+/** What one key holds right now, decoded, which for a manifest is the snapshot it froze. */
 function readManifest(storage: FakeStorage, key: string): Manifest {
     const version = storage.current.get(key);
     const held =
@@ -135,15 +117,7 @@ function readManifest(storage: FakeStorage, key: string): Manifest {
     return JSON.parse(held.body.toString('utf8')) as Manifest;
 }
 
-async function signIn(app: FastifyInstance): Promise<{ cookie: string; csrfToken: string }> {
-    const response = await app.inject({
-        method: 'POST',
-        url: '/v1/auth/sessions',
-        payload: CREDENTIALS,
-    });
-    const cookie = response.cookies.find((candidate) => candidate.name === 'sessionId');
-    return { cookie: `sessionId=${cookie?.value ?? ''}`, csrfToken: response.json().csrfToken };
-}
+const signIn = (app: FastifyInstance) => signInWith(app, CREDENTIALS);
 
 /** The service with one game in it, a bucket behind it, and nothing listening for a task. */
 async function service(records: Records, storage: Storage = bucket()): Promise<FastifyInstance> {

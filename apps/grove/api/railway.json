@@ -6,8 +6,9 @@
     },
     "deploy": {
         "preDeployCommand": ["node node_modules/prisma/build/index.js migrate deploy"],
-        "startCommand": "node dist/main.js",
         "healthcheckPath": "/health",
-        "restartPolicyType": "ON_FAILURE"
+        "healthcheckTimeout": 120,
+        "restartPolicyType": "ON_FAILURE",
+        "drainingSeconds": 35
     }
 }

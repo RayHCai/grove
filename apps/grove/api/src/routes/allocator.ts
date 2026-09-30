@@ -4,7 +4,7 @@ import { signSessionToken } from '@grove/api-contract/tokens';
 import type { Env } from '../env.js';
 import type { Fleet } from '../fleet.js';
 import type { Records } from '../records.js';
-import { requireCsrfToken, requireSession } from '../session.js';
+import { requireSignedIn } from '../session.js';
 
 const TICKET_LIFETIME_SECONDS = 60;
 
@@ -14,8 +14,7 @@ const TICKET_LIFETIME_SECONDS = 60;
  */
 export function allocatorRoutes(env: Env, records: Records, fleet: Fleet): FastifyPluginAsyncZod {
     return async (app) => {
-        app.addHook('onRequest', requireSession);
-        app.addHook('onRequest', requireCsrfToken(app));
+        requireSignedIn(app);
 
         app.post(
             '/games/:gameId/play',

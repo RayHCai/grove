@@ -3,13 +3,13 @@ import { ErrorBody, FleetReport } from '@grove/api-contract';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { Env } from '../env.js';
 import type { Records } from '../records.js';
-import { verifyFleetSecret } from '../service-scope.js';
+import { UNLIMITED, verifyFleetSecret } from '../service-scope.js';
 
 /**
  * Where @grove/server-manager leaves the fleet's history.
  *
  * That service routes off a registry one interval of heartbeats rebuilds, which is what lets it
- * hold the fleet in memory — and what means the state a box *was* in survives nowhere. The rows it
+ * hold the fleet in memory, and what means the state a box *was* in survives nowhere. The rows it
  * posts here are the part no later heartbeat carries.
  *
  * Nothing reads this back on any request path. A report arriving late, twice, or not at all costs
@@ -22,6 +22,7 @@ export function fleetRoutes(records: Records, env: Env): FastifyPluginAsyncZod {
         app.post(
             '/fleet/reports',
             {
+                config: UNLIMITED,
                 schema: {
                     tags: ['fleet'],
                     body: FleetReport,

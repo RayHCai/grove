@@ -1,14 +1,8 @@
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { ErrorBody, PlayerId } from '@grove/api-contract';
-import type { Social } from '../social.js';
+import { ErrorBody, type PlayerId } from '@grove/api-contract';
+import { Friend, type Social } from '../social.js';
 import { requireSession } from '../session.js';
-
-const Friend = z.object({
-    playerId: PlayerId,
-    displayName: z.string(),
-    online: z.boolean(),
-});
 
 /**
  * Friends, presence, and the block list. A scope because of the second hook: `blockedBy` loads

@@ -27,8 +27,8 @@
         },
         "test": {
             // Own `build`, not just `^build`: the suite imports the generated client as a value, and
-            // only this package's build runs `prisma generate`. Without it a clean checkout — where
-            // `src/generated` is gitignored and absent — fails on a tree that is fine.
+            // only this package's build runs `prisma generate`. Without it a clean checkout (where
+            // `src/generated` is gitignored and absent) fails on a tree that is fine.
             "dependsOn": ["^build", "build"],
             "inputs": [
                 "src/**",

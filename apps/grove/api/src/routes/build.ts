@@ -14,8 +14,9 @@ import {
 } from '@grove/api-contract';
 import type { WorkspaceFile } from '@grove/api-contract';
 import type { Env } from '../env.js';
-import { verifyFleetSecret } from '../service-scope.js';
+import { UNLIMITED, verifyFleetSecret } from '../service-scope.js';
 import type { Storage } from '../storage.js';
+import { unattached } from '../reply.js';
 
 /** What a build output is served as when nothing better is known; chunks are JavaScript. */
 const OPAQUE = 'application/octet-stream';
@@ -29,10 +30,14 @@ const Revision = z.coerce.number().int().positive();
 /**
  * How a build box reads the source it was told to compile and writes what came out.
  *
- * It holds no bucket credential, so every byte it touches goes through here. That is the point:
- * what it may read is one frozen manifest's files at the versions that manifest named, and what it
- * may write is the prefix its own revision owns. A builder cannot reach another game, another
- * revision, or a key outside the build prefix, because no route here spells one.
+ * It holds no bucket credential, so every byte it touches goes through here: what it may read is a
+ * frozen manifest's files at the versions that manifest named, and what it may write is under a
+ * revision's build prefix. No route spells a key outside those two shapes. The game and revision
+ * are the caller's to name, though, so the fleet bearer reaches every game's manifests, sources
+ * and build prefixes: the boundary is the key shape, not the task a builder was handed.
+ *
+ * A bucket that did not answer is a 503, never a 404, so a builder retries rather than failing
+ * the creator's build over a read the bucket never made.
  */
 export function fleetBuildRoutes(storage: Storage, env: Env): FastifyPluginAsyncZod {
     return async (app) => {
@@ -52,10 +57,11 @@ export function fleetBuildRoutes(storage: Storage, env: Env): FastifyPluginAsync
         app.get(
             '/fleet/games/:gameId/revisions/:revision/manifest',
             {
+                config: UNLIMITED,
                 schema: {
                     tags: ['build'],
                     params: z.object({ gameId: GameId, revision: Revision }),
-                    response: { 200: Manifest, 401: ErrorBody, 404: ErrorBody },
+                    response: { 200: Manifest, 401: ErrorBody, 404: ErrorBody, 503: ErrorBody },
                 },
             },
             async (request, reply) => {
@@ -79,6 +85,7 @@ export function fleetBuildRoutes(storage: Storage, env: Env): FastifyPluginAsync
             {
                 // No response schema: the body is the file's own bytes, and a serializer compiled
                 // for this route would turn every asset into JSON.
+                config: UNLIMITED,
                 schema: {
                     tags: ['build'],
                     params: z.object({
@@ -122,6 +129,7 @@ export function fleetBuildRoutes(storage: Storage, env: Env): FastifyPluginAsync
             '/fleet/games/:gameId/revisions/:revision/build/:name',
             {
                 bodyLimit: MAX_OUTPUT_BYTES,
+                config: UNLIMITED,
                 schema: {
                     tags: ['build'],
                     params: z.object({
@@ -134,6 +142,7 @@ export function fleetBuildRoutes(storage: Storage, env: Env): FastifyPluginAsync
                         401: ErrorBody,
                         501: ErrorBody,
                         502: ErrorBody,
+                        503: ErrorBody,
                     },
                 },
             },
@@ -148,9 +157,7 @@ export function fleetBuildRoutes(storage: Storage, env: Env): FastifyPluginAsync
                     contentTypeOf(request.params.name, request.headers['content-type']),
                 );
                 if (written.outcome === 'unattached') {
-                    return reply
-                        .code(501)
-                        .send({ code: 'internal', message: 'no games bucket is attached' });
+                    return unattached(reply, 'games bucket');
                 }
                 if (written.outcome !== 'written') {
                     return reply.code(502).send({

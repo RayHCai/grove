@@ -1,13 +1,29 @@
 import {
     DeleteObjectCommand,
+    DeleteObjectsCommand,
     GetObjectCommand,
     HeadObjectCommand,
+    ListObjectVersionsCommand,
     PutObjectCommand,
     S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { VersionId } from '@grove/api-contract';
+import type { FastifyBaseLogger } from 'fastify';
 import type { Env } from './env.js';
+
+/**
+ * A read the bucket failed rather than answered, which a caller must not report as a 404.
+ * Left to reach the error handler, it answers 503, which is what tells a builder to retry.
+ */
+export class StorageUnavailable extends Error {
+    readonly statusCode = 503;
+
+    constructor(key: string, options?: ErrorOptions) {
+        super(`the games bucket did not answer for ${key}`, options);
+        this.name = 'StorageUnavailable';
+    }
+}
 
 /** What landed at a key: the version the bucket minted, and what it actually holds. */
 export interface StoredVersion {
@@ -27,6 +43,10 @@ export type ObjectWritten =
     | { outcome: 'written'; version: StoredVersion }
     | { outcome: 'unattached' }
     | { outcome: 'unavailable' };
+
+/** `unavailable` may have erased part of the prefix; erasing again finishes the job. */
+export type PrefixErased =
+    { outcome: 'erased' } | { outcome: 'unattached' } | { outcome: 'unavailable' };
 
 export type UploadSigned =
     | { outcome: 'signed'; url: string; expiresAt: string }
@@ -51,6 +71,7 @@ export interface Storage {
      *
      * This is how an asset save learns a version and a length: the bytes went straight from the
      * browser to the bucket, so the editor's word for either is a claim rather than a fact.
+     * Undefined is nothing at the key; a bucket that did not answer throws {@link StorageUnavailable}.
      */
     head(key: string): Promise<StoredVersion | undefined>;
     /**
@@ -58,10 +79,20 @@ export interface Storage {
      *
      * The version is optional for the one class of key nothing ever overwrites: a build writes
      * under a prefix its own revision owns, so what is current there is what that build produced.
+     * Undefined is no such key or version; a bucket that did not answer throws
+     * {@link StorageUnavailable}.
      */
     get(key: string, versionId?: VersionId): Promise<StoredObject | undefined>;
-    /** Leaves a delete marker rather than erasing anything, so the history a manifest names survives. */
+    /**
+     * Leaves a delete marker rather than erasing anything, so the history a manifest names survives.
+     * Best effort: a failure is logged, and the bytes stay reachable only through a manifest.
+     */
     remove(key: string): Promise<void>;
+    /**
+     * Every version and delete marker under a prefix, gone for good. Unlike `remove`, nothing is
+     * left to roll back to: this is what deleting a whole game does to its `<gameId>/` prefix.
+     */
+    erase(prefix: string): Promise<PrefixErased>;
     /** A URL the browser PUTs an asset's bytes straight to, which is why this service never sees them. */
     presignPut(key: string, contentType: string): Promise<UploadSigned>;
 }
@@ -74,17 +105,40 @@ export const unattachedStorage: Storage = {
     head: async () => undefined,
     get: async () => undefined,
     remove: async () => undefined,
+    erase: async () => ({ outcome: 'unattached' }),
     presignPut: async () => ({ outcome: 'unattached' }),
 };
 
 /** A manifest is two kilobytes and a source file is small; neither is a multi-megabyte stream. */
 const OBJECT_TIMEOUT_MS = 15_000;
 
-/** The games bucket over the AWS SDK, under whatever credentials the process was given. */
-export function s3Storage(env: Env, bucket: string): Storage {
+/** What S3 answers for a key, a version or a delete marker that holds no bytes to read. */
+const ABSENT_NAMES = new Set(['NoSuchKey', 'NoSuchVersion', 'NotFound', 'MethodNotAllowed']);
+const ABSENT_STATUSES = new Set([404, 405]);
+
+function isAbsent(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null) return false;
+    const { name, $metadata } = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+    return (
+        (name !== undefined && ABSENT_NAMES.has(name)) ||
+        ABSENT_STATUSES.has($metadata?.httpStatusCode ?? 0)
+    );
+}
+
+/**
+ * The games bucket over the AWS SDK, under whatever credentials the process was given.
+ *
+ * The log is reached for lazily, because the process builds its bucket before the app whose logger
+ * it writes to.
+ */
+export function s3Storage(env: Env, bucket: string, log: () => FastifyBaseLogger): Storage {
+    const failed = (operation: string, key: string, error: unknown): void => {
+        log().error({ err: error, operation, key }, 'games bucket did not answer');
+    };
+
     const client = new S3Client({
         region: env.AWS_REGION,
-        // Set only where something other than AWS is answering — a local LocalStack, a test double —
+        // Set only where something other than AWS is answering (a local LocalStack, a test double)
         // and path style with it, because a bucket name is not a hostname there.
         ...(env.S3_ENDPOINT === undefined
             ? {}
@@ -103,13 +157,19 @@ export function s3Storage(env: Env, bucket: string): Storage {
                         ContentType: contentType,
                     }),
                 )
-                .catch(() => undefined);
+                .catch((error: unknown) => {
+                    failed('put', key, error);
+                    return undefined;
+                });
 
             if (written === undefined) return { outcome: 'unavailable' };
             const versionId = VersionId.safeParse(written.VersionId);
             // A bucket with versioning off answers no version, and a row naming one file set would
-            // then name whatever that key holds later — which is the whole guarantee gone.
-            if (!versionId.success) return { outcome: 'unavailable' };
+            // then name whatever that key holds later, which is the whole guarantee gone.
+            if (!versionId.success) {
+                failed('put', key, new Error('the bucket answered no version; is versioning on?'));
+                return { outcome: 'unavailable' };
+            }
             return {
                 outcome: 'written',
                 version: {
@@ -121,13 +181,20 @@ export function s3Storage(env: Env, bucket: string): Storage {
         },
 
         head: async (key) => {
-            const found = await client
-                .send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
-                .catch(() => undefined);
+            let found;
+            try {
+                found = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+            } catch (error) {
+                if (isAbsent(error)) return undefined;
+                failed('head', key, error);
+                throw new StorageUnavailable(key, { cause: error });
+            }
 
-            if (found === undefined) return undefined;
             const versionId = VersionId.safeParse(found.VersionId);
-            if (!versionId.success || found.ContentLength === undefined) return undefined;
+            if (!versionId.success || found.ContentLength === undefined) {
+                failed('head', key, new Error('the bucket answered no version or no length'));
+                throw new StorageUnavailable(key);
+            }
             return {
                 versionId: versionId.data,
                 byteLength: found.ContentLength,
@@ -136,15 +203,20 @@ export function s3Storage(env: Env, bucket: string): Storage {
         },
 
         get: async (key, versionId) => {
-            const found = await client
-                .send(new GetObjectCommand({ Bucket: bucket, Key: key, VersionId: versionId }))
-                .catch(() => undefined);
-
-            if (found?.Body === undefined) return undefined;
-            return {
-                body: Buffer.from(await found.Body.transformToByteArray()),
-                contentType: found.ContentType ?? 'application/octet-stream',
-            };
+            try {
+                const found = await client.send(
+                    new GetObjectCommand({ Bucket: bucket, Key: key, VersionId: versionId }),
+                );
+                if (found.Body === undefined) return undefined;
+                return {
+                    body: Buffer.from(await found.Body.transformToByteArray()),
+                    contentType: found.ContentType ?? 'application/octet-stream',
+                };
+            } catch (error) {
+                if (isAbsent(error)) return undefined;
+                failed('get', key, error);
+                throw new StorageUnavailable(key, { cause: error });
+            }
         },
 
         remove: async (key) => {
@@ -152,7 +224,51 @@ export function s3Storage(env: Env, bucket: string): Storage {
             // manifests already name are still there to roll back to.
             await client
                 .send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
-                .catch(() => undefined);
+                .catch((error: unknown) => {
+                    log().warn({ err: error, key }, 'delete marker not written');
+                });
+        },
+
+        erase: async (prefix) => {
+            try {
+                let keyMarker: string | undefined;
+                let versionIdMarker: string | undefined;
+                for (;;) {
+                    // Sequential by necessity: each page's markers are what the next request names.
+                    // oxlint-disable-next-line no-await-in-loop
+                    const page = await client.send(
+                        new ListObjectVersionsCommand({
+                            Bucket: bucket,
+                            Prefix: prefix,
+                            KeyMarker: keyMarker,
+                            VersionIdMarker: versionIdMarker,
+                        }),
+                    );
+                    // A page is at most a thousand entries, which is also DeleteObjects' ceiling.
+                    const doomed = [...(page.Versions ?? []), ...(page.DeleteMarkers ?? [])]
+                        .filter((entry) => entry.Key !== undefined)
+                        .map((entry) => ({ Key: entry.Key, VersionId: entry.VersionId }));
+                    if (doomed.length > 0) {
+                        // oxlint-disable-next-line no-await-in-loop
+                        const deleted = await client.send(
+                            new DeleteObjectsCommand({
+                                Bucket: bucket,
+                                Delete: { Objects: doomed, Quiet: true },
+                            }),
+                        );
+                        if ((deleted.Errors ?? []).length > 0) {
+                            failed('erase', prefix, deleted.Errors);
+                            return { outcome: 'unavailable' };
+                        }
+                    }
+                    if (page.IsTruncated !== true) return { outcome: 'erased' };
+                    keyMarker = page.NextKeyMarker;
+                    versionIdMarker = page.NextVersionIdMarker;
+                }
+            } catch (error) {
+                failed('erase', prefix, error);
+                return { outcome: 'unavailable' };
+            }
         },
 
         presignPut: async (key, contentType) => {
@@ -164,7 +280,10 @@ export function s3Storage(env: Env, bucket: string): Storage {
                 client,
                 new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType }),
                 { expiresIn },
-            ).catch(() => undefined);
+            ).catch((error: unknown) => {
+                failed('presign', key, error);
+                return undefined;
+            });
 
             if (url === undefined) return { outcome: 'unavailable' };
             return {

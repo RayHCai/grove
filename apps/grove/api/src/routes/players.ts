@@ -2,16 +2,17 @@ import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { Account, ErrorBody, PlayerId, Profile, SignedIn } from '@grove/api-contract';
 import type { Records } from '../records.js';
-import { beginSession, requireCsrfToken, requireSession } from '../session.js';
+import { beginSession, requireSignedIn } from '../session.js';
 import type { ExpiringSessionStore } from '../session-store.js';
 import { DisplayName, Email, Password } from '../values.js';
+import { unattached } from '../reply.js';
 
 /**
  * Accounts: signing up, and the four things the holder of one may do to it.
  *
  * Sign-up sits in the parent with no session gate and a limiter of its own, because it is the one
  * route here an anonymous caller reaches. Everything else is in the child scope below, behind a
- * cookie — and the limiter stays off that scope deliberately: a shared 10/minute budget would
+ * cookie, and the limiter stays off that scope deliberately: a shared 10/minute budget would
  * ration reading a profile at the rate credential stuffing deserves.
  */
 export function playerRoutes(
@@ -47,9 +48,7 @@ export function playerRoutes(
                     request.body.displayName,
                 );
                 if (created.outcome === 'unattached') {
-                    return reply
-                        .code(501)
-                        .send({ code: 'internal', message: 'no account store is attached' });
+                    return unattached(reply, 'account store');
                 }
                 // An address that already answers to somebody is the one fact this route cannot
                 // hide: there is no mailer to defer the answer to.
@@ -73,8 +72,7 @@ function heldAccountRoutes(
     sessions: ExpiringSessionStore,
 ): FastifyPluginAsyncZod {
     return async (app) => {
-        app.addHook('onRequest', requireSession);
-        app.addHook('onRequest', requireCsrfToken(app));
+        requireSignedIn(app);
 
         app.get(
             '/players/me',
@@ -115,9 +113,7 @@ function heldAccountRoutes(
                     request.body.displayName,
                 );
                 if (renamed.outcome === 'unattached') {
-                    return reply
-                        .code(501)
-                        .send({ code: 'internal', message: 'no account store is attached' });
+                    return unattached(reply, 'account store');
                 }
                 if (renamed.outcome === 'missing') {
                     return reply.code(404).send({ code: 'not_found', message: 'no such account' });
@@ -154,9 +150,7 @@ function heldAccountRoutes(
                     request.body.newPassword,
                 );
                 if (changed.outcome === 'unattached') {
-                    return reply
-                        .code(501)
-                        .send({ code: 'internal', message: 'no account store is attached' });
+                    return unattached(reply, 'account store');
                 }
                 if (changed.outcome === 'wrong_password') {
                     return reply.code(403).send({ code: 'forbidden', message: 'wrong password' });
@@ -194,9 +188,7 @@ function heldAccountRoutes(
                     request.body.currentPassword,
                 );
                 if (closed.outcome === 'unattached') {
-                    return reply
-                        .code(501)
-                        .send({ code: 'internal', message: 'no account store is attached' });
+                    return unattached(reply, 'account store');
                 }
                 if (closed.outcome === 'wrong_password') {
                     return reply.code(403).send({ code: 'forbidden', message: 'wrong password' });

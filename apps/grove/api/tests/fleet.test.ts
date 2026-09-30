@@ -1,37 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-    GameId,
-    HostId,
-    InstanceId,
-    PlacementRequest,
-    PlayerId,
-    REQUEST_ID_HEADER,
-    SessionId,
-} from '@grove/api-contract';
+import { HostId, InstanceId, PlacementRequest, REQUEST_ID_HEADER } from '@grove/api-contract';
 import type { PlayableVersion } from '@grove/api-contract';
-import { readEnv } from '../src/env.js';
 import { httpFleet, unattachedFleet } from '../src/fleet.js';
+import { CREATOR, GAME_ID, SESSION_ID, testEnv } from './fixtures.js';
 
-const PLAYER = PlayerId.parse('f47ac10b-58cc-4372-a567-0e02b2c3d479');
-const GAME_ID = GameId.parse('9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f');
-const SESSION_ID = SessionId.parse('5d9a0c3b-7e21-4f44-9b0d-3c5e7a9f1b24');
+const PLAYER = CREATOR;
 const SERVER_URL = `wss://box.example/v1/instances/${SESSION_ID}`;
 const BEARER = 'c'.repeat(32);
 const REQUEST_ID = 'a-caller-presented-id';
 
-const env = readEnv({
-    NODE_ENV: 'test',
-    SESSION_SECRET: 'a'.repeat(32),
-    GAME_TOKEN_SECRET: 'b'.repeat(32),
-    FLEET_SECRET: BEARER,
-    TRUSTED_PROXIES: 'loopback',
-    GAMES_CDN_URL: 'https://cdn.grove.example',
-    PLATFORM_ORIGIN: 'https://grove.example',
-    EDITOR_ORIGIN: 'https://editor.grove.example',
-    SERVER_MANAGER_URL: 'http://server-manager.grove.internal:4003',
-    ASSET_UPLOAD_SERVICE_URL: 'http://asset-upload-service.grove.internal:4005',
-    GAME_BUILDER_URL: 'http://game-builder.grove.internal:4002',
-});
+const env = testEnv({ FLEET_SECRET: BEARER });
 
 const HASH = 'a'.repeat(64);
 
@@ -115,7 +93,7 @@ describe('the fleet seam over http', () => {
         expect(sent).toHaveLength(1);
         expect(sent[0]?.url).toBe('http://server-manager.grove.internal:4003/v1/placements');
         expect(sent[0]?.init.method).toBe('POST');
-        expect(sent[0]?.init.headers).toMatchObject({ authorization: `Bearer ${BEARER}` });
+        expect(new Headers(sent[0]?.init.headers).get('authorization')).toBe(`Bearer ${BEARER}`);
         // The version and the code that goes with it, because a box asked to hold a session it is
         // not already running has to be told what to start.
         expect(PlacementRequest.parse(JSON.parse(String(sent[0]?.init.body)))).toEqual({
@@ -127,8 +105,8 @@ describe('the fleet seam over http', () => {
     });
 
     it('refuses a session placed on a version other than the one asked for', async () => {
-        // A browser handed the wrong bundle set is refused at the handshake, or — declaring no hash
-        // — admitted into a world holding none of its scripts. Neither may reach a player.
+        // A browser handed the wrong bundle set is refused at the handshake, or, declaring no hash,
+        // admitted into a world holding none of its scripts. Neither may reach a player.
         stubFetch(json({ ...PLACEMENT, revision: VERSION.revision - 1 }, 200));
 
         await expect(httpFleet(env).place(GAME_ID, PLAYER, VERSION, REQUEST_ID)).rejects.toThrow(
@@ -141,7 +119,7 @@ describe('the fleet seam over http', () => {
 
         await httpFleet(env).place(GAME_ID, PLAYER, VERSION, REQUEST_ID);
 
-        expect(sent[0]?.init.headers).toMatchObject({ [REQUEST_ID_HEADER]: REQUEST_ID });
+        expect(new Headers(sent[0]?.init.headers).get(REQUEST_ID_HEADER)).toBe(REQUEST_ID);
     });
 
     it('reads a conflict as the fleet being full', async () => {

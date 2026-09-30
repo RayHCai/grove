@@ -6,7 +6,6 @@ import { describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import {
     BuildArtifact,
-    GameId,
     VersionId,
     encodeManifest,
     manifestKey,
@@ -15,27 +14,13 @@ import {
     type WorkspacePath,
 } from '@grove/api-contract';
 import { buildApp } from '../src/app.js';
-import { readEnv } from '../src/env.js';
+import { CDN, FLEET_SECRET, GAME_ID, OTHER_GAME_ID, testEnv } from './fixtures.js';
 import { unattachedRecords } from '../src/records.js';
-import type { Storage, StoredObject } from '../src/storage.js';
+import { StorageUnavailable, type Storage, type StoredObject } from '../src/storage.js';
 
-const GAME_ID = GameId.parse('9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f');
-const OTHER_GAME_ID = GameId.parse('2b6d4f8a-1c3e-4d5f-9a7b-6c8d0e2f4a1b');
 const REVISION = 4;
-const FLEET_SECRET = 'c'.repeat(32);
-const CDN = 'https://cdn.grove.example';
 
-const env = readEnv({
-    NODE_ENV: 'test',
-    SESSION_SECRET: 'a'.repeat(32),
-    GAME_TOKEN_SECRET: 'b'.repeat(32),
-    FLEET_SECRET,
-    SERVER_MANAGER_URL: 'http://server-manager.grove.internal:4003',
-    TRUSTED_PROXIES: '10.0.0.9',
-    GAMES_CDN_URL: CDN,
-    PLATFORM_ORIGIN: 'https://grove.example',
-    EDITOR_ORIGIN: 'https://editor.grove.example',
-});
+const env = testEnv({ TRUSTED_PROXIES: '10.0.0.9' });
 
 const bearer = { authorization: `Bearer ${FLEET_SECRET}` };
 
@@ -91,6 +76,7 @@ function bucket(): FakeStorage {
         head: async () => undefined,
         get: async (target, versionId) => held.get(`${target}@${versionId ?? ''}`),
         remove: async () => undefined,
+        erase: async () => ({ outcome: 'erased' }),
         presignPut: async () => ({ outcome: 'unattached' }),
     };
 }
@@ -203,5 +189,60 @@ describe('what a build writes', () => {
             payload: 'anything',
         });
         expect(response.statusCode).toBe(400);
+    });
+});
+
+describe('a bucket that does not answer', () => {
+    /** Holds the manifest, then fails every read past it the way S3 does when it is down. */
+    function failing(): Storage {
+        const held = bucket();
+        return {
+            ...held,
+            get: async (key, versionId) => {
+                if (key === manifestKey(GAME_ID, REVISION)) return held.get(key, versionId);
+                throw new StorageUnavailable(key);
+            },
+        };
+    }
+
+    it('is a 503 on the manifest, so a builder retries rather than failing the build', async () => {
+        const app = await serving({
+            ...bucket(),
+            get: async (key) => {
+                throw new StorageUnavailable(key);
+            },
+        });
+        const response = await app.inject({
+            method: 'GET',
+            url: `/v1/fleet/games/${GAME_ID}/revisions/${REVISION}/manifest`,
+            headers: bearer,
+        });
+        expect(response.statusCode).toBe(503);
+        expect(response.json()).toMatchObject({ code: 'internal' });
+    });
+
+    it('is a 503 on a file the manifest names, never the 404 a missing file earns', async () => {
+        const app = await serving(failing());
+        const response = await app.inject({
+            method: 'GET',
+            url: `/v1/fleet/games/${GAME_ID}/revisions/${REVISION}/files/${SOURCE.path}`,
+            headers: bearer,
+        });
+        expect(response.statusCode).toBe(503);
+    });
+});
+
+describe('the fleet routes', () => {
+    it('sit outside the browser rate limit, which a creator route still carries', async () => {
+        const app = await serving();
+        const fleet = await app.inject({
+            method: 'GET',
+            url: `/v1/fleet/games/${GAME_ID}/revisions/${REVISION}/manifest`,
+            headers: bearer,
+        });
+        const browser = await app.inject({ method: 'POST', url: '/v1/auth/sessions', payload: {} });
+
+        expect(fleet.headers['x-ratelimit-limit']).toBeUndefined();
+        expect(browser.headers['x-ratelimit-limit']).toBeDefined();
     });
 });

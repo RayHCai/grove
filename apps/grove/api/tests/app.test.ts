@@ -1,16 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance, Session } from 'fastify';
 import {
-    GameId,
     PlayerId,
     REQUEST_ID_HEADER,
     REQUEST_ID_MAX_LENGTH,
-    SessionId,
-    TaskId,
     VersionId,
     WorkspacePath,
 } from '@grove/api-contract';
-import type { PlayableVersion, PublishedVersion, Task, TaskKind } from '@grove/api-contract';
+import type {
+    PlayableVersion,
+    PublishedVersion,
+    Task,
+    TaskId,
+    TaskKind,
+} from '@grove/api-contract';
 import { verifySessionToken } from '@grove/api-contract/tokens';
 import { buildApp } from '../src/app.js';
 import { readEnv } from '../src/env.js';
@@ -21,46 +24,32 @@ import type { TaskQueue } from '../src/queue.js';
 import { unattachedRecords } from '../src/records.js';
 import type { Records } from '../src/records.js';
 import { ExpiringSessionStore } from '../src/session-store.js';
+import {
+    CREATOR,
+    FLEET_SECRET,
+    GAME_ID,
+    OTHER_GAME_ID,
+    OTHER_PLAYER,
+    SESSION_ID,
+    TASK_ID,
+    signIn as signInWith,
+    testEnv,
+} from './fixtures.js';
 
-const CREATOR = PlayerId.parse('f47ac10b-58cc-4372-a567-0e02b2c3d479');
-/** Somebody else, for the cases that turn on who owns what rather than on who is signed in. */
-const OTHER = PlayerId.parse('3e7a1b95-2c48-4d6f-8a01-5b9e7c3d2f46');
-const GAME_ID = GameId.parse('9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f');
-const OTHER_GAME_ID = GameId.parse('2b6d4f8a-1c3e-4d5f-9a7b-6c8d0e2f4a1b');
-const SESSION_ID = SessionId.parse('5d9a0c3b-7e21-4f44-9b0d-3c5e7a9f1b24');
-const TASK_ID = TaskId.parse('8c2e4a60-5d17-4b93-8f0a-1e6d2c4b7a35');
 const SERVER_URL = `wss://box.example/v1/instances/${SESSION_ID}`;
 const CREDENTIALS = { email: 'creator@grove.example', password: 'correct horse' };
 const BALANCER = '10.0.0.9';
 /** What `randomUUID` mints, which is what an unusable presented id has to be replaced by. */
 const MINTED = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
-const FLEET = {
-    FLEET_SECRET: 'c'.repeat(32),
-    SERVER_MANAGER_URL: 'http://server-manager.grove.internal:4003',
-};
-
-const env = readEnv({
-    NODE_ENV: 'test',
-    SESSION_SECRET: 'a'.repeat(32),
-    GAME_TOKEN_SECRET: 'b'.repeat(32),
-    TRUSTED_PROXIES: BALANCER,
-    GAMES_CDN_URL: 'https://cdn.grove.example',
-    PLATFORM_ORIGIN: 'https://grove.example',
-    EDITOR_ORIGIN: 'https://editor.grove.example',
-    ...FLEET,
-});
+const env = testEnv({ TRUSTED_PROXIES: BALANCER });
 
 /** The deployed shape: TLS ends at a proxy this service believes, and the loopback peer is it. */
-const deployed = readEnv({
+const deployed = testEnv({
     NODE_ENV: 'production',
-    SESSION_SECRET: 'a'.repeat(32),
-    GAME_TOKEN_SECRET: 'b'.repeat(32),
-    TRUSTED_PROXIES: 'loopback',
-    GAMES_CDN_URL: 'https://cdn.grove.example',
-    PLATFORM_ORIGIN: 'https://grove.example',
-    EDITOR_ORIGIN: 'https://editor.grove.example',
-    ...FLEET,
+    DATABASE_URL: 'postgresql://grove@db.grove.internal/grove',
+    GAMES_BUCKET: 'grove-games',
+    REDIS_URL: 'redis://redis.grove.internal:6379',
 });
 
 const HASH = 'a'.repeat(64);
@@ -107,6 +96,7 @@ const records: Records = {
                   title: 'My Game',
                   visibility: 'public',
                   createdAt: '2026-09-16T00:00:00.000Z',
+                  publishedAt: null,
               }
             : undefined,
     playableVersionOf: async (game) => (game === GAME_ID ? PLAYABLE : undefined),
@@ -188,21 +178,8 @@ function announcing(): TaskQueue & { pushed: { kind: TaskKind; taskId: TaskId }[
     };
 }
 
-/** Signs in, and hands back the two things every later write has to carry. */
-async function signIn(
-    app: FastifyInstance,
-    headers: Record<string, string> = {},
-): Promise<{ cookie: string; csrfToken: string }> {
-    const response = await app.inject({
-        method: 'POST',
-        url: '/v1/auth/sessions',
-        headers,
-        payload: CREDENTIALS,
-    });
-    expect(response.statusCode).toBe(200);
-    const cookie = response.cookies.find((candidate) => candidate.name === 'sessionId');
-    return { cookie: `sessionId=${cookie?.value ?? ''}`, csrfToken: response.json().csrfToken };
-}
+const signIn = (app: FastifyInstance, headers: Record<string, string> = {}) =>
+    signInWith(app, CREDENTIALS, headers);
 
 /** What one sign-in attempt had left of its bucket, which is what names the bucket it landed in. */
 async function attempt(
@@ -570,7 +547,7 @@ describe('the allocator', () => {
         });
 
         // The authority compares these before it allocates a `Player`, and only the bundle hash
-        // has an empty-string escape — so a browser that arrives without them cannot join at all.
+        // has an empty-string escape, so a browser that arrives without them cannot join at all.
         expect(response.json()).toMatchObject({
             revision: PLAYABLE.revision,
             projectId: PLAYABLE.projectId,
@@ -613,10 +590,11 @@ describe('the allocator', () => {
                 game === GAME_ID
                     ? {
                           gameId: GAME_ID,
-                          ownerId: OTHER,
+                          ownerId: OTHER_PLAYER,
                           title: 'Not Yours',
                           visibility: 'private',
                           createdAt: '2026-09-16T00:00:00.000Z',
+                          publishedAt: null,
                       }
                     : undefined,
         };
@@ -651,6 +629,7 @@ describe('the allocator', () => {
                           title: 'My Game',
                           visibility: 'private',
                           createdAt: '2026-09-16T00:00:00.000Z',
+                          publishedAt: null,
                       }
                     : undefined,
         };
@@ -856,7 +835,7 @@ describe('the task a creator is watching', () => {
 });
 
 describe('a worker settling a task', () => {
-    const BEARER = { authorization: `Bearer ${FLEET.FLEET_SECRET}` };
+    const BEARER = { authorization: `Bearer ${FLEET_SECRET}` };
 
     /** A records seam holding one task, which advances the way the real statement does. */
     function holding(status: Task['status'] = 'NOT_STARTED'): Records {

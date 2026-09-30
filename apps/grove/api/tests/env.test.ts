@@ -1,5 +1,5 @@
 // `.env.example` is what a contributor copies to `.env` and what a reader takes the variable list
-// from, and nothing else reads it — so it drifts silently, and the way it surfaces is a process that
+// from, and nothing else reads it, so it drifts silently, and the way it surfaces is a process that
 // will not start hours after the change that broke it. Parsed here against the one schema, so a
 // variable added to `src/env.ts` without a line here fails the suite instead.
 
@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { readEnv } from '../src/env.js';
+import { testEnv } from './fixtures.js';
 
 const EXAMPLE = fileURLToPath(new URL('../.env.example', import.meta.url));
 
@@ -48,5 +49,27 @@ describe('.env.example', () => {
         expect(example).toHaveProperty(name);
         const { [name]: _dropped, ...without } = example;
         expect(() => readEnv(without)).toThrow();
+    });
+});
+
+describe('the environment', () => {
+    it('refuses a production process with any of its seams unattached', () => {
+        expect(() => testEnv({ NODE_ENV: 'production' })).toThrow(
+            /DATABASE_URL[\s\S]*GAMES_BUCKET[\s\S]*REDIS_URL/u,
+        );
+    });
+
+    it('leaves the seams optional outside production', () => {
+        expect(testEnv().DATABASE_URL).toBeUndefined();
+    });
+
+    it('listens where a platform assigned port says, on every interface', () => {
+        const env = testEnv({ PORT: '8123', API_HOST: undefined, API_PORT: undefined });
+        expect(env.API_PORT).toBe(8123);
+        expect(env.API_HOST).toBe('0.0.0.0');
+    });
+
+    it('keeps its own port over an assigned one', () => {
+        expect(testEnv({ PORT: '8123', API_PORT: '4000' }).API_PORT).toBe(4000);
     });
 });

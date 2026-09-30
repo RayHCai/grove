@@ -3,8 +3,8 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { ErrorBody, GameId, Task, TaskId, TaskStatusUpdate } from '@grove/api-contract';
 import type { Env } from '../env.js';
 import type { Records } from '../records.js';
-import { verifyFleetSecret } from '../service-scope.js';
-import { requireCsrfToken, requireGameOwner, requireSession } from '../session.js';
+import { UNLIMITED, verifyFleetSecret } from '../service-scope.js';
+import { requireGameOwner, requireSignedIn } from '../session.js';
 
 /**
  * What a creator's editor is watching.
@@ -14,8 +14,7 @@ import { requireCsrfToken, requireGameOwner, requireSession } from '../session.j
  */
 export function taskRoutes(records: Records): FastifyPluginAsyncZod {
     return async (app) => {
-        app.addHook('onRequest', requireSession);
-        app.addHook('onRequest', requireCsrfToken(app));
+        requireSignedIn(app);
         app.addHook('preHandler', requireGameOwner(records));
 
         app.get(
@@ -41,11 +40,11 @@ export function taskRoutes(records: Records): FastifyPluginAsyncZod {
 /**
  * Where a worker says what it did.
  *
- * One route for every kind: @grove/game-builder and @grove/upload-service claim from different
- * streams and settle through the same statement, which is what keeps one set of transition rules.
+ * One route for every kind: @grove/game-builder and @grove/asset-upload-service claim from
+ * different streams and settle through the same statement, which keeps one set of transition rules.
  *
- * The transitions are monotonic — NOT_STARTED to IN_PROGRESS to a terminal state, never backwards
- * — so a message redelivered after a worker already settled it is refused rather than applied.
+ * The transitions are monotonic: NOT_STARTED to IN_PROGRESS to a terminal state, never backwards,
+ * so a message redelivered after a worker already settled it is refused rather than applied.
  */
 export function fleetTaskRoutes(records: Records, env: Env): FastifyPluginAsyncZod {
     return async (app) => {
@@ -54,6 +53,7 @@ export function fleetTaskRoutes(records: Records, env: Env): FastifyPluginAsyncZ
         app.patch(
             '/tasks/:taskId',
             {
+                config: UNLIMITED,
                 schema: {
                     tags: ['tasks'],
                     params: z.object({ taskId: TaskId }),

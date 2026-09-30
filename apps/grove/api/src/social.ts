@@ -1,11 +1,13 @@
-import type { PlayerId } from '@grove/api-contract';
+import { z } from 'zod';
+import { PlayerId } from '@grove/api-contract';
 
-/** One entry in a viewer's friend list, as the social seam reports it. */
-export interface Friend {
-    playerId: PlayerId;
-    displayName: string;
-    online: boolean;
-}
+/** One entry in a viewer's friend list, as the social seam reports it and the route answers it. */
+export const Friend = z.object({
+    playerId: PlayerId,
+    displayName: z.string(),
+    online: z.boolean(),
+});
+export type Friend = z.infer<typeof Friend>;
 
 /**
  * Friends, presence and the block list.
@@ -22,7 +24,7 @@ export interface Social {
 /**
  * The social seam with nothing behind it: nobody is blocked and nobody is a friend.
  *
- * Empty rather than a refusal, unlike the other unattached seams — a player with no social graph
+ * Empty rather than a refusal, unlike the other unattached seams: a player with no social graph
  * behind them still has a working session, and a 501 here would take the whole signed-in shell
  * down over a list that is allowed to be empty.
  */

@@ -5,9 +5,10 @@ import type { Env } from '../env.js';
 import { resetLink } from '../mailer.js';
 import type { Mailer } from '../mailer.js';
 import type { Records } from '../records.js';
-import { beginSession, requireCsrfToken, requireSession } from '../session.js';
+import { beginSession, requireSignedIn } from '../session.js';
 import type { ExpiringSessionStore } from '../session-store.js';
 import { Email, Password } from '../values.js';
+import { unattached } from '../reply.js';
 
 /**
  * Where a session begins and ends; nothing at this level demands one, so the two routes that do
@@ -66,9 +67,7 @@ export function authRoutes(
             async (request, reply) => {
                 const begun = await records.beginPasswordReset(request.body.email);
                 if (begun.outcome === 'unattached') {
-                    return reply
-                        .code(501)
-                        .send({ code: 'internal', message: 'no account store is attached' });
+                    return unattached(reply, 'account store');
                 }
 
                 if (begun.outcome === 'begun') {
@@ -77,9 +76,7 @@ export function authRoutes(
                         resetLink(env, begun.token),
                     );
                     if (sent.outcome === 'unattached') {
-                        return reply
-                            .code(501)
-                            .send({ code: 'internal', message: 'no mailer is attached' });
+                        return unattached(reply, 'mailer');
                     }
                     // A provider that refused this one message is this service's problem, not the
                     // caller's, and saying so would answer the question the 202 exists to refuse.
@@ -111,9 +108,7 @@ export function authRoutes(
                     request.body.newPassword,
                 );
                 if (finished.outcome === 'unattached') {
-                    return reply
-                        .code(501)
-                        .send({ code: 'internal', message: 'no account store is attached' });
+                    return unattached(reply, 'account store');
                 }
                 // Wrong, already spent, and expired are one answer: a caller holding a key learns
                 // only that it does not open anything.
@@ -124,7 +119,7 @@ export function authRoutes(
                 }
 
                 // Whoever reset the password is not signed in by it, and every session the account
-                // was holding ends — a reset is what somebody does when they think it was stolen.
+                // was holding ends; a reset is what somebody does when they think it was stolen.
                 sessions.destroyFor(finished.player);
                 return reply.code(204).send(null);
             },
@@ -139,8 +134,7 @@ export function authRoutes(
  * handing out another CSRF token is what an anonymous caller must not reach.
  */
 const signedInAuthRoutes: FastifyPluginAsyncZod = async (app) => {
-    app.addHook('onRequest', requireSession);
-    app.addHook('onRequest', requireCsrfToken(app));
+    requireSignedIn(app);
 
     app.get(
         '/session',

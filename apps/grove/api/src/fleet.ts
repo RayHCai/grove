@@ -1,12 +1,12 @@
 import {
     Placement,
-    REQUEST_ID_HEADER,
     type GameId,
     type PlacementRequest,
     type PlayableVersion,
     type PlayerId,
     type SessionId,
 } from '@grove/api-contract';
+import { fleetCall } from '@grove/service-kit';
 import type { Env } from './env.js';
 
 /**
@@ -22,7 +22,7 @@ export interface Fleet {
          * the router, which knows only what its boxes run.
          */
         version: PlayableVersion,
-        // Passed rather than read off a request, because this seam holds no Fastify types — and a
+        // Passed rather than read off a request, because this seam holds no Fastify types, and a
         // placement the router logged under an id of its own is one no join can be traced into.
         requestId: string,
     ): Promise<{ sessionId: SessionId; serverUrl: string; revision: number } | undefined>;
@@ -40,22 +40,22 @@ const PLACEMENT_TIMEOUT_MS = 2_000;
 
 /** The fleet router over HTTP, behind the shared bearer its `/v1` gate compares. */
 export function httpFleet(env: Env): Fleet {
+    const call = fleetCall({
+        baseUrl: env.SERVER_MANAGER_URL,
+        secret: env.FLEET_SECRET,
+        timeoutMs: PLACEMENT_TIMEOUT_MS,
+    });
     return {
         place: async (game, player, version, requestId) => {
-            const response = await fetch(`${env.SERVER_MANAGER_URL}/v1/placements`, {
+            const response = await call('/v1/placements', requestId, {
                 method: 'POST',
-                headers: {
-                    'content-type': 'application/json',
-                    authorization: `Bearer ${env.FLEET_SECRET}`,
-                    [REQUEST_ID_HEADER]: requestId,
-                },
+                headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
                     gameId: game,
                     playerId: player,
                     revision: version.revision,
                     bundles: version.bundles,
                 } satisfies PlacementRequest),
-                signal: AbortSignal.timeout(PLACEMENT_TIMEOUT_MS),
             });
 
             if (response.status === 409) return undefined;
@@ -65,7 +65,7 @@ export function httpFleet(env: Env): Fleet {
 
             const placement = Placement.parse(await response.json());
             // A session on another version is one whose code this service is about to name wrongly,
-            // and a browser handed the wrong bundle set is refused at the handshake — or, declaring
+            // and a browser handed the wrong bundle set is refused at the handshake or, declaring
             // no hash, admitted into a world with none of its scripts. Refused as a fleet fault.
             if (placement.revision !== version.revision) {
                 throw new Error(

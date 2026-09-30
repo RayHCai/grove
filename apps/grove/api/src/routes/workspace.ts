@@ -19,8 +19,9 @@ import {
 } from '@grove/api-contract';
 import type { TaskQueue } from '../queue.js';
 import type { FileUpsert, Records } from '../records.js';
-import { requireCsrfToken, requireGameOwner, requireSession } from '../session.js';
+import { requireGameOwner, requireSignedIn } from '../session.js';
 import type { Storage } from '../storage.js';
+import { unattached } from '../reply.js';
 
 /** What a browser may keep a file for: nothing, because a key is overwritten in place. */
 const REVALIDATE = 'private, no-cache';
@@ -40,7 +41,7 @@ const OPAQUE = MediaType.parse('application/octet-stream');
 /**
  * The files a game is authored from: the set, the bytes behind it, and the save that moves it on.
  *
- * A save carries the text of what changed and the path of what was removed. Assets are not here —
+ * A save carries the text of what changed and the path of what was removed. Assets are not here:
  * their bytes went straight to the bucket through a presigned PUT, and a save names the path so
  * this service can read back what actually landed.
  */
@@ -50,8 +51,7 @@ export function workspaceRoutes(
     queue: TaskQueue,
 ): FastifyPluginAsyncZod {
     return async (app) => {
-        app.addHook('onRequest', requireSession);
-        app.addHook('onRequest', requireCsrfToken(app));
+        requireSignedIn(app);
         app.addHook('preHandler', requireGameOwner(records));
 
         app.get(
@@ -132,7 +132,7 @@ export function workspaceRoutes(
                 }
 
                 // The bytes go first, and a save that turns out stale leaves versions no manifest
-                // names — which the bucket's own expiry collects, and which no read can reach.
+                // names, which the bucket's own expiry collects, and which no read can reach.
                 // At once, because a save touches every script in a game and these are independent
                 // round trips; the outcomes are read back in order, so the refusal is still the
                 // first one by path rather than whichever lost the race.
@@ -148,9 +148,7 @@ export function workspaceRoutes(
                 );
                 for (const { source, written } of writes) {
                     if (written.outcome === 'unattached') {
-                        return reply
-                            .code(501)
-                            .send({ code: 'internal', message: 'no games bucket is attached' });
+                        return unattached(reply, 'games bucket');
                     }
                     if (written.outcome !== 'written') {
                         return reply.code(502).send({
@@ -243,7 +241,7 @@ export function workspaceRoutes(
             {
                 // No response schema: the body is the file's own bytes, and a serializer compiled
                 // for this route would turn every asset into JSON. Its refusals carry `ErrorBody`
-                // all the same — they are written by hand below.
+                // all the same; they are written by hand below.
                 schema: {
                     tags: ['workspace'],
                     params: z.object({ gameId: GameId, '*': WorkspacePath }),

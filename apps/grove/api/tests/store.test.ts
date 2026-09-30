@@ -142,8 +142,8 @@ describe('an account with a password', () => {
         expect(await records.signIn('creator@grove.example', PASSWORD)).toBeDefined();
     });
 
-    // Without decay, one wrong guess per ceiling — 96 requests a day, from one address, well inside
-    // the per-IP limiter — keeps somebody out of their account for good.
+    // Without decay, one wrong guess per ceiling (96 requests a day, from one address, well inside
+    // the per-IP limiter) keeps somebody out of their account for good.
     it('starts the count over when the last failure is older than the ceiling', async () => {
         await withPassword();
         for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -342,7 +342,7 @@ describe('a forgotten password', () => {
 
         const held = await pg.query('SELECT 1 FROM "PasswordReset"');
         expect(held.rows).toHaveLength(1);
-        // The earlier links are dead, not merely unused — a mailbox full of them is not a mailbox
+        // The earlier links are dead, not merely unused; a mailbox full of them is not a mailbox
         // full of open doors.
         expect(
             (await records.finishPasswordReset(first, 'a brand new long password')).outcome,
@@ -667,13 +667,16 @@ describe('a published version', () => {
     }
 
     it('is nothing until one is published', async () => {
-        expect(await records.publishedVersionOf(await game())).toBeUndefined();
+        const gameId = await game();
+        expect(await records.publishedVersionOf(gameId)).toBeUndefined();
+        expect(await records.gameOf(gameId)).toMatchObject({ publishedAt: null });
     });
 
     it('is the manifest revision the last publish named', async () => {
         const gameId = await game();
         await records.markPublished(gameId, version);
         expect(await records.publishedVersionOf(gameId)).toEqual(version);
+        expect(await records.gameOf(gameId)).toMatchObject({ publishedAt: version.publishedAt });
     });
 
     it('is replaced by the next publish rather than kept beside it', async () => {
@@ -740,7 +743,7 @@ describe('a playable version', () => {
         };
     }
 
-    /** What `playableVersionOf` answers for that build — the manifest, less the game it names. */
+    /** What `playableVersionOf` answers for that build: the manifest, less the game it names. */
     function version(revision: number, hash = HASH) {
         const { gameId: _gameId, ...rest } = built(revision, hash);
         return rest;
