@@ -1,7 +1,8 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { Redis } from 'ioredis';
 import {
     BuildManifest,
-    TaskId,
+    TaskMessage,
     buildManifestKey,
     streamOf,
     type BuildArtifact,
@@ -9,6 +10,7 @@ import {
     type Manifest,
     type Task,
     type TaskDetail,
+    type TaskId,
 } from '@grove/api-contract';
 import type { FastifyBaseLogger } from 'fastify';
 import { compile, type SourceFile } from './compile.js';
@@ -33,7 +35,7 @@ const SERVER = 'server.js';
 /**
  * What one build did with its message.
  *
- * `settled` is acknowledged — the outcome is written down, whatever it was. `retry` leaves the
+ * `settled` is acknowledged: the outcome is written down, whatever it was. `retry` leaves the
  * message claimed so another box takes it back after the reclaim window, which is what a failure
  * of the fleet rather than of the source earns.
  */
@@ -50,7 +52,7 @@ export interface Builder {
  * Claims one task, compiles the revision it names, and settles it.
  *
  * The claim is what tells this box what to build: the message carries a task id and nothing else,
- * and the answer to the claim carries the game and the manifest revision. That is deliberate — the
+ * and the answer to the claim carries the game and the manifest revision. That is deliberate: the
  * row is the truth, and a message that has been sitting in a stream for ten minutes is not.
  *
  * A build is atomic. There is no resuming a half-finished one, because the work is a compile of a
@@ -72,6 +74,17 @@ export async function runBuild(taskId: TaskId, builder: Builder): Promise<Handle
     }
 
     const task = claimed.task;
+    // Checked before compiling rather than only after an outage: a compile that hangs its box is
+    // reclaimed with nothing written, and without this it would be claimed and hung forever.
+    if (task.attempts > env.BUILD_ATTEMPTS) {
+        log.warn({ taskId, attempts: task.attempts }, 'build attempts spent');
+        return settle(
+            taskId,
+            'FAILED',
+            { message: `gave up after ${String(env.BUILD_ATTEMPTS)} attempts` },
+            builder,
+        );
+    }
     log.info({ taskId, gameId: task.gameId, revision: task.manifestRevision }, 'build claimed');
 
     const built = await produce(task, builder);
@@ -124,7 +137,7 @@ async function produce(task: Task, builder: Builder): Promise<Produced> {
     const sources = await read(frozen.value, task, builder);
     if (sources.outcome !== 'read') return sources;
 
-    const compiled = await compile(task.taskId, sources.files);
+    const compiled = await compile(task.taskId, sources.files, builder.env.COMPILE_TIMEOUT_MS);
     if (compiled.outcome !== 'compiled') return compiled;
 
     const { output } = compiled;
@@ -153,7 +166,7 @@ async function produce(task: Task, builder: Builder): Promise<Produced> {
                 sendRate: output.project.settings.sendRate,
                 project: {
                     projectId: output.project.projectId,
-                    // `contentHash` IS `projectHash` on the wire — the handshake compares a digest
+                    // `contentHash` IS `projectHash` on the wire: the handshake compares a digest
                     // of what was authored, and the two names are one value.
                     projectHash: output.project.contentHash,
                     bundleHash: client.artifact.hash,
@@ -290,86 +303,164 @@ async function settle(
     return 'settled';
 }
 
+/** The four stream commands the consumer loop issues, which is all a test double has to answer. */
+export type BuildStream = Pick<Redis, 'xgroup' | 'xautoclaim' | 'xreadgroup' | 'xack'>;
+
+export interface Consumer {
+    /** False once the loop has ended without being asked to, which a health check reports. */
+    running(): boolean;
+    stop(): Promise<void>;
+}
+
+/** Doubling from one second to half a minute: a Redis restart is seconds, an outage is longer. */
+const BACKOFF_FIRST_MS = 1_000;
+const BACKOFF_CEILING_MS = 30_000;
+
+type Delivered = [string, [string, string[]][]][] | null;
+type Reclaimed = [string, [string, string[]][]];
+
+/** The deleted group Redis names in its error, which recreating the group is the answer to. */
+function isNoGroup(error: unknown): boolean {
+    return error instanceof Error && error.message.startsWith('NOGROUP');
+}
+
+/** A stream entry's flat `[field, value, ...]` list as the object the contract parses. */
+function entryOf(fields: readonly string[]): Record<string, string> {
+    const entry: Record<string, string> = {};
+    for (let at = 0; at + 1 < fields.length; at += 2)
+        entry[fields[at] ?? ''] = fields[at + 1] ?? '';
+    return entry;
+}
+
 /**
  * Reads the build stream forever, one task at a time.
  *
  * A consumer group rather than a list, so a box that dies mid-build hands its claim back instead of
  * taking the build with it: `XAUTOCLAIM` is what another box reclaims through, and the window is
- * the build deadline — which is sized for an infrastructure failure to be noticed, since the
+ * the build deadline, which is sized for an infrastructure failure to be noticed, since the
  * compile itself is under a minute.
+ *
+ * Nothing one message does ends the loop: a build that throws is logged and left claimed for the
+ * reclaim, and a Redis that fails is logged and backed off from, with the group recreated if it
+ * was deleted under the box.
  */
 export function startConsumer(
-    redis: Redis,
+    redis: BuildStream,
     builder: Builder,
     env: Env,
     name: string,
-): { stop: () => Promise<void> } {
+): Consumer {
     const stream = streamOf('BUILD');
+    const { log } = builder;
     // An abort rather than a flag: the loop's condition is then something the reader can see is
     // changed from outside it, which a plain boolean closed over is not.
     const stopping = new AbortController();
+    let ended = false;
+
+    const createGroup = async (): Promise<void> => {
+        // MKSTREAM, because the group has to exist before the first publish rather than after it.
+        await redis.xgroup('CREATE', stream, GROUP, '0', 'MKSTREAM').catch((error: unknown) => {
+            if (!(error instanceof Error && error.message.startsWith('BUSYGROUP'))) throw error;
+        });
+    };
 
     const handle = async (id: string, fields: string[]): Promise<void> => {
-        const at = fields.indexOf('taskId');
-        const parsed = TaskId.safeParse(at === -1 ? undefined : fields[at + 1]);
-        if (!parsed.success) {
+        const message = TaskMessage.safeParse(entryOf(fields));
+        if (!message.success) {
             // Nothing this service can ever do with it, and leaving it pending would make every
             // reclaim pass pick it up again.
-            builder.log.error({ id }, 'message names no task');
+            log.error({ id }, 'message names no task');
             await redis.xack(stream, GROUP, id);
             return;
         }
-        if ((await runBuild(parsed.data, builder)) === 'settled') {
-            await redis.xack(stream, GROUP, id);
+        const { taskId } = message.data;
+        let handled: Handled;
+        try {
+            handled = await runBuild(taskId, builder);
+        } catch (error) {
+            // Left unacknowledged, so the reclaim hands it back, and the row's attempt count is
+            // what eventually stops it.
+            log.error({ err: error, id, taskId }, 'build threw; left for reclaim');
+            return;
+        }
+        if (handled === 'settled') await redis.xack(stream, GROUP, id);
+    };
+
+    const pass = async (): Promise<void> => {
+        // Reclaimed first: a build another box died holding is older work than anything new,
+        // and a creator waiting on it has been waiting longest.
+        const reclaimed = (await redis.xautoclaim(
+            stream,
+            GROUP,
+            name,
+            env.BUILD_TIMEOUT_MS,
+            '0',
+            'COUNT',
+            BATCH,
+        )) as Reclaimed;
+        for (const [id, fields] of reclaimed[1] ?? []) {
+            // oxlint-disable-next-line no-await-in-loop
+            await handle(id, fields);
+        }
+
+        const delivered = (await redis.xreadgroup(
+            'GROUP',
+            GROUP,
+            name,
+            'COUNT',
+            BATCH,
+            'BLOCK',
+            BLOCK_MS,
+            'STREAMS',
+            stream,
+            '>',
+        )) as Delivered;
+        for (const [, messages] of delivered ?? []) {
+            for (const [id, fields] of messages) {
+                // oxlint-disable-next-line no-await-in-loop
+                await handle(id, fields);
+            }
         }
     };
 
     const loop = async (): Promise<void> => {
-        // MKSTREAM, because the group has to exist before the first publish rather than after it.
-        await redis.xgroup('CREATE', stream, GROUP, '0', 'MKSTREAM').catch(() => undefined);
-
+        let failures = 0;
+        let groupReady = false;
         while (!stopping.signal.aborted) {
-            // Reclaimed first: a build another box died holding is older work than anything new,
-            // and a creator waiting on it has been waiting longest.
-            // oxlint-disable-next-line no-await-in-loop
-            const reclaimed = (await redis
-                .xautoclaim(stream, GROUP, name, env.BUILD_TIMEOUT_MS, '0', 'COUNT', BATCH)
-                .catch(() => undefined)) as [string, [string, string[]][]] | undefined;
-            for (const [id, fields] of reclaimed?.[1] ?? []) {
-                // oxlint-disable-next-line no-await-in-loop
-                await handle(id, fields);
-            }
-
-            // oxlint-disable-next-line no-await-in-loop
-            const delivered = (await redis
-                .xreadgroup(
-                    'GROUP',
-                    GROUP,
-                    name,
-                    'COUNT',
-                    BATCH,
-                    'BLOCK',
-                    BLOCK_MS,
-                    'STREAMS',
-                    stream,
-                    '>',
-                )
-                .catch(() => undefined)) as [string, [string, string[]][]][] | null | undefined;
-
-            for (const [, messages] of delivered ?? []) {
-                for (const [id, fields] of messages) {
+            try {
+                if (!groupReady) {
                     // oxlint-disable-next-line no-await-in-loop
-                    await handle(id, fields);
+                    await createGroup();
+                    groupReady = true;
                 }
+                // oxlint-disable-next-line no-await-in-loop
+                await pass();
+                failures = 0;
+            } catch (error) {
+                if (isNoGroup(error)) {
+                    log.warn({ stream, group: GROUP }, 'consumer group is gone; recreating it');
+                    groupReady = false;
+                    continue;
+                }
+                failures += 1;
+                const wait = Math.min(BACKOFF_FIRST_MS * 2 ** (failures - 1), BACKOFF_CEILING_MS);
+                log.error({ err: error, failures, retryInMs: wait }, 'build stream failed');
+                // oxlint-disable-next-line no-await-in-loop
+                await sleep(wait, undefined, { signal: stopping.signal }).catch(() => undefined);
             }
         }
     };
 
-    const draining = loop().catch((error: unknown) => {
-        builder.log.error({ err: error }, 'build consumer stopped');
-    });
+    const draining = loop()
+        .catch((error: unknown) => {
+            log.error({ err: error }, 'build consumer stopped');
+        })
+        .finally(() => {
+            ended = true;
+        });
 
     return {
+        running: () => !ended || stopping.signal.aborted,
         stop: async () => {
             stopping.abort();
             // The blocking read is what this waits out, which is why the block is seconds and not

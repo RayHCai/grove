@@ -20,7 +20,7 @@ consumer name share their claims, which is why `BUILDER_NAME` falls back to the 
 to a value every box would write the same.
 
 A claimed message carries a task id and nothing else. What tells this box what to build is the
-answer to its own claim — `PATCH /v1/tasks/:taskId` hands back the task, and with it the game and the
+answer to its own claim: `PATCH /v1/tasks/:taskId` hands back the task, and with it the game and the
 manifest revision it is pinned to. That is deliberate: the row is the truth, and a message that has
 been sitting in a stream for ten minutes is not.
 
@@ -32,11 +32,11 @@ again.
 
 Everything it reads and writes goes through `@grove/api`, which is what the missing bucket
 credential buys. It fetches the manifest that revision froze, then each **source** file at the
-version that manifest named — never what is current at the key, so an edit made after the publish
+version that manifest named, never what is current at the key, so an edit made after the publish
 cannot reach the compiler. Assets are passed over: their bytes are fetched by a client from the
 edge, and what a compile needs of one is the record in the project manifest.
 
-A creator writes no imports — the workbench declares the engine as globals — so the import is put
+A creator writes no imports (the workbench declares the engine as globals), so the import is put
 back above each file from `@platform/scripting`'s own list, the same one the editor compiles
 against. It shares the file's first line rather than taking one of its own, because every position
 this service reports is read off the file it handed the compiler.
@@ -58,12 +58,12 @@ through a registered symbol.
 
 Four files land under `build/<revision>/`, in this order and for this reason:
 
-| File             | Is                                                               |
-| ---------------- | ---------------------------------------------------------------- |
-| `client.js`      | the module a joining browser fetches and evaluates               |
-| `simConfig.json` | the rates a host reads, and the client half's address and digest |
-| `server.js`      | the classic script a session's isolate evaluates                 |
-| `build.json`     | the `BuildManifest` naming all three                             |
+| File             | Is                                                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `client.js`      | the module a joining browser fetches and evaluates                                                                                   |
+| `simConfig.json` | the rates a host reads, and the client half's address and digest                                                                     |
+| `server.js`      | the classic script a session's isolate evaluates, which guards its own realm with the determinism shim before it publishes its entry |
+| `build.json`     | the `BuildManifest` naming all three                                                                                                 |
 
 The client half is first because what it hashes to is what every joiner is held to at the
 handshake, and the config naming that hash cannot be written before it exists. `build.json` is last
@@ -75,26 +75,33 @@ a file, because it is the one place that knows where the edge serves that bucket
 
 ## Two kinds of failure, and why the difference matters
 
-Source this build refuses — a `SyncedScript` reading `Date.now()`, a type error, a manifest naming
-a class that is not there — is `FAILED`, with diagnostics positioned the way a creator's editor
+Source this build refuses (a `SyncedScript` reading `Date.now()`, a type error, a manifest naming
+a class that is not there) is `FAILED`, with diagnostics positioned the way a creator's editor
 gutters them, and it is never retried. Nothing about a second attempt would go differently.
 
-The fleet failing — a bucket that would not answer, a compiler that could not be started, this box
-running out of disk — leaves the message claimed for another box to take back.
+The fleet failing (a bucket that would not answer, a compiler that could not be started or did not
+finish inside `COMPILE_TIMEOUT_MS`, this box running out of disk) leaves the message claimed for
+another box to take back.
 
-Getting that line wrong is worse now than it was: a whole-build restart means a creator error
-mistaken for infrastructure is a game rebuilt forever. `BUILD_ATTEMPTS` is the ceiling, counted on
-the row rather than in this process, so a fault that looks transient on every box in turn still
-stops — and the build is then `FAILED` with what went wrong, rather than left for a creator to watch.
+Getting that line wrong is costly: a whole-build restart means a creator error mistaken for
+infrastructure is a game rebuilt forever. `BUILD_ATTEMPTS` is the ceiling, counted on the row rather
+than in this process, so a fault that looks transient on every box in turn still stops, and the
+build is then `FAILED` with what went wrong, rather than left for a creator to watch. The count is
+checked as soon as a claim answers, before anything compiles, so a compile that hangs its box and is
+reclaimed with nothing written stops at the ceiling too.
 
 A message is acknowledged once the outcome is written down, whatever the outcome was. A claim that
-was refused is work somebody already settled — acknowledged, or it comes back forever. A claim or an
+was refused is work somebody already settled: acknowledged, or it comes back forever. A claim or an
 outcome that could not be written at all is left claimed, so another box takes it back after the
 reclaim window: acknowledging there would leave a creator watching a task nothing will ever move.
 
-`main.ts` starts the consumer and the health endpoint. A box with no stream behind it still comes up
-and says so in the log: one that refuses to boot is one no host agent can tell apart from a box that
-is gone.
+Nothing one message does ends the consumer loop. A build that throws is logged and left claimed for
+the reclaim; a Redis command that fails is logged and retried after a backoff doubling from one
+second to thirty; a consumer group deleted under the box is recreated.
+
+`main.ts` starts the consumer and the health endpoint. The endpoint answers `503` naming why when no
+stream is attached or the consumer loop has ended, and a box in either state still comes up: one
+that refuses to boot is one no host agent can tell apart from a box that is gone.
 
 | File          | Holds                                                                    |
 | ------------- | ------------------------------------------------------------------------ |
@@ -114,17 +121,19 @@ tree is removed whatever the outcome.
 Nothing is defaulted quietly except where the default is the safe one, so a missing value fails at
 startup rather than at the first task that needed it.
 
-| Variable            | What                                                                             |
-| ------------------- | -------------------------------------------------------------------------------- |
-| `NODE_ENV`          | `development`, `test` or `production`; sets the log level                        |
-| `GAME_BUILDER_HOST` | address to bind, `127.0.0.1` by default                                          |
-| `GAME_BUILDER_PORT` | `4002` by default                                                                |
-| `FLEET_SECRET`      | the bearer this service presents reading source, storing output and settling     |
-| `API_URL`           | where all three of those happen, which is the only service this one calls        |
-| `REDIS_URL`         | the server builds are claimed from; absent, this process has no work to do       |
-| `BUILDER_NAME`      | this box's name in the consumer group; the hostname when it is not set           |
-| `BUILD_TIMEOUT_MS`  | how long a claim is held before another box may reclaim it, 3 minutes by default |
-| `BUILD_ATTEMPTS`    | how many boxes may try one build before it is settled as failed, 3 by default    |
+| Variable             | What                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`           | `development`, `test` or `production`; sets the log level                                                     |
+| `GAME_BUILDER_HOST`  | address to bind, `127.0.0.1` by default, or `0.0.0.0` where a platform assigned `PORT`                        |
+| `GAME_BUILDER_PORT`  | `4002` by default                                                                                             |
+| `PORT`               | set by a platform such as Railway; the fallback for `GAME_BUILDER_PORT`                                       |
+| `FLEET_SECRET`       | the bearer this service presents reading source, storing output and settling                                  |
+| `API_URL`            | where all three of those happen, which is the only service this one calls                                     |
+| `REDIS_URL`          | the stream builds are claimed from; absent, this process has no work to do and its health says so             |
+| `BUILDER_NAME`       | this box's name in the consumer group; the hostname when it is not set                                        |
+| `BUILD_TIMEOUT_MS`   | how long a claim is held before another box may reclaim it, 3 minutes by default                              |
+| `COMPILE_TIMEOUT_MS` | how long `tsc` may run on one build before it is killed and the attempt left for retry, 60 seconds by default |
+| `BUILD_ATTEMPTS`     | how many boxes may try one build before it is settled as failed, 3 by default                                 |
 
 A database named in `REDIS_URL` is ignored: the contract decides which one this box reads.
 

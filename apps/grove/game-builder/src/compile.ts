@@ -31,11 +31,11 @@ const MODULE_ROOT = fileURLToPath(new URL('../node_modules', import.meta.url));
 const TSCONFIG = {
     compilerOptions: {
         // ES2022 and not ESNext, because tsc emits a standard decorator verbatim for a target that
-        // claims to have them — and an unlowered `@onStart` is a chunk whose metadata is empty.
+        // claims to have them, and an unlowered `@onStart` is a chunk whose metadata is empty.
         target: 'ES2022',
         module: 'ESNext',
         moduleResolution: 'bundler',
-        // No DOM: a game is not a page, and two engine names — `Storage` and `Animation` — would
+        // No DOM: a game is not a page, and two engine names (`Storage` and `Animation`) would
         // collide outright with that library's.
         lib: ['ES2023'],
         strict: true,
@@ -83,10 +83,14 @@ export interface SourceFile {
  * before `tsc` so a refusal points at the creator's own line, and the linker runs after it so it
  * only ever sees lowered output.
  */
-export async function compile(id: string, sources: readonly SourceFile[]): Promise<Compiled> {
+export async function compile(
+    id: string,
+    sources: readonly SourceFile[],
+    timeoutMs?: number,
+): Promise<Compiled> {
     const work = path.join(WORK_ROOT, id);
     try {
-        return await run(work, sources);
+        return await run(work, sources, timeoutMs);
     } catch (error) {
         // Anything the two passes below did not name is this box: a full disk, a killed compiler,
         // a bundler that fell over. Settling a creator's build as failed over one would tell them
@@ -97,7 +101,11 @@ export async function compile(id: string, sources: readonly SourceFile[]): Promi
     }
 }
 
-async function run(work: string, sources: readonly SourceFile[]): Promise<Compiled> {
+async function run(
+    work: string,
+    sources: readonly SourceFile[],
+    timeoutMs: number | undefined,
+): Promise<Compiled> {
     const gameDir = path.join(work, 'game');
     rmSync(work, { recursive: true, force: true });
     for (const source of sources) {
@@ -134,6 +142,7 @@ async function run(work: string, sources: readonly SourceFile[]): Promise<Compil
             // attachment names a script by the id the editor stamped and a chunk carrying a
             // different one resolves to nothing at boot.
             scripts: declaredScripts(project),
+            lowerTimeoutMs: timeoutMs,
         });
     } catch (error) {
         return refusal(error, gameDir);
@@ -165,7 +174,7 @@ async function run(work: string, sources: readonly SourceFile[]): Promise<Compil
 /**
  * One source as a compiler has to see it.
  *
- * A creator writes no imports — every engine name is a bare global in the workbench — so the
+ * A creator writes no imports (every engine name is a bare global in the workbench), so the
  * import is put back here, from the same list the editor's own compile uses.
  *
  * It shares the file's first line rather than taking one of its own, because every position this
@@ -187,7 +196,7 @@ function projectOf(sources: readonly SourceFile[]): ProjectManifest | undefined 
     try {
         const parsed: unknown = JSON.parse(held.text);
         // Migrated before it is checked, because a file below this build's format is moved forward
-        // and only one above it is refused — a saved game cannot be told to update itself.
+        // and only one above it is refused; a saved game cannot be told to update itself.
         return validate(migrate(parsed));
     } catch {
         return undefined;
@@ -219,9 +228,11 @@ function clientEntry(chunk: string): string {
 /**
  * The session's half: the world, built from the manifest the save froze.
  *
+ * No determinism shim guards this realm: it also runs ServerScripts, which may read a clock.
+ *
  * The manifest is embedded rather than fetched, because an isolate has no way to fetch anything.
  * What the host's own config still decides is where a joiner gets the client half and what its
- * bytes have to hash to — the one pair that cannot be known until the client half is stored.
+ * bytes have to hash to: the one pair that cannot be known until the client half is stored.
  */
 function serverEntry(chunk: string, project: ProjectManifest): string {
     return `import { createSim } from '@platform/engine/host';
@@ -254,8 +265,8 @@ interface LinkOptions {
 /**
  * Rolls one half and everything it imports into a single file.
  *
- * Nothing is left external. The two places these bytes are evaluated — a blob URL in a browser and
- * an isolate with no loader — can neither of them answer a bare specifier, and core's metadata
+ * Nothing is left external. The two places these bytes are evaluated (a blob URL in a browser and
+ * an isolate with no loader) can neither of them answer a bare specifier, and core's metadata
  * crosses a second copy of itself unharmed because every table it keeps is keyed by a registered
  * symbol.
  */
@@ -295,9 +306,9 @@ function refusal(error: unknown, gameDir: string): Compiled {
     }
 
     if (error instanceof BundleError) {
-        // A compiler that could not be started is this box missing a toolchain, not a game that
-        // does not compile — the one BundleError that must never fail a creator's build.
-        if (error.code === 'tsc-unavailable') {
+        // A compiler that could not be started or never finished is this box, not a game that
+        // does not compile: the BundleErrors that must never fail a creator's build outright.
+        if (error.code === 'tsc-unavailable' || error.code === 'tsc-timeout') {
             return { outcome: 'unavailable', message: error.message };
         }
         return {

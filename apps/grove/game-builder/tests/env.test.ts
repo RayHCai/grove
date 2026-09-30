@@ -13,6 +13,7 @@ describe('the environment', () => {
             'BUILDER_NAME',
             'BUILD_ATTEMPTS',
             'BUILD_TIMEOUT_MS',
+            'COMPILE_TIMEOUT_MS',
             'FLEET_SECRET',
             'GAME_BUILDER_HOST',
             'GAME_BUILDER_PORT',
@@ -34,5 +35,11 @@ describe('the environment', () => {
         // A default here would be a box quietly claiming work out of somebody else's Redis.
         const env = readEnv(REQUIRED);
         expect(env.REDIS_URL).toBeUndefined();
+    });
+
+    it('listens where a platform assigned port says, on every interface', () => {
+        const env = readEnv({ ...REQUIRED, PORT: '8123' });
+        expect(env.GAME_BUILDER_PORT).toBe(8123);
+        expect(env.GAME_BUILDER_HOST).toBe('0.0.0.0');
     });
 });
