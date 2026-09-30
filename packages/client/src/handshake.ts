@@ -27,19 +27,18 @@ export interface ClientProject {
     bundleHash: string;
 }
 
-/** A client with no project of its own — every field the empty string, never an absent key. */
+/** A client with no project of its own: every field the empty string, never an absent key. */
 export function unidentifiedProject(): ClientProject {
     return { projectId: '', projectHash: '', bundleHash: '' };
 }
 
-/** Builds the first frame on a connection. `token` is omitted when absent, never `undefined`. */
+/** Builds the first frame on a connection. */
 export function joinRequest(
     name: string,
     clientSentMs: number,
     project: ClientProject = unidentifiedProject(),
-    token?: string,
 ): JoinRequest {
-    const request: JoinRequest = {
+    return {
         kind: 'join-request',
         protocolVersion: PROTOCOL_VERSION,
         name,
@@ -48,8 +47,6 @@ export function joinRequest(
         projectHash: project.projectHash,
         bundleHash: project.bundleHash,
     };
-    if (token !== undefined) request.token = token;
-    return request;
 }
 
 export function timeSync(clientSentMs: number): TimeSync {
@@ -94,7 +91,7 @@ export function asServerEnvelope(message: unknown): ServerToClient | undefined {
         case 'welcome':
             return message as ServerToClient;
         case 'snapshot-chunk':
-            // Both arrays are walked on reassembly, so both are bounded here — and the index, since
+            // Both arrays are walked on reassembly, so both are bounded here, and the index, since
             // it is compared against a position the client is counting.
             return isFiniteNumber(m.index) && isBoundedArray(m.entities) && isBoundedArray(m.state)
                 ? (message as ServerToClient)
@@ -186,7 +183,7 @@ export class SnapshotChunks {
     #bytes = 0;
     #dropped = 0;
 
-    /** Chunks refused as unusable — over either cap, or arriving for a join already answered. */
+    /** Chunks refused as unusable: over either cap, or arriving for a join already answered. */
     get dropped(): number {
         return this.#dropped;
     }
@@ -197,7 +194,7 @@ export class SnapshotChunks {
             this.#dropped++;
             return;
         }
-        // A count bounds frames, not their size, so memory is bounded here too — through the codec.
+        // A count bounds frames, not their size, so memory is bounded here too, through the codec.
         const bytes = jsonCodec.byteLength(JSON.stringify(chunk));
         if (this.#bytes + bytes > MAX_SNAPSHOT_BYTES) {
             this.#dropped++;
@@ -238,13 +235,13 @@ export class SnapshotChunks {
 export function rejectMessage(reject: Reject): string {
     switch (reject.reason) {
         case 'version':
-            return `This game needs an update — the server speaks protocol ${reject.serverProtocolVersion}, this client speaks ${PROTOCOL_VERSION}.`;
+            return `This game needs an update: the server speaks protocol ${reject.serverProtocolVersion}, this client speaks ${PROTOCOL_VERSION}.`;
         case 'full':
             return 'This game is full.';
         case 'identity':
             // Deliberately does not say which of the three disagreed: the wire keeps the reason
             // coarse, and the answer is the same either way.
-            return 'This game has been updated — reload the page to get the current version.';
+            return 'This game has been updated: reload the page to get the current version.';
         default:
             return 'The server refused the connection.';
     }

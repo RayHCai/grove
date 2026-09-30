@@ -8,7 +8,7 @@ export interface DomInputOptions {
     target?: HTMLElement;
 }
 
-/** The DOM device; `emit` is public so {@link pollGamepads} feeds the same handler. */
+/** The DOM device; `emit` is public so another source can feed the same handler. */
 export function createDomInputDevice(opts: DomInputOptions = {}): EmittingInputDevice {
     const target: HTMLElement | Window = opts.target ?? window;
     let handler: ((event: RawInputEvent) => void) | undefined;
@@ -90,43 +90,4 @@ export function createDomInputDevice(opts: DomInputOptions = {}): EmittingInputD
             window.removeEventListener('gamepaddisconnected', onFocusLost);
         },
     };
-}
-
-/** Per-pad last-seen axis and button state, so a poll emits transitions rather than everything. */
-interface PadState {
-    axes: number[];
-    buttons: boolean[];
-}
-
-/** The default poll state, for the common case of one poller per page. */
-const gamepadState = new Map<number, PadState>();
-
-/** Polls connected gamepads and emits only what changed; the API has no axis event. */
-export function pollGamepads(
-    device: { emit(event: RawInputEvent): void },
-    state: Map<number, PadState> = gamepadState,
-): void {
-    for (const pad of navigator.getGamepads()) {
-        if (pad === null) continue;
-        let last = state.get(pad.index);
-        if (last === undefined) {
-            last = { axes: [], buttons: [] };
-            state.set(pad.index, last);
-        }
-
-        for (const [index, value] of pad.axes.entries()) {
-            if (last.axes[index] === value) continue;
-            last.axes[index] = value;
-            device.emit({ kind: 'axis', code: `gamepad:axis${index}`, value });
-        }
-        for (const [index, button] of pad.buttons.entries()) {
-            if (last.buttons[index] === button.pressed) continue;
-            last.buttons[index] = button.pressed;
-            device.emit({
-                kind: 'key',
-                code: `gamepad:button${index}`,
-                down: button.pressed,
-            });
-        }
-    }
 }

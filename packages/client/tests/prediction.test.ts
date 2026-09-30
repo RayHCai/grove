@@ -70,7 +70,7 @@ async function harness(): Promise<Harness> {
     // suite predicts, and every correction assertion would read a blended pose.
     bridge.setPredicted(prediction.scope);
 
-    // The roster the input pass resolves the local player through — the wire's own player-join op.
+    // The roster the input pass resolves the local player through: the wire's own player-join op.
     mirror.applyState(
         stateEnvelope([{ kind: 'player-join', player: { id: PLAYER, index: 0, name: 'Ray' } }], 0),
     );
@@ -109,8 +109,17 @@ async function harness(): Promise<Harness> {
     return h;
 }
 
-/** Spawns an entity owned by `owner` and attaches the one script this suite simulates. */
-function spawnSlider(h: Harness, netId: number, owner: string | null, posX = 0): EntityId {
+/**
+ * Spawns an entity owned by `owner` and attaches the one script this suite simulates. The default
+ * template is the roster's avatar template, the one owned entity input is dispatched at.
+ */
+function spawnSlider(
+    h: Harness,
+    netId: number,
+    owner: string | null,
+    posX = 0,
+    template = 'player',
+): EntityId {
     h.prediction.rewind();
     h.bridge.reconcile(
         h.mirror.applyState(
@@ -118,7 +127,7 @@ function spawnSlider(h: Harness, netId: number, owner: string | null, posX = 0):
                 [
                     {
                         kind: 'spawn',
-                        snapshot: entity(netId, 'slider', {
+                        snapshot: entity(netId, template, {
                             owner,
                             transform: wireTransform({ posX }),
                         }),
@@ -177,7 +186,7 @@ describe('the replay carries the local player’s own entities', () => {
 
         h.receive(stateEnvelope([], 1), 5);
 
-        // Ticks 2..5 — the press tick plus three held ticks, each owed a synthesized hold.
+        // Ticks 2..5: the press tick plus three held ticks, each owed a synthesized hold.
         expect(h.posX(1)).toBe(4 * SPEED);
     });
 
@@ -190,6 +199,19 @@ describe('the replay carries the local player’s own entities', () => {
         h.receive(stateEnvelope([], 1), 4);
 
         expect(h.posX(1)).toBeGreaterThan(0);
+        expect(h.posX(2)).toBe(0);
+    });
+
+    it('fires input at the avatar alone, as the authority does, not at every owned entity', async () => {
+        const h = await harness();
+        spawnSlider(h, 1, PLAYER);
+        spawnSlider(h, 2, PLAYER, 0, 'pet');
+        hold(h, 2, 4);
+
+        h.receive(stateEnvelope([], 1), 4);
+
+        expect(h.prediction.scope.size).toBe(2);
+        expect(h.posX(1)).toBe(3 * SPEED);
         expect(h.posX(2)).toBe(0);
     });
 
@@ -243,7 +265,7 @@ describe('the rewind takes the predicted world back', () => {
         h.receive(stateEnvelope([], 1), 4);
         expect(h.posX(1)).toBe(3 * SPEED);
 
-        // A rewind with no advance behind it — what the client does on any frame it is not `live`.
+        // A rewind with no advance behind it: what the client does on any frame it is not `live`.
         h.prediction.rewind();
 
         // The authority then moves the entity while nothing at all is predicted.
@@ -284,7 +306,7 @@ describe('a delta lands on authoritative state, not on a predicted pose', () => 
         const predicted = h.posX(1);
         expect(predicted).toBe(2 * SPEED);
 
-        // The server simulated tick 2 itself and says the entity is at 100 — a hard disagreement.
+        // The server simulated tick 2 itself and says the entity is at 100: a hard disagreement.
         h.mirror.applyTransforms({
             kind: 'transform',
             tick: 2,
@@ -414,7 +436,7 @@ describe('a correction is eased on screen and exact in the simulation', () => {
         h.bridge.pushTransforms(0);
         h.batches.length = 0;
 
-        // No simulation, no dirty slot — only the ease is left.
+        // No simulation, no dirty slot; only the ease is left.
         h.bridge.pushTransforms(CORRECTION_SMOOTH_SECONDS / 4);
 
         expect(h.batches.flat()).toHaveLength(1);
@@ -485,7 +507,7 @@ describe('a whole session predicts', () => {
     }> {
         const pair = loopbackPair({ latency: 1 });
         const server = new FakeServer(pair.server, {
-            entities: [entity(1, 'slider', { owner: PLAYER })],
+            entities: [entity(1, 'player', { owner: PLAYER })],
         });
         const renderer = await createReadyNullRenderer({ design: { width: 800, height: 600 } });
         const frames = new ManualFrameSource();
@@ -568,7 +590,7 @@ describe('a whole session predicts', () => {
 
         const stats = h.client.stats();
         expect(stats.resimulations).toBeGreaterThan(before.resimulations);
-        // The server's own answer plus exactly the replayed span — never the predicted pose plus
+        // The server's own answer plus exactly the replayed span, never the predicted pose plus
         // it.
         expect(rt.transforms.posX(h.avatar())).toBe(
             250 + (stats.localTick - stats.depictedTick) * SPEED,

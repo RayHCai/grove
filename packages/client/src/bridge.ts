@@ -11,7 +11,7 @@ import type {
     SubtreeNodeDesc,
     AssetManifestEntry,
 } from '@platform/renderer';
-import { AssetQueue, NO_NODE, REMOTE_ASSET_SCHEMES, isAllowedAssetUrl } from '@platform/renderer';
+import { NO_NODE, REMOTE_ASSET_SCHEMES, isAllowedAssetUrl } from '@platform/renderer';
 import type {
     GroupTemplateVisual,
     RenderManifest,
@@ -19,13 +19,13 @@ import type {
     TemplateVisual,
     WireAssetRef,
 } from '@platform/protocol';
-import { isFiniteNumber } from '@platform/math';
+import { clamp, isFiniteNumber, lerp } from '@platform/math';
 import {
     CORRECTION_SMOOTH_SECONDS,
     MAX_FRAME_DT,
     MAX_INTERPOLATION_DELAY_SECONDS,
     MAX_TEMPLATE_DEPTH,
-    MAX_TEMPLATE_NODES,
+    MAX_VISUAL_NODES,
     MAX_WIRE_ITEMS,
 } from './constants.js';
 import type { MirrorDelta, MirrorView } from './mirror.js';
@@ -39,7 +39,7 @@ type TransformFields = Pick<NodePatch, 'position' | 'rotation' | 'scale' | 'alph
 /** Nothing predicted until a `Prediction` says otherwise; a client without one interpolates all. */
 const NOTHING_PREDICTED: ReadonlySet<EntityId> = new Set();
 
-/** One authoritative pose, stamped with the frame's own seconds — the base this file works in. */
+/** One authoritative pose, stamped with the frame's own seconds, the base this file works in. */
 interface Sample {
     time: number;
     x: number;
@@ -90,8 +90,8 @@ export class RenderBridge {
     /** The reverse edge, so a picked node can name the entity a pointer hit. */
     readonly #entityFor = new Map<NodeId, EntityId>();
     readonly #templates = new Map<string, TemplateVisual>();
-    /** Every asset name declared to the renderer; re-declaring an entry then costs nothing. */
-    readonly #assets = new AssetQueue();
+    /** Asset names handed to the renderer and not failed; re-declaring one then costs nothing. */
+    readonly #declared = new Set<string>();
 
     /** Group templates that draw a subtree, flattened into a `createSubtree` batch. Root first. */
     readonly #subtreeFor = new Map<string, SubtreeNodeDesc[]>();
@@ -116,7 +116,7 @@ export class RenderBridge {
     /** Seconds behind the newest sample a buffered entity is drawn: one send interval, capped. */
     readonly #delay: number;
 
-    /** The moment being drawn — the last push's, so `#create` and the camera read the same one. */
+    /** The moment being drawn: the last push's, so `#create` and the camera read the same one. */
     #renderTime = 0;
 
     /** Scratch, reused per call: `updateNodes` retains nothing past the call. */
@@ -147,9 +147,10 @@ export class RenderBridge {
 
     /**
      * Merges a manifest in, additively; the welcome's copy is a baseline, not the whole session.
-     * Templates land before the first `await`, or a join draws as placeholders.
+     * Templates land before the first `await`, or a join draws as placeholders. Resolves with
+     * how many assets failed to load.
      */
-    async loadManifest(manifest: RenderManifest): Promise<void> {
+    async loadManifest(manifest: RenderManifest): Promise<number> {
         for (const t of manifest.templates) {
             if (t.kind === 'group' && t.children !== undefined) {
                 const batch = flattenGroup(t);
@@ -162,15 +163,17 @@ export class RenderBridge {
             this.#templates.set(t.template, t);
         }
 
-        // Deduped through the renderer's own per-name intent map rather than a second table here:
-        // one answer to "is this name already declared", and a re-declared asset is not re-fetched.
         const entries: AssetManifestEntry[] = [];
         for (const entry of manifest.assets.flatMap(toManifestEntry)) {
-            if (this.#assets.intentFor(entry.name) !== undefined) continue;
-            this.#assets.load(entry);
+            if (this.#declared.has(entry.name)) continue;
+            this.#declared.add(entry.name);
             entries.push(entry);
         }
-        if (entries.length > 0) await this.#renderer.loadAssets(entries);
+        if (entries.length === 0) return 0;
+        const result = await this.#renderer.loadAssets(entries);
+        // Forgotten, so a later manifest naming the asset again retries it.
+        for (const failure of result.failed) this.#declared.delete(failure.name);
+        return result.failed.length;
     }
 
     /** Creates, reparents and destroys from the ordered delta, never by diffing the world. */
@@ -327,7 +330,7 @@ export class RenderBridge {
         this.#lastNow = nowSeconds;
         if (last === undefined || this.#corrections.size === 0) return;
 
-        const dt = Math.min(Math.max(0, nowSeconds - last), MAX_FRAME_DT);
+        const dt = clamp(nowSeconds - last, 0, MAX_FRAME_DT);
         if (dt === 0) return;
         this.#expired.length = 0;
         for (const [local, correction] of this.#corrections) {
@@ -523,15 +526,11 @@ export class RenderBridge {
     }
 }
 
-function lerp(from: number, to: number, alpha: number): number {
-    return from + (to - from) * alpha;
-}
-
 /** Where `at` falls across `[from, to]`, clamped; the clamp at 1 holds rather than extrapolates. */
 function progress(from: number, to: number, at: number): number {
     const span = to - from;
     if (!(span > 0)) return 1;
-    return Math.min(Math.max((at - from) / span, 0), 1);
+    return clamp((at - from) / span, 0, 1);
 }
 
 /** Degrees, the short way round: the authority may wrap, and 359°→1° is one degree forward. */
@@ -557,10 +556,10 @@ function pushChildren(
     if (depth > MAX_TEMPLATE_DEPTH) return false;
     if (!Array.isArray(children)) return false;
     if (children.length > MAX_WIRE_ITEMS) return false;
-    if (batch.length + children.length > MAX_TEMPLATE_NODES) return false;
+    if (batch.length + children.length > MAX_VISUAL_NODES) return false;
 
     for (const child of children) {
-        if (batch.length >= MAX_TEMPLATE_NODES) return false;
+        if (batch.length >= MAX_VISUAL_NODES) return false;
         const desc = childDesc(child, parentInBatch);
         if (desc === undefined) return false;
         const at = batch.length;

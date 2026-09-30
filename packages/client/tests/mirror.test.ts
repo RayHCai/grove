@@ -17,7 +17,8 @@ import type {
     WireStructuralOpKind,
 } from '@platform/protocol';
 import { MAX_ENTITY_SCRIPTS, MAX_WIRE_ITEMS } from '../src/constants.js';
-import type { ScriptClass, ScriptIndex } from '../src/mirror.js';
+import type { AnyScriptClass as ScriptClass } from '@platform/core';
+import type { ScriptIndex } from '../src/mirror.js';
 import { Mirror } from '../src/mirror.js';
 import { entity, transformDiff, wireTransform } from './fake-server.js';
 
@@ -188,7 +189,7 @@ describe('apply order and the envelope pairing', () => {
 
     it('a spawn with no transform envelope at all lands at its AUTHORED transform, not the origin', () => {
         // The regression test for the backpressure interaction: transform is dropped first, and a
-        // static entity is dirty exactly once — at spawn.
+        // static entity is dirty exactly once: at spawn.
         const m = mirror();
         const delta = m.applyState(
             stateEnvelope([
@@ -435,7 +436,7 @@ describe('the structural applier is exhaustive', () => {
         // Half of the guarantee. The other half is the `never` default in `#applySingle`:
         // `noImplicitReturns` is off, so an arm added to the union and not handled there would
         // fall through and no-op in silence for the whole session.
-        // @ts-expect-error — there is no `teleport` arm, so nothing can hand the applier one.
+        // @ts-expect-error: there is no `teleport` arm, so nothing can hand the applier one.
         const bogus: WireStructuralOp = { kind: 'teleport', netId: 1 as NetId };
         expect(bogus.kind).toBe('teleport');
     });
@@ -608,7 +609,7 @@ describe('@serverState lands in the host record', () => {
         );
 
         // The point: this client attaches no scripts, so nothing here ever constructed a Scoreboard
-        // — and a plain assignment would have left a decoded object with no `of` on it.
+        // and a plain assignment would have left a decoded object with no `of` on it.
         const scores = m.runtime.hosts.get('game')?.record.values.get('scores');
         expect(scores).toBeInstanceOf(Scoreboard);
         m.runtime.playerManager?.adopt(new Player(m.runtime, 'p2', 0, 'Two'));

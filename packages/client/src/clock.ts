@@ -1,5 +1,6 @@
 // Display rate and tick rate stay separate: fusing them would tie input timing to frame rate.
 
+import { clamp } from '@platform/math';
 import {
     GAIN,
     HEADROOM_TARGET,
@@ -10,10 +11,10 @@ import {
 } from './constants.js';
 
 /** What the server measured about one acked frame. */
-export interface HeadroomSample {
+interface HeadroomSample {
     /** `frame.tick - serverTickOnArrival` for the earliest input in the acked batch. Signed. */
     headroom: number;
-    /** `currentLeadTicks` when that frame was sent — the instant `headroom` describes. */
+    /** `currentLeadTicks` when that frame was sent: the instant `headroom` describes. */
     leadAtSendTicks: number;
 }
 
@@ -89,7 +90,7 @@ export class ClientClock {
         this.#lastNow = nowSeconds;
 
         // Backwards clocks are inert; the clamp is why a suspended tab falls behind.
-        const dt = Math.min(Math.max(0, raw), MAX_FRAME_DT);
+        const dt = clamp(raw, 0, MAX_FRAME_DT);
         this.#accumulator += dt;
 
         const nominal = 1 / this.#simRate;
@@ -133,11 +134,9 @@ export class ClientClock {
     }
 }
 
-/** The legal lead range: 1 tick to 250 ms — 14 ticks wide at 60 Hz, 4 at 20 Hz, correct at both. */
+/** The legal lead range: 1 tick to 250 ms, 14 ticks wide at 60 Hz, 4 at 20 Hz, correct at both. */
 function clampLead(seconds: number, simRate: number): number {
     const min = LEAD_MIN_TICKS / simRate;
     if (!Number.isFinite(seconds)) return min;
-    return Math.min(Math.max(seconds, min), LEAD_MAX_SECONDS);
+    return clamp(seconds, min, LEAD_MAX_SECONDS);
 }
-
-export { clampLead };

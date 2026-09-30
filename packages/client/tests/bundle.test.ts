@@ -1,6 +1,6 @@
 // What a client will and will not run, and what it keeps of what it ran.
 //
-// The order — fetch, bound, hash, compare, evaluate — is asserted through a source that records
+// The order (fetch, bound, hash, compare, evaluate) is asserted through a source that records
 // what it was asked, because a bundle is executable and evaluating before comparing would mean
 // running the peer's code to decide whether to run the peer's code.
 

@@ -11,7 +11,7 @@ export type { EmittingInputDevice, FrameSource, InputDevice, RawInputEvent } fro
 export type { Binding } from './bindings.js';
 export type { BundleSource } from './bundle.js';
 export type { ClientProject, ClockSource } from './handshake.js';
-export type { ScriptClass, ScriptIndex } from './mirror.js';
+export type { ScriptIndex } from './mirror.js';
 
 // What `GameClient`'s own members are typed as, so a host can name what it holds.
 export type { FailureReason, Lifecycle, SessionState } from './lifecycle.js';

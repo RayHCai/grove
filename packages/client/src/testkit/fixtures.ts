@@ -13,7 +13,7 @@ import {
     serverState,
 } from '@platform/core';
 
-/** Moves its host once per tick while `right` is held — one tick of replay, made visible. */
+/** Moves its host once per tick while `right` is held: one tick of replay, made visible. */
 export class Slider extends SyncedScript<Entity> {
     /** Replicated, so a rewind that fails to take it back is a value a test can read. */
     @serverState steps = 0;

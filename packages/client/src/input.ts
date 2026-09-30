@@ -27,7 +27,7 @@ export interface FrameSource {
     stop(): void;
 }
 
-/** A frame source a test drives by hand — no rAF, no wall clock. */
+/** A frame source a test drives by hand: no rAF, no wall clock. */
 export class ManualFrameSource implements FrameSource {
     #onFrame: ((nowSeconds: number) => void) | undefined;
 

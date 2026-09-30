@@ -79,7 +79,7 @@ describe('the accumulator', () => {
         expect(c2.advance(3 / 60)).toHaveLength(3);
     });
 
-    it('is inert under a backwards or non-finite clock — no rewind, accumulator unpoisoned', () => {
+    it('is inert under a backwards or non-finite clock: no rewind, accumulator unpoisoned', () => {
         const c = clock({ rttSeconds: 0 });
         c.advance(10);
         const at = c.localTick;
@@ -152,7 +152,7 @@ describe('the lead loop', () => {
     it('settles at one-way + HEADROOM_TARGET when headroom responds to the lead, as a server measures it', () => {
         // The physical relation: a server measures `frame.tick - serverTickOnArrival`, and a frame
         // stamped `serverNow + lead` arriving at `serverNow + oneWay` yields `lead - oneWay`. So
-        // headroom RESPONDS to the lead, and the loop has a reachable operating point — which the
+        // headroom RESPONDS to the lead, and the loop has a reachable operating point, which the
         // fixed-headroom tests above deliberately deny it.
         const oneWayTicks = 6; // 100 ms at 60 Hz
         const c = clock({ simRate: 60, rttSeconds: 0.2 });
@@ -254,13 +254,13 @@ describe('a suspended tab versus a slow path', () => {
         expect(c.leadError).toBeCloseTo(0, 6);
     });
 
-    it('stays positive under a slow path with the lead pinned — headroom near −33 ticks', () => {
+    it('stays positive under a slow path with the lead pinned: headroom near −33 ticks', () => {
         // At RTT 800 ms the one-way trip is 24 ticks against a 15-tick cap, so headroom sits deeply
         // negative on a connection whose counter is as well positioned as the cap permits.
         const c = clock({ simRate: 60, snapshotTick: 0, rttSeconds: 0.8 });
         settle(c, -33, 50);
         expect(c.targetLeadSeconds).toBeLessThanOrEqual(LEAD_MAX_SECONDS);
-        // depictedTick is stale by the downlink — 24 ticks — and the counter still leads it.
+        // depictedTick is stale by the downlink (24 ticks) and the counter still leads it.
         const depicted = c.localTick - 24;
         expect(c.isBehind(depicted)).toBe(false);
     });

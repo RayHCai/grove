@@ -1,4 +1,4 @@
-// Engine constants, not creator knobs. Each states its unit — mixing units is the failure mode.
+// Engine constants, not creator knobs. Each states its unit; mixing units is the failure mode.
 
 import { MAX_REWIND_MS } from '@platform/core';
 
@@ -32,7 +32,7 @@ export const AXIS_QUANTUM = 1 / 64;
 /** Ticks of the session's own rate that `ackSeq` may stand still before `stalled`. */
 export const ACK_STALL_TICKS = 60;
 
-/** Ring capacity in frames, one per tick. A literal with headroom — ticks per second vary. */
+/** Ring capacity in frames, one per tick. A literal with headroom; ticks per second vary. */
 export const RING_TICKS = 48;
 
 /** Ticks one replay may simulate before it starts at the cap instead. */
@@ -62,9 +62,6 @@ export const JOIN_DEADLINE_SECONDS = 10;
 /** Nesting past which a `request()` payload value is dropped; held below the codec's own cap. */
 export const MAX_REQUEST_DEPTH = 64;
 
-/** Requests one frame may carry, the rest held; the receiver refuses an over-cap frame whole. */
-export const MAX_REQUESTS_PER_FRAME = 16;
-
 /** Cardinality cap on any array a server sends, so one frame cannot buy unbounded work. */
 export const MAX_WIRE_ITEMS = 65_536;
 
@@ -78,5 +75,6 @@ export const MAX_SNAPSHOT_CHUNKS = 256;
 export const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
 
 /** Depth and node count of a template subtree; a recursive shape needs both to stay linear. */
-export const MAX_TEMPLATE_DEPTH = 8;
-export const MAX_TEMPLATE_NODES = 64;
+export { MAX_TEMPLATE_DEPTH } from '@platform/project/limits';
+/** Art nodes one group visual may draw: a wire cap, below core's `MAX_TEMPLATE_NODES` entities. */
+export const MAX_VISUAL_NODES = 64;

@@ -1,6 +1,6 @@
 import type { FrameSource } from '../input.js';
 
-/** `requestAnimationFrame`, in seconds — every number the clock holds is in seconds. */
+/** `requestAnimationFrame`, in seconds; every number the clock holds is in seconds. */
 export function createRafFrameSource(): FrameSource {
     let handle = 0;
     let running = false;

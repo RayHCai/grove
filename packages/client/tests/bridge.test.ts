@@ -14,7 +14,7 @@ import type {
 import type { EntityId } from '@platform/core';
 import { assetId, templateId } from '@platform/project';
 import { RenderBridge } from '../src/bridge.js';
-import { MAX_TEMPLATE_DEPTH, MAX_TEMPLATE_NODES } from '../src/constants.js';
+import { MAX_TEMPLATE_DEPTH, MAX_VISUAL_NODES } from '../src/constants.js';
 import { Mirror } from '../src/mirror.js';
 import { entity, transformDiff, wireTransform } from './fake-server.js';
 
@@ -67,7 +67,7 @@ function spawn(mirror: Mirror, bridge: RenderBridge, netId = 1): EntityId {
     return delta.added[0]!;
 }
 
-/** One send: the tick's state envelope, then the transform it joins on — the wire's own order. */
+/** One send: the tick's state envelope, then the transform it joins on, the wire's own order. */
 function move(mirror: Mirror, netId: number, tick: number, over: Partial<WireTransform>): void {
     mirror.applyState(stateEnvelope([], tick));
     mirror.applyTransforms({ kind: 'transform', tick, transform: [transformDiff(netId, over)] });
@@ -250,7 +250,7 @@ describe('transforms come from the dirty set', () => {
         expect(batches[0]).toHaveLength(1);
     });
 
-    it('drains exactly once per frame — a second drain observes an empty set', async () => {
+    it('drains exactly once per frame: a second drain observes an empty set', async () => {
         const { mirror, bridge, batches } = await harness();
         bridge.reconcile(
             mirror.applyState(stateEnvelope([{ kind: 'spawn', snapshot: entity(1) }])),
@@ -312,7 +312,7 @@ describe('the interpolation buffer sits between the send rate and the frame rate
         expect(renderer.localTransformOf(node)!.position.x).toBeCloseTo(100, 6);
     });
 
-    it('patches on the frames between two envelopes — which is the whole point of it', async () => {
+    it('patches on the frames between two envelopes: which is the whole point of it', async () => {
         const { mirror, bridge, renderer, batches } = await harness();
         const local = spawn(mirror, bridge);
         const node = bridge.nodeFor(local)!;
@@ -381,7 +381,7 @@ describe('the interpolation buffer sits between the send rate and the frame rate
         bridge.pushTransforms(0);
         move(mirror, 1, 2, { posX: 100 });
         bridge.pushTransforms(SEND_INTERVAL);
-        // A second of standstill — a stopped entity and an unsent one look the same.
+        // A second of standstill: a stopped entity and an unsent one look the same.
         bridge.pushTransforms(1);
         expect(renderer.localTransformOf(node)!.position.x).toBe(100);
 
@@ -562,7 +562,34 @@ describe('the manifest and the template table', () => {
         };
         await bridge.loadManifest(manifest);
         await bridge.loadManifest(manifest);
-        // One entry, not two: the renderer's own intent map is what answers "already declared".
+        // One entry, not two: a declared name is not handed to the renderer twice.
+        expect(renderer.inspect().assets.map((a) => a.name)).toStrictEqual(['coin.png']);
+    });
+
+    it('reports how many assets failed, and retries one a later manifest names again', async () => {
+        const { bridge, renderer } = await harness();
+        const realLoad = renderer.loadAssets.bind(renderer);
+        let failing = true;
+        const asked: string[][] = [];
+        renderer.loadAssets = async (entries) => {
+            asked.push(entries.map((e) => e.name));
+            if (!failing) return realLoad(entries);
+            return {
+                loaded: [],
+                failed: entries.map((e) => ({ name: e.name, reason: '404' })),
+                queued: false,
+            };
+        };
+        const manifest = {
+            assets: [{ key: assetId('coin.png'), kind: 'texture' as const, url: '/coin.png' }],
+            templates: [],
+        };
+
+        expect(await bridge.loadManifest(manifest)).toBe(1);
+        failing = false;
+        expect(await bridge.loadManifest(manifest)).toBe(0);
+
+        expect(asked).toStrictEqual([['coin.png'], ['coin.png']]);
         expect(renderer.inspect().assets.map((a) => a.name)).toStrictEqual(['coin.png']);
     });
 
@@ -763,7 +790,7 @@ describe('the manifest and the template table', () => {
     it('refuses a child list past the node bound', async () => {
         const { bridge, mirror, renderer } = await harness();
         const wide: TemplateChild[] = [];
-        for (let i = 0; i <= MAX_TEMPLATE_NODES; i++)
+        for (let i = 0; i <= MAX_VISUAL_NODES; i++)
             wide.push({ kind: 'sprite', texture: assetId('x.png') });
         await bridge.loadManifest({
             assets: [],
@@ -782,7 +809,7 @@ describe('the manifest and the template table', () => {
         const { bridge, mirror, renderer } = await harness();
         const packed: TemplateChild[] = [];
         // Root plus this group fills the batch to the cap, so its two siblings have nowhere to go.
-        for (let i = 0; i < MAX_TEMPLATE_NODES - 2; i++) {
+        for (let i = 0; i < MAX_VISUAL_NODES - 2; i++) {
             packed.push({ kind: 'sprite', texture: assetId('x.png') });
         }
         await bridge.loadManifest({
@@ -807,7 +834,7 @@ describe('the manifest and the template table', () => {
     });
 
     it('refuses a malformed child rather than letting the renderer throw out of the frame', async () => {
-        // A sprite with no texture is a caller bug to the renderer, and it throws — from inside a
+        // A sprite with no texture is a caller bug to the renderer, and it throws, from inside a
         // spawn that would unwind the frame and end the session as a hostile peer.
         const { bridge, mirror, renderer } = await harness();
         await bridge.loadManifest({

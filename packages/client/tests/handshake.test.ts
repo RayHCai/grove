@@ -93,7 +93,7 @@ interface Harness {
     runSilent(n?: number): void;
     /** Frames where the server broadcasts but NEVER acks: the ring grows while the link lives. */
     runSilentWithTraffic(n?: number): void;
-    /** Delivers in-flight frames without advancing anything — loopback is one deliver() late. */
+    /** Delivers in-flight frames without advancing anything; loopback is one deliver() late. */
     flush(): void;
     now(): number;
 }
@@ -153,7 +153,7 @@ async function harness(
             for (let i = 0; i < n; i++) {
                 now += TICK;
                 const ticked = advanceServer();
-                // The server broadcasts on its send cadence, acking whatever input arrived — the
+                // The server broadcasts on its send cadence, acking whatever input arrived: the
                 // ordinary traffic the stall triggers are fed by.
                 if (ticked && server.welcomed && server.tick % everySendTick === 0) server.ackAll();
                 frames.frame(now);
@@ -280,7 +280,7 @@ describe('a snapshot too big for one frame', () => {
         untilLive(h);
 
         expect(h.client.state).toBe('live');
-        // Every entity, from both the chunks and the welcome's own remainder — the session opens on
+        // Every entity, from both the chunks and the welcome's own remainder; the session opens on
         // one world, and chunking is invisible past the fold.
         expect(h.client.mirror?.index.size).toBe(4);
         expect(h.client.stats().nodeCount).toBe(4);
@@ -492,7 +492,7 @@ describe('a template first used mid-session draws with its real visual', () => {
     it('merges a manifest envelope into a session that joined before it existed', async () => {
         const h = await harness();
         untilLive(h);
-        // Nothing in the welcome — this client joined before the template came into use.
+        // Nothing in the welcome: this client joined before the template came into use.
         expect(h.client.stats().nodeCount).toBe(0);
 
         h.server.sendRaw({
@@ -531,7 +531,7 @@ describe('a refusal is distinguishable from a drop', () => {
         expect(h.client.state).toBe('failed');
         const failure = h.client.lifecycle.failure;
         expect(failure?.kind).toBe('rejected');
-        // "update the game" rather than "try again" — which is what serverProtocolVersion buys.
+        // "update the game" rather than "try again", which is what serverProtocolVersion buys.
         expect(failure).toMatchObject({ serverProtocolVersion: PROTOCOL_VERSION });
         expect(failure && 'reason' in failure && failure.reason).toContain('update');
         expect(h.client.mirror).toBeUndefined();
@@ -623,7 +623,7 @@ describe('the steady state', () => {
         h.run(2);
         const local = h.client.mirror!.index.local(1 as never)!;
 
-        // The transform arrives BEFORE its counterpart — the WebTransport case, where the two ride
+        // The transform arrives BEFORE its counterpart: the WebTransport case, where the two ride
         // different streams and FIFO no longer orders them. The server's clock is untouched here.
         h.server.sendTransforms([transformDiff(1, { posX: 42 })], h.server.tick + 1);
         h.runSilent(1);
@@ -786,7 +786,7 @@ describe('stalling refuses input', () => {
         expect(h.client.state).toBe('live');
     });
 
-    it('sends a synthetic release EVEN WHILE STALLED — it can only end ghost gameplay', async () => {
+    it('sends a synthetic release EVEN WHILE STALLED: it can only end ghost gameplay', async () => {
         const h = await harness(
             {},
             { bindings: [{ kind: 'button', code: 'keys:KeyW', action: 'jump' }] },
@@ -868,7 +868,7 @@ describe('stalling refuses input', () => {
     });
 
     it('counts the ack deadline in TICKS, so a fast display does not stall a slow sim early', async () => {
-        // A frame-counting deadline fires 3× early at 20 Hz — the tick-versus-frame unit confusion,
+        // A frame-counting deadline fires 3× early at 20 Hz: the tick-versus-frame unit confusion,
         // in the one place it decides whether controls go dead.
         const h = await harness(
             { simRate: 20, sendRate: 20 },
@@ -881,7 +881,7 @@ describe('stalling refuses input', () => {
         h.runSilentWithTraffic(4);
         expect(h.client.ring.size).toBeGreaterThan(0);
 
-        // ACK_STALL_TICKS of a 20 Hz sim is 3 s — far longer than the same count of 60 fps frames,
+        // ACK_STALL_TICKS of a 20 Hz sim is 3 s, far longer than the same count of 60 fps frames,
         // so a frame-counting implementation is already stalled here.
         h.runSilentWithTraffic(ACK_STALL_TICKS + 5);
         expect(h.client.state).toBe('live');
@@ -940,7 +940,7 @@ describe('resync', () => {
 
     it('does not resync at 20 Hz either, where the one-tick lead floor has least room', async () => {
         // The thinnest margin in the system: `LEAD_MIN` is one tick whatever a tick is worth, and
-        // at 20 Hz the counter advances only every third display frame — so any phase-drift
+        // at 20 Hz the counter advances only every third display frame, so any phase-drift
         // sensitivity in the invariant check shows up here first.
         const h = await harness({ simRate: 20, sendRate: 20, snapshotTick: 0 });
         untilLive(h, 40);
@@ -951,7 +951,7 @@ describe('resync', () => {
 
     it('holds the invariant across a slow link, where both terms degrade together', async () => {
         // Latency-independent: under a slow path `depictedTick` is stale by the downlink, which is
-        // the same delay the headroom deficit reflects — so a sign test needs no threshold.
+        // the same delay the headroom deficit reflects, so a sign test needs no threshold.
         const h = await harness({ snapshotTick: 0 }, { latency: 8 });
         untilLive(h, 60);
         h.run(300);
@@ -1071,7 +1071,7 @@ describe('an untrusted frame ends up as state, never as a throw', () => {
 
     it('fails as `peer` when an op is malformed deeper than the boundary checks reach', async () => {
         // The backstop: a spawn with no transform throws inside the mirror, and without a catch it
-        // unwinds through `frame()` into the frame source — ending the session with no state to
+        // unwinds through `frame()` into the frame source, ending the session with no state to
         // show.
         const h = await harness();
         untilLive(h);
