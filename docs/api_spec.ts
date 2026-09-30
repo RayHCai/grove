@@ -1,9 +1,9 @@
-// Game Platform — MVP API surface
+// Game Platform: MVP API surface
 // Origin at world center, y-up, pixels. Durations in seconds.
 // Sim 60 Hz, replication 20 Hz. Input is tick-indexed.
 //
 // Six engine-owned objects, never subclassed: Entity Player Camera Asset Game HUD.
-// Game IS the world — owns entities, holds build-time bounds, scopes spawn/find. No
+// Game IS the world: owns entities, holds build-time bounds, scopes spawn/find. No
 // Scene (§3.4). HUD is one player's whole interface, client-side only (§12).
 //
 // All creator code lives in a script. Its `extends` clause declares two things:
@@ -12,7 +12,7 @@
 //
 //   class Pickup extends SyncedScript<Entity> { ... }
 //
-// Host decides @serverState scope, location decides trust — orthogonal (§5).
+// Host decides @serverState scope, location decides trust: orthogonal (§5).
 //
 // ATTACHMENT: panel-primary. A script dropped on a template in the editor tray attaches
 // to every instance spawned from it, wired at load time before any @onStart. No
@@ -23,7 +23,7 @@
 // wall-clock, no client-local values (camera.viewport), engine-guaranteed iteration
 // order. The denied forms are refused when the bundle is BUILT, before tsc, so the
 // diagnostic points at the creator's own line. ClientScript is exempt but may not write
-// authoritative state — that half is specified and NOT IMPLEMENTED, so a client-side write
+// authoritative state; that half is specified and NOT IMPLEMENTED, so a client-side write
 // to authoritative state lands locally and desyncs until the authority overwrites it.
 //
 // Server -> client is implicit @serverState replication; client -> server is always an
@@ -45,7 +45,7 @@ declare module '@platform/engine' {
     }
 
     // (M) camera.viewport arithmetic is why math owns geometry, not just scalars.
-    // WORLD-SPACE, y-up (top > bottom), recomputed per tick — one rect convention, so the
+    // WORLD-SPACE, y-up (top > bottom), recomputed per tick: one rect convention, so the
     // renderer's cull test and a creator's query cannot disagree about what a bounds means.
     // Collider.bounds is read as a LOCAL extent box centered on the entity's position; the
     // rotated world-space AABB it is specified as is not computed yet.
@@ -62,7 +62,7 @@ declare module '@platform/engine' {
     // code-reachable Template object: a runtime API that rewrote one would make "what does
     // this template do" unanswerable from the editor (§8.1).
 
-    // Panel-side only — never referenced from code (§12).
+    // Panel-side only, never referenced from code (§12).
     type HUDAnchor =
         | 'top-left'
         | 'top-center'
@@ -129,7 +129,7 @@ declare module '@platform/engine' {
     // ─── input ─────────────────────────────────────────────────────
 
     // Bindings are panel-authored and per-player. Actions double as the network protocol.
-    // NOT IMPLEMENTED: this object stores what you write and nothing reads it — the client
+    // NOT IMPLEMENTED: this object stores what you write and nothing reads it; the client
     // resolves its own binding table, so a rebind here changes no input.
     interface InputBindings {
         rebind(action: string, bindings: string[]): void;
@@ -171,7 +171,7 @@ declare module '@platform/engine' {
     // dropdown of panel-loaded keys); the object form is for text-tier code.
     type AssetRef = Asset | string;
 
-    // TODO: why do we have this — could be getAsset/getAssets helpers instead
+    // TODO: why do we have this? Could be getAsset/getAssets helpers instead
     const assets: {
         get(key: string): Asset | null; // null for an unknown key
         all(kind?: AssetKind): Asset[]; // real array
@@ -180,7 +180,7 @@ declare module '@platform/engine' {
     // ─── attachments ───────────────────────────────────────────────
 
     // Leaf capabilities, not objects. Specified as template-configured; NOT IMPLEMENTED that
-    // way — nothing in the template pipeline writes either one, so an entity carries a collider
+    // way: nothing in the template pipeline writes either one, so an entity carries a collider
     // only where a script assigned it, and carries no animation at all. Contrast a script,
     // which is code the creator wrote.
 
@@ -188,8 +188,8 @@ declare module '@platform/engine' {
     // @onCollide and getTouching answer nothing for that entity.
     interface Collider {
         enabled: boolean; // read by nobody yet; a collider that exists always counts
-        isTrigger: boolean; // fires enter/exit instead of blocking — nothing blocks yet either way
-        readonly bounds: Bounds; // see Bounds TODO
+        isTrigger: boolean; // fires enter/exit instead of blocking; nothing blocks yet either way
+        readonly bounds: Bounds; // a LOCAL extent box centered on the entity; see Bounds
     }
 
     // The per-entity animator, not one clip. Clips are panel-authored assets referenced by
@@ -201,7 +201,7 @@ declare module '@platform/engine' {
         speed: number;
 
         // On screen now: a running play() clip, else the state machine's pick.
-        // '' when nothing plays — never null.
+        // '' when nothing plays, never null.
         readonly clip: string;
     }
 
@@ -211,6 +211,9 @@ declare module '@platform/engine' {
     // lifecycle, tags.
     class Entity {
         readonly id: string;
+        // The runtime's generation-packed slot handle: stable for this entity's life on this
+        // machine, meaningless on any other, so it never belongs in @serverState.
+        readonly entityId: number;
         readonly owner: Player | null; // null for non-player entities
 
         readonly position: Vec3;
@@ -230,7 +233,7 @@ declare module '@platform/engine' {
         faceToward(target: Entity | Vec3): this; // (B)
         distanceTo(target: Entity | Vec3): number; // (B)
 
-        // timed motion — awaitable; -To suffix = absolute, bare verb = relative
+        // timed motion: awaitable; -To suffix = absolute, bare verb = relative
         glideTo(x: number, y: number, seconds: number, easing?: Easing): Promise<void>; // (B)
         glideBy(dx: number, dy: number, seconds: number, easing?: Easing): Promise<void>; // (B)
         fadeTo(opacity: number, seconds: number): Promise<void>; // (B)
@@ -246,26 +249,26 @@ declare module '@platform/engine' {
         readonly parent: Entity | null;
         readonly children: Entity[];
 
-        // tags — a set, not a field
+        // tags: a set, not a field
         tag(name: string): this; // (B) adds
         untag(name: string): this; // (B)
         hasTag(name: string): boolean; // (B)
         readonly tags: string[];
 
-        // attachments — template-configured
+        // attachments: template-configured
         collider?: Collider;
         animation?: Animation;
 
-        // Pull-based counterpart to @onCollide — "am I still on the plate" vs "we just
+        // Pull-based counterpart to @onCollide: "am I still on the plate" vs "we just
         // touched". Filters the contact set BaseMovement.move already wrote this tick, so a
         // per-tick call is cheap.
         //
         // Blocking and trigger colliders both count; isTrigger decides whether you were
         // stopped, not whether you are touching. Excludes self and own parent/children,
         // engine-stable order, empty array / false without a collider, never null. Static
-        // entities are reported individually — there is no merged geometry to hide them in.
+        // entities are reported individually; there is no merged geometry to hide them in.
         //
-        // opts.asSeen resolves against the world as the acting client saw it — same rules
+        // opts.asSeen resolves against the world as the acting client saw it, same rules
         // and the same not-yet-keyed caveat as FindQuery.asSeen above.
         getTouching(tag?: string, opts?: { asSeen?: boolean }): Entity[]; // real array
         isTouching(tag?: string, opts?: { asSeen?: boolean }): boolean; // (B) block-tier spelling
@@ -278,35 +281,42 @@ declare module '@platform/engine' {
         // call is recorded nowhere and nothing is drawn or played.
         // TODO: check how Scratch/Unity store, load, play and interrupt animations
         play(clip: AssetRef, opts?: { loop?: boolean }): Promise<void>; // (B) frame animation; `opts` is accepted and ignored
-        stopAnimation(): this; // (B) accepted and ignored — nothing interrupts a clip yet
+        stopAnimation(): this; // (B) accepted and ignored; nothing interrupts a clip yet
         playEffect(name: AssetRef, opts?: { loop?: boolean }): this; // (B) cosmetic, client-side; `opts` is accepted and ignored
 
-        // Speech bubbles — replicated, one per entity, engine-placed. No per-player scope: a
+        // Speech bubbles: replicated, one per entity, engine-placed. No per-player scope: a
         // bubble is entity state everyone sees, so a private message is a HUD widget (§3.7).
-        say(text: string): this; // (B) persists
-        say(text: string, seconds: number): Promise<void>; // (B) auto-clears
-        think(text: string): this; // (B) accepted and ignored — no thought bubble is drawn
+        // NOT IMPLEMENTED: no bubble is replicated or drawn, so say and clearSay reach no
+        // client; the timed form still awaits its seconds.
+        say(text: string): this; // (B) accepted; reaches no client
+        say(text: string, seconds: number): Promise<void>; // (B) awaits seconds; reaches no client
+        think(text: string): this; // (B) accepted and ignored; no thought bubble is drawn
         think(text: string, seconds: number): Promise<void>; // awaits seconds; draws nothing
-        clearSay(): this; // (B)
+        clearSay(): this; // (B) accepted; reaches no client
 
         // lifecycle
         destroy(): void; // (B) cascades to attached children
         readonly alive: boolean;
 
-        // Scripts — many per entity. The template drop covers every instance (§8.1); this
+        // Scripts: many per entity. The template drop covers every instance (§8.1); this
         // covers THIS entity only and leaves the template untouched.
         //
-        // Any Entity-hosted class fits, and its own base class still decides location —
+        // Any Entity-hosted class fits, and its own base class still decides location:
         // adding a Synced or Server script from a ClientScript is a load-time error. Runs
         // @onStart during the call. Re-adding an existing class is a no-op, so it is safe
         // from a handler that may run twice. No removeScript in MVP.
-        addScript(script: new () => BaseScript<Entity>): this;
+        // `props` is what an inspector would configure: each key is written onto the instance
+        // after construction and before @serverState hoists, so it overrides that initializer.
+        addScript(
+            script: new (props?: Record<string, unknown>) => BaseScript<Entity>,
+            props?: Record<string, unknown>,
+        ): this;
 
         // The running INSTANCE of a class attached to this entity, or null. The one thing an
         // import cannot express: a module reference names a class, and a script needs the
         // object holding this host's state.
         //
-        // Exact class identity, never instanceof — two subclasses of one base are different
+        // Exact class identity, never instanceof: two subclasses of one base are different
         // scripts, and a query for the base would otherwise answer with whichever was
         // attached first. Null is the ordinary answer, not a fault: the class may not be
         // attached here, and on a client it is only attached if this end's location runs it.
@@ -320,12 +330,12 @@ declare module '@platform/engine' {
         // from an ordinary script (§4.1).
 
         // Fire `event` at THIS entity's @onEvent handlers. Direct address, not a broadcast;
-        // no game-wide bus in MVP. Also the only runtime path to a handler — no entity.on(),
+        // no game-wide bus in MVP. Also the only runtime path to a handler: no entity.on(),
         // so an entity's handler set is fully known from its attached scripts, which is what
         // lets the engine reject location violations at load time and keep dispatch order
         // stable. Cross-entity reactions go through addScript or @serverState.
         //
-        // Dispatch is synchronous — every handler runs to its first await before send
+        // Dispatch is synchronous: every handler runs to its first await before send
         // returns, so an await-free handler's @serverState writes are visible on the next
         // line. The promise settles once all handlers finish, so await is a sequencing tool,
         // not a second delivery mode.
@@ -336,7 +346,7 @@ declare module '@platform/engine' {
         // Payload lands unwrapped on ctx.data: plain values plus Entity/Player refs only, no
         // functions or closures. Omitted payload gives {}, never undefined.
         //
-        // Runs at the sender's location — from a SyncedScript on both machines, from a
+        // Runs at the sender's location: from a SyncedScript on both machines, from a
         // ServerScript server-side only, reaching clients as ordinary replication.
         // Location-mismatched handlers are skipped; a dead entity is a no-op that resolves
         // (§5.8).
@@ -346,7 +356,7 @@ declare module '@platform/engine' {
     // ─── camera ────────────────────────────────────────────────────
 
     // Per-player and client-owned: presentation only, never authoritative. A ClientScript
-    // may write it — the one exception to "client code never writes" — and server code
+    // may write it (the one exception to "client code never writes"), and server code
     // retains access for scripted sequences.
     class Camera {
         readonly player: Player; // whose view this is
@@ -363,7 +373,7 @@ declare module '@platform/engine' {
         // position, zoom and the client's window, so it is aspect-correct for free. Normally
         // contained by bounds.
         //
-        // Depends on client-reported window size, so NOT readable from a SyncedScript — two
+        // Depends on client-reported window size, so NOT readable from a SyncedScript: two
         // aspect ratios would diverge. Readable from a ServerScript, free from a
         // ClientScript.
         //
@@ -372,8 +382,11 @@ declare module '@platform/engine' {
         readonly viewport: Bounds;
 
         follow(target: Player | Entity | null): this; // (B) defaults to the owner's avatar
+        // What follow() last stored. A client frame resolves only an Entity target; a Player
+        // target is held and reported, and the camera stays at its own point.
+        followTarget: Player | Entity | null;
         moveTo(x: number, y: number): this; // (B)
-        shake(strength: number, seconds: number): this; // (B) NOT IMPLEMENTED — effect sink, so inert
+        shake(strength: number, seconds: number): this; // (B) NOT IMPLEMENTED: effect sink, so inert
 
         // NOT IMPLEMENTED as timed: both cut to the destination and resolve at once, so
         // `seconds` and `easing` are accepted and ignored.
@@ -381,19 +394,22 @@ declare module '@platform/engine' {
         glideTo(x: number, y: number, seconds: number, easing?: Easing): Promise<void>; // (B)
         zoomTo(zoom: number, seconds: number, easing?: Easing): Promise<void>; // (B)
 
-        // Camera behaviors — lookahead, deadzone, shake-on-land — are Camera-hosted scripts,
+        // Camera behaviors (lookahead, deadzone, shake-on-land) are Camera-hosted scripts,
         // naturally ClientScript<Camera> since they may read viewport.
         //
         // Not tray-attached: a camera is one object per player, not a template, so the panel
         // attaches these from the camera's own inspector. Runtime semantics match
         // Entity.addScript.
-        addScript(script: new () => BaseScript<Camera>): this;
+        addScript(
+            script: new (props?: Record<string, unknown>) => BaseScript<Camera>,
+            props?: Record<string, unknown>,
+        ): this; // props as Entity.addScript
     }
 
     // ─── player ────────────────────────────────────────────────────
 
     // Position is state; clicks are ordinary actions (mouse:left is a binding). Per-player
-    // and private — one player's cursor is invisible to others.
+    // and private: one player's cursor is invisible to others.
     // NOT IMPLEMENTED: every read answers zero/null/false and every write is a no-op. Pointer
     // input reaches creator code through @onClick and cursor-bound axis actions instead.
     interface Cursor {
@@ -409,16 +425,23 @@ declare module '@platform/engine' {
         // events never fire
     }
 
-    // Identity, engine-owned and never subclassed. The avatar is a body — if a value
+    // Identity, engine-owned and never subclassed. The avatar is a body: if a value
     // survives respawn it belongs on a Player-hosted script, not on the avatar.
     //
     //   class Account extends ServerScript<Player> { @serverState credits = 0 }  ->  player.credits
     class Player {
         readonly id: string;
-        readonly name: string;
+        // Writable, but there is no rename op: a tab already present keeps the old name, and
+        // only a later joiner's snapshot carries the new one.
+        name: string;
         readonly index: number;
-        readonly avatar: Entity;
-        // TODO: if readonly, how is it set? How does this relate to camera.follow — does
+        readonly avatar: Entity; // throws while the player has no body; test hasAvatar first
+        readonly hasAvatar: boolean;
+        // The roster's own setter, reachable because nothing hides it: null parts the body from
+        // the player without destroying it, an entity makes it the avatar again. It journals
+        // nothing, so no tab is told either way.
+        setAvatar(entity: Entity | null): void;
+        // TODO: if readonly, how is it set? How does this relate to camera.follow? Does
         // following set player.camera? Need a setter so a custom Camera subclass can be used
         // per player; when custom cameras are instantiated is unspecified.
         readonly camera: Camera;
@@ -436,13 +459,13 @@ declare module '@platform/engine' {
 
         // The movement class driving this player's avatar. Player-only: it turns one
         // player's input into one body's motion. Still an Entity-hosted script under the
-        // hood (host is the avatar) — this is the named accessor the panel's animation config
+        // hood (host is the avatar); this is the named accessor the panel's animation config
         // and other scripts reach for.
         //
         // Undefined until a movement class is attached; a spectating or bodiless player has
         // none.
         movement?: Movement;
-        // The Player template carries one movement slot, not a list — the only way the tray
+        // The Player template carries one movement slot, not a list: the only way the tray
         // treats movement differently from any other script (§8.1). This is the code path
         // for a mid-session swap.
         setMovement(movement: new () => BaseMovement): this; // concrete subclasses only
@@ -451,7 +474,10 @@ declare module '@platform/engine' {
         // scripts dropped on it attach to every player at load time, the same mechanism that
         // spawns the avatar and attaches its camera with no join handler (§3.6). This is the
         // code path for THIS player only; semantics match Entity.addScript.
-        addScript(script: new () => BaseScript<Player>): this;
+        addScript(
+            script: new (props?: Record<string, unknown>) => BaseScript<Player>,
+            props?: Record<string, unknown>,
+        ): this; // props as Entity.addScript
 
         // This player's instance of a class. Semantics match Entity.getScript.
         getScript<T extends BaseScript<Player>>(script: ScriptQuery<T>): T | null;
@@ -469,7 +495,7 @@ declare module '@platform/engine' {
     // error.
     //
     // Widget verbs live HERE, not on HUDScreen, because a widget name is unique across the
-    // whole HUD (panel-enforced) — that keeps `hud.text('score', ...)` one block with no
+    // whole HUD (panel-enforced); that keeps `hud.text('score', ...)` one block with no
     // screen lookup. Widgets are authored and positioned in the panel; code never passes a
     // position, size or parent, since layout requires nesting and the block tier forbids it.
     class HUD {
@@ -486,18 +512,29 @@ declare module '@platform/engine' {
         enable(widget: string, enabled?: boolean): void; // (B) omitted = true
         disable(widget: string): void; // (B)
 
+        // What the verbs above last wrote to one widget, or null before any has.
+        widget(name: string): Readonly<{
+            text?: string;
+            number?: number;
+            fraction?: number;
+            icon?: AssetRef;
+            countdown?: Countdown;
+            visible: boolean;
+            enabled: boolean;
+        }> | null;
+
         // ── screens ─────────────────────────────────────────────────
         // Screens are panel-authored and addressed by name, so `hud.open('pause')` is one
-        // block — this is what "screen switching from a ClientScript<Game>" (§1.1) calls.
+        // block; this is what "screen switching from a ClientScript<Game>" (§1.1) calls.
         //
         // Opening runs the screen's @onStart and its scripts' constructors; closing runs
-        // @onEnd and DISCARDS client state, so a menu reopens fresh — keep a value across
+        // @onEnd and DISCARDS client state, so a menu reopens fresh; keep a value across
         // opens on a Player-hosted script. Both are idempotent.
         open(screen: string): HUDScreen; // (B) returns the now-open screen
         close(screen: string): void; // (B)
         closeAll(): void; // (B)
 
-        // Lookup for an authored screen, open or not — the only way to get a HUDScreen other
+        // Lookup for an authored screen, open or not, the only way to get a HUDScreen other
         // than this.host. null for an unknown name.
         screen(name: string): HUDScreen | null;
         readonly screens: HUDScreen[]; // every authored screen; real array
@@ -510,7 +547,7 @@ declare module '@platform/engine' {
 
     // ─── hud screen ────────────────────────────────────────────────
 
-    // A panel-authored screen: a named set of widgets in a layout — pause menu, shop,
+    // A panel-authored screen: a named set of widgets in a layout: pause menu, shop,
     // inventory, or the always-on gameplay overlay. Engine-owned and never subclassed;
     // creator logic attaches as ClientScript<HUDScreen>, which is where a menu keeps its
     // client state (selection, scroll, pending).
@@ -518,7 +555,7 @@ declare module '@platform/engine' {
     // The prefix is load-bearing: `Screen` reads as the display, and there are many of these
     // per player but only one display.
     //
-    // ClientScript is the only legal location — a screen exists on one machine. Widgets are
+    // ClientScript is the only legal location: a screen exists on one machine. Widgets are
     // NOT reachable from here; they are hud.* by name (§12.1).
     class HUDScreen {
         readonly name: string;
@@ -529,12 +566,19 @@ declare module '@platform/engine' {
         open(): void; // (B)
         close(): void; // (B)
 
+        // The HUD's own state half of open/close, reachable because nothing hides it: it writes
+        // the flag alone, so the screen stays in openScreens and close() then finds nothing to do.
+        setVisible(visible: boolean): void;
+
         // Panel attachment is the default path; this is the code path. Many per screen.
         //
         // Not tray-attached: a screen is panel-authored layout, so its scripts come from the
-        // screen's own inspector. Attached at open, not at load — a screen never opened has
+        // screen's own inspector. Attached at open, not at load; a screen never opened has
         // no script instances (§12.2).
-        addScript(script: new () => BaseScript<HUDScreen>): this;
+        addScript(
+            script: new (props?: Record<string, unknown>) => BaseScript<HUDScreen>,
+            props?: Record<string, unknown>,
+        ): this; // props as Entity.addScript
     }
 
     // ─── game ──────────────────────────────────────────────────────
@@ -552,16 +596,16 @@ declare module '@platform/engine' {
         // NOT IMPLEMENTED as specified: it resolves against the rewind ring's most recent
         // capture rather than the asker's view tick, so there is no clamp to maxRewindMs and
         // no check against that connection's latency estimate. The two load-time errors it is
-        // specified to raise — asSeen in a SyncedScript, which would desync on a server-only
-        // ring, and asSeen from a handler carrying no view tick — are not raised either.
+        // specified to raise (asSeen in a SyncedScript, which would desync on a server-only
+        // ring, and asSeen from a handler carrying no view tick) are not raised either.
         // Present-tense is the default and covers every non-shot case.
         //
-        // Placeholder name — likely rendered as a panel toggle on the hat rather than a
+        // Placeholder name: likely rendered as a panel toggle on the hat rather than a
         // visible flag in the block tier.
         asSeen?: boolean;
     }
 
-    // The session AND the world — one object, because a game has exactly one of each and a
+    // The session AND the world: one object, because a game has exactly one of each and a
     // second name for the same scope bought nothing (§3.4). Engine-owned and never
     // subclassed; orchestration lives in Game-hosted scripts, which is also where global
     // @serverState is declared.
@@ -574,7 +618,7 @@ declare module '@platform/engine' {
         // Every live entity. The Game owns them, receives the loop, and scopes queries.
         readonly entities: Entity[];
 
-        // The world's extent, FIXED AT BUILD TIME from the panel-authored world — not a
+        // The world's extent, FIXED AT BUILD TIME from the panel-authored world, not a
         // runtime value and not writable, which removes "which world am I in" from the API.
         // find({ in }) resolves regions inside it; camera.bounds is specified to leash to it
         // and does not yet.
@@ -591,11 +635,14 @@ declare module '@platform/engine' {
 
         // Not tray-attached: there is one Game, so its scripts come from the game's own
         // inspector. Load-time, before @onStart.
-        addScript(script: new () => BaseScript<Game>): this;
+        addScript(
+            script: new (props?: Record<string, unknown>) => BaseScript<Game>,
+            props?: Record<string, unknown>,
+        ): this; // props as Entity.addScript
 
         // The Game's instance of a class, and the common case: `game.getScript(Rules)` is how
         // any script reaches the one object holding the match. Semantics match
-        // Entity.getScript — including the null, which on a client is the usual answer, since
+        // Entity.getScript, including the null, which on a client is the usual answer, since
         // a ServerScript is not attached there. A client reads the same values through the
         // @serverState the authority replicated onto this facade instead.
         getScript<T extends BaseScript<Game>>(script: ScriptQuery<T>): T | null;
@@ -613,10 +660,10 @@ declare module '@platform/engine' {
     // ─── scripts ───────────────────────────────────────────────────
 
     // Where every line of creator logic lives. Host in the type parameter, location in the
-    // base class — those two words are the whole execution model:
+    // base class: those two words are the whole execution model:
     //
     //               ServerScript          ClientScript           SyncedScript
-    //   Entity      authoritative checks  local-only cosmetics   interaction — the default
+    //   Entity      authoritative checks  local-only cosmetics   interaction (the default)
     //   Player      balances, persistence local prefs, own HUD   predicted own-player state
     //   Game        the orchestrator      music, screen switching shared rules (rarely)
     //   Camera      scripted sequences    camera feel            load-time error
@@ -626,11 +673,11 @@ declare module '@platform/engine' {
     // presentation, so there is no authoritative copy to reconcile against. HUDScreen
     // rejects ServerScript because a screen only exists on a client.
     //
-    // HUD itself is NOT a host — anything attached to it a ClientScript<Game> could hold,
+    // HUD itself is NOT a host: anything attached to it a ClientScript<Game> could hold,
     // and `hud` is ambiently reachable from both.
     type Host = Entity | Player | Game | Camera | HUDScreen;
 
-    // Never extended directly — it names no location, so the engine could not decide where
+    // Never extended directly: it names no location, so the engine could not decide where
     // to run it. Load-time error. Extend one of the three below.
     //
     // ONE member. `host` is the only thing that varies with what a script is attached to,
@@ -651,12 +698,12 @@ declare module '@platform/engine' {
     }
 
     // A script class as `getScript` names one. Abstract-tolerant, so a base class is a legal
-    // query — and the match is still on that exact class, not on its subclasses.
+    // query, and the match is still on that exact class, not on its subclasses.
     type ScriptQuery<T> = abstract new (...args: never[]) => T;
 
     // Server only, and authoritative. The trust boundary lives here: @onRequest is
-    // declarable on this base and no other. Exempt from the determinism rules — no second
-    // copy to agree with — so it is the only place that may read storage and leaderboards.
+    // declarable on this base and no other. Exempt from the determinism rules (no second
+    // copy to agree with), so it is the only place that may read storage and leaderboards.
     //
     //   class Account extends ServerScript<Player> {
     //       @serverState credits = 0;                     // -> player.credits
@@ -670,7 +717,7 @@ declare module '@platform/engine' {
     //
     // Plain fields are client state: no decorator, one machine, dies with the host.
     // @serverState here is a load-time error pointing at request(), as is writing
-    // authoritative state — entity transforms, mutating wrapper calls, spawn/destroy. Reads
+    // authoritative state: entity transforms, mutating wrapper calls, spawn/destroy. Reads
     // are unrestricted, as are Math.random, wall-clock time and camera.viewport.
     //
     // NOT IMPLEMENTED: neither refusal is raised. Wiring rejects the host/location pairings
@@ -707,13 +754,13 @@ declare module '@platform/engine' {
 
     // Runs on both machines from one source: the server's run is authoritative, the client
     // re-produces it from the same tick-indexed inputs so the result is on screen
-    // immediately, and on disagreement the server wins and the engine reconciles invisibly —
+    // immediately, and on disagreement the server wins and the engine reconciles invisibly:
     // no creator-facing rollback hooks. The default for interactive logic, because the
     // creator writes one program and never learns the word "client"; the price is the
     // header's determinism rules, enforced at load time.
     //
     // A Player-hosted synced script re-produces only on that player's client. A Game-hosted
-    // one re-produces on every client, multiplying the cost of a determinism slip — prefer
+    // one re-produces on every client, multiplying the cost of a determinism slip; prefer
     // ServerScript for orchestration.
     //
     //   class Pickup extends SyncedScript<Entity> {
@@ -727,18 +774,18 @@ declare module '@platform/engine' {
 
     // ─── movement ──────────────────────────────────────────────────
 
-    // A SyncedScript<Entity> with a sealed tick — not a fourth kind of thing, so everything
+    // A SyncedScript<Entity> with a sealed tick, not a fourth kind of thing, so everything
     // §5 says about scripts applies. One instance wraps one body and owns its motion for the
     // tick; abstract, so there is no half-configured default to inherit.
     //
     // PLAYER-ONLY: the body is always a player's avatar, so the accessor is player.movement
     // (§3.2), and attaching to an unowned entity is a load-time error. A patrolling guard or
-    // a conveyor uses the Entity motion verbs instead — this class turns input into
+    // a conveyor uses the Entity motion verbs instead; this class turns input into
     // locomotion, and an AI has no input.
     //
     // TopDownMovement, PlatformerMovement and the rest are platform-authored subclasses in
     // the panel's drawer; the engine has no notion of a "mode". Style-specific state
-    // (gravity, jump, facing, dash) belongs to the subclass — only what no subclass could
+    // (gravity, jump, facing, dash) belongs to the subclass; only what no subclass could
     // compute for itself lives here.
     //
     // ONE write channel: velocity (px/sec, world units, setVelocity) is the only
@@ -760,9 +807,9 @@ declare module '@platform/engine' {
         readonly velocity: Vec3; // px/sec, post-collision; write with setVelocity
         readonly intent: Vec3; // -1..1 per axis; direction, not speed
 
-        enabled: boolean; // (B) see "enabled" below — not a freeze
+        enabled: boolean; // (B) see "enabled" below, not a freeze
 
-        // velocity.length(), px/sec — a read, not a knob. Locomotion speed is the subclass's
+        // velocity.length(), px/sec: a read, not a knob. Locomotion speed is the subclass's
         // own field, since it is specific to the movement style.
         readonly speed: number;
 
@@ -771,7 +818,7 @@ declare module '@platform/engine' {
         maxSpeed: number;
 
         // Which side stopped the body, written by the engine in move(). The one collision
-        // result no subclass could compute for itself — a platformer's grounded is a getter
+        // result no subclass could compute for itself: a platformer's grounded is a getter
         // over blocked.down. Read it on the tick AFTER resolution; there is no collision
         // hook.
         //
@@ -801,13 +848,13 @@ declare module '@platform/engine' {
         // so a single-axis edit passes this.velocity.x through.
         setVelocity(x: number, y: number, z?: number): void;
 
-        // Override the player's own steering — a cutscene walk, a tractor beam, an ice slide
+        // Override the player's own steering: a cutscene walk, a tractor beam, an ice slide
         // that ignores held keys. The engine refills intent from the move axes every tick, so
         // this is a standing order only for the ticks a script keeps writing it. Decomposed
         // and normalized: one block with x/y slots, no vector literal.
         setIntent(x: number, y: number, z?: number): void; // (B)
 
-        // Discrete velocity change, px/sec, never dt-scaled — jump, recoil, bounce pad.
+        // Discrete velocity change, px/sec, never dt-scaled: jump, recoil, bounce pad.
         // Mass-free, so a tuned value transfers between bodies. Public because external force
         // comes from @onCollide handlers, which are synced too. 2D subclasses wrap this as
         // jump() and cardinal pushes.
@@ -846,7 +893,7 @@ declare module '@platform/engine' {
         protected approach(current: number, target: number, rate: number): number;
 
         // Engine-owned, not overridable: sweeps along velocity, slides on contacts, writes
-        // position, corrects velocity, sets blocked. No collision hook — a subclass reacts to
+        // position, corrects velocity, sets blocked. No collision hook: a subclass reacts to
         // blocked next tick rather than intercepting resolution, which keeps client and server
         // in step. NOT IMPLEMENTED past the write: it integrates position and neither sweeps
         // nor slides.
@@ -864,7 +911,7 @@ declare module '@platform/engine' {
     // load-bearing: `Platformer` alone would name a whole category of experience (§4.1).
 
     class TopDownMovement extends BaseMovement {
-        walkSpeed: number; // its own knob — `speed` is a reading
+        walkSpeed: number; // its own knob; `speed` is a reading
         protected accelerate(intent: Vec3, dt: number): void; // instant, no inertia
     }
 
@@ -876,9 +923,9 @@ declare module '@platform/engine' {
         friction: number;
 
         // NOT IMPLEMENTED in effect: `grounded` reads blocked.down, which nothing sets, so it
-        // is always false and jump() always returns without a push — a platformer is not
+        // is always false and jump() always returns without a push; a platformer is not
         // buildable until the physics sink lands.
-        readonly grounded: boolean; // getter over blocked.down — derived, not tracked
+        readonly grounded: boolean; // getter over blocked.down; derived, not tracked
 
         protected accelerate(intent: Vec3, dt: number): void;
         protected applyForces(dt: number): void;
@@ -887,8 +934,8 @@ declare module '@platform/engine' {
 
     // Alias for the attached subclass; the engine substitutes the template's.
     //
-    // TODO: this is BaseMovement, so the knobs a creator reaches for — walkSpeed,
-    // jumpStrength — need a cast:
+    // TODO: this is BaseMovement, so the knobs a creator reaches for (walkSpeed,
+    // jumpStrength) need a cast:
     //   (player.movement as PlatformerMovement).walkSpeed = 300
     // Only the panel knows which subclass is attached. Same shape as the hoisted
     // @serverState TODO below; one panel-emitted-types answer should cover both. See §4.1.
@@ -897,7 +944,7 @@ declare module '@platform/engine' {
     // ─── events ────────────────────────────────────────────────────
 
     // Default per event type: 'ignore' for input/click/update, 'concurrent' for collision.
-    // Locking is per script instance. No 'queue' mode — see §5.7.
+    // Locking is per script instance. No 'queue' mode; see §5.7.
     type Concurrency = 'concurrent' | 'ignore' | 'restart';
 
     // Which edge of a sustained event fires the handler. Inputs have all three;
@@ -918,7 +965,7 @@ declare module '@platform/engine' {
         alive: boolean; // false once the owning host dies
 
         // The send() or request() payload, unwrapped: send('drain', { amount: 10 }) reads as
-        // ctx.data.amount. Always an object — {} for events carrying no payload — so a
+        // ctx.data.amount. Always an object ({} for events carrying no payload), so a
         // handler never null-checks it. Read-only: writing reaches neither the sender nor
         // other handlers.
         //
@@ -938,7 +985,7 @@ declare module '@platform/engine' {
     // These are STANDARD (TC39 Stage 3) decorators, not the legacy `experimentalDecorators`
     // kind: one uniform `(value, context) => replacement | void` shape, where the context
     // object carries what legacy passed positionally. Creator-facing syntax is identical
-    // under both — `@onEvent('hit')`, `@serverState credits = 0` — so nothing in a game
+    // under both (`@onEvent('hit')`, `@serverState credits = 0`), so nothing in a game
     // script changes. What differs is that a field decorator returns an INITIALIZER, which
     // is what makes per-instance @serverState implementable at all; a legacy
     // `(target, key)` property decorator only ever sees the prototype, and under
@@ -954,8 +1001,8 @@ declare module '@platform/engine' {
         context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Return>,
     ) => void;
 
-    // Field decorators. `value` is ALWAYS undefined — a field has no value at decoration
-    // time — and the returned function runs per instance with the authored initial value.
+    // Field decorators. `value` is ALWAYS undefined (a field has no value at decoration
+    // time), and the returned function runs per instance with the authored initial value.
     type StateDecorator = <This, Value>(
         value: undefined,
         context: ClassFieldDecoratorContext<This, Value>,
@@ -967,18 +1014,18 @@ declare module '@platform/engine' {
     //
     // The event name is one of three kinds, told apart by its namespace prefix:
     //
-    //   'jump'          panel-defined action  — rebindable, per-player, the default
-    //   'keys:KeyW'     platform device event — physical code, NOT rebindable
-    //   'drain'         creator-sent          — delivered by entity.send()
+    //   'jump'          panel-defined action:   rebindable, per-player, the default
+    //   'keys:KeyW'     platform device event:  physical code, NOT rebindable
+    //   'drain'         creator-sent:           delivered by entity.send()
     //
-    // Prefer bare action names. A device literal opts out of the binding layer —
+    // Prefer bare action names. A device literal opts out of the binding layer:
     // input.rebind cannot reach it, per-player binding sets do not apply, and two local
-    // co-op players on one keyboard both fire the same handler — so the panel warns on
+    // co-op players on one keyboard both fire the same handler, so the panel warns on
     // publish (§7.1). Device codes are PHYSICAL positions, never characters: 'keys:KeyW' is
     // the left-ring-finger key on any layout.
     //
     // Creator-sent names share the namespace with panel actions, so the panel rejects a
-    // collision with a declared action. Only 'press' fires — a send is instantaneous, so
+    // collision with a declared action. Only 'press' fires: a send is instantaneous, so
     // 'release' and 'hold' are a load-time error here.
     //
     //   class Target extends SyncedScript<Entity> {
@@ -1004,12 +1051,12 @@ declare module '@platform/engine' {
     const onEnd: HandlerDecorator;
 
     // Roster changes, not per-player setup. Game-hosted ServerScript only.
-    const onPlayerJoin: HandlerDecorator; // optional — avatar spawns without it
+    const onPlayerJoin: HandlerDecorator; // optional; avatar spawns without it
     const onPlayerLeave: HandlerDecorator; // best-effort; not a save path
 
     function onEvent(event: string, opts?: HandlerOptions): HandlerDecorator;
 
-    // Sugar over onEvent — each sets opts.on and nothing else. Text tier only; the block tier
+    // Sugar over onEvent: each sets opts.on and nothing else. Text tier only; the block tier
     // renders one hat with action and phase dropdowns, so these cost no palette slots.
     // Canonical spelling is @onEvent(action, { on: ... }); these exist because release/hold
     // handlers read better with the phase in the name.
@@ -1026,7 +1073,7 @@ declare module '@platform/engine' {
 
     // ─── state ─────────────────────────────────────────────────────
 
-    // One decorator. Scope follows the HOST of the script it is declared on — location
+    // One decorator. Scope follows the HOST of the script it is declared on; location
     // decides trust, host decides scope:
     //   <Game>      -> global, replicated to everyone
     //   <Player>    -> per-player, replicated to that player
@@ -1035,7 +1082,7 @@ declare module '@platform/engine' {
     //   <HUDScreen> -> not permitted; use a plain field (ClientScript is client state)
     //
     // The name is the whole contract: the property lives on the SERVER, which owns,
-    // replicates and — on a <Player> host — PERSISTS it: a player-hosted value is checkpointed
+    // replicates and, on a <Player> host, PERSISTS it: a player-hosted value is checkpointed
     // against that player's record and restored the next time they join. A <Game>- or
     // <Entity>-hosted value is authoritative and replicated for the session it lives in, and is
     // not carried into the next one. There is no @persist, since on a player host authoritative
@@ -1079,14 +1126,14 @@ declare module '@platform/engine' {
     }
 
     // The shared base of the four stateful wrappers. A field holding one is authoritative
-    // WITHOUT a @serverState decorator — the wrapper's own methods mark the replication
-    // channel — so "is this field replicated state" is an `instanceof StatefulWrapper`
+    // WITHOUT a @serverState decorator (the wrapper's own methods mark the replication
+    // channel), so "is this field replicated state" is an `instanceof StatefulWrapper`
     // rather than a class-name list to keep in sync, and a creator subclass inherits the
     // marking.
     //
     // The three engine members answer the four questions a wrapper cannot when it is
     // constructed as a field initializer, before any host, host record or field name
-    // exists. They are called by wiring, never by creator code — a creator only ever sees
+    // exists. They are called by wiring, never by creator code; a creator only ever sees
     // the domain methods on the subclasses below.
     abstract class StatefulWrapper {
         // Supplies the identity a field initializer lacks: which host record to mark and
@@ -1108,7 +1155,7 @@ declare module '@platform/engine' {
         set(amount: number, player?: Player): void; // (B)
         of(player: Player): number; // (B)
         top(n: number): Player[]; // (B)
-        reset(): void; // (B) manual — the engine never resets it for you
+        reset(): void; // (B) manual; the engine never resets it for you
     }
 
     class Leaderboard extends StatefulWrapper {
@@ -1140,8 +1187,8 @@ declare module '@platform/engine' {
     // ─── motion helpers ────────────────────────────────────────────
 
     // The math that takes a body or camera rather than a scalar, so NOT (M): each writes
-    // replicated state and is cancelled when its host dies. The pure curve moved to math —
-    // sine for oscillate, the circle for orbit, the easing tables for tween — leaving these
+    // replicated state and is cancelled when its host dies. The pure curve moved to math (
+    // sine for oscillate, the circle for orbit, the easing tables for tween), leaving these
     // as the lifecycle around it.
 
     function oscillate(entity: Entity, axis: 'x' | 'y', amount: number, seconds: number): void; // (B)
@@ -1202,14 +1249,14 @@ declare module '@platform/engine' {
     // always "the server", so there is nothing to address. Callable from any ClientScript,
     // whatever its host.
     //
-    // No return value — the answer arrives as replicated @serverState, same as send(), and
+    // No return value: the answer arrives as replicated @serverState, same as send(), and
     // payload restrictions match it. More than 16 calls in one frame ride the frames after it,
     // since a request carries no seq and so has no ordering claim. The rate limit is the whole
     // input channel per connection rather than per (player, name), and a frame arriving over
     // it is dropped, never queued.
     function request(name: string, payload?: Record<string, unknown>): void;
 
-    // Server-side entry point for the above, and the ONLY one — a separate decorator from
+    // Server-side entry point for the above, and the ONLY one: a separate decorator from
     // @onEvent so the trust boundary is a searchable word.
     //
     // Declarable on a ServerScript and nowhere else: a ClientScript handling its own request
@@ -1217,7 +1264,7 @@ declare module '@platform/engine' {
     // checked. Both are load-time errors.
     //
     // ctx.player is engine-supplied from the connection and unforgeable.
-    // ctx.data is the ONLY untrusted ctx.data in the API — validate it.
+    // ctx.data is the ONLY untrusted ctx.data in the API; validate it.
     // ctx.from is null; there is no sending entity.
     //
     //   class Storekeeper extends ServerScript<Game> {
@@ -1231,7 +1278,7 @@ declare module '@platform/engine' {
     //   }
     //
     // Unhandled names are dropped; the dev-console log for one is not written yet. Concurrency defaults to
-    // 'ignore' per instance — note a Game-hosted script has ONE instance, so that serializes
+    // 'ignore' per instance; note a Game-hosted script has ONE instance, so that serializes
     // across all players (§5.9).
     function onRequest(name: string, opts?: HandlerOptions): HandlerDecorator;
 }
