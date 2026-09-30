@@ -1,5 +1,5 @@
 // Two machines must produce identical results from identical inputs, which the built-in
-// transcendentals do not guarantee — so these use polynomial range-reduction over exact IEEE-754
+// transcendentals do not guarantee, so these use polynomial range-reduction over exact IEEE-754
 // operations only. Only sin, cos, atan, exp and log approximate; the rest derive by identity.
 
 const PI = 3.141592653589793;
@@ -8,7 +8,7 @@ const INV_HALF_PI = 0.6366197723675814;
 
 // π/2 in three pieces that sum to it, each holding the bits the one before it dropped. `PIO2_1`'s
 // low 33 bits are zero, so `n * PIO2_1` is exact for every quadrant count this reduction sees and
-// the subtraction below loses nothing — which is the whole reason the split exists.
+// the subtraction below loses nothing, which is the whole reason the split exists.
 const PIO2_1 = 1.5707963267341256;
 const PIO2_2 = 6.077100506303966e-11;
 const PIO2_2T = 2.0222662487959506e-21;
@@ -26,8 +26,8 @@ function reduceQuadrant(x: number): { q: number; r: number } {
     // rounds away bits that matter once n is large, and `PIO2_2T` is exactly those bits.
     const mid = head - n * PIO2_2;
     const tail = n * PIO2_2T - (head - mid - n * PIO2_2);
-    // Arithmetic, never bitwise: `n & 3` wraps at int32, so every angle past 2^31 quadrants — which
-    // is a reachable double — would select the wrong kernel rather than merely lose precision.
+    // Arithmetic, never bitwise: `n & 3` wraps at int32, so every angle past 2^31 quadrants (which
+    // is a reachable double) would select the wrong kernel rather than merely lose precision.
     return { q: ((n % 4) + 4) % 4, r: mid - tail };
 }
 
@@ -109,7 +109,7 @@ export function tan(x: number): number {
 
 // ±1/(2k+3), highest power first, so the Horner walk below runs smallest term first. Carried to
 // x³³ because the halving in `atan` only brings the argument down to 0.414, where stopping at x²¹
-// leaves 7e-11 of truncation — three orders worse than everything else in this module.
+// leaves 7e-11 of truncation, three orders worse than everything else in this module.
 const ATAN_COEFFICIENTS = [
     1 / 33,
     -1 / 31,

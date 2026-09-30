@@ -79,7 +79,7 @@ describe('create', () => {
     it.each(['EntityTable', 'NodeStore'])('names itself in the full-table error: %s', (label) => {
         const t = table(label);
         // Filling 2^24 slots through `create` is not testable, so the table is restored from a
-        // snapshot whose slot array already reaches the cap — the next slot is one past the end.
+        // snapshot whose slot array already reaches the cap; the next slot is one past the end.
         const atCap: (Rec | null)[] = [];
         atCap.length = MAX_INDEX + 1;
         t.apply({ records: atCap, generations: [], freeList: [], live: 0 }, cloneRec);

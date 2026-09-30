@@ -1,4 +1,4 @@
-// `clamp` and `lerp` are on the creator surface too, so this is their one home — the engine
+// `clamp` and `lerp` are on the creator surface too, so this is their one home; the engine
 // re-exports rather than reimplements, and each name resolves to one function.
 
 /** Radians per degree. Rotation is authored in degrees everywhere above the backend. */

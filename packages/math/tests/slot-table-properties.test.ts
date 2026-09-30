@@ -49,7 +49,7 @@ class Model {
 function audit(t: SlotTable<TestId, Rec>, model: Model): void {
     expect(t.liveCount).toBe(model.live.size);
     // Slots are only appended when every existing one is live, so the table never grows past the
-    // most records that were alive at once — the density every parallel structure-of-arrays
+    // most records that were alive at once, the density every parallel structure-of-arrays
     // store's flat scan depends on, and the thing a mislaid freelist quietly costs.
     expect(t.slotCount).toBeLessThanOrEqual(model.peakLive);
 

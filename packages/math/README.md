@@ -4,14 +4,14 @@ Pure, dependency-free primitives: vectors, bounds, easing, scalar helpers, seede
 deterministic transcendentals, generation-packed handles, the slot table behind them, and
 typed-array growth.
 
-The leaf of the package graph — it depends on nothing, and every other package may depend on it.
+The leaf of the package graph: it depends on nothing, and every other package may depend on it.
 Determinism is a property of arithmetic, so isolating the arithmetic means the
 determinism-critical surface is a package a reader can hold in their head, and one that needs
 no world, no clock, and no network.
 
 The creator-facing import is unaffected: `clamp` and `Vec3` are reached from `@platform/engine`
 like the rest of the API, which re-exports them from here so each name resolves to one type. The
-storage primitives — handles, `SlotTable`, the growth helpers, the `numeric.ts` guards, `defined` —
+storage primitives (handles, `SlotTable`, the growth helpers, the `numeric.ts` guards, `defined`)
 are engine-internal and are deliberately not part of that re-export.
 
 ## What's here
@@ -35,9 +35,9 @@ import type { Vec3, Vec3Like, Bounds, Size } from '@platform/math';
 | `slot-table.ts`         | `SlotTable`, `SlotTableSnapshot`                                                                                                                       |
 | `typed-array.ts`        | `growF64`, `growI32`, `growU8`, `grownCapacity`                                                                                                        |
 
-The 22 transcendentals are an enforcement allowlist as much as an implementation — `.oxlintrc.json`
+The 22 transcendentals are an enforcement allowlist as much as an implementation: `.oxlintrc.json`
 refuses each matching `Math.*` property and names the replacement (`Math.random` among them, in
-favour of `SeededRandom`), and `@platform/engine` re-exports the same 22 — so renaming or dropping
+favour of `SeededRandom`), and `@platform/engine` re-exports the same 22, so renaming or dropping
 one is a cross-package change.
 
 Handles are packed arithmetically as `generation * 2^24 + index`, because `<<` coerces to int32
@@ -59,7 +59,7 @@ that in its name so a reader coming from `vec3Length` cannot mistake the two.
 
 **`Bounds` is orientation-agnostic.** The edge names are read in the space that produced them:
 world space is y-up so `top > bottom`, screen space is y-down so `bottom > top`. Nothing here
-assumes a direction — `boundsWidth`/`boundsHeight` return absolute extents, `boundsOverlap`
+assumes a direction: `boundsWidth`/`boundsHeight` return absolute extents, `boundsOverlap`
 compares each axis against its own min/max, and `boundsExpand` grows each edge away from the
 interior. That is what lets one set of helpers serve both spaces.
 
@@ -69,10 +69,10 @@ declares the creator-facing rectangle with writable edges and the spec is author
 is that a creator holding a `Bounds` can write to it, so a getter that returns one must return a
 copy rather than the live object.
 
-**`out` comes first, and is mandatory.** Every helper whose result _is_ the object it writes —
-`vec3Set`, `vec3Copy`, `vec3Normalize`, `boundsSet`, `boundsCopy`, `boundsExpand` — takes `out` as
+**`out` comes first, and is mandatory.** Every helper whose result _is_ the object it writes
+(`vec3Set`, `vec3Copy`, `vec3Normalize`, `boundsSet`, `boundsCopy`, `boundsExpand`) takes `out` as
 its first parameter and returns it, allocating nothing, so a per-frame caller can hit zero
 allocation. There is no defaulted `out`: a caller that wants a fresh object writes
 `boundsExpand(bounds(), b, margin)` and the allocation is visible at the call site. `SlotTable`'s
-`liveIds`/`liveIndices` are the deliberate exception — they return a collection rather than a
+`liveIds`/`liveIndices` are the deliberate exception: they return a collection rather than a
 single value, so the buffer is an optional trailing argument.

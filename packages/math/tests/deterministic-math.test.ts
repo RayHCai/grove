@@ -81,7 +81,7 @@ function agrees(
 describe('sin / cos', () => {
     it('is exact at the quadrant boundaries', () => {
         // The reason cosine has its own kernel rather than being spelled `sin(x + π/2)`: that
-        // spelling lands x = 0 — by far the most common argument — on the least accurate point of
+        // spelling lands x = 0, by far the most common argument, on the least accurate point of
         // the sine kernel's range, and returned 0.9999999439 for cos(0).
         expect(cos(0)).toBe(1);
         expect(sin(0)).toBe(0);
@@ -120,7 +120,7 @@ describe('sin / cos', () => {
 
     it('selects the right quadrant past the int32 wrap', () => {
         // The quadrant count is arithmetic rather than bitwise: `n & 3` wraps at 2^31 quadrants,
-        // which is a reachable double, and would pick the wrong kernel — a sign error, not a
+        // which is a reachable double, and would pick the wrong kernel: a sign error, not a
         // precision one.
         for (const x of [4e9, -4e9, 1e10, -1e10]) {
             expect(Math.abs(sin(x))).toBeLessThanOrEqual(1);
@@ -357,7 +357,7 @@ describe('the derived functions', () => {
 describe('the scratch buffer exp, log and pow share', () => {
     it('carries nothing from one call into the next', () => {
         // `exp`, `log` and the `pow2`/`scalbn` pair behind them all write one module-level
-        // Float64Array, and `pow` runs a `log` and an `exp` through it back to back — so a result
+        // Float64Array, and `pow` runs a `log` and an `exp` through it back to back, so a result
         // could come to depend on which call ran before it, which no accuracy bound would show.
         const xs = sweep(0.1, 40, 500);
         const alone = {

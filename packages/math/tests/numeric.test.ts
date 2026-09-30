@@ -1,4 +1,4 @@
-// `finiteOr` must keep a legitimate negative or zero, and `positiveOr` must reject 0 and -0 —
+// `finiteOr` must keep a legitimate negative or zero, and `positiveOr` must reject 0 and -0,
 // which is the whole difference between them.
 
 import { describe, it, expect } from 'vitest';

@@ -22,7 +22,7 @@ export interface Vec3Like {
     readonly z?: number;
 }
 
-/** A fresh mutable vector. The only allocating helper here — the rest take an `out`. */
+/** A fresh mutable vector. The only allocating helper here; the rest take an `out`. */
 export function vec3(x = 0, y = 0, z = 0): MutableVec3 {
     return { x, y, z };
 }
@@ -51,7 +51,7 @@ export function vec3Length(v: Vec3Like): number {
     return Math.sqrt(x * x + y * y + z * z);
 }
 
-/** Squared length — avoids the sqrt when only comparing magnitudes. */
+/** Squared length: avoids the sqrt when only comparing magnitudes. */
 export function vec3LengthSq(v: Vec3Like): number {
     const x = v.x;
     const y = v.y;
