@@ -51,6 +51,12 @@ export function requireCsrfToken(app: FastifyInstance): onRequestHookHandler {
     };
 }
 
+/** The pair every signed-in scope opens with, in the order that makes a stale session a 401. */
+export function requireSignedIn(app: FastifyInstance): void {
+    app.addHook('onRequest', requireSession);
+    app.addHook('onRequest', requireCsrfToken(app));
+}
+
 /**
  * Refuses a game the viewer does not own, which holding a session says nothing about.
  * A `preHandler`, not `onRequest`: by then the id is validated, so the lookup takes a `GameId`.

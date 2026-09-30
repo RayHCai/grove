@@ -8,17 +8,20 @@ import { s3Storage, unattachedStorage } from './storage.js';
 import { connect, prismaRecords } from './store.js';
 import { sweepTasks } from './sweeper.js';
 
+/** Past this a shutdown is a hung socket, and the platform's own kill would come less politely. */
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+
+// `readEnv` refuses a production process missing any of these, so an absent one here is a
+// development or test process, where every route already answers for the seam it lacks.
 const env = readEnv();
 
-// Named rather than defaulted: with no database behind it every sign-in is a 401 and every route
-// behind the cookie answers as though nobody holds an account, which is what a process pointed at
-// nothing should do rather than refuse to start. The bucket and the streams are the same bargain —
-// a save says it has nowhere to put a file instead of the process failing to boot.
 const db = env.DATABASE_URL === undefined ? undefined : connect(env.DATABASE_URL);
 const records = db === undefined ? unattachedRecords : prismaRecords(db);
 const storage =
-    env.GAMES_BUCKET === undefined ? unattachedStorage : s3Storage(env, env.GAMES_BUCKET);
-const queue = env.REDIS_URL === undefined ? unattachedQueue : redisQueue(env, env.REDIS_URL);
+    env.GAMES_BUCKET === undefined
+        ? unattachedStorage
+        : s3Storage(env, env.GAMES_BUCKET, () => app.log);
+const queue = env.REDIS_URL === undefined ? unattachedQueue : redisQueue(env.REDIS_URL);
 
 // A reset link in the log is a delivered password reset to everybody who can read the log, so this
 // is the one seam chosen by `NODE_ENV` rather than by a URL: a deployed process has no mailer until
@@ -28,6 +31,15 @@ const mailer = env.NODE_ENV === 'production' ? unattachedMailer : loggingMailer(
 
 const app = await buildApp(env, records, httpFleet(env), storage, queue, mailer);
 
+const unattached = [
+    ...(db === undefined ? ['DATABASE_URL'] : []),
+    ...(env.GAMES_BUCKET === undefined ? ['GAMES_BUCKET'] : []),
+    ...(env.REDIS_URL === undefined ? ['REDIS_URL'] : []),
+];
+if (unattached.length > 0) {
+    app.log.warn({ unattached }, 'seams left unattached');
+}
+
 // Started here rather than inside `buildApp`: a test builds the app to drive routes, and a timer
 // re-pushing work every thirty seconds is not something a test asked for.
 const sweeper = sweepTasks(records, queue, env, app.log);
@@ -35,11 +47,21 @@ const sweeper = sweepTasks(records, queue, env, app.log);
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.once(signal, () => {
         sweeper.stop();
+        setTimeout(() => {
+            app.log.error('shutdown did not finish in time');
+            process.exit(1);
+        }, SHUTDOWN_TIMEOUT_MS).unref();
         void app
             .close()
             .then(() => queue.close())
             .then(() => db?.$disconnect())
-            .then(() => process.exit(0));
+            .then(
+                () => process.exit(0),
+                (error: unknown) => {
+                    app.log.error({ err: error }, 'shutdown failed');
+                    process.exit(1);
+                },
+            );
     });
 }
 

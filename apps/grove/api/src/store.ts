@@ -18,6 +18,7 @@ import type {
     AccountRecord,
     GameRecord,
     Records,
+    TaskAdvanced,
     WorkspaceRecord,
     WorkspaceSaved,
 } from './records.js';
@@ -31,6 +32,12 @@ const UNIQUE_VIOLATION = 'P2002';
 const FOREIGN_KEY_VIOLATION = 'P2003';
 /** The row a write named was not there to write. */
 const RECORD_NOT_FOUND = 'P2025';
+
+/**
+ * A save is up to a thousand statements and a bucket PUT, which Prisma's five-second default would
+ * roll back under load. The PUT stays inside: see `saveWorkspace`.
+ */
+const SAVE_TRANSACTION = { maxWait: 10_000, timeout: 30_000 } as const;
 
 /** Long enough that the mail sits in an inbox, short enough that a forwarded one goes stale. */
 const RESET_TTL_MS = 60 * 60 * 1000;
@@ -85,6 +92,7 @@ function asGame(row: Game): GameRecord {
         title: row.title,
         visibility: GameVisibility.parse(row.visibility),
         createdAt: row.createdAt.toISOString(),
+        publishedAt: row.publishedAt?.toISOString() ?? null,
     };
 }
 
@@ -180,8 +188,8 @@ export function prismaRecords(db: PrismaClient): Records {
             // Folded on the way in as well as on the way out, or an address stored lowercase is
             // unreachable to the person who typed it with a capital.
             const claimed = await claimAttempt(db, { email: foldEmail(email) });
-            // The verify runs against the dummy whenever the claim handed back no hash — an unknown
-            // address, an account that holds no password, and a locked one all land here —
+            // The verify runs against the dummy whenever the claim handed back no hash (an unknown
+            // address, an account that holds no password, and a locked one all land here)
             // and it runs before the branch rather than inside it, so no answer is reached without
             // paying argon2 for it. That is one statement and one verify on every path; what is
             // left is whether the join found a row at all, measured at 0.4 ms against a 12.7 ms
@@ -312,7 +320,7 @@ export function prismaRecords(db: PrismaClient): Records {
 
         finishPasswordReset: async (token, next) => {
             // Spent in the same statement that finds it, so two clicks on one link cannot both land
-            // — a read, then a write, is a race with a network round trip inside it.
+            // (a read, then a write, is a race with a network round trip inside it).
             const spent = await db.passwordReset.updateMany({
                 where: {
                     tokenHash: digest(token),
@@ -367,6 +375,16 @@ export function prismaRecords(db: PrismaClient): Records {
             try {
                 const row = await db.game.update({ where: { id: game }, data: { visibility } });
                 return { outcome: 'updated', game: asGame(row) };
+            } catch (error) {
+                if (codeOf(error) === RECORD_NOT_FOUND) return { outcome: 'missing' };
+                throw error;
+            }
+        },
+
+        deleteGame: async (game) => {
+            try {
+                await db.game.delete({ where: { id: game } });
+                return { outcome: 'deleted' };
             } catch (error) {
                 if (codeOf(error) === RECORD_NOT_FOUND) return { outcome: 'missing' };
                 throw error;
@@ -441,21 +459,26 @@ export function prismaRecords(db: PrismaClient): Records {
 
                     // One task per asset this save introduced, pinned to the revision it landed in.
                     // A save of nothing but source creates none, so the typing loop costs nothing.
-                    const tasks: Task[] = [];
-                    for (const asset of plan.upserts.filter((file) => file.kind === 'asset')) {
-                        // oxlint-disable-next-line no-await-in-loop
-                        const row = await tx.task.create({
-                            data: {
-                                gameId: game,
-                                accountId: plan.accountId,
-                                kind: 'ASSET_UPLOAD',
-                                manifestRevision: revision,
-                                assetPath: asset.path,
-                                assetVersionId: asset.versionId,
-                            },
-                        });
-                        tasks.push(asTask(row));
-                    }
+                    const assets = plan.upserts.filter((file) => file.kind === 'asset');
+                    const created = await tx.task.createManyAndReturn({
+                        data: assets.map((asset) => ({
+                            gameId: game,
+                            accountId: plan.accountId,
+                            kind: 'ASSET_UPLOAD' as const,
+                            manifestRevision: revision,
+                            assetPath: asset.path,
+                            assetVersionId: asset.versionId,
+                        })),
+                    });
+                    // In the order the save named them, which RETURNING does not promise.
+                    const order = new Map(assets.map((asset, at) => [asset.path as string, at]));
+                    const tasks: Task[] = created
+                        .toSorted(
+                            (left, right) =>
+                                (order.get(left.assetPath ?? '') ?? 0) -
+                                (order.get(right.assetPath ?? '') ?? 0),
+                        )
+                        .map(asTask);
 
                     const saved = await tx.game.findUniqueOrThrow({
                         where: { id: game },
@@ -463,14 +486,13 @@ export function prismaRecords(db: PrismaClient): Records {
                     });
                     const workspace = asWorkspace(saved);
 
-                    // Inside the transaction on purpose: the revision and the manifest naming it are
-                    // one fact, and a manifest the bucket refused has to leave no revision behind
-                    // for a rollback to point at. It is one small write, and it is the last thing
-                    // this transaction waits on.
+                    // Inside the transaction on purpose: after the commit, a refused PUT leaves a
+                    // revision no manifest names; before the claim, a save that then loses the race
+                    // has already overwritten the winner's manifest at the same key.
                     if (!(await plan.freeze(revision, workspace.files)))
                         throw new ManifestRefused();
                     return { outcome: 'saved', workspace, tasks };
-                })
+                }, SAVE_TRANSACTION)
                 .catch((error: unknown) => {
                     if (error instanceof ManifestRefused) return { outcome: 'unfrozen' as const };
                     throw error;
@@ -567,49 +589,53 @@ export function prismaRecords(db: PrismaClient): Records {
             if (isTerminal(current.status)) return { outcome: 'backwards', task: asTask(current) };
 
             const now = new Date();
-            const moved = await db.task.updateMany({
-                // The guard, not the read above, is what makes this safe: two workers claiming at
-                // once leave one of them matching no row.
-                where: { id: task, status: { in: [...LIVE] } },
-                data: {
-                    status: update.status,
-                    ...(update.detail === undefined ? {} : { detail: update.detail }),
-                    // Counted on every claim, so a task redelivered after a worker died says how
-                    // many boxes have tried it.
-                    ...(update.status === 'IN_PROGRESS'
-                        ? { attempts: { increment: 1 }, startedAt: now }
-                        : {}),
-                    // A task settled without ever being claimed still needs a start: a finish with
-                    // no start is a lifecycle the CHECK refuses and a sweeper cannot reason about.
-                    ...(isTerminal(update.status)
-                        ? { finishedAt: now, startedAt: current.startedAt ?? now }
-                        : {}),
-                },
-            });
-
-            const settled = await db.task.findUniqueOrThrow({ where: { id: task } });
-            if (moved.count === 0) return { outcome: 'backwards', task: asTask(settled) };
-
-            // The verdict is written here rather than by the worker, because the worker holds no
-            // database credential and the file it vouched for is not the one it was told about:
-            // the update matches on the version, so a save that replaced the bytes in the meantime
-            // leaves the row unvalidated instead of inheriting somebody else's pass.
-            if (
-                settled.kind === 'ASSET_UPLOAD' &&
-                settled.status === 'SUCCESSFUL' &&
-                settled.assetPath !== null &&
-                settled.assetVersionId !== null
-            ) {
-                await db.gameFile.updateMany({
-                    where: {
-                        gameId: settled.gameId,
-                        path: settled.assetPath,
-                        versionId: settled.assetVersionId,
+            // One transaction, so a settled upload and the verdict on its file land together: a
+            // crash between them would leave a SUCCESSFUL task whose asset still blocks a publish.
+            return db.$transaction(async (tx): Promise<TaskAdvanced> => {
+                const moved = await tx.task.updateMany({
+                    // The guard, not the read above, is what makes this safe: two workers claiming at
+                    // once leave one of them matching no row.
+                    where: { id: task, status: { in: [...LIVE] } },
+                    data: {
+                        status: update.status,
+                        ...(update.detail === undefined ? {} : { detail: update.detail }),
+                        // Counted on every claim, so a task redelivered after a worker died says how
+                        // many boxes have tried it.
+                        ...(update.status === 'IN_PROGRESS'
+                            ? { attempts: { increment: 1 }, startedAt: now }
+                            : {}),
+                        // A task settled without ever being claimed still needs a start: a finish with
+                        // no start is a lifecycle the CHECK refuses and a sweeper cannot reason about.
+                        ...(isTerminal(update.status)
+                            ? { finishedAt: now, startedAt: current.startedAt ?? now }
+                            : {}),
                     },
-                    data: { validatedVersionId: settled.assetVersionId },
                 });
-            }
-            return { outcome: 'advanced', task: asTask(settled) };
+
+                const settled = await tx.task.findUniqueOrThrow({ where: { id: task } });
+                if (moved.count === 0) return { outcome: 'backwards', task: asTask(settled) };
+
+                // The verdict is written here rather than by the worker, because the worker holds no
+                // database credential and the file it vouched for is not the one it was told about:
+                // the update matches on the version, so a save that replaced the bytes in the meantime
+                // leaves the row unvalidated instead of inheriting somebody else's pass.
+                if (
+                    settled.kind === 'ASSET_UPLOAD' &&
+                    settled.status === 'SUCCESSFUL' &&
+                    settled.assetPath !== null &&
+                    settled.assetVersionId !== null
+                ) {
+                    await tx.gameFile.updateMany({
+                        where: {
+                            gameId: settled.gameId,
+                            path: settled.assetPath,
+                            versionId: settled.assetVersionId,
+                        },
+                        data: { validatedVersionId: settled.assetVersionId },
+                    });
+                }
+                return { outcome: 'advanced', task: asTask(settled) };
+            });
         },
 
         unvalidatedAssets: async (game, limit) => {
@@ -699,7 +725,7 @@ interface Claimed {
  * spend.
  *
  * One statement, and the count happens BEFORE the verify rather than after it. Read-then-verify-then
- * -write leaves a window as wide as argon2 takes — tens of milliseconds under load — in which every
+ * -write leaves a window as wide as argon2 takes (tens of milliseconds under load) in which every
  * request in a burst reads the same unlocked row and every guess gets checked; `FOR UPDATE` makes
  * the attempts queue, and Postgres re-checks the lock predicate against the row each one finds.
  *

@@ -94,8 +94,8 @@ model Game {
 
 /// Every piece of queued work the fleet does, discriminated by `kind`.
 ///
-/// One table rather than one per kind: a build and an asset upload have the same life — claimed,
-/// attempted, settled, swept — and two tables would mean two sweepers, two status routes and two
+/// One table rather than one per kind: a build and an asset upload have the same life (claimed,
+/// attempted, settled, swept) and two tables would mean two sweepers, two status routes and two
 /// sets of monotonic-transition rules.
 model Task {
   id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -171,7 +171,7 @@ enum GameVisibility {
 /// One path in a game's workspace, and the version of the bytes at it.
 ///
 /// The path is the identity: a save upserts and deletes paths, so a row is created, replaced or
-/// gone rather than moved. The bytes are never here — they are at `<gameId>/<kind>/<path>` in the
+/// gone rather than moved. The bytes are never here; they are at `<gameId>/<kind>/<path>` in the
 /// games bucket, and `versionId` names the exact byte-set this row was written for.
 model GameFile {
   gameId String @db.Uuid
@@ -229,7 +229,7 @@ model FleetHost {
 
   liveness FleetLiveness
 
-  /// Fixed for the life of the box's agent, so a change is the box having restarted — which the id
+  /// Fixed for the life of the box's agent, so a change is the box having restarted, which the id
   /// cannot show, because it survives a reboot on purpose.
   incarnation String @db.Uuid
 
@@ -262,7 +262,7 @@ model FleetHostEvent {
   /// The incarnation the box was running, so a restart's events do not read as the last life's.
   incarnation String         @db.Uuid
   at          DateTime       @db.Timestamptz(3)
-  /// Why, where the kind alone does not say it — the signal a suspicion came from, say.
+  /// Why, where the kind alone does not say it: the signal a suspicion came from, say.
   detail      String?        @db.VarChar(512)
 
   /// The operator's read: one box's history, newest first.
