@@ -9,7 +9,7 @@ export class Profile extends ServerScript<Player> {
     @serverState lifetime = 0;
     @serverState best = 0;
 
-    /** This session only, and reset at every join — a seat a departed player left is reused. */
+    /** This session only, and reset at every join: a seat a departed player left is reused. */
     @serverState seat = 0;
     @serverState taken = 0;
 }

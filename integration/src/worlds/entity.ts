@@ -11,7 +11,7 @@ export const TEMPLATE_MARK = 'mark';
 export const TAG_MARK = 'mark';
 export const TAG_SAID = 'said';
 
-/** Where the placed mark sits — fixed, so an expected distance is arithmetic, not a reading. */
+/** Where the placed mark sits: fixed, so an expected distance is arithmetic, not a reading. */
 export const MARK_AT = { x: 120, y: 0 };
 /** Where a joining avatar is put, so every distance and bearing below is known before the run. */
 export const AVATAR_AT = { x: 0, y: 0 };
@@ -90,7 +90,7 @@ export class Body extends ServerScript<Entity> {
 
 export class Director extends ServerScript<Game> {
     @serverState distance = 0;
-    /** The avatar's tags, joined — a list is not a replicated shape, and this is read as text. */
+    /** The avatar's tags, joined: a list is not a replicated shape, and this is read as text. */
     @serverState marks = '';
     @serverState touching = 0;
     /** The same overlap and the same tag, read through the predicate rather than the list. */
@@ -302,7 +302,7 @@ export class Director extends ServerScript<Game> {
     }
 
     #mark(): Entity | null {
-        // By tag rather than by template, which `find` does not query on — the placed mark is the
+        // By tag rather than by template, which `find` does not query on; the placed mark is the
         // only thing in this world carrying it, and an avatar only gets it by pressing for it.
         return game.find({ tag: TAG_MARK }).find((e) => !e.owner) ?? null;
     }

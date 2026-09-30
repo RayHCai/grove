@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
 import type { Session, Tab } from './harness.js';
-import { gameField, newSession, runtimeOf, taggedIn, transformIn } from './harness.js';
+import { openWorld, press, reading, runtimeOf, SETTLE, taggedIn, transformIn } from './harness.js';
 import { SIM_RATE } from '../dist/world.js';
 import {
     DIAL_FAR,
@@ -35,36 +35,19 @@ import {
 
 type Point = { x: number; y: number };
 
-/** Ticks that comfortably outlast one send interval, so a press has been answered. */
-const SETTLE = 12;
 const SWING_TICKS = SWING_SECONDS * SIM_RATE;
 const REV_TICKS = Math.round(((2 * Math.PI) / ORBIT_SPEED) * SIM_RATE);
 const TWEEN_TICKS = Math.ceil(TWEEN_SECONDS * SIM_RATE) + SETTLE;
 const SLOW_TICKS = Math.ceil(DIAL_SLOW_SECONDS * SIM_RATE) + SETTLE;
 const RACE_TICKS = Math.ceil(RACE_SECONDS * SIM_RATE) + SETTLE;
 
-async function open(): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(MOTION_WORLD);
-    const tab = await session.join('one');
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
-
-async function press(session: Session, tab: Tab, widget: string, ticks = SETTLE): Promise<void> {
-    session.press(tab, widget);
-    await session.step(ticks);
-}
+const open = (): ReturnType<typeof openWorld> => openWorld(MOTION_WORLD);
 
 /** One tagged prop as this tab's own mirror holds it. */
 function propOf(tab: Tab, tag: string): EntityId {
     const id = taggedIn(runtimeOf(tab), tag)[0];
     if (id === undefined) throw new Error(`no ${tag} in the mirror`);
     return id;
-}
-
-function reading<T>(tab: Tab, field: string): T | undefined {
-    return gameField<T>(runtimeOf(tab), field);
 }
 
 /** Where the mirror puts a body, once per tick, for as long as asked. */
@@ -86,7 +69,7 @@ async function trail(
 const hi = (xs: readonly number[]): number => xs.reduce((a, b) => Math.max(a, b), -Infinity);
 const lo = (xs: readonly number[]): number => xs.reduce((a, b) => Math.min(a, b), Infinity);
 
-/** The worst a series differs from itself `lag` samples on — zero when `lag` is a true period. */
+/** The worst a series differs from itself `lag` samples on, zero when `lag` is a true period. */
 function driftOver(series: readonly number[], lag: number): number {
     let worst = 0;
     series.forEach((v, i) => {
@@ -191,7 +174,7 @@ describe('a body told to orbit', () => {
         await press(session, tab, W.shiftHub);
 
         // The centre is read once, at the call, so a centre that is an entity is a point and not a
-        // subscription — moving it afterwards leaves the ring where it was.
+        // subscription; moving it afterwards leaves the ring where it was.
         const path = await trail(session, tab, moon, REV_TICKS);
         expect(radiusError(path, HUB_AT)).toBeLessThan(1e-6);
         expect(radiusError(path, { x: HUB_AT.x + HUB_SHIFT, y: HUB_AT.y })).toBeGreaterThan(
@@ -274,7 +257,7 @@ describe('a tween aimed at an entity', () => {
 
         await press(session, tab, W.slideDot, TWEEN_TICKS);
         // `tween` builds its target by plain property get and set for everything, never routing an
-        // Entity through the transform-backed target its own glide verbs use — and `Entity` has no
+        // Entity through the transform-backed target its own glide verbs use, and `Entity` has no
         // `x` accessor for that to reach. The tween ran, and it ran on a field it invented.
         expect(reading<number>(tab, S.shadow)).toBeCloseTo(DOT_SLIDE_TO, 3);
         expect(transformIn(runtimeOf(tab), dot).x).toBe(DOT_AT.x);

@@ -68,7 +68,7 @@ export interface World {
     readonly bindings: readonly StageBinding[];
     readonly screens: readonly ScreenSpec[];
     readonly simRate: number;
-    /** Set, the harness mirrors this widget onto the renderer — proving `hud` reaches drawn art. */
+    /** Set, the harness mirrors this widget onto the renderer, proving `hud` reaches drawn art. */
     readonly mirrorWidget?: string;
 }
 
@@ -122,7 +122,7 @@ function entryOf(s: WorldScript) {
 export function defineWorld(spec: WorldSpec): World {
     const scripts = spec.scripts ?? [];
 
-    // Grouped by source module, because that is the unit a loader reaches a class through — two
+    // Grouped by source module, because that is the unit a loader reaches a class through: two
     // classes exported from one file are one entry, not two.
     const byPath = new Map<string, ScriptModule>();
     for (const s of scripts) {

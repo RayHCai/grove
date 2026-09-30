@@ -87,19 +87,16 @@ export const STATE_ORBS = 'orbs';
 /** Never 'players': a Game-hosted hoist by that name shadows `game.players` itself. */
 export const STATE_PLAYERS = 'seated';
 export const STATE_COLLECTED = 'collected';
-/** The same total, split by how it was earned — walked into, or clicked from across the stage. */
+/** The same total, split by how it was earned: walked into, or clicked from across the stage. */
 export const STATE_WALKED = 'walked';
 export const STATE_POPPED = 'popped';
-/** Crossings into the bonus region and back out of it — the region pass's two edges, counted. */
+/** Crossings into the bonus region and back out of it: the region pass's two edges, counted. */
 export const STATE_RIPENED = 'ripened';
 export const STATE_COOLED = 'cooled';
 export const STATE_SWEEPS = 'sweeps';
-export const STATE_VALUE = 'value';
-export const STATE_RIPE = 'ripe';
 /** Player-hosted: this session's take, and the total that outlives every session. */
 export const STATE_TAKEN = 'taken';
 export const STATE_LIFETIME = 'lifetime';
-export const STATE_BEST = 'best';
 
 export type MatchPhase = 'idle' | 'running';
 

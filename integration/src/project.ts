@@ -118,7 +118,7 @@ export const PROJECT: ProjectManifest = {
             id: templateId(TEMPLATE_AVATAR),
             visual: { kind: 'sprite', texture: assetId(ASSET_DISC) },
             // `Mover` rides the template rather than an `addScript` in the join handler, so the
-            // avatar is running it before that handler returns — and the resulting `attach` op is
+            // avatar is running it before that handler returns, and the resulting `attach` op is
             // what tells the browser to attach its own copy and predict.
             scripts: [
                 { script: scriptId(SCRIPT_MOVER), props: { step: AVATAR_STEP } },

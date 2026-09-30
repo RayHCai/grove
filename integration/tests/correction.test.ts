@@ -1,20 +1,12 @@
-// The drawn-pose lag is not reachable from here — the render bridge is private on the client —
+// The drawn-pose lag is not reachable from here (the render bridge is private on the client),
 // so what is pinned is the ease/snap decision and the convergence, not the interpolation curve.
 
 import { describe, expect, it } from 'vitest';
 import type { Session, Tab } from './harness.js';
-import { avatarIn, newSession, runtimeOf, transformIn } from './harness.js';
+import { avatarIn, openWorld, runtimeOf, SETTLE, transformIn } from './harness.js';
 import { CODE_PUSH, CORRECTION_WORLD, HURL, NUDGE, START, W } from '../dist/worlds/correction.js';
 
-const SETTLE = 12;
-
-async function open(): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(CORRECTION_WORLD);
-    const tab = await session.join('one');
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
+const open = (): ReturnType<typeof openWorld> => openWorld(CORRECTION_WORLD);
 
 function snaps(tab: Tab): number {
     return tab.client.prediction?.counters.snappedCorrections ?? 0;
@@ -58,7 +50,7 @@ describe('a disagreement inside the snap threshold', () => {
         // Under the threshold, so the difference is smoothed into the drawn pose and the counter
         // that records giving up on smoothing stays where it was.
         expect(snaps(tab)).toBe(0);
-        // The simulation itself takes the authority's number outright — easing is a display
+        // The simulation itself takes the authority's number outright; easing is a display
         // concession, never a second opinion about where the entity is.
         await rest(session, tab);
     });
@@ -100,7 +92,7 @@ describe('a disagreement past the snap threshold', () => {
         snapped.session.press(snapped.tab, W.hurl);
         await snapped.session.step(SETTLE * 2);
 
-        // Same world, same input, same handler — only the distance differs, and it is the distance
+        // Same world, same input, same handler: only the distance differs, and it is the distance
         // the threshold reads.
         expect(snaps(eased.tab)).toBe(0);
         expect(snaps(snapped.tab)).toBeGreaterThan(0);

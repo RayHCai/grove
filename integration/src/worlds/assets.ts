@@ -245,7 +245,7 @@ export class Stage extends ClientScript<HUDScreen> {
         hud.text(R.mirror, `${assets.all().length}|${found}`);
     }
 
-    // By tag rather than by template, which `find` does not query on — the placed speaker is the
+    // By tag rather than by template, which `find` does not query on; the placed speaker is the
     // only thing in this world carrying it.
     #speaker(): Entity | null {
         return game.find({ tag: TAG_SPEAKER })[0] ?? null;

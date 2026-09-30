@@ -1,8 +1,8 @@
 // Nearly every case compares a digest of many draws: one number agrees by luck often enough.
 
 import { describe, expect, it } from 'vitest';
-import type { Session, Tab } from './harness.js';
-import { gameField, newSession, runtimeOf } from './harness.js';
+import type { Tab } from './harness.js';
+import { gameField, openWorld, press, runtimeOf } from './harness.js';
 import {
     DRAWS,
     PICKS,
@@ -17,21 +17,7 @@ import {
     W,
 } from '../dist/worlds/randomness.js';
 
-/** Ticks that comfortably outlast one send interval, so a press has been answered. */
-const SETTLE = 12;
-
-async function open(): Promise<{ session: Session; tab: Tab }> {
-    const session = newSession(RANDOMNESS_WORLD);
-    const tab = await session.join('one');
-    await session.live(tab);
-    await session.step(SETTLE);
-    return { session, tab };
-}
-
-async function press(session: Session, tab: Tab, widget: string): Promise<void> {
-    session.press(tab, widget);
-    await session.step(SETTLE);
-}
+const open = (): ReturnType<typeof openWorld> => openWorld(RANDOMNESS_WORLD);
 
 /** One replicated reading off this tab's own mirror, never off the authority that wrote it. */
 function reading(tab: Tab, field: string): string {
