@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HostId, type FleetReport } from '@grove/api-contract';
 import { buildApp } from '../src/app.js';
-import { readEnv } from '../src/env.js';
+import { testEnv } from './fixtures.js';
 import { unattachedRecords, type Records } from '../src/records.js';
 
 const BEARER = 'c'.repeat(32);
@@ -11,17 +11,7 @@ const HOST_ID = HostId.parse('3f2504e0-4f89-41d3-9a0c-0305e82c3301');
 const INCARNATION = '2b1c6f70-9d3a-4a21-8f55-0c9f7a1d4e88';
 const EVENT_ID = 'c5a1f0e2-7b34-4d89-9a6c-1e2f3a4b5c6d';
 
-const env = readEnv({
-    NODE_ENV: 'test',
-    SESSION_SECRET: 'a'.repeat(32),
-    GAME_TOKEN_SECRET: 'b'.repeat(32),
-    FLEET_SECRET: BEARER,
-    TRUSTED_PROXIES: 'loopback',
-    GAMES_CDN_URL: 'https://cdn.grove.example',
-    PLATFORM_ORIGIN: 'https://grove.example',
-    EDITOR_ORIGIN: 'https://editor.grove.example',
-    SERVER_MANAGER_URL: 'http://server-manager.grove.internal:4003',
-});
+const env = testEnv({ FLEET_SECRET: BEARER });
 
 const report: FleetReport = {
     hosts: [

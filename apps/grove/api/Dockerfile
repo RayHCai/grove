@@ -12,7 +12,9 @@ FROM ${NODE_IMAGE} AS base
 ARG PNPM_VERSION
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 ENV PNPM_HOME=/usr/local/share/pnpm
-ENV PATH=/usr/local/share/pnpm:${PATH}
+# pnpm links global binaries into `$PNPM_HOME/bin`, and refuses `--global` outright when that
+# directory is not on PATH -- `$PNPM_HOME` alone was the bin directory only through pnpm 10.
+ENV PATH=${PNPM_HOME}/bin:${PATH}
 ENV npm_config_store_dir=/pnpm-store
 ENV TURBO_TELEMETRY_DISABLED=1
 ENV DO_NOT_TRACK=1
@@ -34,9 +36,11 @@ RUN turbo prune @grove/api --docker --out-dir /prune
 # not change a dependency.
 FROM base AS install
 COPY --from=prune /prune/json/ ./
-# The root `prepare` runs on this install and `turbo prune` carries no root script, so without this the
-# install fails resolving it — before it can reach the check that would have skipped it.
-COPY scripts/install-hooks.mjs ./scripts/install-hooks.mjs
+# The root `prepare` runs on this install and `turbo prune` carries no root script, so without these
+# the install fails resolving it, before it can reach the check that would have skipped it. Named one
+# by one rather than as `scripts/`, so editing an unrelated root script does not invalidate the install
+# below; extend this when `prepare` grows another import.
+COPY scripts/install-hooks.mjs scripts/toolchain.mjs ./scripts/
 RUN --mount=type=cache,id=grove-pnpm-store,target=/pnpm-store \
     pnpm install --frozen-lockfile
 
@@ -54,11 +58,13 @@ RUN --mount=type=cache,id=grove-pnpm-store,target=/pnpm-store \
 
 FROM base AS runtime
 ENV NODE_ENV=production
+# Prisma picks its query engine by the libssl it finds, and the slim base ships none to find.
+RUN apt-get update     && apt-get install --yes --no-install-recommends openssl     && rm -rf /var/lib/apt/lists/*
 WORKDIR /service
 COPY --from=build --chown=node:node /service ./
 USER node
 # `node` rather than curl: the runtime already ships an HTTP client, and a second one is a second
 # stream of advisories to track for no new capability.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD node -e "fetch('http://127.0.0.1:'+(process.env.API_PORT||4000)+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+    CMD node -e "fetch('http://127.0.0.1:'+(process.env.API_PORT||process.env.PORT||4000)+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 CMD ["node", "dist/main.js"]

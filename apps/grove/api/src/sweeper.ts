@@ -11,7 +11,7 @@ const SWEEP_WIDTH = 50;
  * Re-announces work nothing was ever told about.
  *
  * The row is written before the push, so the failure this exists for is a task committed and a
- * message that never reached its stream — a Redis that was down for a second, a process that died
+ * message that never reached its stream: a Redis that was down for a second, a process that died
  * between the two. Without this, that task sits in NOT_STARTED until somebody notices.
  *
  * It only ever re-pushes: a consumer group already redelivers what a dead worker claimed, so a task

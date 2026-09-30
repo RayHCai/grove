@@ -31,3 +31,9 @@ export function verifyFleetSecret(env: Env) {
         }
     };
 }
+
+/**
+ * The route config every fleet route carries: the browser limit is per address, and a few workers
+ * behind one address would share one budget while the bearer is already their gate.
+ */
+export const UNLIMITED = { rateLimit: false } as const;

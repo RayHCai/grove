@@ -3,20 +3,20 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { ErrorBody, GameId, PublishedVersion, Task } from '@grove/api-contract';
 import type { TaskQueue } from '../queue.js';
 import type { Records } from '../records.js';
-import { requireCsrfToken, requireGameOwner, requireSession } from '../session.js';
+import { requireGameOwner, requireSignedIn } from '../session.js';
+import { unattached } from '../reply.js';
 
 /** How many unverified assets a refusal names before the list stops being something to read. */
 const NAMED_ASSETS = 10;
 
 /**
  * Turning the saved draft into a version. A publish carries no body: it checks that every asset has
- * been verified, then writes a build row and pushes its id. The row goes first — a lost push is
+ * been verified, then writes a build row and pushes its id. The row goes first: a lost push is
  * work a sweeper still finds.
  */
 export function publishingRoutes(records: Records, queue: TaskQueue): FastifyPluginAsyncZod {
     return async (app) => {
-        app.addHook('onRequest', requireSession);
-        app.addHook('onRequest', requireCsrfToken(app));
+        requireSignedIn(app);
         app.addHook('preHandler', requireGameOwner(records));
 
         app.post(
@@ -50,9 +50,8 @@ export function publishingRoutes(records: Records, queue: TaskQueue): FastifyPlu
                         .send({ code: 'conflict', message: 'save before publishing' });
                 }
 
-                // Every asset has to have been verified before anything compiles the game holding
-                // it: a build reads the bytes a manifest names, and a build box is the one place
-                // in the fleet that evaluates a creator's code at all.
+                // Every asset has to have been verified before a build pins the game holding it: a
+                // published build is what every browser and game box joining it then loads.
                 const unverified = await records.unvalidatedAssets(
                     request.params.gameId,
                     NAMED_ASSETS,
@@ -74,9 +73,7 @@ export function publishingRoutes(records: Records, queue: TaskQueue): FastifyPlu
                     return reply.code(404).send({ code: 'not_found', message: 'no such game' });
                 }
                 if (queued.outcome === 'unattached') {
-                    return reply
-                        .code(501)
-                        .send({ code: 'internal', message: 'no task store is attached' });
+                    return unattached(reply, 'task store');
                 }
 
                 // A second publish of a manifest already queued gets the first task back rather

@@ -9,20 +9,20 @@ import {
     objectKey,
 } from '@grove/api-contract';
 import type { Records } from '../records.js';
-import { requireCsrfToken, requireGameOwner, requireSession } from '../session.js';
+import { requireGameOwner, requireSignedIn } from '../session.js';
 import type { Storage } from '../storage.js';
+import { unattached } from '../reply.js';
 
 /**
  * Where an asset's bytes are going.
  *
  * The answer is a presigned PUT and nothing else. Nothing is recorded here: a ticket the editor
  * never uses must not leave a row behind, so what puts an asset in a game is the save that names
- * its path afterwards — and that save reads back what actually landed.
+ * its path afterwards, and that save reads back what actually landed.
  */
 export function assetRoutes(records: Records, storage: Storage): FastifyPluginAsyncZod {
     return async (app) => {
-        app.addHook('onRequest', requireSession);
-        app.addHook('onRequest', requireCsrfToken(app));
+        requireSignedIn(app);
         app.addHook('preHandler', requireGameOwner(records));
 
         app.post(
@@ -48,9 +48,7 @@ export function assetRoutes(records: Records, storage: Storage): FastifyPluginAs
                     request.body.contentType,
                 );
                 if (signed.outcome === 'unattached') {
-                    return reply
-                        .code(501)
-                        .send({ code: 'internal', message: 'no games bucket is attached' });
+                    return unattached(reply, 'games bucket');
                 }
                 if (signed.outcome !== 'signed') {
                     return reply

@@ -1,11 +1,14 @@
 import type {
+    Account,
     FileKind,
     FleetReport,
+    Game,
     GameId,
     GameVisibility,
     MediaType,
     PlayableVersion,
     PlayerId,
+    Profile,
     PublishedVersion,
     Task,
     TaskId,
@@ -16,27 +19,10 @@ import type {
     WorkspacePath,
 } from '@grove/api-contract';
 
-/** An account as its owner sees it; never the password hash — no column of it reaches here. */
-export interface AccountRecord {
-    playerId: PlayerId;
-    email: string;
-    displayName: string;
-    createdAt: string;
-}
+/** An account as its owner sees it; never the password hash, since no column of it reaches here. */
+export type AccountRecord = Account;
 
-/** An account as anyone else sees it: a name to render, and the id it belongs to. */
-export interface Profile {
-    playerId: PlayerId;
-    displayName: string;
-}
-
-export interface GameRecord {
-    gameId: GameId;
-    ownerId: PlayerId;
-    title: string;
-    visibility: GameVisibility;
-    createdAt: string;
-}
+export type GameRecord = Game;
 
 /** Only `created` names an account; `taken` is one address already answering to somebody. */
 export type AccountCreated =
@@ -93,7 +79,7 @@ export type TaskQueued =
 
 /**
  * `backwards` is a redelivered attempt trying to walk a settled task back, which is refused rather
- * than applied — it carries the task as it stands so the caller can stop rather than retry.
+ * than applied; it carries the task as it stands so the caller can stop rather than retry.
  */
 export type TaskAdvanced =
     | { outcome: 'advanced'; task: Task }
@@ -104,6 +90,9 @@ export type GameCreated = { outcome: 'created'; game: GameRecord } | { outcome: 
 
 export type GameUpdated =
     { outcome: 'updated'; game: GameRecord } | { outcome: 'missing' } | { outcome: 'unattached' };
+
+export type GameDeleted =
+    { outcome: 'deleted' } | { outcome: 'missing' } | { outcome: 'unattached' };
 
 /** `wrong_password` covers a missing one: a caller who cannot re-authenticate may not proceed. */
 export type Reauthed =
@@ -125,7 +114,7 @@ export type ResetBegun =
     | { outcome: 'no_account' }
     | { outcome: 'unattached' };
 
-/** `refused` is a key that was wrong, already spent, or past its hour — one answer for all. */
+/** `refused` is a key that was wrong, already spent, or past its hour: one answer for all. */
 export type ResetFinished =
     { outcome: 'reset'; player: PlayerId } | { outcome: 'refused' } | { outcome: 'unattached' };
 
@@ -159,6 +148,8 @@ export interface Records {
     /** One game as the allocator reads it, which is the only read there that is not the owner's. */
     gameOf(game: GameId): Promise<GameRecord | undefined>;
     setVisibility(game: GameId, visibility: GameVisibility): Promise<GameUpdated>;
+    /** Drops the game's row, and with it (by cascade) its files and tasks. The bucket is the caller's. */
+    deleteGame(game: GameId): Promise<GameDeleted>;
 
     workspaceOf(game: GameId): Promise<WorkspaceRecord | undefined>;
     /** One file as the rows name it, which is what a read is allowed to fetch by. */
@@ -169,7 +160,7 @@ export interface Records {
      * `limit` of them. Empty is the only state a build may be queued from.
      *
      * Named rather than counted, because a creator told a publish was refused has to be told which
-     * file to look at — and a path the editor can highlight is the difference between waiting and
+     * file to look at, and a path the editor can highlight is the difference between waiting and
      * knowing what to re-upload.
      */
     unvalidatedAssets(game: GameId, limit: number): Promise<WorkspacePath[]>;
@@ -220,6 +211,7 @@ export const unattachedRecords: Records = {
     finishPasswordReset: async () => ({ outcome: 'unattached' }),
     createGame: async () => ({ outcome: 'unattached' }),
     setVisibility: async () => ({ outcome: 'unattached' }),
+    deleteGame: async () => ({ outcome: 'unattached' }),
     queueTask: async () => ({ outcome: 'unattached' }),
 
     // A game-scoped read needs no seam of its own to name: `ownerOf` already answered nobody, so

@@ -1,34 +1,22 @@
 // Signing up, the four things the holder of an account may do to it, resetting a forgotten password,
-// and making a game — every gate in front of each, and what each seam outcome becomes on the wire.
+// and making a game: every gate in front of each, and what each seam outcome becomes on the wire.
 
 import { describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { GameId, PlayerId } from '@grove/api-contract';
+import { PlayerId } from '@grove/api-contract';
 import type { GameVisibility } from '@grove/api-contract';
 import { buildApp } from '../src/app.js';
 import type { Mailer } from '../src/mailer.js';
-import { readEnv } from '../src/env.js';
 import { unattachedRecords } from '../src/records.js';
+import { unattachedStorage } from '../src/storage.js';
 import type { AccountRecord, GameRecord, Records } from '../src/records.js';
+import { CREATOR, GAME_ID, credentialsOf, signIn as signInWith, testEnv } from './fixtures.js';
 
-const HOLDER = PlayerId.parse('f47ac10b-58cc-4372-a567-0e02b2c3d479');
+const HOLDER = CREATOR;
 const STRANGER = PlayerId.parse('2b6d4f8a-1c3e-4d5f-9a7b-6c8d0e2f4a1b');
-const GAME_ID = GameId.parse('9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f');
 const PASSWORD = 'a long enough password';
 
-const env = readEnv({
-    NODE_ENV: 'test',
-    SESSION_SECRET: 'a'.repeat(32),
-    GAME_TOKEN_SECRET: 'b'.repeat(32),
-    FLEET_SECRET: 'c'.repeat(32),
-    TRUSTED_PROXIES: '10.0.0.9',
-    GAMES_CDN_URL: 'https://cdn.grove.example',
-    PLATFORM_ORIGIN: 'https://grove.example',
-    EDITOR_ORIGIN: 'https://editor.grove.example',
-    SERVER_MANAGER_URL: 'http://server-manager.grove.internal:4003',
-    UPLOAD_SERVICE_URL: 'http://upload-service.grove.internal:4005',
-    GAME_BUILDER_URL: 'http://game-builder.grove.internal:4002',
-});
+const env = testEnv({ TRUSTED_PROXIES: '10.0.0.9' });
 
 function account(over: Partial<AccountRecord> = {}): AccountRecord {
     return {
@@ -47,6 +35,7 @@ function game(over: Partial<GameRecord> = {}): GameRecord {
         title: 'My Game',
         visibility: 'private',
         createdAt: '2026-09-16T00:00:00.000Z',
+        publishedAt: null,
         ...over,
     };
 }
@@ -55,7 +44,7 @@ function game(over: Partial<GameRecord> = {}): GameRecord {
  * A store that answers whatever a test needs, over the unattached seam.
  *
  * Spread over `unattachedRecords` so a method a test did not name answers "nothing is attached"
- * rather than throwing — and so a widened seam never silently hands this double a real answer.
+ * rather than throwing, and so a widened seam never silently hands this double a real answer.
  */
 function store(over: Partial<Records> = {}): Records {
     return { ...unattachedRecords, ...over };
@@ -72,15 +61,6 @@ function holding(over: Partial<Records> = {}): Records {
     });
 }
 
-/** The cookie and the token every later write has to carry. */
-function credentials(response: { cookies: { name: string; value: string }[]; json: () => any }): {
-    cookie: string;
-    csrfToken: string;
-} {
-    const cookie = response.cookies.find((candidate) => candidate.name === 'sessionId');
-    return { cookie: `sessionId=${cookie?.value ?? ''}`, csrfToken: response.json().csrfToken };
-}
-
 async function signUp(
     app: FastifyInstance,
     body: Record<string, unknown> = {},
@@ -95,18 +75,11 @@ async function signUp(
             ...body,
         },
     });
-    return { ...credentials(response), status: response.statusCode, body: response.json() };
+    return { ...credentialsOf(response), status: response.statusCode, body: response.json() };
 }
 
-async function signIn(app: FastifyInstance): Promise<{ cookie: string; csrfToken: string }> {
-    const response = await app.inject({
-        method: 'POST',
-        url: '/v1/auth/sessions',
-        payload: { email: 'creator@grove.example', password: PASSWORD },
-    });
-    expect(response.statusCode).toBe(200);
-    return credentials(response);
-}
+const signIn = (app: FastifyInstance) =>
+    signInWith(app, { email: 'creator@grove.example', password: PASSWORD });
 
 describe('signing up', () => {
     it('mints a session, and a token the next write is let through with', async () => {
@@ -368,7 +341,7 @@ describe('changing a password', () => {
 
         // The rotation drops the CSRF secret along with the old session, so the token handed back
         // with it is the only one the next write can carry.
-        const after = credentials(changed);
+        const after = credentialsOf(changed);
         const write = await app.inject({
             method: 'POST',
             url: '/v1/games',
@@ -761,5 +734,70 @@ describe('resetting a forgotten password', () => {
             payload: { token: TOKEN, newPassword: 'short' },
         });
         expect(response.statusCode).toBe(400);
+    });
+});
+
+describe('deleting a game', () => {
+    function owning(owner = HOLDER, deleted: string[] = []): Records {
+        return holding({
+            ownerOf: async (asked) => (asked === GAME_ID ? owner : undefined),
+            deleteGame: async (asked) => {
+                deleted.push(asked);
+                return { outcome: 'deleted' };
+            },
+        });
+    }
+
+    it('erases the bucket prefix, then the row', async () => {
+        const erased: string[] = [];
+        const deleted: string[] = [];
+        const app = await buildApp(env, owning(HOLDER, deleted), undefined, {
+            ...unattachedStorage,
+            erase: async (prefix) => {
+                erased.push(prefix);
+                return { outcome: 'erased' };
+            },
+        });
+        const { cookie, csrfToken } = await signIn(app);
+        const response = await app.inject({
+            method: 'DELETE',
+            url: `/v1/games/${GAME_ID}`,
+            headers: { cookie, 'x-csrf-token': csrfToken },
+        });
+
+        expect(response.statusCode).toBe(204);
+        expect(erased).toEqual([`${GAME_ID}/`]);
+        expect(deleted).toEqual([GAME_ID]);
+    });
+
+    it('keeps the row when the bucket would not answer', async () => {
+        const deleted: string[] = [];
+        const app = await buildApp(env, owning(HOLDER, deleted), undefined, {
+            ...unattachedStorage,
+            erase: async () => ({ outcome: 'unavailable' }),
+        });
+        const { cookie, csrfToken } = await signIn(app);
+        const response = await app.inject({
+            method: 'DELETE',
+            url: `/v1/games/${GAME_ID}`,
+            headers: { cookie, 'x-csrf-token': csrfToken },
+        });
+
+        expect(response.statusCode).toBe(502);
+        expect(deleted).toEqual([]);
+    });
+
+    it('is not somebody else to do', async () => {
+        const deleted: string[] = [];
+        const app = await buildApp(env, owning(STRANGER, deleted));
+        const { cookie, csrfToken } = await signIn(app);
+        const response = await app.inject({
+            method: 'DELETE',
+            url: `/v1/games/${GAME_ID}`,
+            headers: { cookie, 'x-csrf-token': csrfToken },
+        });
+
+        expect(response.statusCode).toBe(403);
+        expect(deleted).toEqual([]);
     });
 });
