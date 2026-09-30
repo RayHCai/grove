@@ -1,10 +1,10 @@
-// Pure — no runtime, no dispatch — so both endpoints fold input edges through one implementation
+// Pure (no runtime, no dispatch), so both endpoints fold input edges through one implementation
 // of the one-tick-wide pressed/released rule, and a second would diverge as a prediction mismatch.
 
 import type { EventPhase } from '../script/types.js';
 import type { ActionState } from './player.js';
 
-/** One action's edge on one tick — the fold's input, structurally the wire's `InputAction`. */
+/** One action's edge on one tick: the fold's input, structurally the wire's `InputAction`. */
 export interface InputEdge {
     action: string;
     on: EventPhase;
@@ -16,7 +16,7 @@ export interface InputEdge {
 export interface ActionStates extends ActionState {
     /** A press sets held + pressed; a release clears held, sets released; an axis updates value. */
     applyEdge(edge: InputEdge): void;
-    /** Clears `pressed`/`released`, keeps `held` and axis values — the one-tick-wide edge rule. */
+    /** Clears `pressed`/`released`, keeps `held` and axis values: the one-tick-wide edge rule. */
     advanceTick(): void;
     /** Every action currently held, for the client's horizon re-derivation. */
     heldActions(): string[];
@@ -55,7 +55,7 @@ export function createActionStates(): ActionStates {
                 case 'hold':
                     // A hold sample carries a value and asserts nothing about the edge: it must not
                     // set `pressed`, which is one tick wide by definition, and it must not add to
-                    // `held` on its own — an axis returning to neutral is a hold, not a release.
+                    // `held` on its own: an axis returning to neutral is a hold, not a release.
                     if (edge.value !== undefined) axis.set(edge.action, edge.value);
                     break;
             }

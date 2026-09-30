@@ -30,7 +30,7 @@ export class Camera {
         return vec3(this.#x, this.#y, 0);
     }
 
-    /** Placeholder extents — the real ones depend on a client window core cannot see. */
+    /** Placeholder extents; the real ones depend on a client window core cannot see. */
     get viewport(): Bounds {
         return makeBounds(this.#x - 400, this.#x + 400, this.#y + 300, this.#y - 300);
     }

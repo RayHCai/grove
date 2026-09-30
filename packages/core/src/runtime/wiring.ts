@@ -1,10 +1,11 @@
 import type { ScriptProps } from '@platform/project';
+import { RESERVED_KEYS } from '@platform/project/limits';
 import { defined } from '@platform/math';
 import type { EntityId } from '../ids.js';
 import { LoadError } from '../errors.js';
 import type { BaseScript, ScriptLocation } from '../script/index.js';
 import { getMetadata } from '../script/index.js';
-import { makeInstance } from '../dispatch/instances.js';
+import { locationOf, makeInstance } from '../dispatch/instances.js';
 import type { DispatchOptions } from '../dispatch/dispatcher.js';
 import { STATE_BACKING, authoredValue, redirectState } from '../state/backing.js';
 import { tagOf, tagsMatch } from '../state/host-record.js';
@@ -109,7 +110,7 @@ export class Wiring {
         localPlayer: Player | undefined,
         props?: ScriptProps,
     ): object {
-        const location = (klass as unknown as { __location: ScriptLocation }).__location;
+        const location = locationOf(klass);
         this.#reject(klass, kind, location);
 
         const entry = this.#rt.hosts.ensure(hostKey);
@@ -199,7 +200,7 @@ export class Wiring {
     }
 
     // The wrapper goes into `values` alongside every other field: it IS the field's value, and the
-    // replication path reads that map — a wrapper left out of it marks a channel whose drain then
+    // replication path reads that map; a wrapper left out of it marks a channel whose drain then
     // finds nothing and drops the write.
     #bindWrappers(instance: object, record: HostRecord): void {
         for (const [field, value] of Object.entries(instance)) {
@@ -223,7 +224,7 @@ export class Wiring {
             );
         }
         if (location === 'server' && kind === 'screen') {
-            throw new LoadError('ServerScript<HUDScreen> — a screen exists on one machine');
+            throw new LoadError('ServerScript<HUDScreen>: a screen exists on one machine');
         }
         const meta = getMetadata(klass);
         const hasRequest = meta?.handlers.some((h) => h.kind === 'onRequest') ?? false;
@@ -239,17 +240,11 @@ export class Wiring {
     }
 }
 
-/**
- * Object keys a prop may not name: assigning one rewrites the instance rather than a field.
- * The same three transport's codec refuses, restated: importing its set would be a value import.
- */
-const RESERVED_PROPS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
-
 /** Writes each configured prop onto the instance; authoritative for any field it names. */
 function applyProps(instance: object, props: ScriptProps | undefined): void {
     if (props === undefined) return;
     for (const [key, value] of Object.entries(props)) {
-        if (RESERVED_PROPS.has(key)) continue;
+        if (RESERVED_KEYS.has(key)) continue;
         (instance as Record<string, unknown>)[key] = value;
     }
 }

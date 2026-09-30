@@ -7,7 +7,7 @@ import { bounds } from '@platform/math';
 afterEach(() => clearRuntime());
 
 describe('snapshot / restore', () => {
-    it('is a value, not a view — a later tick does not mutate a snapshot', () => {
+    it('is a value, not a view: a later tick does not mutate a snapshot', () => {
         const rt = loadGame({ bounds: bounds(-500, 500, 500, -500) });
         const loop = new Loop(rt);
         const e = rt.wired.gameInstance.spawn('crate', 10, 20);
@@ -47,7 +47,7 @@ describe('snapshot / restore', () => {
     });
 });
 
-/** One scripted run over a seeded PRNG — the determinism harness's unit. */
+/** One scripted run over a seeded PRNG, the determinism harness's unit. */
 function deterministicRun(): { x: number; y: number; z: number } {
     const rt = loadGame({ bounds: bounds(-500, 500, 500, -500) });
     rt.wired.random.seed(7);

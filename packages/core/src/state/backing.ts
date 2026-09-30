@@ -1,7 +1,7 @@
 // A @serverState field is never a data property: the accessors resolve the target map at call
 // time, so wiring can redirect them at the host record's values without touching a descriptor.
 
-// Symbol.for because the src and dist copies of core are both loaded — tests import from src
+// Symbol.for because the src and dist copies of core are both loaded; tests import from src
 // while decorator fixtures are compiled to dist, and a plain Symbol() would not match.
 /** Local authored-value map, and the redirectable target the accessors read. */
 export const STATE_BACKING = Symbol.for('@platform/core:state-backing');

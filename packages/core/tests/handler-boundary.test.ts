@@ -17,7 +17,7 @@ describe('breaker', () => {
 
         for (let i = 0; i < BREAKER_THRESHOLD; i++) await e.send('boom');
 
-        // Recording success when the call returned — at the first await — reset the count before
+        // Recording success when the call returned (at the first await) reset the count before
         // the rejection arrived, so it never passed 1 and the handler ran forever.
         expect(rt.log.records.some((r) => r.disabled)).toBe(true);
 

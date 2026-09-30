@@ -20,14 +20,14 @@ export interface FindQuery {
     in?: string;
     near?: { of: Entity | Vec3; within: number };
     /**
-     * Resolve against the world as the acting client saw it — server-side, input-originated
+     * Resolve against the world as the acting client saw it: server-side, input-originated
      * handlers only. `find` reads it on a `near` query alone; a tag- or region-only one is live.
      */
     asSeen?: boolean;
 }
 
 export abstract class Game {
-    /** @internal — the concrete runtime-backed subclass sets this. */
+    /** @internal the concrete runtime-backed subclass sets this. */
     protected rt!: Runtime;
 
     get players(): Player[] {
@@ -68,7 +68,7 @@ export abstract class Game {
         return this;
     }
 
-    /** The Game's instance of `script`, or `null` — how another host reaches the rules. */
+    /** The Game's instance of `script`, or `null`: how another host reaches the rules. */
     getScript<T extends BaseScript<Game>>(script: ScriptQuery<T>): T | null {
         return scriptOnHost(this.rt, GAME_KEY, script);
     }

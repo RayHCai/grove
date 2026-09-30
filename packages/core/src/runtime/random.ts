@@ -47,7 +47,7 @@ export class RuntimeRandom implements Random {
     }
 }
 
-/** The creator-facing `random` const — a facade over the current runtime. */
+/** The creator-facing `random` const: a facade over the current runtime. */
 export const random: Random = {
     seed: (n) => resolve().seed(n),
     between: (min, max) => resolve().between(min, max),
@@ -57,6 +57,6 @@ export const random: Random = {
 };
 
 function resolve(): Random {
-    if (!hasRuntime()) throw new Error('random used before a runtime exists — call loadGame first');
+    if (!hasRuntime()) throw new Error('random used before a runtime exists: call loadGame first');
     return currentRuntime().wiredOrNull?.random ?? new RuntimeRandom(currentRuntime());
 }

@@ -24,7 +24,7 @@ describe('metadata inheritance', () => {
         ]);
     });
 
-    it('an override does not re-register — DoubleJump collects exactly one jump', () => {
+    it('an override does not re-register: DoubleJump collects exactly one jump', () => {
         expect(jumpHandlers(DoubleJump)).toHaveLength(1);
         // and it inherits the parent's registration rather than owning a second
         expect(events(DoubleJump)).toEqual(['@start', 'jump']);
@@ -51,7 +51,7 @@ describe('metadata inheritance', () => {
         expect(dj.jumps).toBe(2); // subclass body (+2), not the parent's (+1)
     });
 
-    it('a sibling adding a handler is copy-on-write — the base stays put', () => {
+    it('a sibling adding a handler is copy-on-write: the base stays put', () => {
         expect(events(Sibling)).toEqual(['@start', 'dash', 'jump']);
         // the base Movement never gained `dash`
         expect((getMetadata(Movement)?.handlers ?? []).some((h) => h.event === 'dash')).toBe(false);

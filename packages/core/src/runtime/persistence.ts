@@ -13,7 +13,7 @@ export interface PersistedSource {
     get(hostId: string, field: string): unknown;
 }
 
-/** One host's persisted fields, as a single KV value — the unit a save and a load both move. */
+/** One host's persisted fields, as a single KV value: the unit a save and a load both move. */
 export type PersistedFields = { [field: string]: unknown };
 
 /** A synchronous view of persisted `@serverState`, write-through to a `KVStore`, keyed by host. */
@@ -29,7 +29,7 @@ export class PersistedState implements PersistedSource {
         return this.#byHost.get(hostId)?.[field];
     }
 
-    /** Whether anything is held for `hostId` — a load that found nothing still counts as held. */
+    /** Whether anything is held for `hostId`; a load that found nothing still counts as held. */
     has(hostId: string): boolean {
         return this.#byHost.has(hostId);
     }
@@ -60,7 +60,7 @@ export class PersistedState implements PersistedSource {
         });
     }
 
-    /** Drops a host from the store and the cache — the creator-facing "forget this player". */
+    /** Drops a host from the store and the cache: the creator-facing "forget this player". */
     forget(hostId: string): Promise<void> {
         this.#byHost.delete(hostId);
         return this.#kv.delete(PERSISTENCE_SCOPE, hostId);

@@ -70,7 +70,7 @@ describe('the breaker’s counters', () => {
 
         leavePlayer(rt, 'p1');
         // A streak that never ended in a success is what leaves an entry, and the instance it names
-        // no longer exists — ids are never reused, so nothing would ever clear it.
+        // no longer exists; ids are never reused, so nothing would ever clear it.
         expect(rt.breaker.count(si.id, 'go')).toBe(0);
     });
 });

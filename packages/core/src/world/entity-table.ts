@@ -1,4 +1,4 @@
-// Iteration is by ascending slot — creation order, the stable order determinism needs.
+// Iteration is by ascending slot: creation order, the stable order determinism needs.
 // SimTransformStore uses the same slot index, so a reused slot is the same entity in both.
 
 import { SlotTable } from '@platform/math';
@@ -84,12 +84,12 @@ export class EntityTable implements SnapshotStore<EntityTableBuffer> {
         this.#slots.release(id);
     }
 
-    /** How many slots are occupied — what the spawn cap is read against, without a list. */
+    /** How many slots are occupied: what the spawn cap is read against, without a list. */
     get liveCount(): number {
         return this.#slots.liveCount;
     }
 
-    /** Live entity ids in ascending slot order — creation order. */
+    /** Live entity ids in ascending slot order: creation order. */
     liveIds(out: EntityId[] = []): EntityId[] {
         return this.#slots.liveIds(out);
     }

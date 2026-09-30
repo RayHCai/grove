@@ -1,7 +1,15 @@
 // Fixtures compiled by the build.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { Menu, OtherMenu, Rules, Shopper, Target } from '../dist/testkit/fixtures.js';
+import {
+    Listener,
+    Menu,
+    OtherMenu,
+    Relay,
+    Rules,
+    Shopper,
+    Target,
+} from '../dist/testkit/fixtures.js';
 import { joinPlayer, loadGame, pressWidget } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import type { Runtime } from '../src/runtime/runtime.js';
@@ -83,7 +91,7 @@ describe('runtime end to end', () => {
         const record = server.hosts.get(entityKey(e.entityId as number))!.record;
         const script = instanceOf<{ health: number }>(server, e, 'Target');
 
-        // The record is what replicates, so all three spellings have to be one value — a hoist that
+        // The record is what replicates, so all three spellings have to be one value: a hoist that
         // left the instance holding its own copy passes every `alive` assertion below and still
         // sends the initializer over the wire forever.
         expect(record.values.get('health')).toBe(3);
@@ -107,6 +115,22 @@ describe('runtime end to end', () => {
         e.addScript(Target as never);
         e.destroy();
         await expect(e.send('damage', { amount: 1 })).resolves.toBeUndefined();
+    });
+
+    it('names the entity whose handler sent as ctx.from, and null from outside any handler', async () => {
+        const relay = game.spawn('crate', 0, 0);
+        const listener = game.spawn('crate', 10, 0);
+        relay.addScript(Relay as never);
+        listener.addScript(Listener as never);
+        instanceOf<{ target: unknown }>(server, relay, 'Relay').target = listener;
+        const heard = (): unknown =>
+            instanceOf<{ heard: unknown }>(server, listener, 'Listener').heard;
+
+        await relay.send('ping');
+        expect(heard()).toBe(relay);
+
+        await listener.send('pong');
+        expect(heard()).toBeNull();
     });
 });
 

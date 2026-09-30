@@ -5,7 +5,8 @@ import { LoadError } from '../src/errors.js';
 import { loadGame } from '../src/runtime/load-game.js';
 import type { GameManifest } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
-import { MAX_TEMPLATE_DEPTH, TemplateRegistry, instantiate } from '../src/world/templates.js';
+import { MAX_TEMPLATE_DEPTH } from '@platform/project/limits';
+import { TemplateRegistry, instantiate } from '../src/world/templates.js';
 import type { TemplateDef } from '../src/world/templates.js';
 import type { SingleStructuralOp, StructuralOp } from '../src/state/channels.js';
 import { entityKey } from '../src/runtime/hosts.js';
@@ -15,7 +16,7 @@ afterEach(() => clearRuntime());
 const id = (key: string): TemplateId => key as TemplateId;
 const sid = (key: string): ScriptId => key as ScriptId;
 
-/** A turret with a barrel under it, and a sight under that — three levels, two references. */
+/** A turret with a barrel under it, and a sight under that: three levels, two references. */
 const TURRET: TemplateDef[] = [
     {
         id: id('turret'),
@@ -39,7 +40,7 @@ function world(over: Partial<GameManifest> = {}) {
     );
 }
 
-/** Every op the journal holds, group boundaries flattened — for asserting order across both. */
+/** Every op the journal holds, group boundaries flattened, for asserting order across both. */
 function flatten(journal: readonly StructuralOp[]): SingleStructuralOp[] {
     return journal.flatMap((op) => (op.kind === 'group' ? op.ops : [op]));
 }
@@ -98,7 +99,7 @@ describe('instantiating a template', () => {
         const sight = barrel.children[0]!;
 
         expect([turret.position.x, turret.position.y]).toStrictEqual([100, 50]);
-        // Local to the parent, which is all hierarchy carries — not 62.
+        // Local to the parent, which is all hierarchy carries, not 62.
         expect(barrel.position.y).toBe(12);
         expect(barrel.layer).toBe(1);
         expect(sight.position.y).toBe(4);
@@ -159,7 +160,7 @@ describe('a group is a replication boundary, not a visibility one', () => {
     it('leaves every entity addressable the moment it is minted', () => {
         const rt = world();
         // Inside the same synchronous call the group is still open, and `spawn` has already
-        // returned live handles — the mirror of destroy, which is logical-now and torn down later.
+        // returned live handles, the mirror of destroy, which is logical-now and torn down later.
         const turret = rt.wired.gameInstance.spawn('turret', 0, 0);
         expect(turret.alive).toBe(true);
         expect(rt.entities.liveIds()).toHaveLength(3);
@@ -173,7 +174,7 @@ describe('a group is a replication boundary, not a visibility one', () => {
         const journal = rt.channels.drainStructural();
         // Both child templates opened their own group and neither produced an op: the whole
         // subtree is one instantiation, and a receiver gains nothing from being told where the
-        // inner one started. The shape holds it too — a group's ops are single ops, never groups.
+        // inner one started. The shape holds it too: a group's ops are single ops, never groups.
         expect(journal).toHaveLength(1);
         expect(flatten(journal)).toHaveLength(6);
     });

@@ -108,7 +108,7 @@ describe('a hit on a dead entity', () => {
 describe('the ambient runtime', () => {
     it('is established for the dispatch, so a handler writing HUD state finds this world', async () => {
         // Same reason `pressWidget` establishes it: a press arrives outside a tick, and `hud`
-        // resolves the AMBIENT runtime — without this it would land in whichever world loaded last.
+        // resolves the AMBIENT runtime; without this it would land in whichever world loaded last.
         const a = loadGame({ role: 'client' });
         const target = pointed(a);
         loadGame({ role: 'client' }); // a second world is now the ambient one

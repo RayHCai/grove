@@ -20,7 +20,7 @@ describe('game @onStart', () => {
 });
 
 describe('tick order', () => {
-    it('adopts the tick index rather than incrementing — replaying 97 reports 97', () => {
+    it('adopts the tick index rather than incrementing: replaying 97 reports 97', () => {
         const rt = loadGame();
         const loop = new Loop(rt);
         loop.step(97);
@@ -42,7 +42,7 @@ describe('@onRequest loopback', () => {
 
     it('is the FALLBACK: an installed uplink takes the call and nothing dispatches here', async () => {
         // What a networked client holds. Dispatching here as well would run the authority's check
-        // on the machine that made the ask — and a mirror is not where the answer is authoritative.
+        // on the machine that made the ask, and a mirror is not where the answer is authoritative.
         const rt = loadGame({ gameScripts: [Rules as never] });
         await startGame(rt);
         joinPlayer(rt, 'p1', 'Ada');

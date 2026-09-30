@@ -93,13 +93,13 @@ export class Player {
     #storage: Storage | null = null;
     movement?: BaseMovement;
 
-    /** @internal — set by the roster. */
+    /** @internal set by the roster. */
     setMovementInstance(movement: BaseMovement | undefined): void {
         if (movement === undefined) delete this.movement;
         else this.movement = movement;
     }
 
-    /** @internal — a spectating or bodiless player has no movement. */
+    /** @internal a spectating or bodiless player has no movement. */
     clearMovement(): void {
         delete this.movement;
     }
@@ -111,7 +111,7 @@ export class Player {
         this.name = name;
     }
 
-    /** @internal — the non-throwing test, for engine code that must branch rather than catch. */
+    /** @internal the non-throwing test, for engine code that must branch rather than catch. */
     get hasAvatar(): boolean {
         return this.#avatar !== null;
     }
@@ -122,7 +122,7 @@ export class Player {
         return this.#avatar;
     }
 
-    /** @internal — set by spawn/roster wiring. */
+    /** @internal set by spawn/roster wiring. */
     setAvatar(entity: Entity | null): void {
         this.#avatar = entity;
     }
@@ -188,7 +188,7 @@ export class PlayerManager {
         return player;
     }
 
-    /** Registers a Player built elsewhere, keeping its index — `create` would renumber. */
+    /** Registers a Player built elsewhere, keeping its index; `create` would renumber. */
     adopt(player: Player): void {
         if (this.#byId.has(player.id)) return;
         this.#byId.set(player.id, player);
