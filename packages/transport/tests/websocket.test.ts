@@ -24,7 +24,7 @@ const HEARTBEAT_INTERVAL_MS = 5000;
 const MAX_MISSED_HEARTBEATS = 3;
 
 /**
- * A socket whose events the test drives. `close()` only moves to CLOSING, as a real one does —
+ * A socket whose events the test drives. `close()` only moves to CLOSING, as a real one does;
  * the close EVENT is a separate, later task, and the ordering guarantees depend on that.
  */
 class FakeSocket implements WebSocketLike {
@@ -145,7 +145,7 @@ function codes(errors: readonly TransportError[]): string[] {
     return errors.map((error) => error.code);
 }
 
-describe('connectWebSocket — a Transport is only handed out once connected', () => {
+describe('connectWebSocket: a Transport is only handed out once connected', () => {
     it('is the declared Connect seam', () => {
         // Both endpoints compile against `Connect`, so a signature drift is a type error on this
         // line rather than a broken composition root.
@@ -293,7 +293,7 @@ describe('connectWebSocket — a Transport is only handed out once connected', (
     });
 });
 
-describe('webSocketTransport — the accept door', () => {
+describe('webSocketTransport: the accept door', () => {
     it('takes a socket a listener already opened', () => {
         const { socket, transport } = harness();
         transport.send({ kind: 'welcome' });
@@ -338,7 +338,7 @@ describe('webSocketTransport — the accept door', () => {
     });
 });
 
-describe('websocket — frames out', () => {
+describe('websocket: frames out', () => {
     it('encodes through the injected codec', () => {
         const { socket, transport } = harness({ codec: byteCodec });
         transport.send({ kind: 'input', seq: 3 });
@@ -374,7 +374,7 @@ describe('websocket — frames out', () => {
     });
 });
 
-describe('websocket — frames in, delivered on arrival', () => {
+describe('websocket: frames in, delivered on arrival', () => {
     it('decodes a string frame to its message', () => {
         const { socket, transport } = harness();
         const seen = collect(transport);
@@ -426,7 +426,7 @@ describe('websocket — frames in, delivered on arrival', () => {
     });
 });
 
-describe('websocket — a hostile peer closes the connection rather than crashing the process', () => {
+describe('websocket: a hostile peer closes the connection rather than crashing the process', () => {
     it('reports a decode rejection under its own code and closes', () => {
         const { socket, transport, errors } = harness();
         const seen = collect(transport);
@@ -493,7 +493,7 @@ describe('websocket — a hostile peer closes the connection rather than crashin
     });
 });
 
-describe('websocket — retention, because registration races arrival', () => {
+describe('websocket: retention, because registration races arrival', () => {
     it('retains frames that arrive before onMessage and flushes them in order', () => {
         const { socket, transport } = harness();
         socket.emitMessage('{"tick":1}');
@@ -546,7 +546,7 @@ describe('websocket — retention, because registration races arrival', () => {
     });
 });
 
-describe('websocket — one handler per end', () => {
+describe('websocket: one handler per end', () => {
     it('refuses a second live onMessage', () => {
         // Two consumers would silently split one connection's frames.
         const { transport } = harness();
@@ -582,7 +582,7 @@ describe('websocket — one handler per end', () => {
     });
 });
 
-describe('websocket — close rides the FIFO', () => {
+describe('websocket: close rides the FIFO', () => {
     it('never fires onClose inside close(), because the socket reports it as a later task', () => {
         const { socket, transport } = harness();
         const closed = vi.fn();
@@ -666,7 +666,7 @@ describe('websocket — close rides the FIFO', () => {
     });
 
     it('makes send a no-op while the socket is merely CLOSING', () => {
-        // The close event has not arrived, so nothing here knows yet — but the socket would throw.
+        // The close event has not arrived, so nothing here knows yet, but the socket would throw.
         const { socket, transport } = harness();
         socket.close();
         transport.send({ kind: 'state' });
@@ -684,7 +684,7 @@ describe('websocket — close rides the FIFO', () => {
     });
 });
 
-describe('websocket — a close nobody asked for is not a clean close', () => {
+describe('websocket: a close nobody asked for is not a clean close', () => {
     it('reports socket-error for an abnormal close code', () => {
         // 1006 is a link that dropped without a close frame, and onClose alone cannot show it.
         const { socket, errors } = harness();
@@ -741,7 +741,7 @@ describe('websocket — a close nobody asked for is not a clean close', () => {
     });
 });
 
-describe('websocket — the heartbeat is a silence cutoff, and sends nothing', () => {
+describe('websocket: the heartbeat is a silence cutoff, and sends nothing', () => {
     it('closes once the missed windows run out', () => {
         const { socket, timer, errors } = harness();
         timer.advance(MAX_MISSED_HEARTBEATS - 1);
@@ -808,7 +808,7 @@ describe('websocket — the heartbeat is a silence cutoff, and sends nothing', (
     });
 });
 
-describe('websocket — a peer that stops draining is closed, not buffered for', () => {
+describe('websocket: a peer that stops draining is closed, not buffered for', () => {
     it('sends while the socket buffer is at the cap', () => {
         const { socket, transport } = harness({ maxBufferedBytes: 1024 });
         socket.bufferedAmount = 1024;
@@ -845,7 +845,7 @@ describe('websocket — a peer that stops draining is closed, not buffered for',
     });
 });
 
-describe('websocket — the socket stays the composition root and no listener is displaced', () => {
+describe('websocket: the socket stays the composition root and no listener is displaced', () => {
     it("adds its own listeners instead of assigning over the root's", () => {
         // An `onmessage =` assignment would silently drop the listener the root put on the socket
         // it accepted.

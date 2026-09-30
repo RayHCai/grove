@@ -13,7 +13,7 @@ export interface Codec {
     encode(message: Message): EncodedFrame;
     /** Decode, rejecting a malformed frame and pollution keys before an endpoint sees the value. */
     decode(frame: Frame): Message;
-    /** Wire byte count — UTF-8 for JSON, not a string's UTF-16 `.length`; only the codec knows. */
+    /** Wire byte count: UTF-8 for JSON, not a string's UTF-16 `.length`; only the codec knows. */
     byteLength(frame: Frame): number;
 }
 
@@ -65,7 +65,7 @@ function describe(value: unknown): string {
 }
 
 /**
- * Where a child sits, as `at` wants it — built on demand, since every caller but a throw arm and a
+ * Where a child sits, as `at` wants it, built on demand, since every caller but a throw arm and a
  * container push discards it, and a healthy encode walks thousands of leaves without throwing once.
  */
 function leafPath(frame: Pending | null, key: string): string {
@@ -91,7 +91,7 @@ function admitLeaf(
             if (Number.isNaN(value)) {
                 transportError(
                     'encode-rejected',
-                    `${at(leafPath(frame, key))} is NaN, which JSON silently encodes as null — send a null, a sentinel, or omit the field.`,
+                    `${at(leafPath(frame, key))} is NaN, which JSON silently encodes as null: send a null, a sentinel, or omit the field.`,
                 );
             }
             if (!Number.isFinite(value)) {
@@ -107,7 +107,7 @@ function admitLeaf(
         case 'undefined':
             transportError(
                 'encode-rejected',
-                `${at(leafPath(frame, key))} is undefined, which JSON DROPS — the peer would receive a frame with the key missing. Send null if the absence is meaningful.`,
+                `${at(leafPath(frame, key))} is undefined, which JSON DROPS: the peer would receive a frame with the key missing. Send null if the absence is meaningful.`,
             );
 
         case 'function':
@@ -131,8 +131,8 @@ function admitLeaf(
 
     if (value === null) return { leaf: null };
 
-    // Rejected rather than flattened: each of these round-trips to something OTHER than itself — a
-    // Map to `{}`, a Date to a string — and a structured-clone worker wire would carry several of
+    // Rejected rather than flattened: each of these round-trips to something OTHER than itself (a
+    // Map to `{}`, a Date to a string) and a structured-clone worker wire would carry several of
     // them faithfully, so rejecting keeps the local run conservative against every wire.
     if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype) {
         transportError(
@@ -203,7 +203,7 @@ function admit(root: unknown): JsonLike {
             if (RESERVED_KEYS.has(key)) {
                 transportError(
                     'encode-rejected',
-                    `${at(leafPath(frame, key))} uses the reserved key "${key}", which a decoder must refuse because it poisons any recursive merge downstream — and an own "__proto__" key would not even survive the copy. Rename the field.`,
+                    `${at(leafPath(frame, key))} uses the reserved key "${key}", which a decoder must refuse because it poisons any recursive merge downstream: and an own "__proto__" key would not even survive the copy. Rename the field.`,
                 );
             }
 
@@ -271,7 +271,7 @@ function setChild(frame: Pending, key: string, value: JsonLike): void {
     else frame.copy[key] = value;
 }
 
-/** The shape `admit` returns — validated, so `JSON.stringify` cannot transform it. */
+/** The shape `admit` returns: validated, so `JSON.stringify` cannot transform it. */
 type JsonLike = null | boolean | number | string | JsonLike[] | { [key: string]: JsonLike };
 
 /**
@@ -303,7 +303,7 @@ function admitDecoded(root: unknown): void {
             if (!isArray && RESERVED_KEYS.has(key)) {
                 transportError(
                     'pollution-key',
-                    `Frame carries a "${key}" key, which poisons any recursive merge downstream. Rejected, not stripped — a frame carrying it IS a malformed frame.`,
+                    `Frame carries a "${key}" key, which poisons any recursive merge downstream. Rejected, not stripped: a frame carrying it IS a malformed frame.`,
                 );
             }
             const value = (node as Record<string, unknown>)[key];

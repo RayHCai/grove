@@ -4,7 +4,7 @@ import { TransportError } from '../src/errors.js';
 import type { Frame, Message } from '../src/transport.js';
 
 // Every guard in this codec is otherwise pinned by the one shape its author thought of, in code
-// that parses bytes from any peer on the internet — so each case here is generated instead, and
+// that parses bytes from any peer on the internet, so each case here is generated instead, and
 // each guard has a generated input that trips it.
 
 /** Fixed, so a failure reproduces: every case derives its seed from this and prints it. */
@@ -23,7 +23,7 @@ interface Gen {
     chance(probability: number): boolean;
 }
 
-/** splitmix32 — seeded, since a fuzz test that cannot reproduce a failure is worse than none. */
+/** splitmix32: seeded, since a fuzz test that cannot reproduce a failure is worse than none. */
 function gen(seed: number): Gen {
     let state = seed >>> 0;
     const next = (): number => {
@@ -54,7 +54,7 @@ const STRINGS: readonly string[] = [
     '\udfff',
     'a\ud83dz',
     'trailing\ud83d',
-    // The reserved words as DATA — a chat message saying "__proto__" must still deliver.
+    // The reserved words as DATA: a chat message saying "__proto__" must still deliver.
     '__proto__',
     'constructor',
     'prototype',
@@ -181,7 +181,7 @@ function caught(fn: () => unknown): unknown {
 
 const encoder = new TextEncoder();
 
-describe('jsonCodec — generated round trip', () => {
+describe('jsonCodec: generated round trip', () => {
     it('round-trips every generated admissible value, byte for byte', () => {
         // The containment property over generated input: whatever `encode` emits, its own `decode`
         // accepts, and the frame is what a stock `JSON.parse` on a debugging proxy would read.
@@ -214,7 +214,7 @@ describe('jsonCodec — generated round trip', () => {
     });
 
     it('round-trips a frame sitting exactly on the byte cap, and refuses one byte more', () => {
-        // The cap is the receiver's, and `encode` has none — so a producer can mint a frame its
+        // The cap is the receiver's, and `encode` has none, so a producer can mint a frame its
         // peer refuses, which is why a producer measures with `byteLength` before it sends.
         for (let i = 0; i < 3; i++) {
             const seed = SEED + 2000 + i;
@@ -355,7 +355,7 @@ function plant(g: Gen, value: unknown): { readonly root: unknown; readonly path:
     return { root, path };
 }
 
-describe('jsonCodec — generated encode rejections', () => {
+describe('jsonCodec: generated encode rejections', () => {
     for (const { what, names, make } of HOSTILE) {
         it(`refuses ${what} wherever it is planted, and names it and the path`, () => {
             // The path is what the creator navigates by, and a walk that reports the frame instead
@@ -375,10 +375,10 @@ describe('jsonCodec — generated encode rejections', () => {
     }
 });
 
-describe('jsonCodec — generated hostile frames', () => {
+describe('jsonCodec: generated hostile frames', () => {
     it('refuses a pollution key at any generated depth or position', () => {
         // `JSON.parse` makes `__proto__` an OWN property, so it survives to whatever merges the
-        // value next — and one nested under an admissible key is the frame a shallow check misses.
+        // value next, and one nested under an admissible key is the frame a shallow check misses.
         for (let i = 0; i < 60; i++) {
             const seed = SEED + 5000 + i;
             const g = gen(seed);
@@ -392,7 +392,7 @@ describe('jsonCodec — generated hostile frames', () => {
     });
 
     it('refuses a numeric literal that overflows to non-finite, at any generated position', () => {
-        // Well-formed JSON that parses to a value `encode` refuses — the gap between the two
+        // Well-formed JSON that parses to a value `encode` refuses; the gap between the two
         // directions is exactly what a hostile peer probes for.
         for (let i = 0; i < 40; i++) {
             const seed = SEED + 6000 + i;
@@ -474,7 +474,7 @@ const JUNK: readonly string[] = [
     '__proto__',
 ];
 
-describe('jsonCodec — decode never crashes', () => {
+describe('jsonCodec: decode never crashes', () => {
     it('answers arbitrary junk with a value or a TransportError, never another error type', () => {
         // Drop-and-close needs a machine-readable code; anything else escaping `decode` reaches a
         // socket event handler where nothing can catch it.
@@ -534,7 +534,7 @@ function bitFlip(g: Gen, frame: string): string {
     return frame.slice(0, index) + String.fromCharCode(flipped) + frame.slice(index + 1);
 }
 
-describe('jsonCodec — byteLength against the real encoding', () => {
+describe('jsonCodec: byteLength against the real encoding', () => {
     it('counts what the encoder would put on the wire, for generated strings of every width', () => {
         // UTF-16 `.length` undercounts every non-ASCII character, and this count is what
         // backpressure and the frame cap both read.
