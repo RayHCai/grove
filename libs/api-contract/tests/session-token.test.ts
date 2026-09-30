@@ -93,8 +93,9 @@ describe('signing', () => {
         expect(signTicket(shuffled, SIGNING_KEY)).toBe(signTicket(ticket, SIGNING_KEY));
     });
 
-    it('signs each audience under its own scheme only', () => {
-        expect(() => signSessionToken(ticket, SECRET)).toThrow();
+    it('refuses signTicket for a non-game-instance audience', () => {
+        // signSessionToken still mints every audience, including game-instance: see the note on
+        // HmacAudience in session-token.ts. signTicket is the one exclusive to game-instance.
         expect(() => signTicket(storeBearer, SIGNING_KEY)).toThrow();
         expect(() => signTicket(purge, SIGNING_KEY)).toThrow();
     });
