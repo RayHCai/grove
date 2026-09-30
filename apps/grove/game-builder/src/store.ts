@@ -1,13 +1,8 @@
-import {
-    BuildArtifact,
-    Manifest,
-    REQUEST_ID_HEADER,
-    type GameId,
-    type WorkspacePath,
-} from '@grove/api-contract';
+import { BuildArtifact, Manifest, type GameId, type WorkspacePath } from '@grove/api-contract';
+import { fleetCall, type FleetCallInit } from '@grove/service-kit';
 import type { Env } from './env.js';
 
-/** `missing` is an answer — a revision nothing froze — where `unavailable` is the fleet failing. */
+/** `missing` is an answer (a revision nothing froze), where `unavailable` is the fleet failing. */
 export type Fetched<T> =
     { outcome: 'found'; value: T } | { outcome: 'missing' } | { outcome: 'unavailable' };
 
@@ -22,7 +17,7 @@ export type Stored = { outcome: 'stored'; artifact: BuildArtifact } | { outcome:
  */
 export interface BuildStore {
     manifest(game: GameId, revision: number, requestId: string): Promise<Fetched<Manifest>>;
-    /** One file's bytes, at the version the manifest froze — never whatever is current at the key. */
+    /** One file's bytes, at the version the manifest froze, never whatever is current at the key. */
     file(
         game: GameId,
         revision: number,
@@ -47,22 +42,23 @@ function revisionPath(game: GameId, revision: number): string {
     return `/v1/fleet/games/${game}/revisions/${String(revision)}`;
 }
 
-export function httpStore(env: Env): BuildStore {
-    const call = async (
-        path: string,
-        requestId: string,
-        init: RequestInit = {},
-    ): Promise<Response | undefined> =>
-        fetch(`${env.API_URL}${path}`, {
-            ...init,
-            headers: {
-                ...init.headers,
-                authorization: `Bearer ${env.FLEET_SECRET}`,
-                [REQUEST_ID_HEADER]: requestId,
-            },
-            signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS),
-        }).catch(() => undefined);
+/** One call to @grove/api under the fleet bearer; undefined is an API that did not answer at all. */
+export type ApiCall = (
+    path: string,
+    requestId: string,
+    init?: FleetCallInit,
+) => Promise<Response | undefined>;
 
+export function apiCall(env: Env): ApiCall {
+    const call = fleetCall({
+        baseUrl: env.API_URL,
+        secret: env.FLEET_SECRET,
+        timeoutMs: TRANSFER_TIMEOUT_MS,
+    });
+    return async (path, requestId, init) => call(path, requestId, init).catch(() => undefined);
+}
+
+export function httpStore(call: ApiCall): BuildStore {
     return {
         manifest: async (game, revision, requestId) => {
             const answered = await call(`${revisionPath(game, revision)}/manifest`, requestId);

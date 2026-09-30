@@ -1,10 +1,11 @@
 import { z } from 'zod';
+import { parseEnv, withPlatformPort } from '@grove/service-kit';
 
 const Env = z.object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-    // Binds loopback by default. Nothing calls this service any more — it claims its work from a
-    // stream — so what is bound here is the health endpoint a host agent polls, and a default of
-    // 0.0.0.0 is how a box stops being private by accident.
+    // Binds loopback by default. Nothing calls this service; it claims its work from a stream, so
+    // what is bound here is the health endpoint a host agent polls, and a default of 0.0.0.0 is how
+    // a box stops being private by accident. A platform-assigned `PORT` binds every interface.
     GAME_BUILDER_HOST: z.string().min(1).default('127.0.0.1'),
     GAME_BUILDER_PORT: z.coerce.number().int().positive().default(4002),
 
@@ -27,6 +28,9 @@ const Env = z.object({
     // failure is reclaimed inside rather than the time a compile is expected to need.
     BUILD_TIMEOUT_MS: z.coerce.number().int().positive().default(180_000),
 
+    /** How long `tsc` may run on one build before it is killed and the attempt left for retry. */
+    COMPILE_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+
     /**
      * How many boxes may try one build before it is settled as failed.
      *
@@ -39,10 +43,10 @@ const Env = z.object({
 
 export type Env = z.infer<typeof Env>;
 
+/** `PORT`, where a platform assigns one, is the fallback for `GAME_BUILDER_PORT`. */
 export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
-    const parsed = Env.safeParse(source);
-    if (!parsed.success) {
-        throw new Error(`bad environment:\n${z.prettifyError(parsed.error)}`);
-    }
-    return parsed.data;
+    return parseEnv(
+        Env,
+        withPlatformPort(source, { host: 'GAME_BUILDER_HOST', port: 'GAME_BUILDER_PORT' }),
+    );
 }
