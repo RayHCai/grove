@@ -3,7 +3,8 @@
 import { describe, expect, it } from 'vitest';
 import { GameId, SessionId } from '@grove/api-contract';
 import type { PlayHandoff } from '@grove/api-contract';
-import { encodeHandoff, readHandoff } from '../src/handoff';
+import { encodeHandoff } from '@grove/api-contract';
+import { readHandoff } from '../src/handoff';
 
 const HANDOFF: PlayHandoff = {
     gameId: GameId.parse('9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f'),
@@ -33,7 +34,7 @@ describe('reading the join out of a fragment', () => {
 
     it('carries a name with an accent in it back out unchanged', () => {
         // `atob` answers one byte per character, so utf-8 read as latin-1 is the usual way this
-        // breaks — and a display name is the usual thing it breaks on.
+        // breaks, and a display name is the usual thing it breaks on.
         const named: PlayHandoff = {
             ...HANDOFF,
             session: { ...HANDOFF.session, projectId: 'jardín-de-hojas' },

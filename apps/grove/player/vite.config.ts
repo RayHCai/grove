@@ -5,7 +5,7 @@ export default defineConfig({
     plugins: [react()],
     server: {
         port: 5177,
-        // Fail loudly rather than silently picking another port — an app on an unexpected port is
+        // Fail loudly rather than silently picking another port; an app on an unexpected port is
         // worse than one that did not start, because the others are configured to dial this one.
         strictPort: true,
         // A bind mount delivers no inotify events, so the watcher inside a container is put on a

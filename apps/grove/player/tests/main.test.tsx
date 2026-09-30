@@ -24,7 +24,7 @@ describe('the entry point', () => {
         });
 
         // Nothing in the document's url, so what the shell renders is the one thing a person who
-        // reached this origin without a join is told — which is enough to prove it mounted.
+        // reached this origin without a join is told, which is enough to prove it mounted.
         expect(host.querySelector('main')?.textContent).toMatch(/opened from a game/u);
     }, 30_000);
 
