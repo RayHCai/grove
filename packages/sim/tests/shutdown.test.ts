@@ -46,7 +46,7 @@ describe('close() hands back every save a shutdown owes', () => {
         peer.close();
         h.pumpTicks(2);
 
-        // A connection id is minted per socket, so a record under one is unreadable by anybody —
+        // A connection id is minted per socket, so a record under one is unreadable by anybody:
         // one leaked KV entry per join/leave cycle, forever.
         expect(h.saves).toHaveLength(0);
         expect(h.sim.close().saves).toHaveLength(0);

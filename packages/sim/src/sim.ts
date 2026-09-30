@@ -40,7 +40,7 @@ import type {
     WireRegion,
     WireStructuralOp,
 } from '@platform/protocol';
-import { PROTOCOL_VERSION } from '@platform/protocol';
+import { MAX_REQUESTS_PER_FRAME, PROTOCOL_VERSION } from '@platform/protocol';
 import type { Codec, JsonValue } from '@platform/transport';
 import { RESERVED_KEYS, jsonCodec } from '@platform/transport';
 import type {
@@ -64,7 +64,6 @@ import {
     MAX_IDENTITY_LENGTH,
     MAX_INTERACTIONS_PER_FRAME,
     MAX_NAME_LENGTH,
-    MAX_REQUESTS_PER_FRAME,
     MAX_REQUEST_NAME_LENGTH,
     MAX_REQUEST_PAYLOAD_NODES,
     MAX_STRUCTURAL_OPS_PER_SEND,
@@ -90,7 +89,7 @@ export interface ProjectIdentity {
     bundleUrl: string;
 }
 
-/** A world declaring no project — every field empty, so agreement rather than absence passes. */
+/** A world declaring no project: every field empty, so agreement rather than absence passes. */
 const UNIDENTIFIED: ProjectIdentity = {
     projectId: '',
     projectHash: '',
@@ -113,14 +112,14 @@ export interface SimConfig extends Partial<EngineConfig> {
     gameScripts?: GameManifest['gameScripts'];
     /** What every spawn key means, from `toGameManifest(validate(file), …)`. */
     templates?: GameManifest['templates'];
-    /** The placed world, parents before children — instantiated before the first tick. */
+    /** The placed world, parents before children, instantiated before the first tick. */
     entities?: GameManifest['entities'];
     /** Names a script class on the wire; without it no `attach` op is journaled at all. */
     scripts?: ScriptIndex;
     /** What this build is. Omitted, every joiner declaring nothing is admitted and nothing else. */
     project?: ProjectIdentity;
     /**
-     * The creator-facing storage seam a `ServerScript` awaits — NOT where `@serverState` is
+     * The creator-facing storage seam a `ServerScript` awaits, NOT where `@serverState` is
      * checkpointed, which rides the batch. Omitted, core's `MemoryKVStore` dies with the world.
      */
     kv?: KVStore;
@@ -135,16 +134,16 @@ export interface SimOptions {
     codec?: Codec;
     /** An in-process sink for this world's diagnostics, beside the lines every batch carries. */
     log?: LogSink;
-    /** Called when the breaker disables a handler — a dev channel, deliberately not an envelope. */
+    /** Called when the breaker disables a handler: a dev channel, deliberately not an envelope. */
     onBreakerTrip?: (trip: BreakerTrip) => void;
 }
 
 /**
  * The authority's deterministic advance: one input batch in, one output batch out.
- * It opens no socket, reads no clock and touches no store — everything arrives in the batch.
+ * It opens no socket, reads no clock and touches no store; everything arrives in the batch.
  */
 export class Sim {
-    /** Live sessions, keyed by the host's connection id — what a transport does not hold. */
+    /** Live sessions, keyed by the host's connection id: what a transport does not hold. */
     readonly #sessions = new Map<ConnectionId, Session>();
     readonly #rt: Runtime;
     readonly #loop: Loop;
@@ -157,9 +156,9 @@ export class Sim {
     readonly #visuals: ManifestStore;
     readonly #project: ProjectIdentity;
     readonly #buffer = new InputBuffer();
-    /** Roster ops awaiting the next send — core's journal has no arm for either. */
+    /** Roster ops awaiting the next send; core's journal has no arm for either. */
     readonly #roster: RosterOps = { joins: [], leaves: [] };
-    /** Structural ops over this send's budget, kept in order — the only state surviving a send. */
+    /** Structural ops over this send's budget, kept in order: the only state surviving a send. */
     readonly #spill: WireStructuralOp[] = [];
     readonly #started: Promise<void>;
     /** `@serverState` that outlives a session, seeded by the host and captured back at a leave. */
@@ -261,7 +260,7 @@ export class Sim {
         };
 
         // Not awaited: a start handler awaiting a timer cannot complete until the loop steps, so
-        // this would deadlock the world. The rejection is caught rather than left floating — an
+        // this would deadlock the world. The rejection is caught rather than left floating; an
         // isolate with no event loop would otherwise lose a Game `@onStart` that threw.
         this.#started = startGame(this.#rt);
         void this.#started.catch((error: unknown) => {
@@ -334,7 +333,7 @@ export class Sim {
 
     /**
      * Releases the world: every session leaves inline, so this batch carries the last save each is
-     * owed — after a shutdown there is no next batch. Idempotent; later ticks are inert.
+     * owed; after a shutdown there is no next batch. Idempotent; later ticks are inert.
      */
     close(): OutputBatch {
         if (this.#closed) return this.#takeOutput();
@@ -574,7 +573,7 @@ export class Sim {
             'reliable',
         );
         // Behind the envelope, never instead of it: a bare close is indistinguishable from a drop,
-        // and the right answers invert — a drop should retry, a version mismatch must never.
+        // and the right answers invert: a drop should retry, a version mismatch must never.
         this.#closes.push({ connectionId: session.connectionId, reason });
         this.#release(session);
     }
@@ -636,7 +635,7 @@ export class Sim {
         }
     }
 
-    /** Closes a session that has not joined in time — the one denial needing no frame at all. */
+    /** Closes a session that has not joined in time: the one denial needing no frame at all. */
     #sweepJoinDeadline(): void {
         const deadline = joinDeadlineTicks(this.#rt.simRate);
         // Collected, then closed: closing mutates the registry, and a sweep that did it
@@ -682,7 +681,7 @@ export class Sim {
             if (player === null) continue;
             // Per session, for the reason the host's write loop is: a snapshot walk or an encode is
             // creator-influenced, and one peer's throw would otherwise take this send's whole
-            // journal down with it — ops that are already drained and would never be produced
+            // journal down with it, ops that are already drained and would never be produced
             // again.
             try {
                 if (session.wantsBroadcast) {
@@ -829,13 +828,13 @@ function asClientEnvelope(message: unknown): ClientToServer | undefined {
     }
 }
 
-/** Every field, checked — not `Partial<JoinRequest>`, which claims the narrowing without it. */
+/** Every field, checked, not `Partial<JoinRequest>`, which claims the narrowing without it. */
 function isJoinRequest(message: object): message is JoinRequest {
     const m = message as Record<string, unknown>;
     return (
         typeof m['protocolVersion'] === 'number' &&
         typeof m['name'] === 'string' &&
-        typeof m['clientSentMs'] === 'number' &&
+        Number.isFinite(m['clientSentMs']) &&
         isIdentityString(m['projectId']) &&
         isIdentityString(m['projectHash']) &&
         isIdentityString(m['bundleHash'])
@@ -904,7 +903,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * Whether a payload's graph fits `MAX_REQUEST_PAYLOAD_NODES`, carries no reserved key and holds
- * no non-finite number — the codec's decode rules, restated, since a handler is handed it whole.
+ * no non-finite number: the codec's decode rules, restated, since a handler is handed it whole.
  */
 function isAdmissiblePayload(payload: Record<string, unknown>): boolean {
     const stack: unknown[] = [payload];
@@ -929,7 +928,7 @@ function isAdmissiblePayload(payload: Record<string, unknown>): boolean {
 }
 
 function isTimeSync(message: object): message is TimeSync {
-    return typeof (message as Partial<TimeSync>).clientSentMs === 'number';
+    return Number.isFinite((message as Partial<TimeSync>).clientSentMs);
 }
 
 function isInputFrame(message: object): message is InputFrame {

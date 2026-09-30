@@ -38,7 +38,7 @@ export class Peer {
     }
 
     /**
-     * The first frame on a connection — the client speaks first.
+     * The first frame on a connection: the client speaks first.
      * Declares no project by default: the identity check passes on agreement, not on absence.
      */
     join(name = 'peer', over: Partial<JoinRequest> = {}): void {
@@ -68,7 +68,7 @@ export class Peer {
         return frame.seq;
     }
 
-    /** Sends a frame with a chosen seq without disturbing the counter — for the gap tests. */
+    /** Sends a frame with a chosen seq without disturbing the counter, for the gap tests. */
     inputAt(seq: number, tick: number, actions: InputAction[]): void {
         this.#send({ kind: 'input', tick, seq, actions } satisfies InputFrame);
     }
@@ -204,9 +204,9 @@ export interface HarnessOptions {
 export class Harness {
     readonly sim: Sim;
     readonly store: HarnessStore;
-    /** Every load the sim has ordered, in order — one output batch cannot show them all. */
+    /** Every load the sim has ordered, in order: one output batch cannot show them all. */
     readonly loads: Array<{ connectionId: ConnectionId; hostKey: string }> = [];
-    /** Every save the sim has ordered, in order — the host's obligation, made observable. */
+    /** Every save the sim has ordered, in order, the host's obligation, made observable. */
     readonly saves: Array<{ hostKey: string; fields: { [field: string]: unknown } }> = [];
     /** Every close the sim has ordered, in order. */
     readonly closes: Array<{ connectionId: ConnectionId; reason: string }> = [];
@@ -306,7 +306,7 @@ export class Harness {
         for (let i = 0; i < limit; i++) {
             if (this.pumpTicks(1) > 0) return;
         }
-        throw new Error('no send-tick within the limit — the cadence is wrong');
+        throw new Error('no send-tick within the limit: the cadence is wrong');
     }
 
     /**
@@ -351,7 +351,7 @@ export class Harness {
         this.#apply(this.sim.close());
     }
 
-    /** Settles once every write this harness started has landed — the host's shutdown drain. */
+    /** Settles once every write this harness started has landed, the host's shutdown drain. */
     async drain(): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 0));
     }
@@ -374,7 +374,7 @@ export class Harness {
         return batch;
     }
 
-    /** Everything one output batch orders — the host's whole job, in the order it must happen. */
+    /** Everything one output batch orders: the host's whole job, in the order it must happen. */
     #apply(out: OutputBatch): void {
         this.lastOutput = out;
         for (const line of out.log) this.lines.push(line.line);
@@ -420,7 +420,7 @@ export class Harness {
     }
 }
 
-/** Ticks between broadcasts, never below one — the host's cadence, restated for the harness. */
+/** Ticks between broadcasts, never below one, the host's cadence, restated for the harness. */
 function ticksPerSend(simRate: number, sendRate: number): number {
     if (!(sendRate > 0)) return 1;
     return Math.max(1, Math.round(simRate / sendRate));

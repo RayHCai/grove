@@ -34,7 +34,7 @@ describe('what one frame is allowed to contain', () => {
 
         peer.input(h.tick + 2, presses(MAX_ACTIONS_PER_FRAME + 1));
         h.pumpTicks(8);
-        // Dropped at the narrowing, which holds no validated seq to resolve — so the ack stalls
+        // Dropped at the narrowing, which holds no validated seq to resolve, so the ack stalls
         // exactly as it would on a frame that never arrived, until the abandonment rule releases
         // it.
         expect(peer.lastState?.ackSeq).toBe(-1);
@@ -191,8 +191,8 @@ describe('shutdown', () => {
 
 describe('the world is built before anything is admitted', () => {
     it('is booted by the time any caller holds it, so `accept` never sees a half-world', () => {
-        // The whole boot is the constructor — registry, Game scripts, scene, `@onStart` to its
-        // first await — and `booted` is set after all of it. There is no window a caller can
+        // The whole boot is the constructor (registry, Game scripts, scene, `@onStart` to its
+        // first await), and `booted` is set after all of it. There is no window a caller can
         // observe, which is the guarantee: a joiner's snapshot is its entire baseline, and no
         // later delta repairs one taken of a world still being assembled.
         const server = new Sim({

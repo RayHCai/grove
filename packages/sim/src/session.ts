@@ -16,13 +16,13 @@ export type RefusalReason = 'too-old' | 'too-far-future' | 'rate';
 /** What `AdmissionState.takeAck` reports for one connection on one send-tick. */
 export interface AckReport {
     ackSeq: number;
-    /** Absent when this ack resolved no input — never `undefined`, which the codec refuses. */
+    /** Absent when this ack resolved no input, never `undefined`, which the codec refuses. */
     earliestHeadroom?: number;
 }
 
 /**
  * Per-connection admission state: the resolution frontier, its acks' headroom, the rate limiters.
- * The frontier is not a high-water mark — either half of the resolved rule alone passes under one.
+ * The frontier is not a high-water mark; either half of the resolved rule alone passes under one.
  */
 export class AdmissionState {
     /** -1 = nothing resolved, matching the client's own start. */
@@ -41,7 +41,7 @@ export class AdmissionState {
     #controlTokens = CONTROL_BUCKET_FRAMES;
     #ticksSinceControlRefill = 0;
     #rateRefusals = 0;
-    /** The last tick any well-formed frame arrived on — the stale-hold backstop's clock. */
+    /** The last tick any well-formed frame arrived on: the stale-hold backstop's clock. */
     #lastInputTick = 0;
 
     /** The number the client prunes its ring against. */
@@ -60,11 +60,6 @@ export class AdmissionState {
 
     get lastInputTick(): number {
         return this.#lastInputTick;
-    }
-
-    /** Seqs resolved but not yet contiguous — a gap's cost, and a test's window into it. */
-    get pendingResolved(): number {
-        return this.#resolved.size;
     }
 
     /** Whether this seq arrived or settled above the frontier, which the frontier cannot say. */
@@ -94,7 +89,7 @@ export class AdmissionState {
         this.#lastInputTick = serverTick;
     }
 
-    /** Marks `seq` settled — applied, or definitively rejected; both resolve it. */
+    /** Marks `seq` settled: applied, or definitively rejected; both resolve it. */
     resolve(seq: number): void {
         if (seq <= this.#frontier) return;
         this.#resolved.add(seq);
@@ -114,7 +109,7 @@ export class AdmissionState {
 
     /**
      * Advances the frontier as far as it is contiguous and reports the ack.
-     * The headroom is the earliest input it resolved — the tail, since a mean-sized lead drops it.
+     * The headroom is the earliest input it resolved: the tail, since a mean-sized lead drops it.
      */
     takeAck(): AckReport {
         let earliest: number | undefined;
@@ -174,7 +169,7 @@ export class Session {
      */
     readonly identity: string | null;
     readonly admission = new AdmissionState();
-    /** This connection's folded input, through core's own fold — a second one would diverge. */
+    /** This connection's folded input, through core's own fold; a second one would diverge. */
     readonly actions: ActionStates = createActionStates();
     /** HUD presses and pointer hits awaiting the next tick pass. */
     readonly interactions: Interaction[] = [];
@@ -192,7 +187,7 @@ export class Session {
     /** A `TimeSync` awaiting the next send, so its reply names a tick the world has reached. */
     pendingTimeSync: TimeSync | null = null;
     /**
-     * The tick this session opened on, which the join deadline counts from — a tick rather than a
+     * The tick this session opened on, which the join deadline counts from, a tick rather than a
      * clock reading, so a host whose wall time jumps cannot move the deadline.
      */
     readonly openedAtTick: number;
@@ -208,7 +203,7 @@ export class Session {
         return this.player !== null;
     }
 
-    /** The Player of a connection both live and joined, or null — the predicate every walk uses. */
+    /** The Player of a connection both live and joined, or null: the predicate every walk uses. */
     get livePlayer(): Player | null {
         return this.closed ? null : this.player;
     }

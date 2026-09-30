@@ -2,13 +2,12 @@
 // output batch and answered in a later input batch, so this is the cache they meet in.
 
 import type { HostRecord } from '@platform/core';
-import { serializeHostField } from '@platform/core';
 import type { JsonValue } from '@platform/transport';
 import type { SaveOrder } from './batch.js';
-import { encodeStateValue } from './replicate.js';
+import { encodeHostField } from './replicate.js';
 
 /**
- * Host records the sim has been handed, by host id — what `rt.persisted` answers from.
+ * Host records the sim has been handed, by host id: what `rt.persisted` answers from.
  * Core's `PersistedSource` is satisfied structurally: the barrel exports the class, not the type.
  */
 export class SessionRecords {
@@ -18,7 +17,7 @@ export class SessionRecords {
         return this.#byHost.get(hostId)?.[field];
     }
 
-    /** Whether anything is held for `hostId` — a load that found nothing still counts as held. */
+    /** Whether anything is held for `hostId`; a load that found nothing still counts as held. */
     has(hostId: string): boolean {
         return this.#byHost.has(hostId);
     }
@@ -36,8 +35,8 @@ export class SessionRecords {
         const fields: { [field: string]: JsonValue } = {};
         for (const field of record.values.keys()) {
             // Through the same encoder the wire uses, so a value the store keeps is one a rejoin's
-            // snapshot can carry back.
-            const value = encodeStateValue(serializeHostField(record, field));
+            // snapshot can carry back, and a reserved key cannot become the copy's prototype.
+            const value = encodeHostField(record, field);
             if (value !== undefined) fields[field] = value;
         }
         this.#byHost.set(record.hostId, fields);

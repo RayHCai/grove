@@ -59,7 +59,7 @@ describe('the isolate entry', () => {
                 bundleHash: '',
             },
         });
-        // Identified, so the join waits on a record the host answers in a later batch — asked for
+        // Identified, so the join waits on a record the host answers in a later batch, asked for
         // on the tick the request landed, since the open and the frame are both at the top of it.
         const asked = tick(opened);
         expect(asked.loads).toEqual([{ connectionId: 'c1', hostKey: 'player:alice' }]);

@@ -12,7 +12,7 @@ export class ManifestStore {
         for (const template of initial.templates) this.#templates.set(template.template, template);
     }
 
-    /** Everything declared so far — the join payload. A copy, since the arrays cross a wire. */
+    /** Everything declared so far: the join payload. A copy, since the arrays cross a wire. */
     snapshot(): RenderManifest {
         return { assets: [...this.#assets.values()], templates: [...this.#templates.values()] };
     }

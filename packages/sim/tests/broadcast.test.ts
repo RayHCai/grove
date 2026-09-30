@@ -1,6 +1,6 @@
 // Fixtures are compiled by the build.
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SingleStructuralOp } from '@platform/core';
 import { GAME_KEY, clearRuntime, entityKey } from '@platform/core';
 import { scriptId, templateId } from '@platform/project';
@@ -72,7 +72,7 @@ describe('the drain runs once and the broadcast fans it out', () => {
         h.pumpTicks(6);
 
         // A per-connection drain would let the first connection take the marks and leave the rest
-        // with nothing — this is the assertion that catches it.
+        // with nothing; this is the assertion that catches it.
         for (const p of [one, two, three]) {
             expect(ops(p).filter((o) => o.kind === 'spawn')).toHaveLength(1);
         }
@@ -131,7 +131,7 @@ describe('the drain runs once and the broadcast fans it out', () => {
         const peer = h.joined('a');
         const rt = h.sim.runtime;
         const crate = rt.entityManager.spawn('crate', 1, 2);
-        // Core guards nothing on the way in, and jsonCodec throws on NaN — which would abort the
+        // Core guards nothing on the way in, and jsonCodec throws on NaN, which would abort the
         // fan-out for every connection and then repeat on the next send.
         rt.transforms.setPosition(crate.entityId, Number.NaN, 2, Number.POSITIVE_INFINITY);
         rt.transforms.setRotation(crate.entityId, Number.NaN);
@@ -228,7 +228,7 @@ describe('the drain runs once and the broadcast fans it out', () => {
         h.pumpTicks(6);
 
         // `spawn` carries a full EntitySnapshot, and a released entity has no record to read one
-        // from — its template would go out as '', which the client rejects, aborting the whole
+        // from: its template would go out as '', which the client rejects, aborting the whole
         // reconcile. An entity that lived less than one send interval is gone either way.
         const journal = ops(peer);
         expect(journal.some((o) => o.kind === 'spawn' && o.snapshot.netId === netId)).toBe(false);
@@ -303,8 +303,8 @@ describe('state is addressed by host and scoped per player', () => {
         h.pumpTicks(6);
         peer.clear();
 
-        // Two fields on the same host in one send interval share one entry, and the address that
-        // used to be repeated per field appears once.
+        // Two fields on the same host in one send interval share one entry, so the address
+        // appears once rather than per field.
         const record = rt.hosts.ensure(GAME_KEY).record;
         record.values.set('round', 7);
         record.values.set('phase', 'dusk');
@@ -335,7 +335,7 @@ describe('state is addressed by host and scoped per player', () => {
 
         const game = peer.states.flatMap((s) => s.state).find((d) => d.host.kind === 'game');
         expect(game?.fields).toStrictEqual({ round: 3 });
-        // An own key, not a mutated prototype — which is what assigning the name would have done.
+        // An own key, not a mutated prototype, which is what assigning the name would have done.
         expect(Object.getPrototypeOf(game?.fields)).toBe(Object.prototype);
     });
 
@@ -348,7 +348,7 @@ describe('state is addressed by host and scoped per player', () => {
         h.pumpTicks(6);
         peer.clear();
 
-        // `@serverState` may hold an Entity, and the host record holds it raw — jsonCodec rejects a
+        // `@serverState` may hold an Entity, and the host record holds it raw; jsonCodec rejects a
         // class instance, so a ref travels as what identifies it across the wire.
         (rules as unknown as { round: unknown }).round = crate;
         h.pumpTicks(6);
@@ -376,7 +376,7 @@ describe('wrapper state crosses as its wire form, not as a class', () => {
             kind: 'Scoreboard',
             scores: [['c1', 7]],
         });
-        // Read raw, the field's value is a class instance — which `encodeStateValue` refuses, so
+        // Read raw, the field's value is a class instance, which `encodeStateValue` refuses, so
         // every write would land here instead, silently.
         expect(h.sim.droppedMarks).toBe(0);
     });
@@ -425,7 +425,7 @@ describe('wrapper state crosses as its wire form, not as a class', () => {
                 fields: { team: { kind: 'Team', name: 'red', members: ['alice'] } },
             },
         ]);
-        // Read after the leave, so the record is already gone from the host table — the capture had
+        // Read after the leave, so the record is already gone from the host table; the capture had
         // to happen synchronously, before `PlayerManager.remove` dropped it.
         expect(rt.hosts.get('player:alice')).toBeUndefined();
     });
@@ -446,14 +446,14 @@ describe('wrapper state crosses as its wire form, not as a class', () => {
 
         expect(peer.states.flatMap((s) => s.state).some((d) => 'round' in d.fields)).toBe(false);
         expect(h.sim.droppedMarks).toBeGreaterThan(0);
-        // The value was unsendable, which is the defect this counter names — not churn.
+        // The value was unsendable, which is the defect this counter names, not churn.
         expect(h.sim.staleMarks).toBe(0);
     });
 
     it('counts a mark whose host died first as churn, and not as a bug report', () => {
         // The write and the destroy land in one send interval, so the address table the drain
-        // builds no longer holds the host. Ordinary in any world that destroys anything — folding
-        // it into `droppedMarks` is what made that counter unusable as a health signal.
+        // builds no longer holds the host. Ordinary in any world that destroys anything; folded
+        // into `droppedMarks` it would make that counter unusable as a health signal.
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
         const crate = h.sim.runtime.entityManager.spawn('crate', 0, 0);
@@ -626,6 +626,44 @@ describe('a template instantiation crosses as one group', () => {
         expect(set.structural).toHaveLength(1);
         expect(spill).toHaveLength(1);
     });
+
+    it('drops the whole group when one of its arms cannot be converted', () => {
+        const h = turretHarness();
+        const rt = h.sim.runtime;
+        rt.channels.clear();
+        const turret = rt.gameInstance!.spawn('turret', 0, 0);
+        const barrel = rt.entities.record(turret.entityId)!.children[0]!;
+        // The barrel's record vanishes between the ephemeral scan and its conversion, the one
+        // shape a spawn arm fails in.
+        const real = rt.entities.record.bind(rt.entities);
+        let seen = 0;
+        vi.spyOn(rt.entities, 'record').mockImplementation((id) =>
+            id === barrel && seen++ > 0 ? null : real(id),
+        );
+
+        const set = drainOnce(rt, 1, { joins: [], leaves: [] }, [], 64);
+
+        expect(set.structural.filter((op) => op.kind === 'group' || op.kind === 'spawn')).toEqual(
+            [],
+        );
+        expect(set.dropped).toBe(1);
+    });
+
+    it('keeps a group whose member was spawned and destroyed inside the interval', () => {
+        const h = turretHarness();
+        const peer = h.joined('a');
+        h.settle([peer]);
+        const rt = h.sim.runtime;
+        const turret = rt.gameInstance!.spawn('turret', 0, 0);
+        const barrel = rt.entities.record(turret.entityId)!.children[0]!;
+        rt.entityManager.facade(barrel).destroy();
+        h.pumpTicks(6);
+
+        // The elided arms name an entity gone on both ends, so what remains is the live subtree.
+        const group = ops(peer).find((op) => op.kind === 'group');
+        if (group?.kind !== 'group') throw new Error('expected the group to survive');
+        expect(group.ops.map((op) => op.kind)).toStrictEqual(['spawn', 'attach']);
+    });
 });
 
 describe('the translation is exhaustive', () => {
@@ -633,7 +671,7 @@ describe('the translation is exhaustive', () => {
         // Half of the guarantee. The other half is the `never` default in `toWireSingle`:
         // `noImplicitReturns` is off, so an arm added to core's journal and not handled there
         // would return `undefined`, be counted as unrepresentable, and vanish for the session.
-        // @ts-expect-error — core's journal has no `teleport` arm.
+        // @ts-expect-error: core's journal has no `teleport` arm.
         const bogus: SingleStructuralOp = { kind: 'teleport', id: 1 };
         expect(bogus.kind).toBe('teleport');
     });

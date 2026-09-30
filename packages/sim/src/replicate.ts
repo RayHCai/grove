@@ -127,7 +127,7 @@ export interface RosterOps {
     leaves: string[];
 }
 
-/** Drains all three channels once and assembles the send set — the only drain on the server. */
+/** Drains all three channels once and assembles the send set, the only drain on the server. */
 export function drainOnce(
     rt: Runtime,
     tick: number,
@@ -158,7 +158,7 @@ export function drainOnce(
     const ephemeral = ephemeralIds(rt, journal);
     for (const op of journal) {
         const wire = toWireStructural(rt, op, ephemeral);
-        if (wire === undefined) set.dropped += 1;
+        if (wire === undefined || wire === null) set.dropped += 1;
         else ordered.push(wire);
     }
 
@@ -169,7 +169,9 @@ export function drainOnce(
     const cut = budgetCut(ordered, budget);
     if (cut < ordered.length) {
         set.structural = ordered.slice(0, cut);
-        spill.push(...ordered.slice(cut));
+        // One at a time rather than spread: a journal's length is script-driven, and spreading a
+        // long one exhausts the argument limit.
+        for (let i = cut; i < ordered.length; i++) spill.push(ordered[i] as WireStructuralOp);
     } else {
         set.structural = ordered;
     }
@@ -190,7 +192,7 @@ export function drainOnce(
         const record = mark.record as HostRecord;
         const host = hosts.get(record.hostId);
         // The table is built from the live world, so a miss is a host that died between the write
-        // and this drain — the entity's own destroy op already tells every peer.
+        // and this drain; the entity's own destroy op already tells every peer.
         if (host === undefined) {
             set.staleMarks += 1;
             continue;
@@ -237,19 +239,23 @@ function ephemeralIds(rt: Runtime, journal: readonly StructuralOp[]): Set<number
     return gone;
 }
 
+/** The wire op, `null` for one elided by design, or `undefined` for one that cannot convert. */
 function toWireStructural(
     rt: Runtime,
     op: StructuralOp,
     ephemeral: Set<number>,
-): WireStructuralOp | undefined {
+): WireStructuralOp | null | undefined {
     if (op.kind !== 'group') return toWireSingle(rt, op, ephemeral);
     const ops: WireSingleStructuralOp[] = [];
     for (const single of op.ops) {
         const wire = toWireSingle(rt, single, ephemeral);
-        if (wire !== undefined) ops.push(wire);
+        // Whole or not at all: a partial group tells the receiver a subtree arrived complete. An
+        // elided arm is no hole, since the entity it names is gone on both ends.
+        if (wire === undefined) return undefined;
+        if (wire !== null) ops.push(wire);
     }
     const only = ops[0];
-    if (only === undefined) return undefined;
+    if (only === undefined) return null;
     return ops.length === 1 ? only : { kind: 'group', ops };
 }
 
@@ -257,8 +263,8 @@ function toWireSingle(
     rt: Runtime,
     op: SingleStructuralOp,
     ephemeral: Set<number>,
-): WireSingleStructuralOp | undefined {
-    if (ephemeral.has(op.id as number)) return undefined;
+): WireSingleStructuralOp | null | undefined {
+    if (ephemeral.has(op.id as number)) return null;
     switch (op.kind) {
         case 'spawn': {
             const snapshot = readEntitySnapshot(rt, op.id, { hierarchy: false });
@@ -273,7 +279,7 @@ function toWireSingle(
                 parent: op.parent === NO_ENTITY ? null : toNetId(op.parent),
             };
         case 'tag':
-            if (op.tag.startsWith(SAY_PREFIX)) return undefined;
+            if (op.tag.startsWith(SAY_PREFIX)) return null;
             return { kind: 'tag', netId: toNetId(op.id), tag: op.tag, added: op.added };
         case 'attach':
             return {
@@ -368,7 +374,7 @@ export function encodeStateValue(
 }
 
 /**
- * One session's reliable envelope — the per-connection residue, and why a state frame cannot
+ * One session's reliable envelope: the per-connection residue, and why a state frame cannot
  * be encoded once. It takes the ack, so it runs exactly once per session per send.
  */
 export function stateEnvelopeFor(session: Session, player: Player, set: SendSet): StateEnvelope {

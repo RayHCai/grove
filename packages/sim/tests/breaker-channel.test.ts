@@ -51,7 +51,7 @@ describe('onBreakerTrip', () => {
         expect(trips).toHaveLength(1);
     });
 
-    it('puts nothing on the wire — a trip is for the host, never for a peer', () => {
+    it('puts nothing on the wire: a trip is for the host, never for a peer', () => {
         const h = harness({ config: { gameScripts: [FaultyRules as never] } });
         const peer = h.joined();
         peer.clear();

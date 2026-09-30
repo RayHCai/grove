@@ -25,7 +25,7 @@ export interface InboundFrame {
 export interface LoadedRecord {
     connectionId: ConnectionId;
     /**
-     * The fields the store held — `{}` for a host it holds none for, `null` only on a FAILED read.
+     * The fields the store held: `{}` for a host it holds none for, `null` only on a FAILED read.
      * Nothing held means a new player; unreadable means a degraded session.
      */
     fields: { [field: string]: JsonValue } | null;
@@ -35,7 +35,7 @@ export interface LoadedRecord {
 export interface InputBatch {
     /**
      * Host wall-clock in milliseconds, stamped into `Welcome` and `TimeSyncReply` and differenced
-     * against nothing — a client compares only its own two stamps.
+     * against nothing; a client compares only its own two stamps.
      */
     nowMs: number;
     /** Whether this tick closes a send interval; the cadence is the host's, on its own clock. */
@@ -55,7 +55,7 @@ export interface InputBatch {
     saved: string[];
 }
 
-/** An empty batch — one quiet tick, which is the common case. */
+/** An empty batch: one quiet tick, which is the common case. */
 export function idleBatch(nowMs: number, drain = false): InputBatch {
     return { nowMs, drain, opened: [], frames: [], closed: [], records: [], saved: [] };
 }
@@ -78,7 +78,7 @@ export interface CloseOrder {
 /** A persisted read the sim needs before it can allocate a `Player` for this connection. */
 export interface LoadOrder {
     connectionId: ConnectionId;
-    /** The host record's key — a `playerKey`, which is what the save is filed under too. */
+    /** The host record's key: a `playerKey`, which is what the save is filed under too. */
     hostKey: string;
 }
 
@@ -98,7 +98,7 @@ export interface LogLine {
 export interface SimDiagnostics {
     /** Marks and ops dropped as unrepresentable. Nonzero is a bug report, not a failure. */
     dropped: number;
-    /** Marks whose host died between the write and the send — churn, not a defect. */
+    /** Marks whose host died between the write and the send: churn, not a defect. */
     stale: number;
 }
 
@@ -113,7 +113,7 @@ export interface BatchRates {
 
 /** Everything one tick produced. Empty on a tick that neither drained nor answered anything. */
 export interface OutputBatch {
-    /** The tick this batch describes — the sim's counter, not the host's. */
+    /** The tick this batch describes, the sim's counter, not the host's. */
     tick: number;
     /** What the host must drive at from here, which `setSimRate` is what moves. */
     rates: BatchRates;

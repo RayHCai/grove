@@ -1,16 +1,14 @@
 // The code, not the message text, is what a host branches on: a misconfigured world is a startup
-// fault to fix, while a bad call argument is one call to repair.
+// fault to fix, while an entry driven out of order is a host bug.
 
 /** Every condition the sim throws on. */
 export type SimErrorCode =
     /** A load-time config value the world cannot run on, such as a `simRate` of 0. */
     | 'invalid-config'
-    /** A call argument outside its contract, refused before anything was mutated. */
-    | 'invalid-argument'
     /** `loadGame` returned no tick passes, so the input pass has nowhere to install. */
     | 'no-pass-table'
-    /** The sim is closed, and the call would advance a world that has already been released. */
-    | 'sim-closed';
+    /** The isolate entry was driven out of order: booted twice, or used before it was booted. */
+    | 'entry-order';
 
 /** A sim failure with a machine-readable {@link SimErrorCode}. */
 export class SimError extends Error {

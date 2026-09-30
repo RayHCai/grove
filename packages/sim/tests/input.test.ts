@@ -32,7 +32,7 @@ function recorderOn(h: Harness, playerId: string): Recorder {
     return onAvatar<Recorder>(h, playerId, Recorder as never, 'Recorder');
 }
 
-describe('admission check 1 — identity comes from the connection', () => {
+describe('admission check 1: identity comes from the connection', () => {
     it('applies a frame to conn.player regardless of what the frame claims', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const first = h.joined('a');
@@ -40,7 +40,7 @@ describe('admission check 1 — identity comes from the connection', () => {
         const one = recorderOn(h, 'c1');
         const two = recorderOn(h, 'c2');
 
-        // A frame carrying another player's id — the field does not exist on the wire, and a
+        // A frame carrying another player's id: the field does not exist on the wire, and a
         // hostile client adding one must change nothing.
         expect(second.welcome).toBeDefined();
         first.input(h.tick + 1, [{ action: 'jump', on: 'press' }]);
@@ -51,7 +51,7 @@ describe('admission check 1 — identity comes from the connection', () => {
     });
 });
 
-describe('admission check 2 — the tick window', () => {
+describe('admission check 2: the tick window', () => {
     it('applies an in-window frame on exactly the tick it names', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
@@ -92,7 +92,7 @@ describe('admission check 2 — the tick window', () => {
         expect(rec.presses).toBe(1);
     });
 
-    it('applies a past-grace frame late rather than never — merge-forward', () => {
+    it('applies a past-grace frame late rather than never: merge-forward', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.joined('a');
         const rec = recorderOn(h, 'c1');
@@ -106,7 +106,7 @@ describe('admission check 2 — the tick window', () => {
     });
 });
 
-describe('admission check 3 — the rate ceiling', () => {
+describe('admission check 3: the rate ceiling', () => {
     it('refuses the excess and leaves other connections untouched', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const noisy = h.joined('a');
@@ -192,7 +192,7 @@ describe('ackSeq is the highest contiguous RESOLVED seq', () => {
 
         const acked = peer.states.find((s) => s.ackSeq === 0);
         // frame.tick - serverTickOnArrival, signed, measured by the server at admission. The frame
-        // is delivered by the next wake's `deliver()`, which runs BEFORE that wake's step — so the
+        // is delivered by the next wake's `deliver()`, which runs BEFORE that wake's step, so the
         // server's tick on arrival is still the tick the frame was addressed from.
         expect(acked?.earliestHeadroom).toBe(lead);
 
@@ -219,7 +219,7 @@ describe('ackSeq is the highest contiguous RESOLVED seq', () => {
         peer.clear();
         h.pumpTicks(12);
 
-        // Every seq is settled — applied or definitively rejected — so the frontier passed all
+        // Every seq is settled (applied or definitively rejected), so the frontier passed all
         // four.
         expect(peer.lastState?.ackSeq).toBe(Math.max(...seqs));
         expect(rec.presses + rec.releases).toBeGreaterThan(0);
@@ -236,7 +236,7 @@ describe('ackSeq is the highest contiguous RESOLVED seq', () => {
         expect(rec.presses).toBe(1);
         expect(peer.lastState?.ackSeq).toBe(seq);
 
-        // Already resolved, so no ack could report it either way — applying it again would
+        // Already resolved, so no ack could report it either way; applying it again would
         // double-fire.
         peer.inputAt(seq, h.tick + 2, [{ action: 'jump', on: 'press' }]);
         h.pumpTicks(8);
@@ -266,7 +266,7 @@ describe('ackSeq is the highest contiguous RESOLVED seq', () => {
         h.settle([peer]);
 
         // One frame per tick is the wire's ceiling, so a seq past the window names a tick that is
-        // already unapplicable — and dating that gap would cost a map entry per missing seq.
+        // already unapplicable, and dating that gap would cost a map entry per missing seq.
         peer.inputAt(maxSeqGap(60) + 1, h.tick + 2, [{ action: 'jump', on: 'press' }]);
         h.pumpTicks(8);
 
@@ -324,7 +324,7 @@ describe('the phases, synthesized from edges alone', () => {
         h.pumpTicks(10);
         expect(rec.lastValue).toBe(0.75);
 
-        // A hold SAMPLE updates the axis and dispatches nothing of its own — the per-tick hold is
+        // A hold SAMPLE updates the axis and dispatches nothing of its own; the per-tick hold is
         // synthesized, so dispatching the sample too would double-fire it.
         peer.input(h.tick + 2, [{ action: 'jump', on: 'hold', value: 0.25 }]);
         h.pumpTicks(4);
@@ -399,7 +399,7 @@ describe('a sustained rate breach closes that connection alone', () => {
         const quiet = h.joined('b');
         const two = recorderOn(h, 'c2');
 
-        // Well past the bucket AND past the cumulative refusal ceiling — a burst is absorbed, a
+        // Well past the bucket AND past the cumulative refusal ceiling: a burst is absorbed, a
         // sustained flood is not.
         for (let i = 0; i < INPUT_BUCKET_FRAMES + RATE_BREACH_CLOSE + 8; i++) {
             noisy.input(h.tick + 1, [{ action: 'jump', on: 'press' }]);

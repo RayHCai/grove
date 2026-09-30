@@ -24,7 +24,7 @@ export function buildSnapshot(rt: Runtime, forPlayer: Player): WorldSnapshot {
     };
 }
 
-/** Live ids with every parent ahead of its children — a wire requirement, not a convention. */
+/** Live ids with every parent ahead of its children, a wire requirement, not a convention. */
 export function ancestorsFirst(rt: Runtime): EntityId[] {
     const ids = rt.entities.liveIds();
     const live = new Set<number>(ids.map((id) => id as number));
