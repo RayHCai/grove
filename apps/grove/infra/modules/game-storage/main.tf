@@ -67,18 +67,21 @@ resource "aws_s3_bucket_lifecycle_configuration" "games" {
     }
   }
 
-  rule {
-    id     = "expire-noncurrent-versions"
-    status = "Enabled"
-
-    filter {}
-
-    noncurrent_version_expiration {
-      noncurrent_days = var.noncurrent_version_expiration_days
-    }
-  }
-
   depends_on = [aws_s3_bucket_versioning.games]
+}
+
+# A creator's asset goes from the browser to the bucket over a presigned PUT, and the editor reads a
+# source file back the same way, so the origins a signed-in person works from are the ones allowed.
+resource "aws_s3_bucket_cors_configuration" "games" {
+  bucket = aws_s3_bucket.games.id
+
+  cors_rule {
+    allowed_methods = ["GET", "PUT", "HEAD"]
+    allowed_origins = var.browser_origins
+    allowed_headers = ["*"]
+    expose_headers  = ["ETag", "x-amz-version-id"]
+    max_age_seconds = 300
+  }
 }
 
 data "aws_iam_policy_document" "games" {

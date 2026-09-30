@@ -14,10 +14,14 @@ variable "cdn_prefixes" {
   default     = ["build/", "assets/"]
 }
 
-variable "noncurrent_version_expiration_days" {
-  description = "How long a superseded object version is kept before it is deleted."
-  type        = number
-  default     = 30
+variable "browser_origins" {
+  description = "Origins a browser may presign a PUT or GET against this bucket from."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.browser_origins) > 0
+    error_message = "At least one origin, or no browser can upload an asset."
+  }
 }
 
 variable "price_class" {

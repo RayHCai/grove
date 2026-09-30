@@ -13,11 +13,6 @@ output "cdn_distribution_id" {
   value       = module.grove.cdn_distribution_id
 }
 
-output "task_streams" {
-  description = "Where the services that queue and claim work reach Redis, and the network it is in."
-  value       = module.grove.task_streams
-}
-
 output "tables" {
   description = "The two tables `@grove/game-manager`'s store is keyed for."
   value       = module.grove.tables

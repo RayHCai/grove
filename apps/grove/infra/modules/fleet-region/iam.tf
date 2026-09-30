@@ -28,48 +28,30 @@ resource "aws_iam_role_policy_attachment" "ssm" {
 }
 
 data "aws_iam_policy_document" "fleet" {
-  # Bundles only. A box pulls the artifacts a session loads and never the source archives that
-  # produced them.
+  # Build output and assets only, matched mid-key because the game comes first: a box pulls what a
+  # session loads and never a creator's source or the manifests that name it.
   statement {
-    sid     = "ReadBundles"
+    sid     = "ReadBuilds"
     actions = ["s3:GetObject"]
     resources = [
-      "${var.artifact_bucket_arn}/bundles/*",
-      "${var.artifact_bucket_arn}/assets/*",
+      "${var.artifact_bucket_arn}/*/build/*",
+      "${var.artifact_bucket_arn}/*/assets/*",
     ]
   }
 
   statement {
-    sid       = "ListBundles"
+    sid       = "ListBuilds"
     actions   = ["s3:ListBucket"]
     resources = [var.artifact_bucket_arn]
 
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["bundles/*", "assets/*"]
+      values   = ["*/build/*", "*/assets/*"]
     }
   }
 
-  dynamic "statement" {
-    for_each = length(var.dynamodb_arn_patterns) > 0 ? [1] : []
-
-    content {
-      sid = "GameData"
-      actions = [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:UpdateItem",
-        "dynamodb:DeleteItem",
-        "dynamodb:Query",
-        "dynamodb:BatchGetItem",
-        "dynamodb:BatchWriteItem",
-      ]
-      resources = var.dynamodb_arn_patterns
-    }
-  }
-
-  # The two secrets a box needs, read at boot and never written from here.
+  # The two secrets a box needs, read before every agent start and never written from here.
   statement {
     sid     = "ReadFleetSecrets"
     actions = ["ssm:GetParameter", "ssm:GetParameters"]

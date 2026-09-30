@@ -1,7 +1,7 @@
 bucket_name = "grove-production-games"
 
 # One box per region. Three regions because a region is the unit of failure a player notices, and
-# because `@grove/server-manager` treats a requested region as a filter rather than a preference —
+# because `@grove/server-manager` treats a requested region as a filter rather than a preference:
 # a region with no box in it is a region no player can be placed in.
 fleet = {
   a = {
@@ -31,3 +31,7 @@ fleet = {
 }
 
 server_manager_url = "https://server-manager.grove.internal:4003"
+game_manager_url   = "https://game-manager.grove.internal:4001"
+
+# Written by the image build in each of the three fleet regions; see the fleet section of the README.
+fleet_ami_parameter = "/grove/production/fleet/ami"

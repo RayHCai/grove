@@ -1,13 +1,9 @@
 # The two tables `@grove/game-manager`'s store is keyed for. `gameId` partitions both, so a row
-# belonging to another game is not in the partition a handler's token lets it name — the guarantee
+# belonging to another game is not in the partition a handler's token lets it name, the guarantee
 # that service's scope makes, held at the datastore as well as above it.
 
-data "aws_partition" "current" {}
-
-data "aws_caller_identity" "current" {}
-
 locals {
-  # A replicated table is a global table, and a global table is fed by a stream — so streams follow
+  # A replicated table is a global table, and a global table is fed by a stream, so streams follow
   # the replicas rather than being a setting of their own.
   replicated      = length(var.replica_regions) > 0
   billing_mode    = "PAY_PER_REQUEST"
@@ -64,7 +60,7 @@ resource "aws_dynamodb_table" "state" {
   tags = merge(local.common_tags, { Name = "${local.table_name_base}-state" })
 }
 
-# `Bundles`. One row per game, holding the set its sessions load — read on every session start and
+# `Bundles`. One row per game, holding the set its sessions load, read on every session start and
 # written once per deployment, which is why it is not a partition of the state table.
 resource "aws_dynamodb_table" "bundles" {
   name             = "${local.table_name_base}-bundles"

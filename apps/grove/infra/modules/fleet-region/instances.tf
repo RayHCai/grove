@@ -41,6 +41,7 @@ resource "aws_launch_template" "fleet" {
     grove_env             = var.environment == "production" ? "production" : "development"
     secret_path           = local.secret_path
     server_manager_url    = var.server_manager_url
+    game_manager_url      = var.game_manager_url
     instance_manager_port = var.instance_manager_port
     max_instances         = var.max_instances_per_box
     heartbeat_interval    = var.heartbeat_interval
@@ -75,8 +76,9 @@ resource "aws_autoscaling_group" "fleet" {
   max_size         = coalesce(var.max_instance_count, var.instance_count)
   desired_capacity = var.instance_count
 
-  # EC2 health only. An unhealthy agent is a fact `@grove/server-manager` already routes on by
-  # withholding work from the box, and replacing the box instead would end every session on it.
+  # EC2 health only, and no load balancer to take ELB health from. An unhealthy agent is a fact
+  # `@grove/server-manager` already routes on by withholding work from the box, and replacing the box
+  # instead would end every session on it.
   health_check_type         = "EC2"
   health_check_grace_period = 300
 

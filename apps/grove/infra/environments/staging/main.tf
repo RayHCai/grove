@@ -22,6 +22,10 @@ module "grove" {
   bucket_name        = var.bucket_name
   fleet              = var.fleet
   server_manager_url = var.server_manager_url
+  game_manager_url   = var.game_manager_url
+
+  fleet_ami_parameter = var.fleet_ami_parameter
+  browser_origins     = var.browser_origins
 
   # No replicas: a staging tick may cross a region to reach the store, and the cost of a second copy
   # of both tables buys nothing a staging run needs to observe.
