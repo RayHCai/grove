@@ -11,12 +11,13 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
 func main() {
 	addrEnv := flag.String("addr-env", "", "variable holding a host:port to take the port from")
-	portEnv := flag.String("port-env", "", "variable holding the port to probe")
+	portEnv := flag.String("port-env", "", "variables holding the port to probe, comma-separated, first set wins")
 	port := flag.String("port", "", "port to probe when neither variable is set")
 	path := flag.String("path", "/health", "path to probe")
 	timeout := flag.Duration("timeout", 3*time.Second, "how long to wait for a response")
@@ -54,8 +55,9 @@ func resolvePort(addrEnv, portEnv, fallback string) string {
 			}
 		}
 	}
-	if portEnv != "" {
-		if port := os.Getenv(portEnv); port != "" {
+	// A list because a service reads its own port variable before a platform's PORT.
+	for _, name := range strings.Split(portEnv, ",") {
+		if port := os.Getenv(strings.TrimSpace(name)); port != "" {
 			return port
 		}
 	}
