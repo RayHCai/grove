@@ -69,7 +69,7 @@ type Child interface {
 // answered is that nothing this agent forked is under that pid.
 var ErrNotOurs = errors.New("the pid is not this agent's child")
 
-// Launcher is the seam that makes this service testable at all — a fake here is what lets the
+// Launcher is the seam that makes this service testable at all: a fake here is what lets the
 // suite drive supervision without forking a real binary.
 type Launcher interface {
 	Start(ctx context.Context, spec Spec, logs io.Writer) (Child, error)
@@ -80,7 +80,7 @@ type Launcher interface {
 
 type execLauncher struct {
 	bin string
-	// What the kernel says is running under a pid — a seam because no suite can arrange a /proc
+	// What the kernel says is running under a pid, a seam because no suite can arrange a /proc
 	// that is there but unreadable, which is the case a survivor's life depends on.
 	cmdline func(pid int) ([]byte, error)
 }
@@ -139,7 +139,7 @@ func (l execLauncher) Adopt(pid int) (Child, error) {
 }
 
 // A pid outlives the process that held it, so what the kernel says is running under that number is
-// the only evidence a survivor is this agent's child — and a box without /proc has none.
+// the only evidence a survivor is this agent's child, and a box without /proc has none.
 func (l execLauncher) owns(pid int) (bool, error) {
 	raw, err := l.cmdline(pid)
 	if err != nil {
@@ -168,8 +168,7 @@ type execChild struct{ cmd *exec.Cmd }
 
 func (c *execChild) Pid() int { return c.cmd.Process.Pid }
 
-// SIGINT, not SIGTERM: the child hangs its drain off ctrl_c, and any other signal ends the session
-// with its last batch of saves still in memory.
+// SIGINT because the child drains on it, flushing its last batch of saves before it exits.
 func (c *execChild) Drain() error {
 	return c.cmd.Process.Signal(os.Interrupt)
 }

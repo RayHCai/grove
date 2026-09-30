@@ -117,7 +117,7 @@ func newBeater(t *testing.T, url string, source Source) *Beater {
 		Interval:         time.Hour,
 		Source:           source,
 		Box:              fakeBox{cpu: 0.25, free: 3 << 30},
-		Log:              slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log:              slog.New(slog.DiscardHandler),
 	})
 }
 

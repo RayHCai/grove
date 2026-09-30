@@ -2,11 +2,8 @@
 package heartbeat
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -115,29 +112,10 @@ func (b *Beater) Farewell(ctx context.Context) (string, error) {
 }
 
 func (b *Beater) post(ctx context.Context, beat contract.HostHeartbeat) (string, error) {
-	body, err := json.Marshal(beat)
-	if err != nil {
-		return "", fmt.Errorf("encode heartbeat: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.url, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("build heartbeat: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+string(b.opts.FleetSecret))
-	// A beat sits inside no request, so it starts its own thread rather than joining one.
-	requestID := httpx.Forward(req)
-
-	res, err := b.opts.Client.Do(req)
+	fleet := httpx.FleetClient{Client: b.opts.Client, Secret: b.opts.FleetSecret}
+	requestID, err := fleet.PostJSON(ctx, b.url, beat, nil, maxAnswerBytes)
 	if err != nil {
 		return requestID, fmt.Errorf("post heartbeat: %w", err)
-	}
-	defer res.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, maxAnswerBytes))
-
-	if res.StatusCode >= http.StatusBadRequest {
-		return requestID, fmt.Errorf("heartbeat answered %d", res.StatusCode)
 	}
 	return requestID, nil
 }

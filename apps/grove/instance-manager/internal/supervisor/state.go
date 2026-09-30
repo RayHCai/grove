@@ -18,12 +18,14 @@ const stateExt = ".json"
 // record is one child in the terms that outlive the agent that forked it: what the fleet calls it,
 // and where on this box it is.
 type record struct {
-	InstanceID string    `json:"instanceId"`
-	GameID     string    `json:"gameId"`
-	SessionID  string    `json:"sessionId"`
-	PID        int       `json:"pid"`
-	Port       int       `json:"port"`
-	StartedAt  time.Time `json:"startedAt"`
+	InstanceID string `json:"instanceId"`
+	GameID     string `json:"gameId"`
+	SessionID  string `json:"sessionId"`
+	// Zero on a record written before revisions were kept, which Adopt reads as unknown.
+	Revision  int       `json:"revision,omitempty"`
+	PID       int       `json:"pid"`
+	Port      int       `json:"port"`
+	StartedAt time.Time `json:"startedAt"`
 	// When a redeploy put this world into drain, so the next run of this agent resumes a budget
 	// already spent rather than granting a whole new one. Absent on a world nobody has ended.
 	DrainingSince time.Time `json:"drainingSince,omitzero"`

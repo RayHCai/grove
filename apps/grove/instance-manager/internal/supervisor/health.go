@@ -45,7 +45,7 @@ func (p httpProber) Probe(ctx context.Context, addr string) (Vitals, string, err
 	if err != nil {
 		return Vitals{}, "", fmt.Errorf("build probe: %w", err)
 	}
-	// A poll sits inside no request, so it starts its own thread rather than joining one — and the
+	// A poll sits inside no request, so it starts its own thread rather than joining one, and the
 	// child echoes and logs that id, which is what joins two accounts of a box going quiet.
 	requestID := httpx.Forward(req)
 
@@ -64,7 +64,7 @@ func (p httpProber) Probe(ctx context.Context, addr string) (Vitals, string, err
 	}
 
 	var v Vitals
-	// A body that is not json is not a failure — the status is the answer.
+	// A body that is not json is not a failure; the status is the answer.
 	_ = json.Unmarshal(body, &v)
 	return v, requestID, nil
 }
