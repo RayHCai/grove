@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { TopBar } from '../src/shell/TopBar';
+import { SAVED_FADE_MS, TopBar } from '../src/shell/TopBar';
 import type { SaveState, TopBarProps } from '../src/shell/TopBar';
 import { mount } from './helpers';
 
@@ -12,6 +12,7 @@ function bar(over: Partial<TopBarProps> = {}): Promise<HTMLElement> {
             dirty={false}
             state={{ at: 'idle' }}
             onSave={vi.fn()}
+            profileHref="https://grove.example/profile"
             {...over}
         />,
     );
@@ -19,6 +20,10 @@ function bar(over: Partial<TopBarProps> = {}): Promise<HTMLElement> {
 
 function status(host: HTMLElement): string | undefined {
     return host.querySelector('[role="status"]')?.textContent ?? undefined;
+}
+
+function faded(host: HTMLElement): boolean | undefined {
+    return host.querySelector('[role="status"]')?.classList.contains('topbar__state--faded');
 }
 
 function button(host: HTMLElement, label: string): HTMLButtonElement | null {
@@ -45,11 +50,12 @@ describe('TopBar', () => {
         expect(host.querySelector('[role="group"]')).toBeNull();
     });
 
-    it('names the person signed in rather than a profile nobody holds, and ends on them', async () => {
+    it('names the person signed in, ends on them, and goes to where they sign out', async () => {
         const host = await bar();
-        const profile = host.querySelector<HTMLButtonElement>('.topbar__profile');
-        expect(profile?.getAttribute('aria-label')).toBe('Rowan');
-        expect(profile?.hasAttribute('aria-disabled')).toBe(false);
+        const profile = host.querySelector<HTMLAnchorElement>('.topbar__profile');
+        expect(profile?.tagName).toBe('A');
+        expect(profile?.getAttribute('aria-label')).toBe('Rowan: profile and sign out');
+        expect(profile?.getAttribute('href')).toBe('https://grove.example/profile');
         expect(host.querySelector('header')?.lastElementChild).toBe(profile);
     });
 
@@ -57,9 +63,25 @@ describe('TopBar', () => {
         expect(status(await bar())).toBe('Up to date');
         expect(status(await bar({ dirty: true }))).toBe('Unsaved changes');
         expect(status(await bar({ state: { at: 'saving' } }))).toBe('Saving…');
-        expect(status(await bar({ state: { at: 'saved', revision: 4 } }))).toBe(
-            'Saved as revision 4',
-        );
+        expect(status(await bar({ state: { at: 'saved' } }))).toBe('Saved');
+    });
+
+    it('fades "Saved" after ten seconds, and only "Saved"', async () => {
+        vi.useFakeTimers();
+        try {
+            const saved = await bar({ state: { at: 'saved' } });
+            await act(async () => vi.advanceTimersByTime(SAVED_FADE_MS - 1));
+            expect(faded(saved)).toBe(false);
+            await act(async () => vi.advanceTimersByTime(1));
+            expect(faded(saved)).toBe(true);
+            expect(status(saved)).toBe('Saved');
+
+            const saving = await bar({ state: { at: 'saving' } });
+            await act(async () => vi.advanceTimersByTime(SAVED_FADE_MS));
+            expect(faded(saving)).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('shows the service’s own words for a refusal, and marks them as one', async () => {

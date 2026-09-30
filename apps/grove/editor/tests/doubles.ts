@@ -8,7 +8,6 @@ import type {
     GameId,
     PlayerId,
     SignedIn,
-    Task,
     VersionId,
     Workspace,
     WorkspaceFile,
@@ -30,7 +29,6 @@ import { DEFAULT_TEMPLATE } from '../src/workspace/templates';
 
 export const PLAYER_ID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479' as PlayerId;
 export const GAME_ID = '9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f' as GameId;
-export const TASK_ID = '8c2e4a60-5d17-4b93-8f0a-1e6d2c4b7a35' as Task['taskId'];
 
 export const ACCOUNT: Account = {
     playerId: PLAYER_ID,
@@ -45,6 +43,7 @@ export const GAME: Game = {
     title: "Pip's Garden",
     visibility: 'private',
     createdAt: '2026-09-01T09:00:00.000Z',
+    publishedAt: null,
 };
 
 /** The file the default template opens on, which most of these suites type into. */
@@ -132,7 +131,6 @@ export interface FakeApi extends Api {
     /** Every presign handed out, whether or not the bytes ever followed. */
     readonly signed: WorkspacePath[];
     readonly saves: WorkspaceSave[];
-    readonly publishes: GameId[];
     workspaceState: Workspace;
     owned: Game[];
     signedIn: boolean;
@@ -141,8 +139,8 @@ export interface FakeApi extends Api {
 /**
  * The service, out of memory.
  *
- * It refuses the way the real one does — a stale save is a conflict, an asset nobody uploaded is a
- * 400, and a call with no session is a 401 — because those are the branches the editor has to
+ * It refuses the way the real one does (a stale save is a conflict, an asset nobody uploaded is a
+ * 400, and a call with no session is a 401) because those are the branches the editor has to
  * answer for.
  */
 export function fakeApi(over: Partial<FakeApi> = {}): FakeApi {
@@ -156,7 +154,6 @@ export function fakeApi(over: Partial<FakeApi> = {}): FakeApi {
         bucket: new Map(),
         signed: [],
         saves: [],
-        publishes: [],
         signedIn: true,
         owned: [GAME],
         workspaceState: {
@@ -167,9 +164,6 @@ export function fakeApi(over: Partial<FakeApi> = {}): FakeApi {
         },
 
         session: async () => (api.signedIn ? signedIn() : undefined),
-        signOut: async () => {
-            api.signedIn = false;
-        },
 
         me: async () => guard(api, ACCOUNT),
         games: async () => guard(api, api.owned),
@@ -253,14 +247,6 @@ export function fakeApi(over: Partial<FakeApi> = {}): FakeApi {
             api.bucket.set(upload.path, { bytes, type: contentType });
         },
 
-        publish: async (game) => {
-            api.publishes.push(game);
-            return queued(api.workspaceState.revision);
-        },
-        task: async (_game, taskId) => ({
-            ...queued(api.workspaceState.revision),
-            taskId,
-        }),
         ...over,
     };
     return api;
@@ -273,19 +259,6 @@ function signedIn(): SignedIn {
 function guard<T>(api: FakeApi, value: T): T {
     if (!api.signedIn) throw new ApiError(401, 'unauthorized', 'sign in first');
     return value;
-}
-
-function queued(manifestRevision: number): Task {
-    return {
-        taskId: TASK_ID,
-        gameId: GAME_ID,
-        kind: 'BUILD',
-        status: 'NOT_STARTED',
-        manifestRevision,
-        attempts: 0,
-        createdAt: '2026-09-16T10:00:00.000Z',
-        updatedAt: '2026-09-16T10:00:00.000Z',
-    };
 }
 
 /** A workspace already holding these files, with their bytes in the bucket beside them. */

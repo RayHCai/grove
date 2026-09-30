@@ -1,7 +1,7 @@
 // The local run: the document a game is put in, and the channel the editor drives it over.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runDocument, windowDocument } from '../src/run/document';
+import { runDocument } from '../src/run/document';
 import { RunHost } from '../src/run/host';
 import type { RunLine } from '../src/run/host';
 
@@ -51,17 +51,6 @@ describe('the run document', () => {
     });
 });
 
-describe('the full-page document', () => {
-    it('holds the same run in a sandboxed frame, and relays what it says to the opener', () => {
-        const page = windowDocument(documentOf({ 'src/main.js': 'console.log(1)' }), 'Game');
-        expect(page).toContain('sandbox="allow-scripts"');
-        expect(page).toContain('srcdoc="');
-        // The run's own markup is escaped into the attribute rather than parsed as this page's.
-        expect(page).toContain('&lt;script');
-        expect(page).toContain('window.opener.postMessage');
-    });
-});
-
 describe('the run host', () => {
     let host: RunHost | undefined;
     const lines: RunLine[] = [];
@@ -81,7 +70,6 @@ describe('the run host', () => {
         host?.dispose();
         host = undefined;
         lines.length = 0;
-        vi.unstubAllGlobals();
     });
 
     it('puts the run in the frame it was attached to, and takes it away on stop', () => {
@@ -133,31 +121,5 @@ describe('the run host', () => {
             { source: 'grove-editor', type: 'pause' },
             { source: 'grove-editor', type: 'resume' },
         ]);
-    });
-
-    it('says so rather than failing quietly when a full-page run is blocked', () => {
-        const { host: run } = open();
-        vi.stubGlobal('open', () => null);
-        run.start({}, 'src/main.js', 'Game', COLORS, 'window');
-
-        expect(lines[0]?.level).toBe('error');
-        expect(lines[0]?.text).toContain('pop-ups');
-        // Falls back to the stage rather than leaving the run addressed at a window nobody opened.
-        expect(run.surface).toBe('stage');
-    });
-
-    it('writes the full-page run into the window it opened', () => {
-        const { host: run } = open();
-        const written: string[] = [];
-        const opened = {
-            document: { write: (text: string) => written.push(text), close: vi.fn() },
-            close: vi.fn(),
-            postMessage: vi.fn(),
-        };
-        vi.stubGlobal('open', () => opened);
-
-        run.start({ 'src/main.js': '' }, 'src/main.js', 'Game', COLORS, 'window');
-        expect(run.surface).toBe('window');
-        expect(written[0]).toContain('sandbox="allow-scripts"');
     });
 });

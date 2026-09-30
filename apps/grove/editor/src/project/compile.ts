@@ -52,7 +52,7 @@ function fault(path: string, message: string, severity: Problem['severity']): Pr
  * Compiles the game as it stands.
  *
  * A broken parse stops here: the JavaScript beside it cannot be trusted, and a manifest stamped
- * over it would claim classes the file no longer has. A wrong type does not — it still compiles to
+ * over it would claim classes the file no longer has. A wrong type does not: it still compiles to
  * something that runs, which is what the workbench reports as a warning.
  */
 export async function compile({ files, project, emit }: CompileInput): Promise<CompileResult> {
@@ -120,7 +120,7 @@ export function summarize(version: LocalVersion): string {
     const scripts = version.project.scriptModules.flatMap((module) => module.scripts).length;
     const settings = version.project.settings;
     return (
-        `Build succeeded: ${count(scripts, 'script')} in ${count(version.project.scriptModules.length, 'file')} — ` +
+        `Build succeeded: ${count(scripts, 'script')} in ${count(version.project.scriptModules.length, 'file')}: ` +
         `${String(settings.simRate)} Hz, up to ${count(settings.maxPlayers, 'player')}`
     );
 }

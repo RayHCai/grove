@@ -21,6 +21,7 @@ const mounted = vi.mocked(mountEditor);
 interface Workbench {
     onChange: Mock;
     syncFiles: Mock;
+    resetFiles: Mock;
 }
 
 async function shell(api: FakeApi = fakeApi(), lapsed: () => void = vi.fn()): Promise<HTMLElement> {
@@ -76,6 +77,19 @@ function paths(host: HTMLElement): (string | null)[] {
     return [...host.querySelectorAll('.tree__name')].map((name) => name.textContent);
 }
 
+/** Removes a file the way the explorer does: from the row's own right-click menu. */
+async function remove(host: HTMLElement, name: string): Promise<void> {
+    const row = [...host.querySelectorAll('.tree__item')].find(
+        (item) => item.querySelector('.tree__name')?.textContent === name,
+    );
+    await act(async () => {
+        row?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    });
+    await act(async () => {
+        host.querySelector<HTMLButtonElement>('[role="menuitem"]')?.click();
+    });
+}
+
 describe('saving', () => {
     it('offers nothing to save until something has changed', async () => {
         const api = fakeApi();
@@ -91,14 +105,14 @@ describe('saving', () => {
         expect(state(host)).toBe('Unsaved changes');
     });
 
-    it('sends the whole template the first time, and says which revision it produced', async () => {
+    it('sends the whole template the first time, and says the save landed', async () => {
         const api = fakeApi();
         const host = await shell(api);
 
         await press(host, 'Save');
         await until(() => state(host) !== 'Saving…');
 
-        expect(state(host)).toBe('Saved as revision 1');
+        expect(state(host)).toBe('Saved');
         expect(api.saves).toHaveLength(1);
         expect(api.saves[0]?.sources.map((source) => source.path)).toEqual([
             TEMPLATE_PATH,
@@ -110,11 +124,11 @@ describe('saving', () => {
         const api = fakeApi();
         const host = await shell(api);
         await press(host, 'Save');
-        await until(() => state(host) === 'Saved as revision 1');
+        await until(() => api.saves.length === 1);
 
         await type(TEMPLATE_PATH, 'const a = 3;');
         await press(host, 'Save');
-        await until(() => state(host) === 'Saved as revision 2');
+        await until(() => api.saves.length === 2);
 
         expect(api.saves[1]?.sources.map((source) => source.path)).toEqual([TEMPLATE_PATH]);
         expect(api.saves[1]?.deletes).toEqual([]);
@@ -125,15 +139,14 @@ describe('saving', () => {
         const host = await shell(api);
 
         await act(async () => {
-            [...host.querySelectorAll('button')]
-                .find((each) => each.textContent === 'New file')
-                ?.click();
+            host.querySelector<HTMLButtonElement>('button[aria-label="New file"]')?.click();
         });
         const field = host.querySelector<HTMLInputElement>('.explorer-panel__new input');
         await act(async () => {
+            // The explorer is rooted at the source folder, so a name is all it is given.
             Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
                 field,
-                'src/enemy.ts',
+                'enemy.ts',
             );
             field?.dispatchEvent(new Event('input', { bubbles: true }));
         });
@@ -145,12 +158,12 @@ describe('saving', () => {
         expect(paths(host)).toContain('enemy.ts');
 
         await press(host, 'Save');
-        await until(() => state(host) === 'Saved as revision 1');
+        await until(() => api.saves.length === 1);
         expect(api.saves[0]?.sources.map((source) => source.path)).toContain('src/enemy.ts');
 
-        await press(host, 'Delete');
+        await remove(host, 'enemy.ts');
         await press(host, 'Save');
-        await until(() => state(host) === 'Saved as revision 2');
+        await until(() => api.saves.length === 2);
         expect(api.saves[1]?.deletes).toEqual(['src/enemy.ts']);
     });
 
@@ -167,6 +180,30 @@ describe('saving', () => {
         await until(() => state(host)?.includes('reloaded') === true);
         expect(state(host)).toContain('revision 7');
         expect(host.querySelector('.topbar__state')?.className).toContain('--failed');
+    });
+
+    it('puts what the service holds back into the code editor on a reload', async () => {
+        const api = fakeApi();
+        await stored(api, [draftFromText('src/main.ts', 'const a = 1;')], 1);
+        const host = await reopened(api);
+
+        await type('src/main.ts', 'const a = 2;');
+        api.workspaceState = { ...api.workspaceState, revision: 7 };
+        await press(host, 'Save');
+        await until(() => state(host)?.includes('reloaded') === true);
+
+        // Without this the screen keeps the text that lost, and the next keystroke saves it over
+        // the one that won.
+        const reset = workbench().resetFiles.mock.lastCall?.[0] as {
+            path: string;
+            value: string;
+        }[];
+        expect(reset.find((file) => file.path === 'src/main.ts')?.value).toBe('const a = 1;');
+        expect(reset.some((file) => file.path === PROJECT_PATH)).toBe(false);
+
+        const saves = api.saves.length;
+        await press(host, 'Save');
+        expect(api.saves.length).toBe(saves);
     });
 });
 
@@ -294,5 +331,111 @@ describe('saving without being asked', () => {
         const dirty = new Event('beforeunload', { cancelable: true });
         window.dispatchEvent(dirty);
         expect(dirty.defaultPrevented).toBe(true);
+    });
+});
+
+describe('one save at a time', () => {
+    it('holds a save asked for mid-flight until the first lands, then sends it on top', async () => {
+        vi.useFakeTimers();
+        try {
+            const api = fakeApi();
+            await stored(api, [draftFromText('src/main.ts', 'const a = 1;')]);
+            const host = await reopened(api);
+
+            const real = api.save.bind(api);
+            const sent: number[] = [];
+            let release!: () => void;
+            const held = new Promise<void>((resolve) => (release = resolve));
+            api.save = async (game, save) => {
+                sent.push(save.baseRevision);
+                if (sent.length === 1) await held;
+                return real(game, save);
+            };
+
+            await type('src/main.ts', 'const a = 2;');
+            await press(host, 'Save');
+            // Typed while the first is in flight, and saved on its own once the typing stops.
+            await type('src/main.ts', 'const a = 3;');
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS + 1);
+            });
+            expect(sent).toEqual([1]);
+
+            await act(async () => {
+                release();
+                await vi.advanceTimersByTimeAsync(0);
+            });
+
+            // The second went at the revision the first landed as, so nothing was a conflict and
+            // nothing reloaded the typing away.
+            expect(sent).toEqual([1, 2]);
+            expect(api.saves.map((save) => save.sources[0]?.text)).toEqual([
+                'const a = 2;',
+                'const a = 3;',
+            ]);
+            expect(state(host)).toBe('Saved');
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+describe('the save a closing tab sends', () => {
+    it('keeps its text edits and leaves out an asset it had no time to upload', async () => {
+        const api = fakeApi();
+        await stored(api, [draftFromText('src/main.ts', 'const a = 1;')]);
+        const host = await reopened(api);
+        const flushed = vi.spyOn(api, 'saveOnExit');
+
+        await type('src/main.ts', 'const a = 2;');
+        const picker = host.querySelector<HTMLInputElement>('input[type="file"]');
+        const art = new File([new Uint8Array([137, 80, 78, 71])], 'tile.png', {
+            type: 'image/png',
+        });
+        await act(async () => {
+            Object.defineProperty(picker, 'files', { value: [art], configurable: true });
+            picker?.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await until(() => paths(host).includes('tile.png'));
+
+        await act(async () => {
+            Object.defineProperty(document, 'visibilityState', {
+                value: 'hidden',
+                configurable: true,
+            });
+            document.dispatchEvent(new Event('visibilitychange'));
+        });
+
+        const save = flushed.mock.calls[0]?.[1];
+        expect(save?.assets).toEqual([]);
+        expect(save?.sources.map((source) => source.path)).toEqual(['src/main.ts']);
+        // Which the service takes, where naming the asset would have refused the text with it.
+        await until(() => api.saves.length === 1);
+    });
+});
+
+describe('importing a file', () => {
+    it('trusts the extension over what the browser reported for it', async () => {
+        const api = fakeApi();
+        await stored(api, [draftFromText('src/main.ts', 'const a = 1;')]);
+        const host = await reopened(api);
+
+        // A .ts file is `video/mp2t` in an OS media registry, and a browser reports that.
+        const script = new File(['export const b = 1;'], 'enemy.ts', { type: 'video/mp2t' });
+        const picker = host.querySelector<HTMLInputElement>('input[type="file"]');
+        await act(async () => {
+            Object.defineProperty(picker, 'files', { value: [script], configurable: true });
+            picker?.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await until(() => paths(host).includes('enemy.ts'));
+
+        await press(host, 'Save');
+        await until(() => api.saves.length === 1);
+        expect(api.saves[0]?.sources).toContainEqual({
+            path: 'enemy.ts',
+            contentType: 'text/typescript',
+            text: 'export const b = 1;',
+        });
+        expect(api.saves[0]?.assets).toEqual([]);
     });
 });

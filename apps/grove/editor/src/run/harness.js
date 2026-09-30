@@ -17,8 +17,6 @@
         parent.postMessage(message, '*');
     }
 
-    // ---- what a value looks like in the console pane
-
     function render(value, depth) {
         if (typeof value === 'string') return depth === 0 ? value : JSON.stringify(value);
         if (value === null || value === undefined) return String(value);
@@ -77,7 +75,6 @@
         post({ type: 'error', text: 'unhandled rejection: ' + render(event.reason, 0) });
     });
 
-    // ---- pause
     //
     // A page cannot be suspended, but its clock can: while paused, every frame and timer the game
     // asked for is held and handed over on resume, so a loop stops advancing instead of racing on
@@ -126,7 +123,6 @@
         }
     });
 
-    // ---- the module graph
     //
     // Blob urls, built dependency-first, because a module's own url has to exist before the one
     // importing it can name it. That is also why a cycle is refused here rather than hanging: this

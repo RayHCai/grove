@@ -3,7 +3,7 @@
 //
 // A deployed game is linked by `@platform/scripting`'s toolchain, which has rolldown and a file
 // system. Neither is here, so the module graph is given urls of its own and handed to the browser's
-// own loader — the same evaluation, one module at a time instead of one chunk.
+// own loader: the same evaluation, one module at a time instead of one chunk.
 
 import type { ScriptId } from '@platform/project';
 import type { ScriptEntry } from '@platform/scripting';
@@ -31,7 +31,7 @@ export interface LinkOptions {
 /** A game's classes, live in this page, and the urls holding them up. */
 export interface LinkedGame {
     scripts: ScriptEntry<ScriptId>[];
-    /** Releases the urls. The classes outlive it — a module graph is held by what imported it. */
+    /** Releases the urls. The classes outlive it; a module graph is held by what imported it. */
     dispose: () => void;
 }
 
@@ -44,7 +44,7 @@ export class LinkError extends Error {
  * The handoff a generated module reads the engine back off.
  *
  * A module given a url of its own is fetched by the loader, not resolved through this page's
- * bundle, so it cannot reach an import — and two of the same engine would be two sets of base
+ * bundle, so it cannot reach an import, and two of the same engine would be two sets of base
  * classes, of which the world would recognise one. A key per link, deleted once the graph has
  * evaluated, so nothing of a finished run is left standing on the global.
  */
@@ -107,7 +107,7 @@ function importsOf(name: string, text: string, names: ReadonlySet<string>): stri
  * The modules in an order where nothing is given a url before what it imports has one.
  *
  * A blob's contents are fixed when it is made, so a module's text has to name its dependencies'
- * urls — which means they have to exist first. A circle has no such order, and is refused rather
+ * urls, which means they have to exist first. A circle has no such order, and is refused rather
  * than half-linked.
  */
 function order(modules: ReadonlyMap<string, string>): string[] {
@@ -140,7 +140,7 @@ function rewrite(
     urls: ReadonlyMap<string, string>,
 ): string {
     const names = new Set(urls.keys());
-    const linked = text.replaceAll(SPECIFIERS, (whole, quote: string, specifier: string) => {
+    const linked = text.replaceAll(SPECIFIERS, (whole, _quote: string, specifier: string) => {
         if (specifier === ENGINE_MODULE) return whole.replace(specifier, engineUrl);
         const target = resolve(name, specifier, names);
         // A specifier naming nothing this graph holds is left as it is, so the loader refuses it

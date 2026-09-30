@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useId, useRef, useState } from 'react';
 import { VisuallyHidden, cx, useTheme } from '@grove/ui';
 import type { EditorFile, EditorHandle, MountOptions } from './monaco';
 
@@ -45,10 +45,8 @@ export function CodeEditor({
     const keysId = useId();
     // The mount takes the first file through its options, so the open effect must not repeat it.
     const openedRef = useRef<string | null>(file?.path ?? null);
-    // Read through a ref, so the mount effect never has to re-run over a caller passing a new
-    // function every render.
-    const readyRef = useRef(onReady);
-    readyRef.current = onReady;
+    // An effect event, so the mount effect never re-runs over a caller passing a new function.
+    const ready = useEffectEvent((mounted: EditorHandle | null) => onReady?.(mounted));
 
     useEffect(() => {
         const host = hostRef.current;
@@ -61,7 +59,7 @@ export function CodeEditor({
                 const mounted = loaded.mountEditor(host, { file, theme });
                 handleRef.current = mounted;
                 setHandle(mounted);
-                readyRef.current?.(mounted);
+                ready(mounted);
             })
             .catch(() => {
                 if (!cancelled) setFailed(true);
@@ -70,7 +68,7 @@ export function CodeEditor({
             cancelled = true;
             handleRef.current?.dispose();
             handleRef.current = null;
-            readyRef.current?.(null);
+            ready(null);
         };
     }, []);
 

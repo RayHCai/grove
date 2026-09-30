@@ -24,6 +24,7 @@ export function Transport({ state, dispatch, className }: TransportProps): React
             <Button
                 variant="primary"
                 size="sm"
+                cursor={false}
                 className="transport__play"
                 icon={playing ? <PauseIcon /> : <PlayIcon />}
                 onClick={() => dispatch(playing ? 'pause' : 'play')}
