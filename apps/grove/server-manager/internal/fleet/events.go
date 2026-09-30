@@ -1,6 +1,6 @@
 // The history half of the registry: what a box did, as opposed to what it is.
 //
-// The registry answers what the fleet is right now, and one beat replaces the whole of it — which
+// The registry answers what the fleet is right now, and one beat replaces the whole of it, which
 // means the state a box was in is on no beat at all. A transition is therefore the only thing about
 // a box worth keeping, and this is where the ones nobody has taken yet are held.
 
@@ -19,7 +19,7 @@ import (
 const MaxPendingEvents = 1024
 
 // kindFor names the transition into a liveness. Read off the destination alone, because the row is
-// about what the box became — where it came from is the row before it.
+// about what the box became; where it came from is the row before it.
 func kindFor(to contract.HostLiveness) contract.FleetEventKind {
 	switch to {
 	case contract.HostSuspected:
@@ -85,7 +85,7 @@ func (reg *Registry) Drain() []contract.FleetEvent {
 // Restore puts events back after a failed report, oldest first.
 //
 // The alternative is losing the transition, and a history with a hole in it is worse than one that
-// arrives late — a box that failed and never came back is exactly the row an operator goes looking
+// arrives late; a box that failed and never came back is exactly the row an operator goes looking
 // for, and exactly the one a dropped report would take.
 func (reg *Registry) Restore(events []contract.FleetEvent) {
 	if len(events) == 0 {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"slices"
 	"sync"
@@ -152,7 +151,7 @@ func newHarness(t *testing.T, lineDepth int, p *placer) *harness {
 		Line: New(Options{
 			Queue:    q,
 			Placer:   p,
-			Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Log:      slog.New(slog.DiscardHandler),
 			Deadline: joinDeadline,
 		}),
 		queue:  q,

@@ -243,7 +243,7 @@ func TestParseRedisURLRefusesAUrlNoConnectionCouldBeMadeFrom(t *testing.T) {
 		{
 			name:    "a scheme this client does not speak",
 			raw:     "rediss://cache.internal",
-			mention: "scheme must be redis",
+			mention: "no TLS",
 		},
 		{
 			name:    "a url with nothing to dial",
@@ -470,5 +470,44 @@ func TestAReplyTheClientCannotReadNeverGoesBackInTheIdlePool(t *testing.T) {
 				t.Errorf("idle connections: got %d, want 0", n)
 			}
 		})
+	}
+}
+
+// An ACL user is named on AUTH, except the default one a bare password already authenticates as.
+func TestParseRedisURLKeepsAnACLUser(t *testing.T) {
+	for raw, want := range map[string]string{
+		"redis://queue:hunter2@cache.internal":   "queue",
+		"redis://default:hunter2@cache.internal": "",
+		"redis://:hunter2@cache.internal":        "",
+	} {
+		got, err := parseRedisURL(raw)
+		if err != nil {
+			t.Fatalf("parseRedisURL(%s): %v", raw, err)
+		}
+		if got.user != want || got.password != "hunter2" {
+			t.Errorf("%s: got user %q and password %q, want %q and hunter2", raw, got.user, got.password, want)
+		}
+	}
+}
+
+func TestAnACLUserIsNamedOnAuth(t *testing.T) {
+	f := serveRedis(t, "+OK\r\n", ":0\r\n", ":1\r\n")
+	r := redisFor(t, "redis://queue:hunter2@"+f.ln.Addr().String())
+
+	if _, err := r.Push(context.Background(), []byte("job-1")); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if got := f.commands(); len(got) == 0 || got[0] != "*3\r\n$4\r\nAUTH\r\n$5\r\nqueue\r\n$7\r\nhunter2\r\n" {
+		t.Fatalf("commands: got %q, want AUTH with the user first", got)
+	}
+}
+
+// The url carries the password, so no refusal may quote it back into a log.
+func TestAMalformedURLNeverQuotesItsPassword(t *testing.T) {
+	for _, raw := range []string{"redis://:hunter2@cache.internal:port", "redis://:hunter2@/3"} {
+		_, err := parseRedisURL(raw)
+		if err == nil || strings.Contains(err.Error(), "hunter2") {
+			t.Errorf("%s: got %v, want a refusal that names no password", raw, err)
+		}
 	}
 }
