@@ -60,7 +60,7 @@ describe('toPixiTextStyleOptions', () => {
         expect(Object.hasOwn(options, 'fontStyle')).toBe(false);
     });
 
-    it('does not forward resolution — that scales the raster, not the layout box', () => {
+    it('does not forward resolution: that scales the raster, not the layout box', () => {
         const options = toPixiTextStyleOptions({ resolution: 3 });
         // `resolution` is the caller's answer to zoom blur and belongs to the raster call.
         expect(Object.hasOwn(options, 'resolution')).toBe(false);

@@ -1,7 +1,7 @@
 // Three things go wrong quietly here, so each is asserted with exact numbers: the ANCHOR SIGN
 // (`anchor` is y-down inside the art, local bounds are y-up), QUARTER-TURN FUZZ (`cos(90°)` is
 // 6.1e-17, so quarter turns use `toBe` while diagonals take a tolerance), and the MARGIN'S UNIT
-// (`cullMargin` is WORLD px — scaling it by zoom would pop sprites at the edge).
+// (`cullMargin` is WORLD px; scaling it by zoom would pop sprites at the edge).
 
 import { describe, expect, it } from 'vitest';
 import { DEG2RAD, bounds, boundsHeight, boundsWidth, type Bounds } from '@platform/math';
@@ -25,12 +25,12 @@ function stageViewport(zoom = 1, cx = 0, cy = 0): Bounds {
 }
 
 describe('DEFAULT_CULL_MARGIN', () => {
-    it('is 64 world px — the cull margin unit', () => {
+    it('is 64 world px: the cull margin unit', () => {
         expect(DEFAULT_CULL_MARGIN).toBe(64);
     });
 });
 
-describe('spriteLocalBounds — anchor offset', () => {
+describe('spriteLocalBounds: anchor offset', () => {
     it('centers a 64x32 texture on the origin at the default anchor {0.5, 0.5}', () => {
         expect(spriteLocalBounds(TEX, 1, 1, 0.5, 0.5)).toEqual({
             left: -32,
@@ -70,7 +70,7 @@ describe('spriteLocalBounds — anchor offset', () => {
         });
     });
 
-    it('keeps the extent independent of the anchor — only the offset moves', () => {
+    it('keeps the extent independent of the anchor: only the offset moves', () => {
         for (const [ax, ay] of [
             [0, 0],
             [0.25, 0.75],
@@ -96,7 +96,7 @@ describe('spriteLocalBounds — anchor offset', () => {
     });
 });
 
-describe('spriteLocalBounds — per-axis scale', () => {
+describe('spriteLocalBounds: per-axis scale', () => {
     it('scales each axis independently', () => {
         expect(spriteLocalBounds(TEX, 2, 0.5, 0.5, 0.5)).toEqual({
             left: -64,
@@ -158,7 +158,7 @@ describe('spriteLocalBounds — per-axis scale', () => {
     });
 });
 
-describe('spriteLocalBounds — zero-size textures', () => {
+describe('spriteLocalBounds: zero-size textures', () => {
     it('returns a zero rect at the origin for a 0x0 texture at any anchor', () => {
         for (const [ax, ay] of [
             [0, 0],
@@ -192,14 +192,14 @@ describe('spriteLocalBounds — zero-size textures', () => {
     });
 });
 
-describe('spriteLocalBounds / emptyLocalBounds — out parameter', () => {
+describe('spriteLocalBounds / emptyLocalBounds: out parameter', () => {
     it('writes into `out` and returns that same object', () => {
         const out = bounds(1, 2, 3, 4);
         expect(spriteLocalBounds(TEX, 1, 1, 0.5, 0.5, out)).toBe(out);
         expect(out).toEqual({ left: -32, right: 32, top: 16, bottom: -16 });
     });
 
-    it('gives a group zero extent at the origin — a group is never culled', () => {
+    it('gives a group zero extent at the origin: a group is never culled', () => {
         expect(emptyLocalBounds()).toEqual({ left: 0, right: 0, top: 0, bottom: 0 });
 
         const out = bounds(1, 2, 3, 4);
@@ -209,7 +209,7 @@ describe('spriteLocalBounds / emptyLocalBounds — out parameter', () => {
     });
 });
 
-describe('rotatedHalfExtents — quarter turns are EXACT', () => {
+describe('rotatedHalfExtents: quarter turns are EXACT', () => {
     it('is the identity at 0 degrees', () => {
         expect(rotatedHalfExtents(10, 20, 0)).toEqual({ hx: 10, hy: 20 });
     });
@@ -238,7 +238,7 @@ describe('rotatedHalfExtents — quarter turns are EXACT', () => {
     });
 });
 
-describe('rotatedHalfExtents — 45 degrees', () => {
+describe('rotatedHalfExtents: 45 degrees', () => {
     it("expands a SQUARE's half-extent to hx * sqrt(2)", () => {
         // A 45-degree square is the largest relative expansion possible.
         const r = rotatedHalfExtents(10, 10, 45);
@@ -249,7 +249,7 @@ describe('rotatedHalfExtents — 45 degrees', () => {
     it('makes a non-square rect SQUARE at 45, both half-extents (hx + hy) / sqrt(2)', () => {
         const r = rotatedHalfExtents(10, 20, 45);
         // Close, not identical: `45 * DEG2RAD` is not π/4, so sine and cosine of it genuinely
-        // differ in the last bit — `Math.sin` and `Math.cos` disagree there too. A `toBe` here
+        // differ in the last bit; `Math.sin` and `Math.cos` disagree there too. A `toBe` here
         // passed only while the deterministic cosine was derived from the sine and inherited its
         // rounding, which made two different values come out equal for the wrong reason.
         expect(r.hx).toBeCloseTo(r.hy, 12);
@@ -267,7 +267,7 @@ describe('rotatedHalfExtents — 45 degrees', () => {
     });
 });
 
-describe('rotatedHalfExtents — a non-multiple of 45', () => {
+describe('rotatedHalfExtents: a non-multiple of 45', () => {
     it('matches the closed form at 30 degrees', () => {
         // hx' = cos30*10 + sin30*20 = 5*sqrt(3) + 10
         // hy' = sin30*10 + cos30*20 = 5 + 10*sqrt(3)
@@ -284,7 +284,7 @@ describe('rotatedHalfExtents — a non-multiple of 45', () => {
     });
 });
 
-describe('rotatedHalfExtents — invariants', () => {
+describe('rotatedHalfExtents: invariants', () => {
     it('reads negative half-extents as magnitudes', () => {
         expect(rotatedHalfExtents(-10, 20, 0)).toEqual({ hx: 10, hy: 20 });
         expect(rotatedHalfExtents(10, -20, 90)).toEqual({ hx: 20, hy: 10 });
@@ -309,7 +309,7 @@ describe('rotatedHalfExtents — invariants', () => {
     });
 });
 
-describe('worldAabb — translation', () => {
+describe('worldAabb: translation', () => {
     it('translates an unrotated centered rect', () => {
         const local = spriteLocalBounds(TEX, 1, 1, 0.5, 0.5);
         expect(worldAabb(local, 0, 100, 50)).toEqual({
@@ -320,7 +320,7 @@ describe('worldAabb — translation', () => {
         });
     });
 
-    it('keeps top > bottom — the world rect stays y-up', () => {
+    it('keeps top > bottom: the world rect stays y-up', () => {
         const local = spriteLocalBounds(TEX, 1, 1, 0.25, 0.75);
         for (const degrees of [0, 30, 45, 90, 180, 270, -45]) {
             const b = worldAabb(local, degrees, -12, 7);
@@ -337,7 +337,7 @@ describe('worldAabb — translation', () => {
     });
 });
 
-describe('worldAabb — rotation about the node ORIGIN, not the rect center', () => {
+describe('worldAabb: rotation about the node ORIGIN, not the rect center', () => {
     it('swaps the extents of a centered rect at 90 degrees, exactly', () => {
         const local = spriteLocalBounds(TEX, 1, 1, 0.5, 0.5);
         expect(worldAabb(local, 90, 0, 0)).toEqual({
@@ -351,7 +351,7 @@ describe('worldAabb — rotation about the node ORIGIN, not the rect center', ()
     it('sweeps an off-center rect around the origin at 90 degrees', () => {
         // Anchor {0,0}: the art occupies x in [0, 64], y in [-32, 0]. A CCW quarter turn maps
         // (x, y) -> (-y, x), so x' in [0, 32] and y' in [0, 64]. Rotating about the rect's own
-        // center instead would leave the AABB straddling the origin — the bug this catches.
+        // center instead would leave the AABB straddling the origin, the bug this catches.
         const local = spriteLocalBounds(TEX, 1, 1, 0, 0);
         expect(worldAabb(local, 90, 0, 0)).toEqual({
             left: 0,
@@ -507,7 +507,7 @@ describe('isVisibleInViewport', () => {
 
     it('clamps a NEGATIVE margin to zero instead of insetting the viewport', () => {
         // `cullMargin` is slack ADDED; an inset has no meaning. An inset deeper than the
-        // half-extent INVERTS the axis, and `boundsOverlap` re-normalizes — so a deeper inset would
+        // half-extent INVERTS the axis, and `boundsOverlap` re-normalizes, so a deeper inset would
         // draw MORE.
         const inside = bounds(-100, 100, 16, -16);
         const justOutside = bounds(500, 540, 16, -16);
@@ -542,10 +542,10 @@ describe('isVisibleInViewport', () => {
     });
 });
 
-describe('isVisibleInViewport — cullMargin is WORLD px, never CSS px', () => {
+describe('isVisibleInViewport: cullMargin is WORLD px, never CSS px', () => {
     it('yields the same world slack at every zoom, because the function never sees a zoom', () => {
         // 64 always means 64 WORLD px of slack, at every zoom. In CSS px it would buy 6.4 world px
-        // at zoom 10 and 640 at zoom 0.1 — popping when zoomed out and over-drawing when zoomed in.
+        // at zoom 10 and 640 at zoom 0.1, popping when zoomed out and over-drawing when zoomed in.
         for (const zoom of [0.1, 0.5, 1, 2, 10]) {
             const viewport = stageViewport(zoom);
             const inside = bounds(viewport.right + 63, viewport.right + 70, 0, 0);

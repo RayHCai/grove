@@ -1,5 +1,5 @@
 // `xform` carries only what inherits, `art` only what does not, and a child xform is a SIBLING of
-// `art` — nesting children under `art` silently restores full inheritance.
+// `art`; nesting children under `art` silently restores full inheritance.
 // `sortableChildren` is load-bearing: Pixi's stable sort draws a default-layer child over art.
 
 import { Container, Sprite, Text, TextStyle as PixiTextStyle } from 'pixi.js';

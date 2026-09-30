@@ -11,6 +11,7 @@ import type {
     RendererInitOptions,
     TextStyle,
 } from '../renderer.js';
+import { PLACEHOLDER_SIZE } from '../defaults.js';
 import { rendererError } from '../errors.js';
 import { validateAssetEntry } from '../asset-queue.js';
 import type { MergedAssetWork } from '../asset-queue.js';
@@ -22,9 +23,6 @@ import { measureText, rasterizeText } from './text-raster.js';
 import { SurfaceTree } from './surface-tree.js';
 import { PixiSink } from './pixi-sink.js';
 import { CANCELLED_REASON, ContextGuard } from './context-guard.js';
-
-/** Fallback size for a texture that is not resident. */
-const PLACEHOLDER_SIZE: Size = { width: 1, height: 1 };
 
 /** The PixiJS v8 implementation of {@link IRenderer}. */
 export class PixiRenderer extends RendererShell {
@@ -134,6 +132,8 @@ export class PixiRenderer extends RendererShell {
     }
 
     async loadAsset(entry: AssetManifestEntry): Promise<AssetInfo> {
+        // The singular form is a caller naming one asset, so a malformed one is a bug to throw.
+        validateAssetEntry(entry);
         const result = await this.loadAssets([entry]);
         const info = result.loaded[0];
         if (info === undefined) {
@@ -148,13 +148,24 @@ export class PixiRenderer extends RendererShell {
         const guard = this.#guard;
         if (guard?.lost === true) {
             // Mid-loss the intent is recorded and the restore's merge performs the upload, so the
-            // deferred operation only reports what landed — replaying the load here would upload
+            // deferred operation only reports what landed; replaying the load here would upload
             // every entry a second time.
-            const names = entries.map((entry) => entry.name);
-            for (const entry of entries) this.queue.load(entry);
+            const names: string[] = [];
+            const invalid: AssetLoadResult['failed'] = [];
+            for (const entry of entries) {
+                // Rejected before it is queued, as the live path rejects it before it loads: the
+                // restore's merge would otherwise throw on it and fail the whole rebuild.
+                const reason = invalidReason(entry);
+                if (reason !== null) {
+                    invalid.push({ name: String(entry?.name ?? ''), reason });
+                    continue;
+                }
+                names.push(entry.name);
+                this.queue.load(entry);
+            }
             return guard.run(
-                async () => this.#loadResultFor(names),
-                () => cancelledLoad(names),
+                async () => withFailures(this.#loadResultFor(names), invalid),
+                () => withFailures(cancelledLoad(names), invalid),
             );
         }
         return this.#loadNow(entries);
@@ -250,7 +261,7 @@ export class PixiRenderer extends RendererShell {
     protected dropResident(name: string): void {
         // Affected nodes fall back to the placeholder; their ids stay valid. Sprites reference an
         // atlas by BARE FRAME NAME, so the frames the sheet contributed have to be repointed as
-        // well — the atlas name itself is usually on no node at all.
+        // well; the atlas name itself is usually on no node at all.
         const core = this.core;
         const slots = core?.slotsUsingTexture(name) ?? [];
         for (const frame of this.#assets.framesOf(name)) {
@@ -258,6 +269,20 @@ export class PixiRenderer extends RendererShell {
         }
         this.#assets.unload(name);
         this.#sink?.repointToPlaceholder(slots);
+    }
+
+    /**
+     * The inverse of `dropResident`: a sprite resolves its texture once, at creation, so one made
+     * while its art was still loading holds the placeholder until something repoints it. A client
+     * spawns off a manifest it started but did not await, so this is the common case, not a race.
+     */
+    #repointToResident(name: string): void {
+        const core = this.core;
+        const sink = this.#sink;
+        if (core === null || sink === null) return;
+        for (const texture of [name, ...this.#assets.framesOf(name)]) {
+            sink.repointTo(core.slotsUsingTexture(texture), texture);
+        }
     }
 
     #installObserver(container: HTMLElement): void {
@@ -298,7 +323,7 @@ export class PixiRenderer extends RendererShell {
         for (const name of work.toUnload) this.#assets.unload(name);
         for (const entry of work.toLoad) {
             // A text entry rasterizes rather than fetches, and the registry refuses that kind by
-            // design — so routing it through the loader would report every world label as failed.
+            // design, so routing it through the loader would report every world label as failed.
             if (entry.kind === 'text') {
                 this.#assets.unload(entry.name);
                 const info = await this.createTextAsset(entry.name, entry.text, entry.style);
@@ -350,7 +375,10 @@ export class PixiRenderer extends RendererShell {
                 continue;
             }
             const outcome = await this.#assets.load(entry);
-            if (outcome.info !== undefined) result.loaded.push(outcome.info);
+            if (outcome.info !== undefined) {
+                result.loaded.push(outcome.info);
+                this.#repointToResident(entry.name);
+            }
             if (outcome.failure !== undefined) result.failed.push(outcome.failure);
             // A frame an atlas could not claim is an authoring bug the caller has to hear about.
             if (outcome.collisions !== undefined) result.failed.push(...outcome.collisions);
@@ -367,6 +395,12 @@ function invalidReason(entry: AssetManifestEntry): string | null {
     } catch (error) {
         return error instanceof Error ? error.message : String(error);
     }
+}
+
+/** `result` with `failed` appended, for entries refused before anything was queued. */
+function withFailures(result: AssetLoadResult, failed: AssetLoadResult['failed']): AssetLoadResult {
+    for (const failure of failed) result.failed.push(failure);
+    return result;
 }
 
 /** What a queued load settles with when the context never comes back. */

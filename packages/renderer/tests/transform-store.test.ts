@@ -38,17 +38,16 @@ describe('defaults', () => {
         expect(store.visible(0)).toBe(true);
         expect(store.neverCull(0)).toBe(false);
         expect(store.culled(0)).toBe(false);
-        expect(store.depth(0)).toBe(0);
         expect(store.parent(0)).toBe(-1);
     });
 
-    it('centers the anchor — a negative-x flip must pivot in place', () => {
+    it('centers the anchor: a negative-x flip must pivot in place', () => {
         const store = storeOf(1);
         expect(store.anchorX(0)).toBe(0.5);
         expect(store.anchorY(0)).toBe(0.5);
     });
 
-    it('uses -1, not 0, as the empty tree sentinel — slot 0 is a valid node', () => {
+    it('uses -1, not 0, as the empty tree sentinel: slot 0 is a valid node', () => {
         const store = storeOf(2);
         store.link(1, 0);
         expect(store.parent(1)).toBe(0);
@@ -72,7 +71,7 @@ describe('position-only inheritance', () => {
         expect(store.resolvedZ(1)).toBe(4);
     });
 
-    it('does NOT inherit rotation, scale, alpha or tint — local IS resolved for those', () => {
+    it('does NOT inherit rotation, scale, alpha or tint: local IS resolved for those', () => {
         const store = storeOf(2);
         store.link(1, 0);
         store.setRotation(0, 90);
@@ -132,7 +131,7 @@ describe('visibility inheritance', () => {
         expect(store.resolvedVisible(0)).toBe(false);
         expect(store.resolvedVisible(1)).toBe(false);
         expect(store.resolvedVisible(2)).toBe(false);
-        // The LOCAL flag is untouched — only the resolved value inherited.
+        // The LOCAL flag is untouched; only the resolved value inherited.
         expect(store.visible(2)).toBe(true);
 
         store.setVisible(0, true);
@@ -156,7 +155,7 @@ describe('visibility inheritance', () => {
     });
 });
 
-describe('dirty scope — a write dirties exactly what it changed', () => {
+describe('dirty scope: a write dirties exactly what it changed', () => {
     it('flush-dirties ONE node and resolve-dirties NOTHING for a rotation write', () => {
         const store = storeOf(3);
         store.link(1, 0);
@@ -165,7 +164,7 @@ describe('dirty scope — a write dirties exactly what it changed', () => {
 
         store.setRotation(0, 45);
         // Nothing to recompose: rotation stops at the node that declares it. Asserted on the
-        // PENDING set, because a rotation write changes no resolved value either way — so
+        // PENDING set, because a rotation write changes no resolved value either way, so
         // `consumeResolvedDirty` alone cannot tell correct from over-propagating.
         expect(sorted(store.pendingResolveRoots())).toEqual([]);
         store.resolve();
@@ -192,7 +191,7 @@ describe('dirty scope — a write dirties exactly what it changed', () => {
         }
     });
 
-    it('flush-dirties one node per spinning enemy — 200 nodes, not 200 subtrees', () => {
+    it('flush-dirties one node per spinning enemy: 200 nodes, not 200 subtrees', () => {
         const store = storeOf(200);
         for (let i = 1; i < 200; i++) store.link(i, 0);
         settle(store);
@@ -248,7 +247,7 @@ describe('dirty scope — a write dirties exactly what it changed', () => {
         expect(store.consumeFlushDirty()).toEqual([]);
     });
 
-    it('does not flush-dirty on a cull write — the flush pass owns that flag', () => {
+    it('does not flush-dirty on a cull write: the flush pass owns that flag', () => {
         const store = storeOf(1);
         settle(store);
         store.setCulled(0, true);
@@ -266,7 +265,7 @@ describe('dirty scope — a write dirties exactly what it changed', () => {
         store.markAllDirty();
         expect(sorted(store.consumeFlushDirty())).toEqual([0, 1, 2]);
         store.resolve();
-        // Values are unchanged, so nothing is reported as CHANGED — but the walk still ran,
+        // Values are unchanged, so nothing is reported as CHANGED, but the walk still ran,
         // which is what the rebuild needs.
         expect(store.resolvedX(2)).toBe(4);
     });
@@ -304,8 +303,8 @@ describe('resolve ordering', () => {
         // Each node appears at most once in the changed set.
         const changed = store.consumeResolvedDirty();
         expect(changed).toHaveLength(new Set(changed).size);
-        // And each was composed exactly once. Values alone cannot show this — recomposing
-        // node 2 a second time yields the same number — so the work itself is asserted.
+        // And each was composed exactly once. Values alone cannot show this: recomposing
+        // node 2 a second time yields the same number, so the work itself is asserted.
         expect(store.lastResolveVisits).toBe(3);
     });
 
@@ -348,7 +347,6 @@ describe('resolve ordering', () => {
         for (let i = 0; i < depth; i++) store.setPosition(i, 1, 0, 0);
         store.resolve();
         expect(store.resolvedX(depth - 1)).toBe(depth);
-        expect(store.depth(depth - 1)).toBe(depth - 1);
     });
 });
 
@@ -426,30 +424,30 @@ describe('tree integrity', () => {
         expect(store.nextSibling(1)).toBe(-1);
     });
 
-    it('moves a whole subtree between parents, maintaining depth', () => {
+    it('moves a whole subtree between parents, carrying its descendants', () => {
         const store = storeOf(5);
         store.link(1, 0);
         store.link(2, 1);
         store.link(3, 2);
         store.link(4, 0);
-        expect(store.depth(3)).toBe(3);
 
         // Move node 1 (with 2 and 3 under it) beneath node 4.
         store.link(1, 4);
         expect(store.parent(1)).toBe(4);
         expect(store.children(0)).toEqual([4]);
-        expect(store.depth(1)).toBe(2);
-        expect(store.depth(2)).toBe(3);
-        expect(store.depth(3)).toBe(4);
+        expect(store.children(4)).toEqual([1]);
+        expect(store.parent(2)).toBe(1);
+        expect(store.parent(3)).toBe(2);
     });
 
-    it('resets depth to 0 across a subtree that becomes a root', () => {
+    it('keeps a subtree intact when its root becomes a root', () => {
         const store = storeOf(3);
         store.link(1, 0);
         store.link(2, 1);
         store.unlink(1);
-        expect(store.depth(1)).toBe(0);
-        expect(store.depth(2)).toBe(1);
+        expect(store.parent(1)).toBe(-1);
+        expect(store.parent(2)).toBe(1);
+        expect(store.roots()).toEqual([0, 1]);
     });
 
     it('orders subtree() parent before child', () => {
@@ -485,7 +483,7 @@ describe('tree integrity', () => {
         store.link(1, 0);
         expect(store.roots()).toEqual([0, 2]);
         store.unlink(1);
-        // Back to a root, now at the end — insertion-defined.
+        // Back to a root, now at the end: insertion-defined.
         expect(store.roots()).toEqual([0, 2, 1]);
     });
 
@@ -549,7 +547,7 @@ describe('slot lifecycle', () => {
         expect(store.firstChild(500)).toBe(-1);
     });
 
-    it('keeps Float64 precision — the reason it is not Float32', () => {
+    it('keeps Float64 precision: the reason it is not Float32', () => {
         const store = storeOf(1);
         // 0.1 is not representable in binary; Float32 would lose it at this magnitude.
         store.setPosition(0, 0.1, 1e15 + 0.5, 0);

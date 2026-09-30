@@ -1,6 +1,7 @@
 // Anything touching a display object or a GPU resource goes through `SceneSink`; a backend is
 // the only place a Pixi type may appear.
 
+import { defaultCamera } from '../defaults.js';
 import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import {
     bounds,
@@ -104,7 +105,7 @@ export class RendererCore {
 
     #sink: SceneSink;
     #config: CoreConfig;
-    #camera: CameraState = { position: { x: 0, y: 0, z: 0 }, zoom: 1, framing: 'stage' };
+    #camera: CameraState = defaultCamera();
 
     readonly #events = new EventEmitter<RendererEvents>();
 
@@ -119,6 +120,7 @@ export class RendererCore {
     readonly #scratchOrigin: MutableVec3 = vec3();
     readonly #scratchTopLeft: MutableVec3 = vec3();
     readonly #scratchBottomRight: MutableVec3 = vec3();
+    readonly #scratchCorner: MutableVec3 = vec3();
     readonly #scratchIndices: number[] = [];
     readonly #dirtyOut: number[] = [];
     readonly #resolvedOut: number[] = [];
@@ -131,9 +133,6 @@ export class RendererCore {
 
     /** Set when something scene-wide changed and the next flush must reconsider every node. */
     #cullAll = true;
-
-    /** Stamped onto every `NodeRecord`; never rewound, so a recycled slot still sorts newest. */
-    #nextOrdinal = 0;
 
     /** Slots already re-culled this flush: a moved node lands in both dirty sets. */
     readonly #culledThisFlush = new Set<number>();
@@ -179,7 +178,7 @@ export class RendererCore {
 
     setCamera(camera: Readonly<CameraState>): void {
         // Copied, not retained, since a caller may reuse one camera object every frame. Never
-        // clamped to `camera.bounds`, which is engine-enforced — but non-finite values are
+        // clamped to `camera.bounds`, which is engine-enforced, but non-finite values are
         // rejected here, because a NaN reaching the backend blanks every camera-transformed
         // surface with no trace of where it came from.
         this.#camera = {
@@ -223,7 +222,7 @@ export class RendererCore {
         return fitScale(this.#camera.framing ?? 'stage', scaleMode, canvas, design);
     }
 
-    /** Validates and allocates a node; check order is contract — surface, text, texture, parent. */
+    /** Validates and allocates a node; check order is contract: surface, text, texture, parent. */
     createNode(desc: NodeDesc): NodeId {
         const surface = desc.surface ?? 'world';
         if (!this.isSurfaceEnabled(surface)) {
@@ -253,7 +252,6 @@ export class RendererCore {
             style: desc.kind === 'text' ? desc.style : undefined,
             uiAnchor: desc.uiAnchor,
             layer: desc.layer ?? 0,
-            ordinal: this.#nextOrdinal++,
         };
 
         const id = this.nodes.create(record);
@@ -271,7 +269,7 @@ export class RendererCore {
 
     destroyNode(id: NodeId): void {
         const index = this.nodes.indexOf(id);
-        // A stale handle is a legitimate race — `entity.destroy()` mid-frame — so it no-ops.
+        // A stale handle is a legitimate race (`entity.destroy()` mid-frame), so it no-ops.
         if (index < 0) return;
 
         const subtree = this.xf.subtree(index, this.#subtreeOut, true);
@@ -286,7 +284,7 @@ export class RendererCore {
     }
 
     updateNodes(patches: readonly NodePatch[]): void {
-        // Retains nothing past the call — not the array, not any patch object.
+        // Retains nothing past the call: not the array, not any patch object.
         for (const patch of patches) {
             const index = this.nodes.indexOf(patch.id);
             if (index < 0) continue;
@@ -421,14 +419,14 @@ export class RendererCore {
         this.attachAt(index, parent, opts?.keepResolvedPosition ?? false);
     }
 
-    /** `detachNode`, defaulting `keepResolvedPosition` to true — it keeps world position. */
+    /** `detachNode`, defaulting `keepResolvedPosition` to true; it keeps world position. */
     detachNode(child: NodeId, opts?: { keepResolvedPosition?: boolean }): void {
         const index = this.nodes.indexOf(child);
         if (index < 0) return;
         this.detachAt(index, opts?.keepResolvedPosition ?? true);
     }
 
-    /** Creates a batch. No intra-batch parenting — a `parent` must already exist. */
+    /** Creates a batch. No intra-batch parenting: a `parent` must already exist. */
     createNodes(descs: readonly NodeDesc[], out: NodeId[] = []): NodeId[] {
         out.length = 0;
         for (const desc of descs) out.push(this.createNode(desc));
@@ -500,7 +498,7 @@ export class RendererCore {
     }
 
     /**
-     * Relinks a slot under `parentIndex` — {@link NO_PARENT} detaches — and, when asked, rewrites
+     * Relinks a slot under `parentIndex` ({@link NO_PARENT} detaches) and, when asked, rewrites
      * its local position so the resolved one survives the move.
      */
     #relinkAt(index: number, parentIndex: number, keepResolvedPosition: boolean): void {
@@ -613,7 +611,7 @@ export class RendererCore {
     /**
      * `screenBoundsOf` for a slot already in hand, written into `out`.
      * The caller has resolved and holds the record, which is what keeps `nodeAt`'s loop off the
-     * public path — that one re-does the lookup and allocates, once per live node.
+     * public path; that one re-does the lookup and allocates, once per live node.
      */
     #screenBoundsAt(index: number, record: NodeRecord, out: Bounds): Bounds {
         if (!isCameraTransformed(record.surface)) {
@@ -632,25 +630,25 @@ export class RendererCore {
         }
 
         const world = this.worldBoundsAt(index, this.#scratchWorld);
-        const topLeft = this.worldToScreen({ x: world.left, y: world.top }, this.#scratchTopLeft);
-        const bottomRight = this.worldToScreen(
-            { x: world.right, y: world.bottom },
-            this.#scratchBottomRight,
-        );
+        const corner = this.#scratchCorner;
+        corner.x = world.left;
+        corner.y = world.top;
+        corner.z = 0;
+        const topLeft = this.worldToScreen(corner, this.#scratchTopLeft);
+        corner.x = world.right;
+        corner.y = world.bottom;
+        const bottomRight = this.worldToScreen(corner, this.#scratchBottomRight);
         // y-down after projection: `bottom > top`.
         return boundsSet(out, topLeft.x, bottomRight.x, topLeft.y, bottomRight.y);
     }
 
     /**
      * The topmost node whose art covers `screenPoint`, or `NO_NODE`. Screen space, y-down.
-     * Draw order backwards: surface, then `layer`, then creation order — never slot index.
+     * Draw order backwards: surface, then `layer` and sibling order at each level of the tree.
      */
     nodeAt(screenPoint: Vec3Like, opts: PickOptions = {}): NodeId {
         this.xf.resolve();
-        let best = NO_NODE;
         let bestSurface = -1;
-        let bestLayer = -Infinity;
-        let bestOrdinal = -1;
         let bestIndex = -1;
 
         for (const index of this.nodes.liveIndices(this.#pickScratch)) {
@@ -664,24 +662,62 @@ export class RendererCore {
             const order = surfaceOrder(record.surface);
             // Cheaper than the bounds below, and it decides the winner on its own.
             if (order < bestSurface) continue;
-            if (order === bestSurface && record.layer < bestLayer) continue;
-            if (order === bestSurface && record.layer === bestLayer) {
-                if (record.ordinal < bestOrdinal) continue;
-                if (record.ordinal === bestOrdinal && index < bestIndex) continue;
-            }
 
             const box = this.#screenBoundsAt(index, record, this.#scratchPick);
             if (screenPoint.x < box.left || screenPoint.x > box.right) continue;
             // Screen bounds are y-down, so `top` is the smaller number.
             if (screenPoint.y < box.top || screenPoint.y > box.bottom) continue;
 
-            best = this.nodes.idAt(index);
+            if (order === bestSurface && !this.#drawsAbove(index, bestIndex)) continue;
             bestSurface = order;
-            bestLayer = record.layer;
-            bestOrdinal = record.ordinal;
             bestIndex = index;
         }
-        return best;
+        return bestIndex < 0 ? NO_NODE : this.nodes.idAt(bestIndex);
+    }
+
+    /**
+     * Whether slot `a` draws over slot `b` on one surface: the backend sorts each container's
+     * children by `layer`, ties by insertion, and a node's own art sits at layer 0 ahead of them.
+     */
+    #drawsAbove(a: number, b: number): boolean {
+        let x = a;
+        let y = b;
+        let depthX = this.#depthOf(x);
+        let depthY = this.#depthOf(y);
+        let belowX = NO_PARENT;
+        let belowY = NO_PARENT;
+        while (depthX > depthY) {
+            belowX = x;
+            x = this.xf.parent(x);
+            depthX--;
+        }
+        while (depthY > depthX) {
+            belowY = y;
+            y = this.xf.parent(y);
+            depthY--;
+        }
+        // One is the other's ancestor: the branch toward the descendant sorts against the art.
+        if (x === y)
+            return belowX !== NO_PARENT ? this.#layerOf(belowX) >= 0 : this.#layerOf(belowY) < 0;
+
+        while (this.xf.parent(x) !== this.xf.parent(y)) {
+            x = this.xf.parent(x);
+            y = this.xf.parent(y);
+        }
+        const layerX = this.#layerOf(x);
+        const layerY = this.#layerOf(y);
+        if (layerX !== layerY) return layerX > layerY;
+        return this.xf.insertedAfter(x, y);
+    }
+
+    #depthOf(index: number): number {
+        let depth = 0;
+        for (let p = this.xf.parent(index); p !== NO_PARENT; p = this.xf.parent(p)) depth++;
+        return depth;
+    }
+
+    #layerOf(index: number): number {
+        return this.nodes.recordAt(index)?.layer ?? 0;
     }
 
     screenPositionOf(id: NodeId, out: MutableVec3 = vec3()): MutableVec3 | null {
@@ -811,7 +847,7 @@ export class RendererCore {
         return index < 0 ? false : this.xf.culled(index);
     }
 
-    /** Root ids for one surface in draw order — by `layer`, ties by insertion. */
+    /** Root ids for one surface in draw order: by `layer`, ties by insertion. */
     drawOrderOf(surface: Surface): NodeId[] {
         return inDrawOrder(
             this,
@@ -830,7 +866,7 @@ export class RendererCore {
         );
     }
 
-    /** How many live nodes reference an asset name — the `inUse` count. */
+    /** How many live nodes reference an asset name: the `inUse` count. */
     referenceCount(name: string): number {
         let count = 0;
         for (const slot of this.nodes.liveIndices()) {
@@ -886,7 +922,7 @@ export class RendererCore {
 
     /**
      * A UI node's screen position: its anchoring ancestor's origin plus its resolved design-px
-     * offset, scaled by `fitScale`. The anchor is the surface ROOT's — `uiAnchor` is root-only.
+     * offset, scaled by `fitScale`. The anchor is the surface ROOT's; `uiAnchor` is root-only.
      */
     #uiScreenPosition(index: number, out: MutableVec3): MutableVec3 {
         return uiToScreen(

@@ -94,7 +94,7 @@ describe('nodeAt', () => {
         expect(renderer.nodeAt(CENTRE)).toBe(second);
 
         // Destroying the oldest returns its slot to the freelist, so the next node is created into
-        // a LOWER slot index than the one already on screen — the case a slot-index rank inverts.
+        // a LOWER slot index than the one already on screen: the case a slot-index rank inverts.
         renderer.destroyNode(first);
         const third = renderer.createNode({
             kind: 'sprite',
@@ -105,6 +105,65 @@ describe('nodeAt', () => {
 
         expect(renderer.drawOrderOf('world').at(-1)).toBe(third);
         expect(renderer.nodeAt(CENTRE)).toBe(third);
+        renderer.destroy();
+    });
+
+    it('compares a child layer among its siblings, not against the whole surface', async () => {
+        const renderer = await ready();
+        const parent = renderer.createNode({ kind: 'group', surface: 'world' });
+        const child = renderer.createNode({
+            kind: 'sprite',
+            texture: 'block',
+            surface: 'world',
+            parent,
+            layer: 10,
+        });
+        // A later root draws over the whole of an earlier root's subtree, whatever layer is inside.
+        const later = renderer.createNode({ kind: 'sprite', texture: 'block', surface: 'world' });
+
+        expect(renderer.nodeAt(CENTRE)).toBe(later);
+        expect(child).not.toBe(later);
+        renderer.destroy();
+    });
+
+    it('draws a child over its parent at layer 0 and under it below 0', async () => {
+        const renderer = await ready();
+        const parent = renderer.createNode({ kind: 'sprite', texture: 'block', surface: 'world' });
+        const above = renderer.createNode({
+            kind: 'sprite',
+            texture: 'block',
+            surface: 'world',
+            parent,
+        });
+        expect(renderer.nodeAt(CENTRE)).toBe(above);
+
+        renderer.updateNodes([{ id: above, layer: -1 }]);
+        expect(renderer.nodeAt(CENTRE)).toBe(parent);
+        renderer.destroy();
+    });
+
+    it('puts a reparented node last among its new siblings, as the backend appends it', async () => {
+        const renderer = await ready();
+        const parent = renderer.createNode({ kind: 'group', surface: 'world' });
+        const elsewhere = renderer.createNode({ kind: 'group', surface: 'world' });
+        const moved = renderer.createNode({
+            kind: 'sprite',
+            texture: 'block',
+            surface: 'world',
+            parent,
+        });
+        const stayed = renderer.createNode({
+            kind: 'sprite',
+            texture: 'block',
+            surface: 'world',
+            parent,
+        });
+        expect(renderer.nodeAt(CENTRE)).toBe(stayed);
+
+        renderer.attachNode(moved, elsewhere);
+        renderer.attachNode(moved, parent);
+
+        expect(renderer.nodeAt(CENTRE)).toBe(moved);
         renderer.destroy();
     });
 
@@ -152,7 +211,7 @@ describe('nodeAt', () => {
         renderer.destroy();
     });
 
-    it('never hits a group — it has no art to cover a pixel with', async () => {
+    it('never hits a group: it has no art to cover a pixel with', async () => {
         const renderer = await ready();
         renderer.createNode({ kind: 'group', surface: 'world', position: { x: 0, y: 0 } });
         expect(renderer.nodeAt(CENTRE)).toBe(NO_NODE);

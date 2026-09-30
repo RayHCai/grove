@@ -30,7 +30,7 @@ function urlOf(entry: AssetManifestEntry): string | null {
     return entry.kind === 'text' ? null : entry.url;
 }
 
-/** A magenta 1x1 for an unresolved texture name — it has to read as a failure at a glance. */
+/** A magenta 1x1 for an unresolved texture name; it has to read as a failure at a glance. */
 function makePlaceholder(): Texture {
     return new Texture({
         source: new BufferImageSource({
@@ -52,7 +52,7 @@ export class AssetRegistry {
 
     #defaultFilter: TextureFilter = 'nearest';
 
-    /** `'nearest'` by default — kid-drawn pixel art should not blur. */
+    /** `'nearest'` by default; kid-drawn pixel art should not blur. */
     setDefaultFilter(filter: TextureFilter): void {
         this.#defaultFilter = filter;
     }
@@ -72,7 +72,7 @@ export class AssetRegistry {
         return this.#resident.get(name)?.size ?? null;
     }
 
-    /** The kind a resident name was loaded as — `unloadAssets` needs it to defer fonts. */
+    /** The kind a resident name was loaded as; `unloadAssets` needs it to defer fonts. */
     kindOf(name: string): AssetManifestEntry['kind'] | null {
         return this.#resident.get(name)?.entry.kind ?? null;
     }
@@ -124,7 +124,7 @@ export class AssetRegistry {
         }
     }
 
-    /** Registers an already-built texture under a name — the text-raster path. */
+    /** Registers an already-built texture under a name: the text-raster path. */
     registerTexture(entry: AssetManifestEntry, texture: Texture, size: Size): AssetInfo {
         this.#release(this.#resident.get(entry.name));
         this.#resident.set(entry.name, { texture, size, entry, frames: [] });
@@ -223,7 +223,7 @@ export class AssetRegistry {
     }
 
     #applyFilter(texture: Texture, filter: TextureFilter | undefined): void {
-        // `scaleMode` lives on the texture source, shared by every texture cut from it — which is
+        // `scaleMode` lives on the texture source, shared by every texture cut from it, which is
         // what an atlas wants.
         texture.source.scaleMode = filter ?? this.#defaultFilter;
     }

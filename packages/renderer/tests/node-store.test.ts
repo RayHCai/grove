@@ -22,7 +22,6 @@ function record(overrides: Partial<NodeRecord> = {}): NodeRecord {
         style: undefined,
         uiAnchor: undefined,
         layer: 0,
-        ordinal: 0,
         ...overrides,
     };
 }
@@ -126,7 +125,7 @@ describe('freelist reuse', () => {
         expect(nodeIndex(store.create(record()))).toBe(1);
         expect(store.slotCount).toBe(3);
 
-        // Freelist drained — now it grows.
+        // Freelist drained; now it grows.
         expect(nodeIndex(store.create(record()))).toBe(3);
         expect(store.slotCount).toBe(4);
     });
@@ -268,7 +267,7 @@ describe('generations', () => {
         expect(nearMax).toBeLessThanOrEqual(Number.MAX_SAFE_INTEGER);
 
         // Past MAX_GENERATION the packing would leave the safe range, so the slot is retired
-        // rather than re-minted at generation 1 — which would hand `first` back to a caller that
+        // rather than re-minted at generation 1, which would hand `first` back to a caller that
         // is still holding it and turn a dead node id into a live one belonging to someone else.
         store.release(0);
         const next = store.create(record());

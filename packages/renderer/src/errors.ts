@@ -3,10 +3,11 @@
 
 /** Every condition the renderer throws on. */
 export type RendererErrorCode =
-    /** `init` was called twice, or an operation needing a canvas ran before `init`. */
+    /** Reserved and never thrown: a call before `init` or after `destroy` is a silent no-op. */
     | 'not-initialized'
+    /** `init` was called twice. */
     | 'already-initialized'
-    /** An option was structurally invalid — a non-positive design size, a bad DPR cap. */
+    /** An option was structurally invalid: a non-positive design size, a bad DPR cap. */
     | 'invalid-option'
     /** The named surface was left out of `enabledSurfaces`. */
     | 'surface-disabled'
@@ -14,10 +15,10 @@ export type RendererErrorCode =
     | 'cross-surface-parent'
     /** The requested parenting would make a node its own ancestor. */
     | 'cycle'
-    /** `kind: 'text'` on a camera-transformed surface — use `createTextAsset` instead. */
+    /** `kind: 'text'` on a camera-transformed surface; use `createTextAsset` instead. */
     | 'text-node-on-world-surface'
     /**
-     * A node descriptor was structurally invalid — a sprite with no texture name, or a
+     * A node descriptor was structurally invalid: a sprite with no texture name, or a
      * `parentInBatch` naming anything but an earlier desc of the same `createSubtree` call.
      */
     | 'invalid-node-desc'

@@ -1,5 +1,5 @@
 // The reusable renderer contract: the same suite must run unchanged against any backend.
-// BACKEND-AGNOSTIC BY CONSTRUCTION — it may touch only `IRenderer` members plus what arrives
+// BACKEND-AGNOSTIC BY CONSTRUCTION: it may touch only `IRenderer` members plus what arrives
 // through `opts`, and imports no backend and no pixi.
 
 import { describe, it, expect } from 'vitest';
@@ -140,8 +140,8 @@ export function runRendererContract(
                 const other = renderer.createNode(sprite());
                 renderer.destroyNode(id);
 
-                // A stale handle arises from a legitimate race — `entity.destroy()` mid-frame
-                // — so each of these must degrade quietly.
+                // A stale handle arises from a legitimate race, `entity.destroy()` mid-frame,
+                // so each of these must degrade quietly.
                 expect(() => {
                     renderer.updateNodes([{ id, position: { x: 5, y: 5 }, alpha: 0.5 }]);
                     renderer.updateSubtree(id, { alpha: 0.5 });
@@ -270,13 +270,13 @@ export function runRendererContract(
                 const parent = renderer.createNode(sprite({ position: { x: 100, y: 0 } }));
                 const child = renderer.createNode(sprite({ position: { x: 10, y: 0 } }));
 
-                // attach defaults to keepResolvedPosition: false — "position becomes local to
+                // attach defaults to keepResolvedPosition: false: "position becomes local to
                 // parent", so the resolved position MOVES.
                 renderer.attachNode(child, parent);
                 expect(renderer.resolvedTransformOf(child)?.position.x).toBe(110);
                 expect(renderer.localTransformOf(child)?.position.x).toBe(10);
 
-                // detach defaults to true — "keeps world position", so the resolved position
+                // detach defaults to true: "keeps world position", so the resolved position
                 // STAYS and the local one absorbs it.
                 renderer.detachNode(child);
                 expect(renderer.resolvedTransformOf(child)?.position.x).toBe(110);
@@ -391,7 +391,7 @@ export function runRendererContract(
                 expect(renderer.isAlive(worldNode)).toBe(false);
                 expect(renderer.isAlive(uiNode)).toBe(true);
 
-                // Assets survive a clear — it drops nodes, not the canvas or the registry.
+                // Assets survive a clear; it drops nodes, not the canvas or the registry.
                 expect(renderer.hasAsset(image.name)).toBe(true);
                 renderer.destroy();
             });
@@ -586,7 +586,7 @@ export function runRendererContract(
 
                 renderer.updateSubtree(root, { alpha: 0.5 });
 
-                // FLATTENS rather than scaling proportionally — the stated cost of set
+                // FLATTENS rather than scaling proportionally, the stated cost of set
                 // semantics.
                 expect(renderer.localTransformOf(root)?.alpha).toBe(0.5);
                 expect(renderer.localTransformOf(mid)?.alpha).toBe(0.5);
@@ -605,7 +605,7 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
-            it('establishes no inheritance — a later child is unaffected', async () => {
+            it('establishes no inheritance: a later child is unaffected', async () => {
                 const renderer = await ready();
                 const root = renderer.createNode(sprite());
                 renderer.updateSubtree(root, { alpha: 0.5 });
@@ -669,7 +669,7 @@ export function runRendererContract(
 
             it('rejects a text node on a camera-transformed surface', async () => {
                 const renderer = await ready();
-                // The error must point at createTextAsset — world text is an asset first.
+                // The error must point at createTextAsset; world text is an asset first.
                 expect(() =>
                     renderer.createNode({ kind: 'text', text: 'boom', surface: 'world' }),
                 ).toThrow(RendererError);
@@ -778,7 +778,7 @@ export function runRendererContract(
                 renderer.destroy();
             });
 
-            it('flips y — a point above the camera gets a smaller screen y', async () => {
+            it('flips y: a point above the camera gets a smaller screen y', async () => {
                 const renderer = await ready();
                 renderer.resize(800, 600);
                 renderer.setCamera({ position: { x: 0, y: 0 }, zoom: 1 });
@@ -1054,7 +1054,7 @@ export function runRendererContract(
                 const result = await renderer.unloadAssets([image.name]);
                 const reported = result.inUse.find((entry) => entry.name === image.name);
                 expect(reported?.nodeCount).toBe(2);
-                // Unloaded anyway — a level transition genuinely wants to force it.
+                // Unloaded anyway: a level transition genuinely wants to force it.
                 expect(result.unloaded).toContain(image.name);
                 renderer.destroy();
             });
@@ -1360,7 +1360,7 @@ export function runRendererContract(
             it('gives each node its OWN bounds objects, not shared scratch', async () => {
                 // The core computes bounds through a reused scratch rect. If a snapshot handed that
                 // rect out instead of a copy, every node would alias it and report the LAST node's
-                // extent — a 10x10 sprite claiming to be 200x200. Two differently sized textures
+                // extent: a 10x10 sprite claiming to be 200x200. Two differently sized textures
                 // are what make that visible; equal-sized ones would pass either way.
                 const renderer = await ready();
                 await renderer.loadAsset({
@@ -1422,7 +1422,7 @@ export function runRendererContract(
                 const snapshot = renderer.inspect({ skipBounds: true });
                 expect(snapshot.nodes.get(s)?.localBounds).toBeNull();
                 expect(snapshot.nodes.get(s)?.worldBounds).toBeNull();
-                // Hierarchy still present — that is the point of the flag.
+                // Hierarchy still present; that is the point of the flag.
                 expect(snapshot.nodes.get(s)?.id).toBe(s);
                 renderer.destroy();
             });

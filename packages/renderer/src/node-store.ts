@@ -1,5 +1,5 @@
 // Non-numeric per-node data; the numeric transform data is in transform-store.ts under the same
-// slot index — which is why slots reuse densely and `slotCount` never shrinks.
+// slot index, which is why slots reuse densely and `slotCount` never shrinks.
 
 import { SlotTable } from '@platform/math';
 import type { NodeId } from './node-id.js';
@@ -19,11 +19,6 @@ export interface NodeRecord {
     uiAnchor: UiAnchor | undefined;
     /** Draw order within the surface; sibling order once parented. */
     layer: number;
-    /**
-     * Creation sequence number: the freelist is LIFO, so a slot index would sort a node created
-     * into a recycled slot underneath the node it was drawn on top of.
-     */
-    ordinal: number;
 }
 
 /** Slot table plus freelist for renderer nodes; records are stored and returned by reference. */
@@ -37,7 +32,7 @@ export class NodeStore {
         return this.slots.liveCount;
     }
 
-    /** Highest slot index ever allocated, plus one — the bound for a flat scan. */
+    /** Highest slot index ever allocated, plus one: the bound for a flat scan. */
     get slotCount(): number {
         return this.slots.slotCount;
     }

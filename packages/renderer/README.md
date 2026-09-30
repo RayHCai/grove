@@ -9,14 +9,14 @@ is in [DESIGN.md](./DESIGN.md); this file is the short version.
 ## Subpath exports
 
 Importing `@platform/renderer` yields the interface and types **without pulling `pixi.js` into
-the module graph** — otherwise anything touching the type (server-side tooling, the panel's type
+the module graph**; otherwise anything touching the type (server-side tooling, the panel's type
 emission) would drag a WebGL library along.
 
 | Import                    | Gives you                                                              |
 | ------------------------- | ---------------------------------------------------------------------- |
 | `@platform/renderer`      | `IRenderer`, every type, `NO_NODE`, `RendererError`, `AssetQueue`      |
-| `@platform/renderer/pixi` | `createPixiRenderer()` — the real backend                              |
-| `@platform/renderer/null` | `createNullRenderer()`, `createReadyNullRenderer()` — headless, no DOM |
+| `@platform/renderer/pixi` | `createPixiRenderer()` (the real backend)                              |
+| `@platform/renderer/null` | `createNullRenderer()`, `createReadyNullRenderer()` (headless, no DOM) |
 
 ```ts
 import type { IRenderer } from '@platform/renderer';
@@ -38,7 +38,7 @@ const hero = renderer.createNode({
     layer: 10,
 });
 
-// per frame, from @platform/client — the renderer owns no clock
+// per frame, from @platform/client; the renderer owns no clock
 renderer.updateNodes([{ id: hero, position: { x, y }, rotation: deg }]);
 renderer.setCamera({ position: { x: camX, y: camY }, zoom: 1 });
 renderer.render();
@@ -46,7 +46,7 @@ renderer.render();
 
 ## Five things that surprise people
 
-- **`render()` is explicit.** Nothing draws until you call it, and it takes no `dt` — the
+- **`render()` is explicit.** Nothing draws until you call it, and it takes no `dt`; the
   renderer owns no clock. Frame animation is the client picking a texture name per frame.
 - **A child inherits position and visibility. Nothing else, ever.** Rotation, scale, alpha and
   tint stop at the node that declares them, so a nameplate follows its parent without inheriting
@@ -57,24 +57,24 @@ renderer.render();
 - **World text goes through `createTextAsset` first**, then becomes a sprite node.
   `kind: 'text'` is UI-surface only, and `setNodeText` is therefore UI-only too.
 - **A context loss needs no caller rebuild path.** Store mutations apply immediately, GPU
-  operations queue, and node ids survive — so the frame loop needs no branch.
+  operations queue, and node ids survive, so the frame loop needs no branch.
 - **`cullMargin` is world pixels**, not CSS pixels, so 64 means the same slack at every zoom.
 - **`nodeAt(screenPoint)` picks against what was DRAWN**, which is the whole reason it lives here.
-  It takes canvas pixels — the same space `screenToWorld` takes — tests each node's
+  It takes canvas pixels (the same space `screenToWorld` takes), tests each node's
   `screenBoundsOf`, and returns the topmost by surface order, then layer, then creation order, or
   `NO_NODE`. Groups and invisible nodes are never hit, and `{ surface }` narrows it to one. A caller
   holding poses of its own could hit-test those instead, and would be wrong by whatever the caller
   interpolates or buffers away.
 - **`inspect()` is the only method for tooling**, and the only one that allocates per call. It
-  returns a copied `SceneSnapshot` — roots per surface in draw order, every live node, the view
-  state — because enumeration is impossible through the per-node queries, which all walk down from a
+  returns a copied `SceneSnapshot` (roots per surface in draw order, every live node, the view
+  state) because enumeration is impossible through the per-node queries, which all walk down from a
   handle you already hold. Dev only: never per frame, never branched on.
 
 ## Layout
 
 ```
 src/
-├── index.ts            public barrel — types + IRenderer, NO pixi import
+├── index.ts            public barrel: types + IRenderer, NO pixi import
 ├── renderer.ts         IRenderer, options, descs, patches, events
 ├── node-id.ts          NodeId brand and NO_NODE over math's packed handle
 ├── errors.ts           RendererError + codes
@@ -91,7 +91,7 @@ src/
 │   ├── scene-snapshot.ts   inspect()'s per-node projection + the empty snapshot
 │   ├── event-emitter.ts    typed pub/sub, no scene knowledge
 │   └── scene-sink.ts       the seam a backend implements
-├── null/               headless IRenderer — no DOM
+├── null/               headless IRenderer, no DOM
 └── pixi/               the PixiJS v8 backend
 ```
 
@@ -104,7 +104,7 @@ sign-bearing math reachable without a browser.
 shell over the same core. The core owns the two stores, `createNode`'s validation and its order, the
 attach/detach asymmetry, `updateSubtree`'s set semantics, the resolve/flush/cull pass, projection
 and bounds; the shell owns every `IRenderer` member that is pure delegation to it, the no-op before
-`init` and after `destroy`, and the fonts-last unload. A backend supplies only a `SceneSink` —
+`init` and after `destroy`, and the fonts-last unload. A backend supplies only a `SceneSink`:
 create/reparent/destroy a node's objects, push its local values, toggle its art, and answer how big
 it is.
 
@@ -112,5 +112,5 @@ This is deliberately not a "keep these files in sync" convention: each of those 
 exactly one place, and a backend inherits it rather than restating it.
 
 What legitimately differs stays per-backend: `init` (only one builds a GPU `Application`), `resize`
-(only one resizes a surface), the asset pipeline, the context guard, and `sizeOf` — a GPU backend
+(only one resizes a surface), the asset pipeline, the context guard, and `sizeOf`: a GPU backend
 measures text with a real font, a headless one cannot.

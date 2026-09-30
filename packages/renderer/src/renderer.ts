@@ -42,7 +42,7 @@ export interface RendererInitOptions {
     container?: HTMLElement;
     /** The reference stage, in world px. UI is authored against this size. */
     design: Size;
-    /** Default `['world', 'ui']` — a shipped game allocates no editor containers. */
+    /** Default `['world', 'ui']`; a shipped game allocates no editor containers. */
     enabledSurfaces?: readonly Surface[];
     /** Default `'fit'`. */
     scaleMode?: ScaleMode;
@@ -51,11 +51,11 @@ export interface RendererInitOptions {
     background?: number | 'transparent';
     /** DPR cap. Default 2. */
     maxResolution?: number;
-    /** Default `'nearest'` — kid-drawn pixel art. */
+    /** Default `'nearest'`: kid-drawn pixel art. */
     defaultFilter?: TextureFilter;
     /** Default `false`. */
     antialias?: boolean;
-    /** Default `true` — an internal `ResizeObserver` on `container`. */
+    /** Default `true`: an internal `ResizeObserver` on `container`. */
     autoResize?: boolean;
     /** World px of slack added to the viewport before the cull test. Default 64. */
     cullMargin?: number;
@@ -79,7 +79,7 @@ export interface AssetFailure {
     reason: string;
 }
 
-/** `loadAssets` resolves with this rather than rejecting — one 404 must not kill a level. */
+/** `loadAssets` resolves with this rather than rejecting: one 404 must not kill a level. */
 export interface AssetLoadResult {
     loaded: AssetInfo[];
     failed: AssetFailure[];
@@ -89,7 +89,7 @@ export interface AssetLoadResult {
 
 export interface AssetUnloadResult {
     unloaded: string[];
-    /** Never loaded. Not an error — idempotent teardown needs no guard. */
+    /** Never loaded. Not an error: idempotent teardown needs no guard. */
     unknown: string[];
     /** Unloaded anyway; affected nodes show the placeholder. A font in use is kept instead. */
     inUse: Array<{ name: string; nodeCount: number }>;
@@ -107,14 +107,14 @@ export interface TextStyle {
     stroke?: { color: number; width: number };
     wrapWidth?: number;
     lineHeight?: number;
-    /** Raster scale for text assets — the caller's explicit answer to zoom blur. */
+    /** Raster scale for text assets, the caller's explicit answer to zoom blur. */
     resolution?: number;
 }
 
 interface NodeBase {
     /** Default `'world'`. Immutable after create. */
     surface?: Surface;
-    /** Default `NO_NODE` — a root of its surface. */
+    /** Default `NO_NODE`: a root of its surface. */
     parent?: NodeId;
 
     // Inherited by children.
@@ -133,11 +133,11 @@ interface NodeBase {
     alpha?: number;
     tint?: number;
 
-    /** 0..1 pivot INSIDE this node's own art — not hierarchy. Default centered (0.5, 0.5). */
+    /** 0..1 pivot INSIDE this node's own art, not hierarchy. Default centered (0.5, 0.5). */
     anchor?: Vec3Like;
     /** Draw order within the surface; sibling order once parented. */
     layer?: number;
-    /** For visuals that exceed their bounds — glow, thick stroke, emitter. */
+    /** For visuals that exceed their bounds: glow, thick stroke, emitter. */
     neverCull?: boolean;
     /** UI-surface roots only. `position` is then the offset from this anchor. */
     uiAnchor?: UiAnchor;
@@ -153,7 +153,7 @@ export interface GroupNodeDesc extends NodeBase {
     kind: 'group';
 }
 
-/** UI surfaces only — world text goes through `createTextAsset`. */
+/** UI surfaces only; world text goes through `createTextAsset`. */
 export interface TextNodeDesc extends NodeBase {
     kind: 'text';
     text: string;
@@ -293,13 +293,13 @@ export interface IRenderer {
     setSurfaceVisible(surface: Surface, visible: boolean): void;
     isSurfaceEnabled(surface: Surface): boolean;
 
-    // assets — async, uniform AssetInfo; queued while the context is lost
+    // assets: async, uniform AssetInfo; queued while the context is lost
 
     loadAsset(entry: AssetManifestEntry): Promise<AssetInfo>;
     loadAssets(entries: readonly AssetManifestEntry[]): Promise<AssetLoadResult>;
     unloadAssets(entries: readonly (string | AssetManifestEntry)[]): Promise<AssetUnloadResult>;
     createTextAsset(name: string, text: string, style?: TextStyle): Promise<AssetInfo>;
-    /** Intended state, post-queue — never raw GPU state. */
+    /** Intended state, post-queue, never raw GPU state. */
     hasAsset(name: string): boolean;
     getAssetSize(name: string): Readonly<Size> | null;
 
@@ -308,7 +308,7 @@ export interface IRenderer {
     /** Synchronous by design: `game.spawn` is specified sync and always safe. */
     createNode(desc: NodeDesc): NodeId;
     createNodes(descs: readonly NodeDesc[], out?: NodeId[]): NodeId[];
-    /** Creates a parented subtree in one call, all or nothing — the caller holds no handle yet. */
+    /** Creates a parented subtree in one call, all or nothing; the caller holds no handle yet. */
     createSubtree(descs: readonly SubtreeNodeDesc[], out?: NodeId[]): NodeId[];
     createNodeAsync(desc: NodeDesc): Promise<{ id: NodeId } & AssetInfo>;
     /** Cascades to children, matching `Entity.destroy()`. */
@@ -321,7 +321,7 @@ export interface IRenderer {
         patch: Omit<NodePatch, 'id' | 'parent'>,
         opts?: { includeRoot?: boolean },
     ): void;
-    /** UI text nodes only — world text is an asset. */
+    /** UI text nodes only; world text is an asset. */
     setNodeText(id: NodeId, text: string): void;
     isAlive(id: NodeId): boolean;
     /** Drops nodes; keeps the canvas and every loaded asset. */
@@ -348,12 +348,12 @@ export interface IRenderer {
     localTransformOf(id: NodeId, out?: Transform): Transform | null;
     resolvedTransformOf(id: NodeId, out?: Transform): Transform | null;
     localBoundsOf(id: NodeId): Bounds | null;
-    /** Rotated AABB in world space — culling and editor selection. */
+    /** Rotated AABB in world space: culling and editor selection. */
     worldBoundsOf(id: NodeId): Bounds | null;
     /** Screen space, for UI hit-testing. */
     screenBoundsOf(id: NodeId): Bounds | null;
     /**
-     * The topmost node covering `screenPoint`, or `NO_NODE` — the pointer's question, answered.
+     * The topmost node covering `screenPoint`, or `NO_NODE`: the pointer's question, answered.
      * Screen space, y-down. Groups and invisible nodes never hit.
      */
     nodeAt(screenPoint: Vec3Like, opts?: PickOptions): NodeId;
@@ -373,6 +373,6 @@ export interface IRenderer {
         handler: (e: RendererEvents[K]) => void,
     ): () => void;
 
-    /** No `dt` — the renderer owns no clock. Nothing draws until this is called. */
+    /** No `dt`: the renderer owns no clock. Nothing draws until this is called. */
     render(): void;
 }

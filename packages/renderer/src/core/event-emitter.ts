@@ -24,7 +24,7 @@ export class EventEmitter<Events> {
     emit<K extends keyof Events>(event: K, payload: Events[K]): void {
         const set = this.#listeners.get(event);
         if (set === undefined) return;
-        // Snapshotted: a handler may unsubscribe itself — or another — mid-dispatch.
+        // Snapshotted: a handler may unsubscribe itself, or another, mid-dispatch.
         const snapshot = Array.from(set);
         for (const handler of snapshot) (handler as (e: Events[K]) => void)(payload);
     }

@@ -2,9 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { createNullRenderer, NullRenderer } from '../src/null/index.js';
 import { runRendererContract } from './contract/renderer-contract.js';
 
-// The whole contract, against the second implementation of the interface. When a browser-mode
-// target exists this same call runs against PixiRenderer.
-runRendererContract(() => createNullRenderer(), { name: 'NullRenderer — IRenderer contract' });
+// The whole contract, against the headless implementation of the interface.
+runRendererContract(() => createNullRenderer(), { name: 'NullRenderer: IRenderer contract' });
 
 const DESIGN = { width: 800, height: 600 };
 
@@ -23,10 +22,10 @@ async function ready(): Promise<NullRenderer> {
     return renderer;
 }
 
-describe('NullRenderer — headless specifics', () => {
+describe('NullRenderer: headless specifics', () => {
     it('needs no DOM: init never touches the container', async () => {
         const renderer = new NullRenderer();
-        // A Proxy that throws on ANY access proves the container is never dereferenced — the
+        // A Proxy that throws on ANY access proves the container is never dereferenced; the
         // null backend must run where there is no DOM at all.
         const trap = new Proxy(
             {},
@@ -67,7 +66,7 @@ describe('NullRenderer — headless specifics', () => {
         renderer.destroy();
     });
 
-    it('measures text deterministically — same input, same size', async () => {
+    it('measures text deterministically: same input, same size', async () => {
         const a = await ready();
         const b = await ready();
         const first = await a.createTextAsset('t', 'Hello\nWorld', { size: 20 });
@@ -122,7 +121,7 @@ describe('NullRenderer — headless specifics', () => {
 
         const result = await renderer.unloadAssets(['Chalk']);
         // Dropping a live font re-rasterizes to a fallback face, which reads as corruption
-        // rather than as a missing asset — so it is kept and reported.
+        // rather than as a missing asset, so it is kept and reported.
         expect(result.inUse.map((entry) => entry.name)).toContain('Chalk');
         expect(result.unloaded).not.toContain('Chalk');
         expect(renderer.hasAsset('Chalk')).toBe(true);
@@ -146,7 +145,7 @@ describe('NullRenderer — headless specifics', () => {
     });
 });
 
-describe('NullRenderer — culling', () => {
+describe('NullRenderer: culling', () => {
     it('culls a sprite outside the viewport and draws one inside', async () => {
         const renderer = await ready();
         renderer.resize(800, 600);
@@ -225,7 +224,7 @@ describe('NullRenderer — culling', () => {
 
         renderer.render();
         expect(renderer.isCulled(parent)).toBe(true);
-        // Culling toggles the ART only — a child is a sibling of its parent's art, so it is
+        // Culling toggles the ART only: a child is a sibling of its parent's art, so it is
         // structurally incapable of being hidden by the parent's cull.
         expect(renderer.isCulled(child)).toBe(false);
         renderer.destroy();
@@ -244,7 +243,7 @@ describe('NullRenderer — culling', () => {
         renderer.setCamera({ position: { x: 0, y: 0 }, zoom: 1 });
 
         // Viewport right edge is 400; the sprite's half-width is 32, so its left edge sits at
-        // 420 — outside, but inside the 64px margin.
+        // 420: outside, but inside the 64px margin.
         const id = renderer.createNode({
             kind: 'sprite',
             texture: 'block',
@@ -258,7 +257,7 @@ describe('NullRenderer — culling', () => {
     });
 });
 
-describe('NullRenderer — draw order', () => {
+describe('NullRenderer: draw order', () => {
     it('orders roots by layer', async () => {
         const renderer = await ready();
         const back = renderer.createNode({
@@ -289,7 +288,7 @@ describe('NullRenderer — draw order', () => {
         const first = renderer.createNode({ kind: 'group', surface: 'world', layer: 3 });
         const second = renderer.createNode({ kind: 'group', surface: 'world', layer: 3 });
 
-        // Insertion-defined and stable — one fewer source of visual nondeterminism.
+        // Insertion-defined and stable: one fewer source of visual nondeterminism.
         expect(renderer.drawOrderOf('world')).toEqual([first, second]);
         renderer.destroy();
     });

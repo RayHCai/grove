@@ -93,7 +93,7 @@ async function settle(): Promise<void> {
     });
 }
 
-describe('ContextGuard — state machine', () => {
+describe('ContextGuard: state machine', () => {
     it("starts 'ok' and not lost", () => {
         const h = harness();
         expect(h.guard.state).toBe('ok');
@@ -110,7 +110,7 @@ describe('ContextGuard — state machine', () => {
         expect(h.lost).toEqual(['webglcontextlost']);
     });
 
-    it('calls preventDefault on webglcontextlost — MANDATORY', () => {
+    it('calls preventDefault on webglcontextlost: MANDATORY', () => {
         const h = harness();
         const event = h.canvas.fire('webglcontextlost');
 
@@ -138,7 +138,7 @@ describe('ContextGuard — state machine', () => {
         expect(h.restored).toEqual([{ reloadedAssets: ['hero'], failedAssets: [] }]);
     });
 
-    it('reports failed reloads — a loss during a network outage is real', async () => {
+    it('reports failed reloads: a loss during a network outage is real', async () => {
         const h = harness();
         h.retained.set('hero', image('hero'));
         h.retained.set('gone', image('gone'));
@@ -169,7 +169,7 @@ describe('ContextGuard — state machine', () => {
     });
 });
 
-describe('ContextGuard — queueing', () => {
+describe('ContextGuard: queueing', () => {
     it('runs an operation immediately while the context is fine', async () => {
         const h = harness();
         let ran = false;
@@ -199,7 +199,7 @@ describe('ContextGuard — queueing', () => {
             () => 'cancelled',
         );
 
-        // Store mutations apply immediately; GPU operations QUEUE — so nothing has run yet, and
+        // Store mutations apply immediately; GPU operations QUEUE, so nothing has run yet, and
         // the caller is still holding an unresolved promise rather than an error.
         expect(ran).toBe(false);
         expect(h.guard.pendingCount).toBe(1);
@@ -282,7 +282,7 @@ describe('ContextGuard — queueing', () => {
         let second: Promise<string> | undefined;
         const first = h.guard.run(
             async () => {
-                // Lands after `#pending` was drained but before the state is `'ok'` — the window a
+                // Lands after `#pending` was drained but before the state is `'ok'`: the window a
                 // single splice leaves work stranded in.
                 second = h.guard.run(
                     async () => 'second',
@@ -319,7 +319,7 @@ describe('ContextGuard — queueing', () => {
     });
 });
 
-describe('ContextGuard — a failed restore does not wedge the renderer', () => {
+describe('ContextGuard: a failed restore does not wedge the renderer', () => {
     it('returns to ok and reports the failure when the re-upload throws', async () => {
         const h = harness();
         h.retained.set('hero', image('hero'));
@@ -390,7 +390,7 @@ describe('ContextGuard — a failed restore does not wedge the renderer', () => 
     });
 });
 
-describe('ContextGuard — restore merge order', () => {
+describe('ContextGuard: restore merge order', () => {
     it('lets a queued unload SUPPRESS a retained re-upload', async () => {
         const h = harness();
         h.retained.set('level1', image('level1'));
@@ -404,7 +404,7 @@ describe('ContextGuard — restore merge order', () => {
         await settle();
 
         const merge = h.merges[0];
-        // The reverse order — re-upload everything retained, then drain the queue — would
+        // The reverse order (re-upload everything retained, then drain the queue) would
         // RESURRECT level1 and pay for it every frame after.
         expect(merge?.toLoad.map((entry) => entry.name)).toEqual(['shared']);
         expect(merge?.toUnload).toEqual(['level1']);
@@ -439,7 +439,7 @@ describe('ContextGuard — restore merge order', () => {
 
         const loaded = h.merges[0]?.toLoad;
         expect(loaded).toHaveLength(1);
-        // The queued declaration is newer — a changed url must win.
+        // The queued declaration is newer; a changed url must win.
         expect(loaded?.[0]).toBe(updated);
     });
 

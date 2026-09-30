@@ -36,7 +36,7 @@ describe('cameraScale', () => {
         expect(cameraScale(camera(0, 0, 2), 'expand', WIDE, DESIGN)).toBe(2);
     });
 
-    it("ignores the scale mode under 'free' framing — zoom is literal px per world unit", () => {
+    it("ignores the scale mode under 'free' framing: zoom is literal px per world unit", () => {
         for (const mode of ['fit', 'fill', 'expand'] as const) {
             expect(cameraScale(camera(0, 0, 3, 'free'), mode, WIDE, DESIGN)).toBe(3);
         }
@@ -52,7 +52,7 @@ describe('cameraScale', () => {
 });
 
 describe('pixiRotation', () => {
-    it('negates the authored angle — CCW-positive world, CW-positive backend', () => {
+    it('negates the authored angle: CCW-positive world, CW-positive backend', () => {
         expect(pixiRotation(90)).toBe(-Math.PI / 2);
         expect(pixiRotation(-90)).toBe(Math.PI / 2);
         expect(pixiRotation(180)).toBe(-Math.PI);
@@ -84,7 +84,7 @@ describe('pixiRotation', () => {
 });
 
 describe('flipY', () => {
-    it('negates, and only negates — the write-boundary flip', () => {
+    it('negates, and only negates: the write-boundary flip', () => {
         expect(flipY(100)).toBe(-100);
         expect(flipY(-100)).toBe(100);
         expect(flipY(0.5)).toBe(-0.5);
@@ -109,7 +109,7 @@ describe('worldToScreen', () => {
         });
     });
 
-    it('gives a point ABOVE the camera a SMALLER screen y — the y-flip', () => {
+    it('gives a point ABOVE the camera a SMALLER screen y: the y-flip', () => {
         const above = worldToScreen({ x: 0, y: 100 }, camera(0, 0, 1), 'fit', WIDE, DESIGN);
         const below = worldToScreen({ x: 0, y: -100 }, camera(0, 0, 1), 'fit', WIDE, DESIGN);
         expect(above.y).toBe(300); // 450 - 100 * 1.5
@@ -119,7 +119,7 @@ describe('worldToScreen', () => {
         expect(above.y).toBeLessThan(below.y);
     });
 
-    it('does NOT flip x — a point right of the camera has a larger screen x', () => {
+    it('does NOT flip x: a point right of the camera has a larger screen x', () => {
         const right = worldToScreen({ x: 100, y: 0 }, camera(0, 0, 1), 'fit', WIDE, DESIGN);
         const left = worldToScreen({ x: -100, y: 0 }, camera(0, 0, 1), 'fit', WIDE, DESIGN);
         expect(right.x).toBe(950);
@@ -180,7 +180,7 @@ describe('screenToWorld', () => {
         );
     });
 
-    it('gives a SMALLER screen y a LARGER world y — the flip, read backwards', () => {
+    it('gives a SMALLER screen y a LARGER world y: the flip, read backwards', () => {
         const up = screenToWorld({ x: 800, y: 300 }, camera(0, 0, 1), 'fit', WIDE, DESIGN);
         const down = screenToWorld({ x: 800, y: 600 }, camera(0, 0, 1), 'fit', WIDE, DESIGN);
         expect(up.y).toBe(100); // (450 - 300) / 1.5
@@ -320,7 +320,7 @@ describe('uiAnchorOrigin', () => {
     // real 'expand' stage rect for the 800x600 design on the 1600x900 canvas.
     const STAGE: Bounds = stageRect('stage', 'expand', WIDE, DESIGN);
 
-    it('is the offset rect this test intends — sanity, so the table below means something', () => {
+    it('is the offset rect this test intends: sanity, so the table below means something', () => {
         expect(STAGE).toEqual({ left: 400, right: 1200, top: 150, bottom: 750 });
         expect(STAGE.bottom).toBeGreaterThan(STAGE.top); // screen space, y-down
     });
@@ -454,11 +454,11 @@ describe('uiToScreen', () => {
         });
     });
 
-    it('scales the design offset by fitScale — a HUD lands proportionally on every screen', () => {
+    it('scales the design offset by fitScale: a HUD lands proportionally on every screen', () => {
         expect(uiToScreen({ x: 20, y: 20 }, 'top-left', STAGE, 1).y).toBe(20);
         expect(uiToScreen({ x: 20, y: 20 }, 'top-left', STAGE, 2).y).toBe(40);
         expect(uiToScreen({ x: 20, y: 20 }, 'top-left', STAGE, 0.5).y).toBe(10);
-        // The anchor origin itself is NOT scaled — it is already CSS px.
+        // The anchor origin itself is NOT scaled; it is already CSS px.
         expect(uiToScreen({ x: 0, y: 0 }, 'top-left', STAGE, 3)).toEqual({ x: 200, y: 0, z: 0 });
     });
 
@@ -488,9 +488,9 @@ describe('uiToScreen', () => {
         expect(out).toEqual({ x: 230, y: 30, z: 0 });
     });
 
-    it('is correct when `out` IS `offset` — the pooled-scratch call', () => {
+    it('is correct when `out` IS `offset`: the pooled-scratch call', () => {
         // Callers may pass `out === p` for zero allocation, so the anchor origin must not be
-        // written before `offset` is read — that would clobber the offset and yield (500, 0)
+        // written before `offset` is read; that would clobber the offset and yield (500, 0)
         // instead of (230, 30).
         for (const anchor of ['top-left', 'center', 'bottom-right'] as const) {
             for (const offset of [

@@ -1,5 +1,5 @@
 // The y-flip is arithmetic at the write boundary and nowhere else: `root.scale.y = -1` would
-// mirror every sprite and glyph. Three spaces meet here and differ in y direction —
+// mirror every sprite and glyph. Three spaces meet here and differ in y direction:
 // world (stage-center, y-up, world px), ui (named anchor, y-down, design px), screen (canvas
 // top-left, y-down, CSS px). `z` passes through unchanged, reserved for a 3D backend.
 
