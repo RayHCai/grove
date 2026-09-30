@@ -1,6 +1,6 @@
 {
     // Solution file for `tsc -b`: every composite project in the tree, so one build from the root
-    // is the whole of it. Every app is deliberately ABSENT — an app emits no declarations and is
+    // is the whole of it. Every app is deliberately ABSENT: an app emits no declarations and is
     // imported by nothing, and a composite project may not disable declaration emit (TS6304).
     // Their types are checked by their own `typecheck` scripts, which turbo runs alongside every
     // package's.
@@ -41,6 +41,9 @@
         },
         {
             "path": "./libs/api-contract"
+        },
+        {
+            "path": "./libs/service-kit"
         },
         {
             "path": "./libs/player"
