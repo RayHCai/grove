@@ -3,7 +3,6 @@ package config
 
 import (
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -43,7 +42,7 @@ type Config struct {
 // Read parses the whole environment before it reports, so three unset variables cost one restart.
 func Read(r *env.Reader) (Config, error) {
 	cfg := Config{
-		Env: r.OneOf("GROVE_ENV", "development", "development", "test", "production"),
+		Env: r.Environment(),
 		// Every interface, unlike the services behind it: @grove/server-manager reaches this agent
 		// across the fleet network, and a box no one can address holds no sessions.
 		Host:              r.String("INSTANCE_MANAGER_HOST", "0.0.0.0"),
@@ -90,9 +89,4 @@ func Read(r *env.Reader) (Config, error) {
 // Addr is what the listener binds.
 func (c Config) Addr() string {
 	return env.Addr(c.Host, c.Port)
-}
-
-// LogLevel is debug everywhere a person is watching, and info where a log aggregator is.
-func (c Config) LogLevel() slog.Level {
-	return env.LogLevel(c.Env)
 }

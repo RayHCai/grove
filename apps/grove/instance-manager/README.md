@@ -4,7 +4,7 @@ The agent on one EC2 instance: it supervises the several `@grove/game-instance` 
 box, reads their local health and logs, and reports what it sees upward. Written in Go.
 
 It allocates nothing. Which box a session lands on is `@grove/server-manager`'s decision, and this
-agent only carries one out — one of these per instance, several game processes per one of these. Not
+agent only carries one out: one of these per instance, several game processes per one of these. Not
 publicly routable.
 
 ## The scope
@@ -18,7 +18,7 @@ inside the fleet. `/health` and `/ready` sit outside that scope, for whatever su
 | -------------------------------------------- | ---------------------------------------------------- |
 | `GET /ready`                                 | `{"ok":true}` if the game binary is forkable         |
 | `GET /health`                                | `{"ok":true}`                                        |
-| `POST /v1/instances`                         | the report, port included, 201 — or 409 at the cap   |
+| `POST /v1/instances`                         | the report, port included, 201, or 409 at the cap    |
 | `GET /v1/instances`                          | every instance on this box, oldest first             |
 | `GET /v1/instances/{instanceId}`             | one, or 404                                          |
 | `DELETE /v1/instances/{instanceId}`          | 204 once the child has drained, or 404               |
@@ -26,8 +26,9 @@ inside the fleet. `/health` and `/ready` sit outside that scope, for whatever su
 | `POST /v1/games/{gameId}/redeploy`           | a `HostDeployment`: the worlds of that game, drained |
 
 A start body names the instance and session ids the placement was answered with, the game, the
-version and the bundle refs its code is at. It is a placement already decided upstream, so nothing
-here weighs it — a box cannot answer which box should hold a session. The bearer the child presents to
+version and the bundle refs its code is at, held to the same `contract.BundleSet` check the router
+applies. It is a placement already decided upstream, so nothing
+here weighs it: a box cannot answer which box should hold a session. The bearer the child presents to
 `@grove/game-manager` is signed here from `GAME_TOKEN_SECRET`, so that credential never crosses the
 fleet network.
 
@@ -35,23 +36,26 @@ fleet network.
 
 A start names a version and where its code lives; this box fetches it. A path chosen upstream would
 be one only that machine's filesystem has, and `@grove/server-manager` holds no build output to send
-bytes from — so what crosses is a ref, and the fetch is this agent's.
+bytes from, so what crosses is a ref, and the fetch is this agent's.
 
 One file per content hash under `BUNDLE_CACHE_DIR`, which is what makes a busy game cheap: the first
 session of a version pays the download and every session after it pays a stat. Content-addressed
 rather than keyed by game and revision, so a redeploy that changed one half re-fetches only that
-half — and a name that is the hash of its own bytes can never be stale. Only the server half and the
+half, and a name that is the hash of its own bytes can never be stale. Only the server half and the
 sim config come down: the client bundle is fetched by the browser from the same edge, and a box that
 pulled it would spend bandwidth on bytes it never opens.
 
 The bytes are hashed as they are written, and a file whose digest is not the name it was fetched
-under is refused and kept nowhere. That is the one failure that must never be cached — a box that
+under is refused and kept nowhere. That is the one failure that must never be cached: a box that
 kept it would run the wrong code for every session of that version until somebody noticed. A hash
 is checked before it becomes a filename, in the contract's own lowercase-hex spelling, because it is
 the only part of a start that reaches this box's filesystem at all.
 
 The fetch happens before the instance lock, so one download does not hold up every other start on
-the box, and the version travels on into the heartbeat: it is what lets the router tell a world a
+the box. It runs on its own `bundleFetchTimeout` rather than the start request's clock, and every
+start of the same version waits on that one download: the router gives up on a start within a
+second, and a cold first download that died with it would make every retry start from nothing.
+The version travels on into the heartbeat: it is what lets the router tell a world a
 joiner's code matches from one still draining on the version before it.
 
 ## Supervision
@@ -65,8 +69,8 @@ only a child that ignores it is killed. The 204 comes back after the process is 
 the last batch of saves is written.
 
 A redeploy is the same ending on a longer clock. Every world of the named game is marked `draining`
-at once — the mark is what the next beat carries and what stops `@grove/server-manager` sending
-anyone else here — and each one is then held until its last player leaves, at which point it takes
+at once (the mark is what the next beat carries and what stops `@grove/server-manager` sending
+anyone else here), and each one is then held until its last player leaves, at which point it takes
 the same drain a stop does. Nobody is thrown out of a game to put a new version on the box, and the
 next join starts a fresh process. The roster it waits on is this agent's own reading from the probe,
 never a claim a child made, and a world no probe has yet answered for is unknown rather than empty,
@@ -89,7 +93,7 @@ The child inherits none of this box's own environment.
 
 Each child is polled on its own `/healthz` over loopback, all of them at once so one that has
 stopped answering cannot age every other reading in the beat, and what that reading says is what
-the report carries — `starting`, `healthy`, `draining` or `unhealthy` — never a claim a child made
+the report carries (`starting`, `healthy`, `draining` or `unhealthy`), never a claim a child made
 about itself. A probe that fails inside the boot grace leaves an instance `starting`; after it,
 unhealthy. A drain is this agent's own decision, and no probe overrides it: while one is draining
 the state is pinned and the roster keeps moving, because a reading frozen at the moment of the drain
@@ -103,10 +107,10 @@ that never sends a newline, because the point of it is to survive a process that
 
 A ticker posts a `HostHeartbeat` to `@grove/server-manager`: this box, its region, the port this
 agent listens on, its capacity, and one `InstanceReport` per child it still holds a process for,
-each naming the port that child bound — which is the port a player dials, so the router names it
+each naming the port that child bound, which is the port a player dials, so the router names it
 rather than guessing one. Every instance every beat rather than a delta, so a dropped beat costs
 nothing to recover, and a reaped child is absent rather than reported dead. A failed beat is logged
-and dropped — the next one carries the whole state, and a queue of stale beats would describe a box
+and dropped; the next one carries the whole state, and a queue of stale beats would describe a box
 as it was.
 
 `cpuLoad` and `memoryFreeBytes` come from `/proc`, normalized by core count so one number compares
@@ -124,9 +128,10 @@ merely missing from the next beat.
 
 The last thing this process does, after the listener has drained and before it exits, is one beat
 marked `leaving`. Silence is how the router finds a crash, so a deploy that simply went quiet reads
-as one — this is the beat that says otherwise, and it is what separates `left` from `failed` upward.
+as one; this is the beat that says otherwise, and it is what separates `left` from `failed` upward.
 
-The ticker is stopped first, so an ordinary beat cannot race it and say nothing of the sort. It gets
+The ticker is stopped and waited for first, so an ordinary beat still in flight cannot land after
+it and say nothing of the sort. It gets
 a short budget and a context of its own, because the one that ended the process is already cancelled.
 A failure is dropped: the router then concludes `failed` where it would have concluded `left`, which
 is a worse operator story and not a wrong one.
@@ -182,10 +187,13 @@ holds no sessions.
 A shutdown here leaves the children running. A game in progress outlives the agent that started it,
 and a redeploy of this agent must not end anyone's session. Each child is written down under
 `INSTANCE_STATE_DIR` as it starts, so the next run of this agent takes the survivors back rather
-than coming up empty on a box that is already full.
+than coming up empty on a box that is already full. The record carries the revision each child
+runs, so a survivor goes on being reported on its own version. A record that names none is a world
+no joiner can be matched to: it is taken back draining, counted against the cap, and left off the
+beat, whose router refuses an instance without a revision.
 
 `pnpm run build | test | typecheck` at the repo root reach this module through `package.json`, whose
-scripts shell to Go — and `typecheck` to `staticcheck` as well, a binary of its own that a machine
+scripts shell to Go, and `typecheck` to `staticcheck` as well, a binary of its own that a machine
 with the Go toolchain can still be without. Either one absent prints one `skipped:` line and
 succeeds, so working on the TypeScript half of the fleet requires installing neither. CI names both
 in `GROVE_REQUIRE_TOOLCHAIN`, where an absence is a broken install and fails the job instead.

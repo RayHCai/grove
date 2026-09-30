@@ -49,7 +49,7 @@ type Disk struct {
 	MaxBytes int64
 }
 
-// The ceiling a Disk uses when none is configured.
+// DefaultMaxBytes is the ceiling a Disk uses when none is configured.
 const DefaultMaxBytes = 64 << 20
 
 func (d Disk) Fetch(ctx context.Context, set contract.BundleSet) (Paths, error) {

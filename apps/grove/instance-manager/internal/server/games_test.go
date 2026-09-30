@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/supervisor"
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
@@ -25,7 +24,7 @@ func redeployPath(gameID string) string {
 }
 
 // startBodyFor names one game for every instance it builds, so a second game is spelled out here.
-func startOneOfOtherGame(t *testing.T, handler http.Handler, i int) supervisor.View {
+func startOneOfOtherGame(t *testing.T, handler http.Handler, i int) contract.InstanceReport {
 	t.Helper()
 
 	res := call(handler, http.MethodPost, "/v1/instances", fmt.Sprintf(`{
@@ -39,7 +38,7 @@ func startOneOfOtherGame(t *testing.T, handler http.Handler, i int) supervisor.V
 		t.Fatalf("start %d of another game: got %d, body %s", i, res.Code, res.Body.String())
 	}
 
-	var view supervisor.View
+	var view contract.InstanceReport
 	if err := json.Unmarshal(res.Body.Bytes(), &view); err != nil {
 		t.Fatalf("decode a started instance: %v", err)
 	}
@@ -48,11 +47,11 @@ func startOneOfOtherGame(t *testing.T, handler http.Handler, i int) supervisor.V
 
 // Two worlds of one game beside one of another, which is the only scene that tells a redeploy
 // finding by game apart from one marking the whole box.
-func boxOfTwoGames(t *testing.T) (http.Handler, []supervisor.View, supervisor.View) {
+func boxOfTwoGames(t *testing.T) (http.Handler, []contract.InstanceReport, contract.InstanceReport) {
 	t.Helper()
 
 	handler := newTestService(3)
-	ours := []supervisor.View{startOne(t, handler, 0), startOne(t, handler, 1)}
+	ours := []contract.InstanceReport{startOne(t, handler, 0), startOne(t, handler, 1)}
 	return handler, ours, startOneOfOtherGame(t, handler, 2)
 }
 
@@ -72,7 +71,7 @@ func statesOf(t *testing.T, handler http.Handler) map[string]contract.InstanceSt
 	t.Helper()
 
 	var page struct {
-		Instances []supervisor.View `json:"instances"`
+		Instances []contract.InstanceReport `json:"instances"`
 	}
 	res := call(handler, http.MethodGet, "/v1/instances", "")
 	if err := json.Unmarshal(res.Body.Bytes(), &page); err != nil {

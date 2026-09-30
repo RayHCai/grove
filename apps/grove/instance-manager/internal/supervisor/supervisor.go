@@ -37,6 +37,7 @@ const (
 	// that one player who never closes the tab does not hold a slot for the rest of the day.
 	defaultDrainDeadline = 15 * time.Minute
 	defaultDrainPoll     = time.Second
+	defaultFetchTimeout  = 2 * time.Minute
 )
 
 // How long the bearer this agent mints for a child is good for. Sized to the longest session this
@@ -52,7 +53,11 @@ type Options struct {
 	// Where a version's code comes from. This box fetches it rather than being handed a path, since
 	// a path chosen upstream is one only that machine's filesystem has.
 	Bundles bundles.Store
-	Log     *slog.Logger
+	// Bounds a download detached from its start, so one the router gave up on still warms the cache.
+	FetchTimeout time.Duration
+	// Where @grove/game-manager is, which every child is given: a fleet address this box holds.
+	ManagerURL string
+	Log        *slog.Logger
 
 	MaxInstances int
 	// Lines of a child's output kept per instance.
@@ -75,27 +80,6 @@ type Options struct {
 	TokenSecret    []byte
 	HeapLimitBytes int64
 	TickBudget     time.Duration
-}
-
-// Request is one session this box was told to run.
-type Request struct {
-	// Chosen by @grove/server-manager, which hands it to the player in the same breath: a second id
-	// minted here would name a process nobody was told to dial.
-	InstanceID string
-	GameID     string
-	SessionID  string
-	// The version this world runs, which is reported on every beat: it is what lets the router tell
-	// a world a joiner's code matches from one still draining on the version before it.
-	Revision int
-	// Where the code lives, rather than where it landed. This box fetches it, because a path chosen
-	// upstream would be one only that machine's filesystem has.
-	Bundles    contract.BundleSet
-	ManagerURL string
-}
-
-// View is what this box reports about one game process.
-type View struct {
-	contract.InstanceReport
 }
 
 type instance struct {
@@ -132,6 +116,18 @@ type Registry struct {
 
 	mu        sync.Mutex
 	instances map[string]*instance
+
+	fetchMu  sync.Mutex
+	fetching map[string]*fetch
+}
+
+// fetch is one shared download; paths and err are written once, before done closes.
+type fetch struct {
+	done  chan struct{}
+	paths bundles.Paths
+	err   error
+	// Starts that asked for this download, guarded by fetchMu.
+	askers int
 }
 
 // New builds the registry the routes and the heartbeat both read.
@@ -163,28 +159,73 @@ func New(opts Options) *Registry {
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
+	if opts.FetchTimeout <= 0 {
+		opts.FetchTimeout = defaultFetchTimeout
+	}
 	return &Registry{
 		opts:      opts,
 		state:     store{dir: opts.StateDir},
 		instances: make(map[string]*instance),
+		fetching:  make(map[string]*fetch),
+	}
+}
+
+// code waits on the version's one download, which runs on its own clock and outlives any caller.
+func (r *Registry) code(ctx context.Context, set contract.BundleSet) (bundles.Paths, error) {
+	key := set.Server.Hash + "/" + set.SimConfig.Hash
+
+	r.fetchMu.Lock()
+	f, inFlight := r.fetching[key]
+	if !inFlight {
+		f = &fetch{done: make(chan struct{})}
+		r.fetching[key] = f
+		go r.download(context.WithoutCancel(ctx), key, set, f)
+	}
+	f.askers++
+	r.fetchMu.Unlock()
+
+	select {
+	case <-f.done:
+		return f.paths, f.err
+	case <-ctx.Done():
+		return bundles.Paths{}, ctx.Err()
+	}
+}
+
+func (r *Registry) download(ctx context.Context, key string, set contract.BundleSet, f *fetch) {
+	ctx, cancel := context.WithTimeout(ctx, r.opts.FetchTimeout)
+	defer cancel()
+
+	f.paths, f.err = r.opts.Bundles.Fetch(ctx, set)
+
+	// Forgotten before done closes, so a later start retries a failure and finds a success on disk.
+	r.fetchMu.Lock()
+	delete(r.fetching, key)
+	askers := f.askers
+	r.fetchMu.Unlock()
+	close(f.done)
+
+	// Logged here because every start that asked may have given up, and then nobody else reports it.
+	if f.err != nil {
+		r.opts.Log.Warn("bundle fetch failed", "err", f.err, "starts", askers)
 	}
 }
 
 // Start spawns one game process and returns what this box will report about it.
-func (r *Registry) Start(ctx context.Context, req Request) (View, error) {
+func (r *Registry) Start(ctx context.Context, req contract.InstanceStart) (contract.InstanceReport, error) {
 	// Fetched before the lock, because it reaches the edge and every other start on this box would
 	// otherwise wait behind one download. A version already on disk costs a stat and nothing else.
-	code, err := r.opts.Bundles.Fetch(ctx, req.Bundles)
+	code, err := r.code(ctx, req.Bundles)
 	if err != nil {
-		return View{}, fmt.Errorf("fetch the code for %s: %w", req.SessionID, err)
+		return contract.InstanceReport{}, fmt.Errorf("fetch the code for %s: %w", req.SessionID, err)
 	}
 
 	// Held across the spawn so the cap is a real cap: two concurrent starts must not both pass it.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// One session, one world. A retried start — a @grove/server-manager timeout, a duplicated
-	// request — must be handed the process already holding the session, because a second one beside
+	// One session, one world. A retried start (a @grove/server-manager timeout, a duplicated
+	// request) must be handed the process already holding the session, because a second one beside
 	// it is a second world that half the players would be talking to.
 	for _, held := range r.instances {
 		if held.sessionID == req.SessionID && !held.done() {
@@ -193,7 +234,7 @@ func (r *Registry) Start(ctx context.Context, req Request) (View, error) {
 	}
 
 	if r.running() >= r.opts.MaxInstances {
-		return View{}, ErrAtCapacity
+		return contract.InstanceReport{}, ErrAtCapacity
 	}
 
 	id := req.InstanceID
@@ -206,12 +247,12 @@ func (r *Registry) Start(ctx context.Context, req Request) (View, error) {
 		Exp:       time.Now().Add(storeBearerLifetime).Unix(),
 	}, r.opts.TokenSecret)
 	if err != nil {
-		return View{}, fmt.Errorf("mint the store bearer: %w", err)
+		return contract.InstanceReport{}, fmt.Errorf("mint the store bearer: %w", err)
 	}
 
 	port, err := r.opts.Ports.Take()
 	if err != nil {
-		return View{}, err
+		return contract.InstanceReport{}, err
 	}
 
 	logs := NewRing(r.opts.LogLines)
@@ -224,7 +265,7 @@ func (r *Registry) Start(ctx context.Context, req Request) (View, error) {
 		BundlePath:     code.Bundle,
 		SimConfigPath:  code.SimConfig,
 		TokenSecret:    r.opts.TokenSecret,
-		ManagerURL:     req.ManagerURL,
+		ManagerURL:     r.opts.ManagerURL,
 		ManagerToken:   bearer,
 		HeapLimitBytes: r.opts.HeapLimitBytes,
 		TickBudget:     r.opts.TickBudget,
@@ -232,7 +273,7 @@ func (r *Registry) Start(ctx context.Context, req Request) (View, error) {
 	if err != nil {
 		// Nothing else will hand this one back: no process holds it, and no entry names it.
 		r.opts.Ports.Release(port)
-		return View{}, fmt.Errorf("spawn a game process: %w", err)
+		return contract.InstanceReport{}, fmt.Errorf("spawn a game process: %w", err)
 	}
 
 	inst := &instance{
@@ -257,6 +298,7 @@ func (r *Registry) Start(ctx context.Context, req Request) (View, error) {
 		InstanceID: id,
 		GameID:     req.GameID,
 		SessionID:  req.SessionID,
+		Revision:   req.Revision,
 		PID:        child.Pid(),
 		Port:       port,
 		StartedAt:  inst.startedAt,
@@ -340,6 +382,7 @@ func (r *Registry) Adopt() error {
 			id:        rec.InstanceID,
 			gameID:    rec.GameID,
 			sessionID: rec.SessionID,
+			revision:  rec.Revision,
 			port:      rec.Port,
 			addr:      fmt.Sprintf("127.0.0.1:%d", rec.Port),
 			// The recorded start, so a survivor of a boot that finished long ago is read against a
@@ -356,11 +399,20 @@ func (r *Registry) Adopt() error {
 		r.instances[rec.InstanceID] = inst
 		go r.reap(inst)
 
+		// A record that names no revision is a world no joiner can be matched to, so it only drains.
+		drainingSince := rec.DrainingSince
+		if rec.Revision < 1 && drainingSince.IsZero() {
+			drainingSince = time.Now()
+			if err := r.state.draining(rec.InstanceID, drainingSince); err != nil {
+				r.opts.Log.Warn("drain not written down", "instanceId", rec.InstanceID, "err", err)
+			}
+		}
+
 		// A world that was ending when the last agent went comes back as one that is still ending:
 		// re-armed as starting, the router would offer it to a joiner the child then refuses.
-		if !rec.DrainingSince.IsZero() {
+		if !drainingSince.IsZero() {
 			inst.mark(contract.InstanceDraining)
-			inst.stopOnce.Do(func() { go r.drainOnEmpty(inst, rec.DrainingSince) })
+			inst.stopOnce.Do(func() { go r.drainOnEmpty(inst, drainingSince) })
 		}
 
 		r.opts.Log.Info("instance adopted",
@@ -429,13 +481,13 @@ func (r *Registry) probe(ctx context.Context, inst *instance, now time.Time) {
 	if inst.state == contract.InstanceDraining {
 		return
 	}
-	// A process that has not bound its port yet is starting, not failing — but only for as long as
+	// A process that has not bound its port yet is starting, not failing, but only for as long as
 	// a boot takes.
 	if inst.state == contract.InstanceStarting && now.Sub(inst.startedAt) < r.opts.StartGrace {
 		return
 	}
 	// Once per transition rather than once per poll, so a box that is down for an hour is one
-	// account of why — under the id the child logged the refused probe against.
+	// account of why, under the id the child logged the refused probe against.
 	if inst.state != contract.InstanceUnhealthy {
 		r.opts.Log.Warn("instance unhealthy",
 			"err", err, "instanceId", inst.id, "requestId", requestID)
@@ -579,11 +631,11 @@ func (r *Registry) drainOnEmpty(inst *instance, since time.Time) {
 }
 
 // List is every instance this box holds, oldest first, so a page of them reads as a timeline.
-func (r *Registry) List() []View {
+func (r *Registry) List() []contract.InstanceReport {
 	now := time.Now()
 	held := r.snapshot()
 
-	out := make([]View, 0, len(held))
+	out := make([]contract.InstanceReport, 0, len(held))
 	for _, inst := range held {
 		out = append(out, inst.view(now))
 	}
@@ -591,12 +643,12 @@ func (r *Registry) List() []View {
 }
 
 // Get is one instance, whether it is still running or only still remembered.
-func (r *Registry) Get(id string) (View, error) {
+func (r *Registry) Get(id string) (contract.InstanceReport, error) {
 	r.mu.Lock()
 	inst, ok := r.instances[id]
 	r.mu.Unlock()
 	if !ok {
-		return View{}, ErrUnknown
+		return contract.InstanceReport{}, ErrUnknown
 	}
 	return inst.view(time.Now()), nil
 }
@@ -620,10 +672,11 @@ func (r *Registry) Live() []contract.InstanceReport {
 
 	out := make([]contract.InstanceReport, 0, len(held))
 	for _, inst := range held {
-		if inst.done() {
+		// A world of unknown revision is left out too: the router refuses a whole beat carrying one.
+		if inst.done() || inst.revision < 1 {
 			continue
 		}
-		out = append(out, inst.view(now).InstanceReport)
+		out = append(out, inst.view(now))
 	}
 	return out
 }
@@ -673,21 +726,19 @@ func (r *Registry) snapshot() []*instance {
 	return held
 }
 
-func (i *instance) view(now time.Time) View {
+func (i *instance) view(now time.Time) contract.InstanceReport {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	return View{
-		InstanceReport: contract.InstanceReport{
-			InstanceID:    i.id,
-			GameID:        i.gameID,
-			SessionID:     i.sessionID,
-			State:         i.state,
-			Players:       i.players,
-			UptimeSeconds: int64(now.Sub(i.startedAt).Seconds()),
-			Revision:      i.revision,
-			Port:          i.port,
-		},
+	return contract.InstanceReport{
+		InstanceID:    i.id,
+		GameID:        i.gameID,
+		SessionID:     i.sessionID,
+		State:         i.state,
+		Players:       i.players,
+		UptimeSeconds: int64(now.Sub(i.startedAt).Seconds()),
+		Revision:      i.revision,
+		Port:          i.port,
 	}
 }
 

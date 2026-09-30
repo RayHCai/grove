@@ -17,7 +17,7 @@ import (
 func (s *service) redeployGame(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("gameId")
 	if !contract.ValidUUID(gameID) {
-		bad(w, "gameId must be a uuid")
+		httpx.BadRequest(w, "gameId must be a uuid")
 		return
 	}
 

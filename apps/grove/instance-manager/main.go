@@ -27,9 +27,7 @@ const (
 	// Short: this one sits between a drained listener and the process ending, and a box that cannot
 	// reach the router in this long is one the router is about to stop hearing from anyway.
 	farewellTimeout = 3 * time.Second
-	// How long one version of a game may take to come down from the edge. Minutes rather than
-	// seconds: it is paid once per version per box, and the join waiting on it has already been
-	// answered for by the router that asked.
+	// Minutes, because the download is detached from the start whose join the router gave up on.
 	bundleFetchTimeout = 2 * time.Minute
 )
 
@@ -49,6 +47,8 @@ func main() {
 		Prober:        supervisor.NewHTTPProber(probeTimeout),
 		Ports:         supervisor.NewKernelPorts(),
 		Bundles:       bundles.Disk{Dir: cfg.BundleDir, Client: &http.Client{Timeout: bundleFetchTimeout}},
+		FetchTimeout:  bundleFetchTimeout,
+		ManagerURL:    cfg.GameManagerURL,
 		Log:           log,
 		MaxInstances:  cfg.MaxInstances,
 		TokenSecret:   cfg.GameTokenSecret,
@@ -81,20 +81,25 @@ func main() {
 	defer stop()
 
 	go instances.Watch(ctx, pollInterval)
-	go beater.Run(ctx)
+	beating := make(chan struct{})
+	go func() {
+		defer close(beating)
+		beater.Run(ctx)
+	}()
 
 	// The one thing about this agent that is not true the moment it binds: a deploy that left the
 	// game binary missing takes every start request and fails it.
 	ready := supervisor.ExecReady(cfg.GameInstanceBin)
 
-	handler := server.New(instances, ready, cfg.FleetSecret, cfg.HostID, cfg.GameManagerURL, log)
+	handler := server.New(instances, ready, cfg.FleetSecret, cfg.HostID, log)
 	err = httpx.Serve(ctx, cfg.Addr(), handler, log)
 
 	// After the listener has drained and before this process is gone: one beat saying the box is
 	// leaving deliberately. Silence is how the router finds a crash, so a deploy that just went
-	// quiet would read as one — and the ticker above is stopped here so it cannot race this beat
-	// with an ordinary one that says nothing of the sort.
+	// quiet would read as one, and the ticker above is stopped and waited for so no ordinary beat
+	// still in flight can land after this one and say nothing of the sort.
 	stop()
+	<-beating
 	farewell, done := context.WithTimeout(context.Background(), farewellTimeout)
 	defer done()
 	if requestID, ferr := beater.Farewell(farewell); ferr != nil {
