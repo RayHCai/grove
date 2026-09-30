@@ -10,7 +10,7 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
 
-// The bundles themselves are fetched from the urls this returns, never through here — a service
+// The bundles themselves are fetched from the urls this returns, never through here; a service
 // that proxied multi-megabyte chunks would be on the join path for every player of every game.
 func (s *service) readBundles(w http.ResponseWriter, r *http.Request) {
 	set, err := s.store.Bundles(r.Context(), gameID(r))

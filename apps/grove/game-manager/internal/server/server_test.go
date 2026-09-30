@@ -29,7 +29,7 @@ const (
 )
 
 func TestHealthAnswersWithoutAToken(t *testing.T) {
-	_, handler := newServer()
+	_, handler := newServer(t)
 
 	res := request(t, handler, http.MethodGet, "/health", "", "")
 
@@ -42,7 +42,7 @@ func TestHealthAnswersWithoutAToken(t *testing.T) {
 }
 
 func TestReadyAnswersWithoutAToken(t *testing.T) {
-	_, handler := newServer()
+	_, handler := newServer(t)
 
 	res := request(t, handler, http.MethodGet, "/ready", "", "")
 
@@ -55,8 +55,7 @@ func TestReadyAnswersWithoutAToken(t *testing.T) {
 }
 
 func TestReadyRefusesWhileTheStoreDoesNotAnswer(t *testing.T) {
-	handler := New(unreachableStore{store.NewMemory()}, []byte(secret),
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := New(t.Context(), unreachableStore{store.NewMemory()}, []byte(secret), slog.New(slog.DiscardHandler))
 
 	res := request(t, handler, http.MethodGet, "/ready", "", "")
 
@@ -69,7 +68,7 @@ func TestReadyRefusesWhileTheStoreDoesNotAnswer(t *testing.T) {
 func TestAnAnswerEchoesTheIDTheCallerBrought(t *testing.T) {
 	const brought = "1e1b6f0e-7c9a-4a6b-9f4c-9f1a2b3c4d5e"
 
-	_, handler := newServer()
+	_, handler := newServer(t)
 
 	res := answerPresenting(t, handler, brought)
 
@@ -80,7 +79,7 @@ func TestAnAnswerEchoesTheIDTheCallerBrought(t *testing.T) {
 
 // The id is logged, echoed and forwarded, so one this service would not have minted is replaced.
 func TestAnAnswerMintsTheIDTheCallerDidNot(t *testing.T) {
-	_, handler := newServer()
+	_, handler := newServer(t)
 
 	cases := []struct {
 		name      string
@@ -111,7 +110,7 @@ func TestAnAnswerMintsTheIDTheCallerDidNot(t *testing.T) {
 }
 
 func TestScopeAdmitsOnlyAVerifiedToken(t *testing.T) {
-	memory, handler := newServer()
+	memory, handler := newServer(t)
 	seedState(t, memory, gameA, "score", `{"points":7}`)
 
 	cases := []struct {
@@ -171,7 +170,7 @@ func TestScopeAdmitsOnlyAVerifiedToken(t *testing.T) {
 }
 
 func TestATokenReachesOnlyItsOwnGame(t *testing.T) {
-	memory, handler := newServer()
+	memory, handler := newServer(t)
 	seedState(t, memory, gameA, "score", `{"points":1}`)
 	seedState(t, memory, gameB, "score", `{"points":2}`)
 
@@ -207,7 +206,7 @@ func TestATokenReachesOnlyItsOwnGame(t *testing.T) {
 }
 
 func TestCompareAndSetRefusesAStaleRevision(t *testing.T) {
-	_, handler := newServer()
+	_, handler := newServer(t)
 	bearer := ticket(t, gameA)
 
 	cases := []struct {
@@ -290,7 +289,7 @@ func TestCompareAndSetRefusesAStaleRevision(t *testing.T) {
 }
 
 func TestAReleasedKeyIsAKeyNeverWritten(t *testing.T) {
-	memory, handler := newServer()
+	memory, handler := newServer(t)
 	seedState(t, memory, gameA, "score", `{"points":1}`)
 	seedState(t, memory, gameB, "score", `{"points":2}`)
 
@@ -352,8 +351,7 @@ func TestAGameAtItsBoundIsToldWhichOneItHit(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			handler := New(boundedStore{store.NewMemory(), c.refusal}, []byte(secret),
-				slog.New(slog.NewTextHandler(io.Discard, nil)))
+			handler := New(t.Context(), boundedStore{store.NewMemory(), c.refusal}, []byte(secret), slog.New(slog.DiscardHandler))
 
 			res := request(t, handler, http.MethodPut, "/v1/state/score", ticket(t, gameA), `{"value":1}`)
 
@@ -373,7 +371,7 @@ func TestAGameAtItsBoundIsToldWhichOneItHit(t *testing.T) {
 func TestLeaderboardClampsItsLimit(t *testing.T) {
 	const players = 150
 
-	memory, handler := newServer()
+	memory, handler := newServer(t)
 	for i := range players {
 		memory.PutScore(gameA, "high", contract.LeaderboardEntry{
 			PlayerID:    fmt.Sprintf("00000000-0000-4000-8000-%012d", i),
@@ -487,7 +485,7 @@ func TestLeaderboardClampsItsLimit(t *testing.T) {
 }
 
 func TestBundlesAnswerOnceAGameHasPublished(t *testing.T) {
-	memory, handler := newServer()
+	memory, handler := newServer(t)
 	published := contract.BundleSet{
 		Server: contract.BundleRef{
 			Side:       contract.SideServer,
@@ -522,7 +520,7 @@ func TestBundlesAnswerOnceAGameHasPublished(t *testing.T) {
 // The contract carries a `LeaderboardWrite` and a bundle set is a value this store holds, but
 // neither has a verb here: state is the only thing a caller writes.
 func TestABoardAndABundleSetTakeNoWriteFromACaller(t *testing.T) {
-	_, handler := newServer()
+	_, handler := newServer(t)
 	bearer := ticket(t, gameA)
 
 	standing := encode(t, contract.LeaderboardWrite{
@@ -591,9 +589,9 @@ func TestABoardAndABundleSetTakeNoWriteFromACaller(t *testing.T) {
 	}
 }
 
-func newServer() (*store.Memory, http.Handler) {
+func newServer(t *testing.T) (*store.Memory, http.Handler) {
 	memory := store.NewMemory()
-	return memory, New(memory, []byte(secret), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return memory, New(t.Context(), memory, []byte(secret), slog.New(slog.DiscardHandler))
 }
 
 // What a database-backed store is while it is still connecting.

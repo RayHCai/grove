@@ -54,7 +54,7 @@ func NewMemory() *Memory {
 	}
 }
 
-// A map in this process is reachable exactly when this process is.
+// Ping always answers, since a map in this process is reachable exactly when this process is.
 func (m *Memory) Ping(context.Context) error { return nil }
 
 func (m *Memory) Read(_ context.Context, game, key string) (contract.StateRecord, error) {
@@ -76,7 +76,7 @@ func (m *Memory) Write(_ context.Context, game, key string, write contract.State
 	at := row{game, key}
 	held, exists := m.state[at]
 	// A key never written is at revision zero, which is what makes the first compare-and-set of a
-	// key expressible — `ifRevision: 0` — instead of a special case a caller has to know about.
+	// key expressible (`ifRevision: 0`) instead of a special case a caller has to know about.
 	current := held.Revision
 	if write.IfRevision != nil && *write.IfRevision != current {
 		return 0, ErrStale

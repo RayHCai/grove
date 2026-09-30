@@ -48,11 +48,11 @@ func (s *service) writeState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(write.Value) == 0 {
-		bad(w, "value is required")
+		httpx.BadRequest(w, "value is required")
 		return
 	}
 	if write.IfRevision != nil && *write.IfRevision < 0 {
-		bad(w, "ifRevision must not be negative")
+		httpx.BadRequest(w, "ifRevision must not be negative")
 		return
 	}
 
@@ -96,7 +96,7 @@ func (s *service) deleteState(w http.ResponseWriter, r *http.Request) {
 func stateKey(w http.ResponseWriter, r *http.Request) (string, bool) {
 	key := r.PathValue("key")
 	if key == "" || len(key) > contract.StateKeyMaxLen {
-		bad(w, fmt.Sprintf("key must be 1 to %d characters", contract.StateKeyMaxLen))
+		httpx.BadRequest(w, fmt.Sprintf("key must be 1 to %d characters", contract.StateKeyMaxLen))
 		return "", false
 	}
 	return key, true

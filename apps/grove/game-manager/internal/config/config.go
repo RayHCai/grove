@@ -2,8 +2,6 @@
 package config
 
 import (
-	"log/slog"
-
 	"github.com/RayHCai/grove/libs/go-grove/env"
 )
 
@@ -18,12 +16,17 @@ type Config struct {
 
 // Read parses the whole environment before it reports, so three unset variables cost one restart.
 func Read(r *env.Reader) (Config, error) {
+	port, hosted := r.PlatformPort(4001)
+	// Loopback unless a platform assigned PORT, whose router reaches the process from off the box.
+	host := "127.0.0.1"
+	if hosted {
+		host = "0.0.0.0"
+	}
+
 	cfg := Config{
-		Env: r.OneOf("GROVE_ENV", "development", "development", "test", "production"),
-		// Loopback by default. This service is reachable from the fleet's own network and from
-		// nowhere else, and a default of 0.0.0.0 is how that stops being true by accident.
-		Host:        r.String("GAME_MANAGER_HOST", "127.0.0.1"),
-		Port:        r.Port("GAME_MANAGER_PORT", 4001),
+		Env:         r.Environment(),
+		Host:        r.String("GAME_MANAGER_HOST", host),
+		Port:        r.Port("GAME_MANAGER_PORT", port),
 		TokenSecret: r.Secret("GAME_TOKEN_SECRET", env.SecretMinLen),
 	}
 	return cfg, r.Err()
@@ -32,9 +35,4 @@ func Read(r *env.Reader) (Config, error) {
 // Addr is what the listener binds.
 func (c Config) Addr() string {
 	return env.Addr(c.Host, c.Port)
-}
-
-// LogLevel is debug everywhere a person is watching, and info where a log aggregator is.
-func (c Config) LogLevel() slog.Level {
-	return env.LogLevel(c.Env)
 }

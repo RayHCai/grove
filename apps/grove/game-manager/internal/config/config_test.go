@@ -1,7 +1,6 @@
 package config
 
 import (
-	"log/slog"
 	"strings"
 	"testing"
 
@@ -15,14 +14,12 @@ func TestRead(t *testing.T) {
 		name  string
 		vars  map[string]string
 		addr  string
-		level slog.Level
 		wants []string
 	}{
 		{
-			name:  "the defaults bind loopback",
-			vars:  map[string]string{"GAME_TOKEN_SECRET": secret},
-			addr:  "127.0.0.1:4001",
-			level: slog.LevelDebug,
+			name: "the defaults bind loopback",
+			vars: map[string]string{"GAME_TOKEN_SECRET": secret},
+			addr: "127.0.0.1:4001",
 		},
 		{
 			name: "a configured host and port",
@@ -32,8 +29,17 @@ func TestRead(t *testing.T) {
 				"GAME_MANAGER_PORT": "4101",
 				"GROVE_ENV":         "production",
 			},
-			addr:  "10.0.4.7:4101",
-			level: slog.LevelInfo,
+			addr: "10.0.4.7:4101",
+		},
+		{
+			name: "a platform's PORT binds every interface on it",
+			vars: map[string]string{"GAME_TOKEN_SECRET": secret, "PORT": "8080"},
+			addr: "0.0.0.0:8080",
+		},
+		{
+			name: "the service's own port outranks the platform's",
+			vars: map[string]string{"GAME_TOKEN_SECRET": secret, "PORT": "8080", "GAME_MANAGER_PORT": "4101"},
+			addr: "0.0.0.0:4101",
 		},
 		{
 			name:  "a secret shorter than the signing key",
@@ -68,9 +74,6 @@ func TestRead(t *testing.T) {
 			}
 			if cfg.Addr() != c.addr {
 				t.Errorf("addr: got %s, want %s", cfg.Addr(), c.addr)
-			}
-			if cfg.LogLevel() != c.level {
-				t.Errorf("level: got %v, want %v", cfg.LogLevel(), c.level)
 			}
 		})
 	}
