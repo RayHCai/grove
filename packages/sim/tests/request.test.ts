@@ -3,11 +3,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
 import { Rules, Vault } from '../dist/testkit/fixtures.js';
-import {
-    MAX_REQUESTS_PER_FRAME,
-    MAX_REQUEST_NAME_LENGTH,
-    MAX_REQUEST_PAYLOAD_NODES,
-} from '../src/constants.js';
+import { MAX_REQUESTS_PER_FRAME } from '@platform/protocol';
+import { MAX_REQUEST_NAME_LENGTH, MAX_REQUEST_PAYLOAD_NODES } from '../src/constants.js';
 import { harness } from './harness.js';
 import type { Harness } from './harness.js';
 
@@ -57,7 +54,7 @@ describe('a request runs on the authority and nowhere else', () => {
         expect(vault(h).asks).toStrictEqual([]);
     });
 
-    it('drops a request that arrived before the join — identity comes from the connection', () => {
+    it('drops a request that arrived before the join: identity comes from the connection', () => {
         const h = harness({ config: { gameScripts: [Rules, Vault] } });
         const peer = h.connect();
         peer.request(1, [{ name: 'buy', data: { item: 'shield' } }]);

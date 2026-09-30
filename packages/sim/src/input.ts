@@ -1,7 +1,15 @@
 import type { DispatchOptions, EntityId, PointerEdge, Player, Runtime } from '@platform/core';
-import { deliverRequest, entityKey, playerKey, pointerHit, pressWidget } from '@platform/core';
+import {
+    deliverRequest,
+    dispatchInput,
+    foldInputEdges,
+    inputHostKeys,
+    pointerHit,
+    pressWidget,
+    synthesizeHolds,
+} from '@platform/core';
 import { defined } from '@platform/math';
-import type { InputFrame, InputPhase } from '@platform/protocol';
+import type { InputFrame } from '@platform/protocol';
 import type { RefusalReason, Session } from './session.js';
 import {
     HORIZON_CLAMP_TICKS,
@@ -10,9 +18,6 @@ import {
     maxSeqGap,
     pastGraceTicks,
 } from './constants.js';
-
-/** The panel-mapped move axes `BaseMovement.fillIntent` reads. */
-const MOVE_AXES = ['moveX', 'moveY'] as const;
 
 /** A frame and the session it arrived on, carried rather than re-derived: that is the identity. */
 export interface BufferedInput {
@@ -116,7 +121,7 @@ export class InputBuffer {
 export interface InputPassContext {
     readonly rt: Runtime;
     readonly buffer: InputBuffer;
-    /** Every live session, joined or not — the pass skips the unjoined itself. */
+    /** Every live session, joined or not; the pass skips the unjoined itself. */
     sessions(): Iterable<Session>;
 }
 
@@ -138,9 +143,8 @@ export function runInputPass(ctx: InputPassContext, dispatch: DispatchOptions): 
     for (const session of ctx.sessions()) {
         const player = session.livePlayer;
         if (player === null) continue;
-        const hosts = hostKeys(player);
-
         if (tick - session.admission.lastInputTick >= stale) {
+            const hosts = inputHostKeys(player);
             for (const action of session.actions.heldActions()) {
                 session.actions.applyEdge({ action, on: 'release' });
                 dispatchInput(rt, player, hosts, action, 'release', undefined, dispatch);
@@ -152,22 +156,7 @@ export function runInputPass(ctx: InputPassContext, dispatch: DispatchOptions): 
             }
         }
 
-        for (const action of activeActions(session)) {
-            dispatchInput(
-                rt,
-                player,
-                hosts,
-                action,
-                'hold',
-                session.actions.axis(action),
-                dispatch,
-            );
-        }
-
-        player.movement?.fillIntent(
-            session.actions.axis(MOVE_AXES[0]),
-            session.actions.axis(MOVE_AXES[1]),
-        );
+        synthesizeHolds(rt, player, session.actions, dispatch);
 
         drainInteractions(rt, session, player);
         drainRequests(rt, session, player);
@@ -206,14 +195,7 @@ const POINTER_EDGE = {
     'hover-exit': 'onHoverExit',
 } as const satisfies Record<string, PointerEdge>;
 
-/** Every action a synthesized `hold` is owed: held buttons union non-neutral axes. */
-function activeActions(session: Session): Set<string> {
-    const out = new Set(session.actions.heldActions());
-    for (const { action } of session.actions.axisValues()) out.add(action);
-    return out;
-}
-
-/** Folds one frame, dispatches its edges, resolves its seq at the apply — hence `ackSeq`. */
+/** Folds one frame, dispatches its edges, resolves its seq at the apply, hence `ackSeq`. */
 function applyBuffered(
     rt: Runtime,
     session: Session,
@@ -222,62 +204,10 @@ function applyBuffered(
 ): void {
     const player = session.player;
     if (player === null) return;
-    const hosts = hostKeys(player);
-    for (const action of frame.actions) {
-        // Dropped per action rather than refusing the frame: a peer past the name cap is out of
-        // contract, but a legitimate frame's other actions still deserve to land.
-        if (!session.admission.admitsAction(action.action)) continue;
-        session.actions.applyEdge(action);
-        // `hold` is synthesized per tick from the fold, so dispatching here too would double-fire
-        // it.
-        if (action.on === 'hold') continue;
-        dispatchInput(
-            rt,
-            player,
-            hosts,
-            action.action,
-            action.on,
-            action.value ?? session.actions.axis(action.action),
-            dispatch,
-        );
-    }
+    // Dropped per action rather than refusing the frame: a peer past the name cap is out of
+    // contract, but a legitimate frame's other actions still deserve to land.
+    foldInputEdges(rt, player, session.actions, frame.actions, dispatch, (action) =>
+        session.admission.admitsAction(action),
+    );
     session.admission.resolve(frame.seq);
-}
-
-/** Fires one action edge at the player's own hosts. */
-function dispatchInput(
-    rt: Runtime,
-    player: Player,
-    hosts: readonly string[],
-    action: string,
-    phase: InputPhase,
-    value: number | undefined,
-    dispatch: DispatchOptions,
-): void {
-    const opts: DispatchOptions = { ...dispatch, phase };
-    const ctx = {
-        data: {},
-        dt: 1 / rt.simRate,
-        alive: true,
-        player,
-        ...defined({ value }),
-    };
-
-    for (const hostKey of hosts) {
-        void rt.dispatcher.dispatch(
-            rt.instances.forHost(hostKey),
-            'onEvent',
-            action,
-            hostKey,
-            ctx,
-            opts,
-        );
-    }
-}
-
-/** The player's host and its avatar's, both receiving the edge; a spectator has no avatar. */
-function hostKeys(player: Player): string[] {
-    return player.hasAvatar
-        ? [playerKey(player.id), entityKey(player.avatar.entityId)]
-        : [playerKey(player.id)];
 }

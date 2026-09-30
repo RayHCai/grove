@@ -67,12 +67,12 @@ describe('the per-send structural budget', () => {
         const peer = h.joined();
         h.settle([peer]);
 
-        // Three sends' worth minted in one tick — the runaway the budget exists for. Unbounded,
+        // Three sends' worth minted in one tick, the runaway the budget exists for. Unbounded,
         // this is one envelope no peer would parse; bounded, it is three every peer will.
         const names = tagMany(h, MAX_STRUCTURAL_OPS_PER_SEND * 3);
         statesUntil(h, peer, 4);
 
-        // The state envelope is what the budget bounds — the transform channel is droppable by
+        // The state envelope is what the budget bounds; the transform channel is droppable by
         // construction and carries no journal, so it is not what an op storm inflates.
         for (const envelope of peer.states) {
             expect(frameBytes(envelope)).toBeLessThanOrEqual(MAX_FRAME_BYTES);
@@ -96,7 +96,7 @@ describe('the per-send structural budget', () => {
         statesUntil(h, first, 1);
 
         // Joins while ops are still held over. Its snapshot is read from LIVE state, so it already
-        // contains them — replaying would mint a second copy, and a duplicate spawn is not
+        // contains them; replaying would mint a second copy, and a duplicate spawn is not
         // idempotent.
         const late = h.connect();
         late.join('late');

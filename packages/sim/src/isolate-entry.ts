@@ -4,6 +4,7 @@
 import type { Codec, Message } from '@platform/transport';
 import { jsonCodec } from '@platform/transport';
 import type { InputBatch, LogLine, OutputBatch, Send } from './batch.js';
+import { simError } from './errors.js';
 import { Sim } from './sim.js';
 import type { SimConfig } from './sim.js';
 
@@ -25,7 +26,7 @@ export interface EncodedSend extends Omit<Send, 'envelope'> {
     envelope: string;
 }
 
-/** An {@link OutputBatch} with every envelope encoded — what an out-of-process host takes. */
+/** An {@link OutputBatch} with every envelope encoded: what an out-of-process host takes. */
 export interface EncodedBatch extends Omit<OutputBatch, 'sends'> {
     sends: EncodedSend[];
 }
@@ -50,22 +51,22 @@ export function installIsolateEntry(
 
     globalThis.__grove = {
         boot(config: string): void {
-            if (sim !== null) throw new Error('the isolate entry is already booted');
+            if (sim !== null) simError('entry-order', 'the isolate entry is already booted');
             sim = build(JSON.parse(config) as SimConfig);
         },
         tick(batch: string): string {
-            if (sim === null) throw new Error('the isolate entry has not booted');
+            if (sim === null) simError('entry-order', 'the isolate entry has not booted');
             return answer(sim.tick(JSON.parse(batch) as InputBatch));
         },
         close(): string {
-            if (sim === null) throw new Error('the isolate entry has not booted');
+            if (sim === null) simError('entry-order', 'the isolate entry has not booted');
             return answer(sim.close());
         },
     };
 }
 
 /**
- * Encodes every envelope for the wire, dropping any the codec refuses — one bad envelope costs
+ * Encodes every envelope for the wire, dropping any the codec refuses; one bad envelope costs
  * that send, not the tick that produced it. The loss leaves a line, so it is never silent.
  */
 function encodeBatch(out: OutputBatch, codec: Codec): EncodedBatch {
@@ -94,7 +95,7 @@ function encodeBatch(out: OutputBatch, codec: Codec): EncodedBatch {
 /** Reads back what {@link installIsolateEntry} published, which is what a host reaches for. */
 export function isolateEntry(): IsolateEntry {
     const entry = globalThis.__grove;
-    if (entry === undefined) throw new Error('no isolate entry was installed');
+    if (entry === undefined) simError('entry-order', 'no isolate entry was installed');
     return entry;
 }
 

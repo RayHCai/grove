@@ -76,7 +76,7 @@ describe('the client speaks first', () => {
         expect(welcome && 'reconnectToken' in welcome).toBe(false);
     });
 
-    it('echoes clientSentMs byte-identically — only the client differences its own stamps', () => {
+    it('echoes clientSentMs byte-identically: only the client differences its own stamps', () => {
         const h = harness({ config: { gameScripts: [Rules] } });
         const peer = h.connect();
         peer.join('Ray', { clientSentMs: 987_654 });
@@ -196,7 +196,7 @@ describe('the handshake proves both ends run the same bytes', () => {
         expect(h.sim.runtime.playerManager?.players).toHaveLength(0);
     });
 
-    it('refuses another project the same way — the reason stays coarse', () => {
+    it('refuses another project the same way: the reason stays coarse', () => {
         const h = harness({ config: { project, gameScripts: [Rules] } });
         const peer = h.connect();
         peer.join('elsewhere', { projectId: 'other', projectHash: 'build-7' });
@@ -217,7 +217,7 @@ describe('the handshake proves both ends run the same bytes', () => {
         expect(second.reject?.reason).toBe('identity');
     });
 
-    it('admits an empty bundleHash — a joiner holds none — and refuses a stale one', () => {
+    it('admits an empty bundleHash (a joiner holds none) and refuses a stale one', () => {
         const h = harness({ config: { project, gameScripts: [Rules] } });
         const fresh = h.connect();
         fresh.join('fresh', { projectId: 'arcade', projectHash: 'build-7', bundleHash: '' });
@@ -276,7 +276,7 @@ describe('the join snapshot is a walk of the live world', () => {
         const second = h.joined('b');
         const snapshot = second.welcome?.snapshot;
 
-        // The tick the walk was read at, which the joiner's counter seeds from — behind `rt.tick`
+        // The tick the walk was read at, which the joiner's counter seeds from, behind `rt.tick`
         // by however many ticks have been stepped since the Welcome was built.
         expect(snapshot?.tick).toBeGreaterThan(0);
         expect(snapshot?.tick).toBeLessThanOrEqual(rt.tick);
@@ -335,7 +335,7 @@ describe('the join snapshot is a walk of the live world', () => {
         const h = harness({ config: { gameScripts: [Spectators] } });
         h.joined('a');
         const rt = h.sim.runtime;
-        // The wire requires parents first, and parenting is a post-hoc mutation — so slot order
+        // The wire requires parents first, and parenting is a post-hoc mutation, so slot order
         // puts the child first and a slot sweep would ship it first.
         const child = rt.entityManager.spawn('child', 0, 0);
         const parent = rt.entityManager.spawn('parent', 0, 0);
@@ -368,7 +368,7 @@ describe('the unjoined connection is bounded', () => {
         for (let i = 0; i < MAX_UNJOINED_CONNECTIONS - 1; i++) h.connect();
         h.pumpTicks(1);
 
-        // A shared cap would let unjoined sockets lock out real players — the same denial wearing
+        // A shared cap would let unjoined sockets lock out real players, the same denial wearing
         // the admission check as a costume. Distinct caps mean the roster is untouched by them.
         const first = h.joined('a');
         const second = h.joined('b');
@@ -471,7 +471,7 @@ describe('disconnection', () => {
         h.pumpTicks(joinDeadlineTicks(h.sim.config.simRate) + 1);
 
         // The socket is the host's to close, so a session the sim gave up on has to reach it as an
-        // order — released here and never closed there, the peer holds an open socket forever.
+        // order: released here and never closed there, the peer holds an open socket forever.
         expect(h.closes).toContainEqual({ connectionId: 'c2', reason: 'join-deadline' });
     });
 });
