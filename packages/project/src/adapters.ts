@@ -51,7 +51,7 @@ export type PlacedEntity = {
 
 /** What a runtime is built from: the world's fixed shape, its templates, and the placed world. */
 export type GameManifest = {
-    /** The location filter — which handlers this runtime dispatches, and so its trust boundary. */
+    /** The location filter: which handlers this runtime dispatches, and so its trust boundary. */
     role: 'server' | 'client';
     simRate: number;
     bounds: ProjectBounds;
@@ -59,7 +59,7 @@ export type GameManifest = {
     /** No `url`: a runtime loads nothing, so an address it cannot act on is not its to hold. */
     assets: Array<{ key: string; kind: AssetKind; meta?: AssetMeta }>;
     templates: ResolvedTemplate[];
-    /** The placed world, parents before children — `validate` is what makes that hold. */
+    /** The placed world, parents before children; `validate` is what makes that hold. */
     entities: PlacedEntity[];
     gameScripts: ResolvedAttachment[];
 };

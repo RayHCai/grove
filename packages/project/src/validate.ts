@@ -1,4 +1,4 @@
-// It refuses rather than repairs, and it returns the value it was handed rather than a copy — a
+// It refuses rather than repairs, and it returns the value it was handed rather than a copy: a
 // project file is the creator's own text, and a loader that silently rewrote it would make "what
 // does this project contain" unanswerable from the file.
 
@@ -12,6 +12,7 @@ import type {
     ScriptLocation,
     SpriteVisual,
 } from './manifest.js';
+import { MAX_TEMPLATE_DEPTH, RESERVED_KEYS } from './limits.js';
 import { PROJECT_FORMAT_VERSION } from './manifest.js';
 
 /** Why a value is not a `ProjectManifest`, and where in it the fault sits. */
@@ -26,17 +27,8 @@ export class ProjectFormatError extends Error {
     }
 }
 
-/**
- * Object keys a `props` map may not carry, because they poison a downstream recursive merge.
- * The same three transport's codec refuses, restated: importing its set would be a value import.
- */
-const RESERVED_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
-
 /** Nesting a `props` value may reach. The walk below recurses, so this bound is a stack bound. */
 const MAX_PROP_DEPTH = 32;
-
-/** Levels a template subtree may nest; a child names a template, so the bound is on the graph. */
-const MAX_TEMPLATE_DEPTH = 8;
 
 /** Each table is keyed by the type it mirrors, so manifest.ts cannot grow a member unnoticed. */
 function isMember<K extends string>(table: Record<K, true>, value: string): value is K {
@@ -94,7 +86,7 @@ export function validate(value: unknown): ProjectManifest {
     if (formatVersion !== PROJECT_FORMAT_VERSION) {
         fail(
             'formatVersion',
-            `expected ${PROJECT_FORMAT_VERSION}, received ${formatVersion} — migrate the file first`,
+            `expected ${PROJECT_FORMAT_VERSION}, received ${formatVersion}: migrate the file first`,
         );
     }
     readKey(manifest['projectId'], 'projectId');
@@ -201,7 +193,7 @@ function readTemplates(
 ): ReadonlySet<string> {
     const entries = readArray(value, path);
 
-    // Ids first, because a child may name a template declared further down the array — unlike an
+    // Ids first, because a child may name a template declared further down the array, unlike an
     // entity's parent, which is ordered so a loader builds the hierarchy in one pass. A template
     // graph has no such order to impose: two templates may legally reference each other's siblings.
     const ids = new Set<string>();
@@ -312,7 +304,7 @@ function readEntities(
         if (entity['parent'] !== null) {
             const key = readKey(entity['parent'], `${at}.parent`);
             // Checked against what has been read SO FAR, which is what makes the rule
-            // parents-before-children — so a loader builds the hierarchy in one pass.
+            // parents-before-children, so a loader builds the hierarchy in one pass.
             if (!seen.has(key)) fail(`${at}.parent`, `no entity "${key}" before this one`);
         }
         seen.add(id);
@@ -371,7 +363,7 @@ function readProps(value: unknown, path: string): void {
 }
 
 /**
- * Refuses a reserved key rather than stripping it — deleting one would alter the file, which is the
+ * Refuses a reserved key rather than stripping it; deleting one would alter the file, which is the
  * silent-transform failure in miniature.
  */
 function checkJsonValue(value: unknown, path: string, depth: number): void {

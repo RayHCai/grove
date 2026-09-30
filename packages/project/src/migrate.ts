@@ -1,6 +1,6 @@
 // The version policy, which is the opposite of the wire's: a file BELOW the current format is moved
 // forward one version at a time, and only a file above it is refused. `PROTOCOL_VERSION` refuses a
-// mismatch in either direction because a peer can be told to update — a file on disk cannot.
+// mismatch in either direction because a peer can be told to update; a file on disk cannot.
 
 import { PROJECT_FORMAT_VERSION } from './manifest.js';
 import { ProjectFormatError } from './validate.js';

@@ -1,19 +1,19 @@
 // The authoring shape: what an editor saves, and the one thing every runtime input is derived from.
-// Declarations only — nothing here reads a file, fetches an asset or builds a world.
+// Declarations only: nothing here reads a file, fetches an asset or builds a world.
 
 import type { AssetId, ScriptId, TemplateId } from './ids.js';
 import type { ScriptProps } from './props.js';
 
 /**
  * The format this build reads and writes. A file below it is moved forward by `migrate`; one
- * above is refused — the opposite of `PROTOCOL_VERSION`, since a file on disk cannot update.
+ * above is refused, the opposite of `PROTOCOL_VERSION`, since a file on disk cannot update.
  */
 export const PROJECT_FORMAT_VERSION = 1;
 
 /** An axis-aligned rectangle. Restated, not imported: the only dependency here is type-only. */
 export type ProjectBounds = { left: number; right: number; top: number; bottom: number };
 
-/** One named rectangle inside the world's extent — what `find({ in })` and `camera.bounds` use. */
+/** One named rectangle inside the world's extent: what `find({ in })` and `camera.bounds` use. */
 export type RegionRecord = { name: string; bounds: ProjectBounds };
 
 /** The authoring vocabulary for assets; the renderer's four kinds narrow these at draw time. */
@@ -63,7 +63,7 @@ export type SpriteVisual = {
     anchorX?: number;
     anchorY?: number;
     tint?: number;
-    /** For visuals that exceed their bounds — glow, thick stroke, emitter. */
+    /** For visuals that exceed their bounds: glow, thick stroke, emitter. */
     neverCull?: boolean;
 };
 
@@ -83,7 +83,7 @@ export type TemplateChildRecord = {
     transform?: EntityTransform;
 };
 
-/** A configured entity, spawnable by key — one row of the editor's tray. */
+/** A configured entity, spawnable by key: one row of the editor's tray. */
 export type TemplateRecord = {
     id: TemplateId;
     visual: TemplateVisual;
@@ -115,7 +115,7 @@ export type EntityTransform = {
 /** Names one row of `ProjectManifest.entities`. Unbranded: it addresses this file only. */
 export type EntityRecordId = string;
 
-/** One entity as the editor placed it — enough to REBUILD it, in ids that survive a reload. */
+/** One entity as the editor placed it: enough to REBUILD it, in ids that survive a reload. */
 export type EntityRecord = {
     id: EntityRecordId;
     /** The template it instances, or `null` for an entity configured entirely in place. */
@@ -123,7 +123,7 @@ export type EntityRecord = {
     /** `null` = a child of the world root. A parent's record comes before its children's. */
     parent: EntityRecordId | null;
     transform?: EntityTransform;
-    /** Every tag authored on it — what `game.find` queries. */
+    /** Every tag authored on it: what `game.find` queries. */
     tags: string[];
     /** This entity alone; the attachments its template already carries are not repeated here. */
     scripts: ScriptAttachment[];
@@ -142,7 +142,7 @@ export type ProjectSettings = {
 /** A whole game, as one file. No `scenes` field: Game IS the world, owning the placed entities. */
 export type ProjectManifest = {
     formatVersion: number;
-    /** Stable across saves and renames — what a build, a share link and a save file agree on. */
+    /** Stable across saves and renames: what a build, a share link and a save file agree on. */
     projectId: string;
     /** A digest of the authored content, stamped by whatever wrote the file. */
     contentHash: string;
