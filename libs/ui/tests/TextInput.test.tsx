@@ -1,7 +1,7 @@
 import { act, createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { TextInput } from '../src/components/TextInput.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 describe('TextInput', () => {
     it('is a labelled input whose label points at a generated id', async () => {
@@ -101,5 +101,13 @@ describe('TextInput', () => {
         });
         expect(onKeyDown).toHaveBeenCalledOnce();
         expect(onKeyDown.mock.calls[0]?.[0]?.key).toBe('a');
+    });
+});
+
+describe('a dense TextInput', () => {
+    it('takes the dense metrics on its wrapper and nothing else', async () => {
+        const host = await mount(<TextInput label="Players" dense />);
+        expect(host.querySelector('.pg-field')?.className).toBe('pg-field pg-field--dense');
+        expect(host.querySelector('input')?.hasAttribute('dense')).toBe(false);
     });
 });

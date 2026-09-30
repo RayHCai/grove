@@ -4,7 +4,7 @@ import { Badge } from '../src/components/Badge.js';
 import { HeartIcon } from '../src/icons/HeartIcon.js';
 import { LeafIcon } from '../src/icons/LeafIcon.js';
 import { StarIcon } from '../src/icons/StarIcon.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 describe('Badge', () => {
     it('is a span holding its text and no icon', async () => {

@@ -6,7 +6,7 @@
 .pg-sectitle {
     display: block;
     width: fit-content;
-    padding: 12px 16px;
+    padding: var(--pg-plate-pad);
     background: var(--pg-plate);
     box-shadow: var(--pg-lift) var(--pg-lift) 0 var(--pg-plate-lift);
     color: var(--pg-plate-ink);
@@ -16,6 +16,17 @@
 .pg-sectitle__sub {
     margin-top: var(--pg-sp-3);
     color: var(--pg-ink-muted);
-    font-size: 23px;
+    font-size: var(--pg-plate-sub-text);
     line-height: 1.45;
+}
+/* A stack of inked plates in a narrow rail reads as a pile of blocks, so a rail heads with a line. */
+.pg-sectitle--label {
+    width: auto;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+    color: var(--pg-ink-muted);
+    font: 700 var(--pg-text-sm) / 1 var(--pg-font-ui);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }

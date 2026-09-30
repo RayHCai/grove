@@ -1,7 +1,7 @@
 import { createRef } from 'react';
 import { describe, expect, it } from 'vitest';
 import { Tilestrip } from '../src/components/Tilestrip.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 describe('Tilestrip', () => {
     it('is an empty div hidden from assistive technology', async () => {

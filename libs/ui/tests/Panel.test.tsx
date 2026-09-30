@@ -1,7 +1,7 @@
 import { createRef } from 'react';
 import { describe, expect, it } from 'vitest';
 import { Panel } from '../src/components/Panel.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 describe('Panel', () => {
     it('is a div wearing the surface face by default', async () => {

@@ -1,8 +1,8 @@
 import { act, createRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { IconButton } from '../src/components/IconButton.js';
+import { IconButton, iconButtonClass } from '../src/components/IconButton.js';
 import { StopIcon } from '../src/icons/StopIcon.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 describe('IconButton', () => {
     it('is named and titled by its label and holds one icon', async () => {
@@ -78,5 +78,13 @@ describe('IconButton', () => {
             button?.click();
         });
         expect(onClick).not.toHaveBeenCalled();
+    });
+});
+
+describe('iconButtonClass', () => {
+    it('hands the icon button classes to an element that is not a button', () => {
+        expect(iconButtonClass({ variant: 'ghost' }, 'profile')).toBe(
+            'pg-iconbtn pg-iconbtn--ghost profile',
+        );
     });
 });

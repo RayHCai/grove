@@ -18,7 +18,7 @@ export type PanelProps<T extends PanelTag = 'div'> = {
     className?: string | undefined;
 } & Omit<ComponentPropsWithRef<T>, 'as' | 'className'>;
 
-/** A pane or card: a surface with a 1px border, 12px corners and a soft shadow, in one of four faces. */
+/** A pane or card: a face in a 3px stepped edge that drops a solid block, in one of four faces. */
 export function Panel<T extends PanelTag = 'div'>({
     as,
     face = 'surface',
