@@ -1,9 +1,13 @@
-//! The id that joins one request across the services it passes through — the same token the Go
+//! The id that joins one request across the services it passes through, the same token the Go
 //! half puts on every hop, restated for the Rust crates that sit between them: a chain is only as
-//! long as its quietest link.
+//! long as its quietest link. With `service`, also the rest of what both Rust services start the
+//! same way: the middleware that carries the id, the log setup, and the environment readers.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(feature = "service")]
+pub mod env;
 
 /// Where a caller's id arrives and where this process echoes the one it chose.
 pub const HEADER: &str = "x-request-id";
@@ -23,7 +27,7 @@ pub fn valid(candidate: &str) -> bool {
 }
 
 /// Mints one from the clock and a counter rather than a uuid crate, because what this needs is a
-/// token two logs can be joined on and not a name unique across the world — and a fourth crate
+/// token two logs can be joined on and not a name unique across the world, and a fourth crate
 /// inside the process that hosts an untrusted isolate is a cost with nothing behind it.
 pub fn mint() -> String {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -37,6 +41,41 @@ pub fn mint() -> String {
         "{nanos:016x}{:08x}",
         COUNTER.fetch_add(1, Ordering::Relaxed)
     )
+}
+
+/// Joins one request to the caller that made it: the id it presented when that is one token this
+/// process can log unchanged, and a fresh one when it is not. Put back on the request too, so a
+/// handler reads the id the caller will quote.
+#[cfg(feature = "service")]
+pub async fn correlate(
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let id = request
+        .headers()
+        .get(HEADER)
+        .and_then(|presented| presented.to_str().ok())
+        .filter(|presented| valid(presented))
+        .map_or_else(mint, str::to_owned);
+
+    let value =
+        axum::http::HeaderValue::from_str(&id).expect("a checked request id is a header value");
+    request.headers_mut().insert(HEADER, value.clone());
+
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(HEADER, value);
+    response
+}
+
+/// Logs at `info` unless `RUST_LOG` says otherwise.
+#[cfg(feature = "service")]
+pub fn init_tracing() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
 }
 
 #[cfg(test)]
