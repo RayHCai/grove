@@ -1,0 +1,92 @@
+.authpage {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--pg-sp-4);
+    padding: var(--pg-sp-5) var(--shell-gutter);
+}
+
+.authcard {
+    width: 100%;
+    max-width: var(--shell-narrow);
+    padding: var(--pg-sp-6);
+}
+
+/* The heading is a plate as wide as its words, so centring the plate is what centres it. */
+.authcard__title {
+    margin-inline: auto;
+    text-align: center;
+}
+
+.authcard__fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-4);
+    margin-top: var(--pg-sp-5);
+}
+
+/* A refusal is a dialog line: inked border, warm face, no rounding. */
+.authcard__refusal {
+    margin-top: var(--pg-sp-4);
+    padding: var(--pg-sp-3) var(--pg-sp-4);
+    border: var(--pg-bw) solid var(--pg-warm);
+    background: var(--pg-warm-soft);
+    color: var(--pg-warm-ink);
+    font-size: var(--pg-text);
+    line-height: 1.35;
+}
+
+.authcard__note {
+    color: var(--pg-ink-muted);
+    font-size: 18px;
+    line-height: 1.45;
+}
+
+.authcard__aside {
+    font-size: var(--pg-text);
+}
+
+.authpage__footer {
+    color: var(--pg-ink-muted);
+    font-size: var(--pg-text);
+}
+
+.authpage__footer a,
+.authcard__aside a {
+    color: var(--pg-accent-strong);
+    text-decoration: none;
+    box-shadow: inset 0 -3px 0 var(--pg-accent);
+}
+
+.authpage__footer a:hover,
+.authcard__aside a:hover {
+    background: var(--pg-plate);
+    color: var(--pg-plate-ink);
+    box-shadow: none;
+}
+
+/*
+ * The sign-in flow owes a short window one screenful too, and a form cannot be made shorter by
+ * wrapping, so the card steps its rhythm down rather than the page growing a scrollbar.
+ */
+@media (max-height: 656px) {
+    .authpage {
+        padding-block: var(--pg-sp-4);
+    }
+
+    .authcard {
+        padding: var(--pg-sp-5);
+    }
+
+    .authcard__fields {
+        gap: var(--pg-sp-3);
+        margin-top: var(--pg-sp-4);
+    }
+
+    .authcard__refusal {
+        margin-top: var(--pg-sp-3);
+        padding: var(--pg-sp-2) var(--pg-sp-3);
+    }
+}

@@ -1,9 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Badge, Button, Eyebrow, Panel, SectionTitle, Tag, TextInput } from '@grove/ui';
+import { useEffect, useEffectEvent, useState } from 'react';
+import {
+    Badge,
+    Button,
+    EyeIcon,
+    PlusIcon,
+    IconButton,
+    Panel,
+    SettingsIcon,
+    Tag,
+    TextInput,
+    TrashIcon,
+    VisuallyHidden,
+    messageOf,
+} from '@grove/ui';
 import type { Game } from '@grove/api-contract';
-import { isLapsedSession, messageOf } from '../api/messages';
-import { go } from '../router/useRoute';
+import { isLapsedSession } from '../api/client';
+import { FormPanel } from '../chrome/FormPanel';
+import { SearchField } from '../chrome/SearchField';
+import { playRefusal } from '../player/refusal';
+import { IconLink } from '../router/Link';
+import { useAction } from '../session/useAction';
 import { useSession } from '../session/SessionProvider';
+import { UNFINISHED } from '../unfinished';
 import { formatDate } from './date';
 
 /** The title a game gets when somebody made one without naming it. */
@@ -12,115 +30,166 @@ const UNTITLED = 'Untitled game';
 type Listing =
     { at: 'loading' } | { at: 'listed'; games: Game[] } | { at: 'failed'; message: string };
 
+/** What one row is in the middle of; every other row stays free to press. */
+interface RowDoing {
+    gameId: string;
+    kind: 'edit' | 'play' | 'delete';
+}
+
 /**
  * Every game this creator owns, newest first.
  *
  * The editor opens the newest of them and has no way to be pointed at another, so only the first
- * card offers to open one — a button on the rest would say it opens that game and open a different
+ * card offers to open one; a button on the rest would say it opens that game and open a different
  * one.
  */
 export function Games(): React.JSX.Element {
-    const { api, session, forget, openEditor } = useSession();
+    const { api, lapsed, openEditor, openPlayer } = useSession();
     const [listing, setListing] = useState<Listing>({ at: 'loading' });
+    const [attempt, setAttempt] = useState(0);
     const [naming, setNaming] = useState(false);
     const [title, setTitle] = useState('');
-    const [refusal, setRefusal] = useState<string | undefined>(undefined);
-    const [busy, setBusy] = useState(false);
-    // StrictMode runs the effect below twice, and the second run would list the games again.
-    const asked = useRef(false);
+    const [query, setQuery] = useState('');
+    const creating = useAction();
+    const row = useAction();
+    const [doing, setDoing] = useState<RowDoing | null>(null);
 
-    const lapsed = useCallback(() => {
-        forget();
-        go({ at: 'sign-in', returnTo: undefined });
-    }, [forget]);
-
-    const load = useCallback(async () => {
-        setListing({ at: 'loading' });
-        try {
-            setListing({ at: 'listed', games: await api.games() });
-        } catch (failure) {
-            if (isLapsedSession(failure)) {
-                lapsed();
-                return;
-            }
-            setListing({
-                at: 'failed',
-                message: messageOf(failure, 'Your games could not be listed.'),
-            });
+    const refused = useEffectEvent((failure: unknown) => {
+        if (isLapsedSession(failure)) {
+            lapsed();
+            return;
         }
-    }, [api, lapsed]);
+        setListing({
+            at: 'failed',
+            message: messageOf(failure, 'Your games could not be listed.'),
+        });
+    });
 
     useEffect(() => {
-        if (asked.current) return;
-        asked.current = true;
-        void load();
-    }, [load]);
+        // A listing that lands after this effect was torn down belongs to nobody.
+        let live = true;
+        api.games().then(
+            (games) => {
+                if (live) setListing({ at: 'listed', games });
+            },
+            (failure: unknown) => {
+                if (live) refused(failure);
+            },
+        );
+        return () => {
+            live = false;
+        };
+    }, [api, attempt]);
 
-    async function create(): Promise<void> {
-        setBusy(true);
-        setRefusal(undefined);
-        try {
+    function retry(): void {
+        setListing({ at: 'loading' });
+        setAttempt((count) => count + 1);
+    }
+
+    function create(): void {
+        void creating.run(async () => {
             const made = await api.createGame(title.trim() === '' ? UNTITLED : title.trim());
             setNaming(false);
             setTitle('');
             // Made and then opened, in that order: the new game is now the newest, which is the one
             // the editor opens on.
-            setListing({
+            setListing((held) => ({
                 at: 'listed',
-                games: [made, ...(listing.at === 'listed' ? listing.games : [])],
-            });
+                games: [made, ...(held.at === 'listed' ? held.games : [])],
+            }));
             openEditor();
-        } catch (failure) {
-            if (isLapsedSession(failure)) {
-                lapsed();
-                return;
-            }
-            setRefusal(messageOf(failure, 'That game could not be made. Try again.'));
-        } finally {
-            setBusy(false);
-        }
+        }, 'That game could not be made. Try again.');
     }
 
-    async function edit(): Promise<void> {
-        setBusy(true);
-        setRefusal(undefined);
-        try {
-            openEditor();
-        } catch (failure) {
-            if (isLapsedSession(failure)) {
-                lapsed();
-                return;
-            }
-            setRefusal(messageOf(failure, 'The editor could not be opened. Try again.'));
-            setBusy(false);
+    async function onRow(
+        game: Game,
+        kind: RowDoing['kind'],
+        work: () => Promise<string | undefined | void>,
+        fallback: string,
+    ): Promise<void> {
+        setDoing({ gameId: game.gameId, kind });
+        await row.run(work, fallback);
+        setDoing(null);
+    }
+
+    function remove(game: Game): void {
+        // A game is gone for good, files and all, so the owner says so out loud first.
+        if (
+            !window.confirm(
+                `Delete "${game.title}"? Its files go with it, and this cannot be undone.`,
+            )
+        ) {
+            return;
         }
+        void onRow(
+            game,
+            'delete',
+            async () => {
+                await api.deleteGame(game.gameId);
+                setListing((held) =>
+                    held.at === 'listed'
+                        ? {
+                              at: 'listed',
+                              games: held.games.filter((each) => each.gameId !== game.gameId),
+                          }
+                        : held,
+                );
+            },
+            'That game could not be deleted. Try again.',
+        );
+    }
+
+    function edit(game: Game): void {
+        // Left set: the tab is on its way to the editor, and nothing on this page comes back.
+        setDoing({ gameId: game.gameId, kind: 'edit' });
+        row.reset();
+        openEditor();
+    }
+
+    function play(game: Game): void {
+        void onRow(
+            game,
+            'play',
+            async () => {
+                try {
+                    const session = await api.play(game.gameId);
+                    openPlayer({ gameId: game.gameId, session });
+                    return undefined;
+                } catch (failure) {
+                    if (isLapsedSession(failure)) throw failure;
+                    return playRefusal(failure, game.title);
+                }
+            },
+            'That game could not be started. Try again.',
+        );
     }
 
     const games = listing.at === 'listed' ? listing.games : [];
-    const newest = games[0];
+    const newestId = games[0]?.gameId;
+    const needle = query.trim().toLowerCase();
+    const shown =
+        needle === '' ? games : games.filter((game) => game.title.toLowerCase().includes(needle));
+    const refusal = row.refusal ?? creating.refusal;
 
     return (
         <main className="zone">
-            <header className="zone__head">
-                <div>
-                    <Eyebrow>
-                        {session.at === 'signed-in' ? session.account.displayName : 'Your Grove'}
-                    </Eyebrow>
-                    <SectionTitle
-                        as="h1"
-                        subline={
-                            newest === undefined
-                                ? 'Nothing here yet. The first one takes a minute.'
-                                : `The editor opens your newest game, ${newest.title}.`
-                        }
-                    >
-                        Your games
-                    </SectionTitle>
-                </div>
+            <VisuallyHidden as="h1">Your games</VisuallyHidden>
+            <header className="zone__head gamesbar">
+                <SearchField
+                    className="gamesbar__search"
+                    label="Search your games"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                />
                 {!naming && (
-                    <Button variant="primary" onClick={() => setNaming(true)}>
-                        New game
-                    </Button>
+                    <IconButton
+                        className="gamesbar__new"
+                        variant="primary"
+                        label="New game"
+                        onClick={() => setNaming(true)}
+                    >
+                        <PlusIcon />
+                    </IconButton>
                 )}
             </header>
 
@@ -131,17 +200,10 @@ export function Games(): React.JSX.Element {
             )}
 
             {naming && (
-                <Panel
-                    as="form"
-                    className="newgame"
-                    noValidate
-                    onSubmit={(event) => {
-                        event.preventDefault();
-                        void create();
-                    }}
-                >
+                <FormPanel className="newgame" onSubmit={create}>
                     <TextInput
                         label="Game title"
+                        className="newgame__field"
                         name="title"
                         maxLength={120}
                         autoFocus
@@ -153,14 +215,14 @@ export function Games(): React.JSX.Element {
                         <Button
                             type="submit"
                             variant="primary"
-                            aria-busy={busy}
-                            aria-disabled={busy}
+                            aria-busy={creating.busy}
+                            aria-disabled={creating.busy}
                         >
-                            {busy ? 'Making it…' : 'Create and open the editor'}
+                            {creating.busy ? 'Making it…' : 'Create and open the editor'}
                         </Button>
                         <Button
                             variant="ghost"
-                            aria-disabled={busy || undefined}
+                            aria-disabled={creating.busy || undefined}
                             onClick={() => {
                                 setNaming(false);
                                 setTitle('');
@@ -169,7 +231,7 @@ export function Games(): React.JSX.Element {
                             Cancel
                         </Button>
                     </div>
-                </Panel>
+                </FormPanel>
             )}
 
             {listing.at === 'loading' && (
@@ -181,7 +243,7 @@ export function Games(): React.JSX.Element {
             {listing.at === 'failed' && (
                 <Panel className="zone__failure">
                     <p role="alert">{listing.message}</p>
-                    <Button onClick={() => void load()}>Try again</Button>
+                    <Button onClick={retry}>Try again</Button>
                 </Panel>
             )}
 
@@ -198,32 +260,92 @@ export function Games(): React.JSX.Element {
             )}
 
             {games.length > 0 && (
-                <ul className="gamelist">
-                    {games.map((game, index) => (
-                        <li key={game.gameId}>
-                            <Panel as="article" className="gamecard">
-                                <div className="gamecard__body">
-                                    <h2 className="gamecard__title">{game.title}</h2>
-                                    <p className="gamecard__meta">
-                                        <Tag>Made {formatDate(game.createdAt, 'short')}</Tag>
-                                        {index === 0 && <Badge icon="sprout">Newest</Badge>}
-                                    </p>
-                                </div>
-                                {index === 0 && (
-                                    <Button
-                                        variant="primary"
-                                        size="sm"
-                                        aria-busy={busy}
-                                        aria-disabled={busy}
-                                        onClick={() => void edit()}
-                                    >
-                                        {busy ? 'Opening…' : 'Open in editor'}
-                                    </Button>
-                                )}
-                            </Panel>
-                        </li>
-                    ))}
-                </ul>
+                <section className="gamelist" aria-label="Your games">
+                    {/* Column labels for the rows below, not a table header: each row stays a card. */}
+                    <div className="gamelist__labels" aria-hidden="true">
+                        <span>Name</span>
+                        <span>Created</span>
+                        <span>Visibility</span>
+                        <span />
+                    </div>
+                    {shown.length === 0 && (
+                        <p className="zone__note">No games match “{query.trim()}”.</p>
+                    )}
+                    <ul className="gamelist__rows">
+                        {shown.map((game) => {
+                            const busy = doing?.gameId === game.gameId ? doing.kind : undefined;
+                            return (
+                                <li key={game.gameId}>
+                                    <Panel as="article" className="gamecard">
+                                        <div className="gamecard__body">
+                                            <h2 className="gamecard__title">{game.title}</h2>
+                                            {game.gameId === newestId && (
+                                                <Badge icon="sprout">Newest</Badge>
+                                            )}
+                                        </div>
+                                        <span className="gamecard__cell">
+                                            {formatDate(game.createdAt)}
+                                        </span>
+                                        <span className="gamecard__cell">
+                                            <Tag>{game.visibility}</Tag>
+                                        </span>
+                                        <div className="gamecard__actions">
+                                            {game.gameId === newestId && (
+                                                <Button
+                                                    variant="primary"
+                                                    size="sm"
+                                                    aria-busy={busy === 'edit'}
+                                                    aria-disabled={busy !== undefined}
+                                                    onClick={() => edit(game)}
+                                                >
+                                                    {busy === 'edit'
+                                                        ? 'Opening…'
+                                                        : 'Open in editor'}
+                                                </Button>
+                                            )}
+                                            <Button
+                                                size="sm"
+                                                aria-busy={busy === 'play'}
+                                                aria-disabled={busy !== undefined}
+                                                onClick={() => play(game)}
+                                            >
+                                                Play
+                                            </Button>
+                                            {/* Only a published game has a page worth a visit. */}
+                                            {game.publishedAt !== null && (
+                                                <IconLink
+                                                    size="sm"
+                                                    label="View game page"
+                                                    to={{ at: 'game', gameId: game.gameId }}
+                                                >
+                                                    <EyeIcon />
+                                                </IconLink>
+                                            )}
+                                            {UNFINISHED && (
+                                                <IconButton
+                                                    size="sm"
+                                                    label="Game settings"
+                                                    disabled
+                                                >
+                                                    <SettingsIcon />
+                                                </IconButton>
+                                            )}
+                                            <IconButton
+                                                size="sm"
+                                                label="Delete game"
+                                                aria-busy={busy === 'delete'}
+                                                aria-disabled={busy !== undefined}
+                                                onClick={() => remove(game)}
+                                            >
+                                                <TrashIcon />
+                                            </IconButton>
+                                        </div>
+                                    </Panel>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </section>
             )}
         </main>
     );

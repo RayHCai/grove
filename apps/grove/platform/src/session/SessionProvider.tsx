@@ -1,16 +1,11 @@
-import {
-    createContext,
-    useCallback,
-    useContext,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-} from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { Account } from '@grove/api-contract';
+import type { Account, PlayHandoff } from '@grove/api-contract';
+import { leaveFor } from '@grove/ui';
 import type { Api } from '../api/client';
 import { editorLink } from '../editor/link';
+import { playerLink } from '../player/link';
+import { go } from '../router/useRoute';
 
 /** Who is signed in, once the cookie has been asked about. */
 export type Session =
@@ -28,15 +23,22 @@ export interface SessionContextValue {
     accountChanged: (account: Account) => void;
     /** Forgets the session without asking the service, for a page that just closed the account. */
     forget: () => void;
+    /**
+     * What every page does when the service stopped recognising the session mid-visit: forgets it
+     * and sends the visitor to sign in, rather than leaving them on a page that can do nothing.
+     */
+    lapsed: () => void;
     /** Leaves for the editor, optionally back to where it sent somebody from. */
     openEditor: (returnTo?: string | undefined) => void;
+    /** Leaves for the player origin, carrying the join the allocator just minted. */
+    openPlayer: (handoff: PlayHandoff) => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
 export interface SessionProviderProps {
     api: Api;
-    /** How the tab leaves for the editor; a test hands in its own rather than navigating. */
+    /** How the tab leaves for the editor or a game; a test hands in its own rather than navigating. */
     navigate?: ((url: string) => void) | undefined;
     children: ReactNode;
 }
@@ -46,7 +48,7 @@ export interface SessionProviderProps {
  *
  * Two calls rather than one: `GET /v1/auth/session` is the one route that answers a cookie naming
  * nobody without it being a failure, and it also hands back the CSRF token every write here has to
- * carry — so it runs before the account is read and before any form can be submitted.
+ * carry, so it runs before the account is read and before any form can be submitted.
  */
 export function SessionProvider({
     api,
@@ -54,34 +56,30 @@ export function SessionProvider({
     children,
 }: SessionProviderProps): React.JSX.Element {
     const [session, setSession] = useState<Session>({ at: 'loading' });
-    // StrictMode runs the effect below twice, and the second run would ask the service again for
-    // an answer the first one already has.
-    const asked = useRef(false);
 
-    const go = useCallback(
-        (url: string) => {
-            (navigate ?? ((to: string) => window.location.assign(to)))(url);
-        },
-        [navigate],
-    );
-
-    const load = useCallback(async () => {
-        if ((await api.session()) === undefined) {
-            setSession({ at: 'anonymous' });
-            return;
-        }
-        setSession({ at: 'signed-in', account: await api.me() });
-    }, [api]);
+    const leave = useCallback((url: string) => (navigate ?? leaveFor)(url), [navigate]);
 
     useEffect(() => {
-        if (asked.current) return;
-        asked.current = true;
-        void load().catch(() => {
+        // An answer that lands after this effect was torn down belongs to nobody.
+        let live = true;
+        const settle = (next: Session): void => {
+            if (live) setSession(next);
+        };
+        void (async () => {
+            if ((await api.session()) === undefined) {
+                settle({ at: 'anonymous' });
+                return;
+            }
+            settle({ at: 'signed-in', account: await api.me() });
+        })().catch(() => {
             // An API nobody can reach is a visitor who is not signed in: the pages behind the gate
             // say so, and the ones in front of it still work.
-            setSession({ at: 'anonymous' });
+            settle({ at: 'anonymous' });
         });
-    }, [load]);
+        return () => {
+            live = false;
+        };
+    }, [api]);
 
     const value = useMemo<SessionContextValue>(
         () => ({
@@ -106,14 +104,21 @@ export function SessionProvider({
 
             accountChanged: (account) => setSession({ at: 'signed-in', account }),
             forget: () => setSession({ at: 'anonymous' }),
+            lapsed: () => {
+                setSession({ at: 'anonymous' });
+                go({ at: 'sign-in', returnTo: undefined });
+            },
 
             // Nothing is minted and nothing crosses: the session is a cookie on the API origin,
             // and the editor is a subdomain of this same site, so it is already carrying it.
             openEditor: (returnTo) => {
-                go(editorLink(returnTo));
+                leave(editorLink(returnTo));
+            },
+            openPlayer: (handoff) => {
+                leave(playerLink(handoff));
             },
         }),
-        [session, api, go],
+        [session, api, leave],
     );
 
     return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

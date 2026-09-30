@@ -12,6 +12,7 @@ export type Route =
     | { at: 'forgot-password' }
     | { at: 'reset-password'; token: string | undefined }
     | { at: 'games' }
+    | { at: 'game'; gameId: string }
     | { at: 'profile' }
     | { at: 'missing'; path: string };
 
@@ -52,7 +53,18 @@ export function parseRoute(href: string): Route {
         case '/profile':
             return { at: 'profile' };
         default:
-            return { at: 'missing', path };
+            return gameAt(path) ?? { at: 'missing', path };
+    }
+}
+
+/** `/games/<id>`, one segment deep; an id that is not one decodable segment is no game. */
+function gameAt(path: string): Route | undefined {
+    const match = /^\/games\/([^/]+)$/u.exec(path);
+    if (match?.[1] === undefined) return undefined;
+    try {
+        return { at: 'game', gameId: decodeURIComponent(match[1]) };
+    } catch {
+        return undefined;
     }
 }
 
@@ -75,6 +87,8 @@ export function hrefOf(route: Route): string {
             return '/reset-password';
         case 'games':
             return '/games';
+        case 'game':
+            return `/games/${encodeURIComponent(route.gameId)}`;
         case 'profile':
             return '/profile';
         default:
@@ -89,10 +103,34 @@ function withReturn(path: string, returnTo: string | undefined): string {
 
 /** The pages that mean nothing without a session, and so send an anonymous visitor to sign in. */
 export function needsSession(route: Route): boolean {
-    return route.at === 'games' || route.at === 'profile';
+    return route.at === 'games' || route.at === 'game' || route.at === 'profile';
 }
 
 /** The pages that are about not having a session yet, and so have nothing to say to a holder of one. */
 export function needsAnonymity(route: Route): boolean {
     return route.at === 'sign-in' || route.at === 'sign-up';
+}
+
+/** What the browser tab says while a route is on screen. */
+export function titleOf(route: Route): string {
+    switch (route.at) {
+        case 'landing':
+            return 'Grove';
+        case 'sign-in':
+            return 'Sign in · Grove';
+        case 'sign-up':
+            return 'Sign up · Grove';
+        case 'forgot-password':
+            return 'Forgot your password · Grove';
+        case 'reset-password':
+            return 'Choose a new password · Grove';
+        case 'games':
+            return 'Your games · Grove';
+        case 'game':
+            return 'Game · Grove';
+        case 'profile':
+            return 'Your profile · Grove';
+        default:
+            return 'Nothing here · Grove';
+    }
 }

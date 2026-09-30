@@ -1,10 +1,11 @@
 // A creator's own games: what the page lists, what it offers to open, and what it does when the
 // service will not answer.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { decodeHandoff } from '@grove/api-contract';
 import { ApiError } from '../src/api/client';
 import { App } from '../src/App';
-import { GAME, navigation, OLDER_GAME, signedInApi } from './doubles';
+import { GAME, navigation, OLDER_GAME, PLAY_SESSION, signedInApi } from './doubles';
 import { byText, click, field, mount, need, submit, type, until, untilSettled } from './helpers';
 
 /** Where the editor is; the crossing goes to its origin and carries nothing else. */
@@ -42,7 +43,6 @@ describe('the games page', () => {
         expect(
             [...host.querySelectorAll('button')].filter((b) => b.textContent === 'Open in editor'),
         ).toHaveLength(1);
-        expect(host.textContent).toContain(`The editor opens your newest game, ${GAME.title}`);
     });
 
     it('crosses to the editor from the newest card, carrying nothing', async () => {
@@ -57,9 +57,78 @@ describe('the games page', () => {
     it('says so when there is nothing yet', async () => {
         const { host } = await games(signedInApi({ owned: [] }));
 
-        expect(host.textContent).toContain('Nothing here yet');
         expect(byText(host, 'button', 'Make your first game')).toBeDefined();
         expect(byText(host, 'button', 'Open in editor')).toBeUndefined();
+    });
+});
+
+describe('deleting a game', () => {
+    it('removes the card once the owner confirms', async () => {
+        const { host, api } = await games();
+        const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+        await click(host.querySelector<HTMLButtonElement>('button[aria-label="Delete game"]')!);
+        await until(() => host.querySelectorAll('.gamecard').length === 1);
+
+        expect(api.owned.some((game) => game.gameId === GAME.gameId)).toBe(false);
+        confirm.mockRestore();
+    });
+
+    it('keeps the game when the owner backs out', async () => {
+        const { host, api } = await games();
+        const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+        await click(host.querySelector<HTMLButtonElement>('button[aria-label="Delete game"]')!);
+
+        expect(host.querySelectorAll('.gamecard').length).toBe(2);
+        expect(api.owned).toHaveLength(2);
+        confirm.mockRestore();
+    });
+
+    it('busies only the card being deleted, and says nothing about opening', async () => {
+        const { host, api } = await games();
+        const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+        vi.spyOn(api, 'deleteGame').mockReturnValue(new Promise(() => undefined));
+
+        const [newest, older] = [...host.querySelectorAll<HTMLElement>('.gamecard')];
+        await click(older!.querySelector('button[aria-label="Delete game"]')!);
+
+        expect(
+            older!.querySelector('button[aria-label="Delete game"]')?.getAttribute('aria-busy'),
+        ).toBe('true');
+        const open = need<HTMLButtonElement>(newest!, 'button', 'Open in editor');
+        expect(open.getAttribute('aria-disabled')).toBe('false');
+        confirm.mockRestore();
+    });
+
+    it('offers settings, but not yet', async () => {
+        const { host } = await games();
+
+        expect(
+            host.querySelector<HTMLButtonElement>('button[aria-label="Game settings"]')?.disabled,
+        ).toBe(true);
+    });
+});
+
+describe('viewing a game', () => {
+    it('offers a page to view only for a game that has been published', async () => {
+        const published = { ...OLDER_GAME, publishedAt: '2026-09-12T09:00:00.000Z' };
+        const { host } = await games(signedInApi({ owned: [GAME, published] }));
+
+        const views = host.querySelectorAll<HTMLAnchorElement>('a[aria-label="View game page"]');
+        expect(views).toHaveLength(1);
+        expect(views[0]?.getAttribute('href')).toBe(`/games/${OLDER_GAME.gameId}`);
+    });
+
+    it('goes to the game page from the view link', async () => {
+        const published = { ...GAME, publishedAt: '2026-09-12T09:00:00.000Z' };
+        const { host } = await games(signedInApi({ owned: [published] }));
+
+        await click(host.querySelector('a[aria-label="View game page"]')!);
+        await until(() => host.querySelector('.gameinfo__title') !== null);
+
+        expect(window.location.pathname).toBe(`/games/${GAME.gameId}`);
+        expect(host.querySelector('h1')?.textContent).toBe(GAME.title);
     });
 });
 
@@ -81,7 +150,7 @@ describe('making a game', () => {
     it('takes an untitled one rather than refusing an empty field', async () => {
         const { host, api } = await games(signedInApi({ owned: [] }));
 
-        await click(need(host, 'button', 'New game'));
+        await click(host.querySelector<HTMLButtonElement>('button[aria-label="New game"]')!);
         await submit(need(host, 'button', 'Create and open the editor'));
         await until(() => api.owned.length > 0);
 
@@ -91,7 +160,7 @@ describe('making a game', () => {
     it('leaves the list alone when cancelled', async () => {
         const { host, api } = await games(signedInApi({ owned: [] }));
 
-        await click(need(host, 'button', 'New game'));
+        await click(host.querySelector<HTMLButtonElement>('button[aria-label="New game"]')!);
         await click(need(host, 'button', 'Cancel'));
 
         expect(api.owned).toHaveLength(0);
@@ -127,5 +196,69 @@ describe('when the service will not answer', () => {
 
         await games(api);
         await until(() => window.location.pathname === '/sign-in');
+    });
+});
+
+/** The Play button on the card titled `title`. */
+function playOn(host: HTMLElement, title: string): HTMLButtonElement {
+    const card = [...host.querySelectorAll('.gamecard')].find((node) =>
+        node.querySelector('.gamecard__title')?.textContent?.includes(title),
+    );
+    const button = [...(card?.querySelectorAll('button') ?? [])].find(
+        (node) => node.textContent === 'Play',
+    );
+    if (button === undefined) throw new Error(`no Play on ${title}`);
+    return button;
+}
+
+describe('playing a game', () => {
+    /** Where the player origin is; a dev server's default, since a test build is one. */
+    const PLAYER = 'http://localhost:5177';
+
+    it('offers Play on every game, not only the newest', async () => {
+        const { host } = await games();
+
+        expect(
+            [...host.querySelectorAll('button')].filter((b) => b.textContent === 'Play'),
+        ).toHaveLength(2);
+    });
+
+    it('sends the tab to the player origin with the join in the fragment', async () => {
+        const { host, tab } = await games();
+
+        await click(playOn(host, OLDER_GAME.title));
+        await until(() => tab.to.length > 0);
+
+        const url = new URL(tab.to[0] ?? '');
+        expect(url.origin).toBe(PLAYER);
+        // Never in the query or the path: a fragment is the one part a browser keeps to itself.
+        expect(url.search).toBe('');
+        expect(url.pathname).toBe('/');
+        expect(decodeHandoff(url.hash.slice(1))).toEqual({
+            gameId: OLDER_GAME.gameId,
+            session: PLAY_SESSION,
+        });
+    });
+
+    it('says why a game with no build cannot start, and stays put', async () => {
+        const api = signedInApi();
+        api.unplayable.add(GAME.gameId);
+        const { host, tab } = await games(api);
+
+        await click(playOn(host, GAME.title));
+        await until(() => host.querySelector('[role="alert"]') !== null);
+
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain('no playable build');
+        expect(tab.to).toEqual([]);
+    });
+
+    it('sends a lapsed session to sign in rather than to a game', async () => {
+        const api = signedInApi();
+        const { host, tab } = await games(api);
+        api.signedIn = false;
+
+        await click(playOn(host, GAME.title));
+        await until(() => window.location.pathname === '/sign-in');
+        expect(tab.to).toEqual([]);
     });
 });

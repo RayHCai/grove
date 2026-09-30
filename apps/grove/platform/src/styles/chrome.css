@@ -1,0 +1,173 @@
+/* The tilestrip and the header hold their height; the page under them takes the slack. */
+.site__strip {
+    flex: none;
+}
+
+.siteheader {
+    flex: none;
+    /* Not sticky: the nav is a panel dropping a solid block, and a sticky one would drag that
+       block down the page as it scrolled. */
+    padding: var(--pg-sp-5) var(--shell-gutter) 0;
+}
+
+.siteheader__inner {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--pg-sp-4) var(--pg-sp-5);
+    width: 100%;
+    max-width: var(--shell-measure);
+    min-height: var(--header-height);
+    margin: 0 auto;
+    padding: var(--pg-sp-4) var(--pg-sp-5);
+}
+
+.sitenav {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--pg-sp-2);
+}
+
+/* A menu line rather than a chip: it inverts on hover the way a selected row does. */
+.sitenav__link {
+    padding: var(--pg-sp-1) var(--pg-sp-3);
+    color: var(--pg-ink);
+    font-size: 18px;
+    text-decoration: none;
+}
+
+.sitenav__link:hover {
+    background: var(--pg-plate);
+    color: var(--pg-plate-ink);
+}
+
+.sitenav__link:active {
+    transform: translate(2px, 2px);
+}
+
+.sitenav__link[aria-current='page'] {
+    background: var(--pg-accent);
+    color: var(--pg-accent-ink);
+}
+
+.siteheader__end {
+    display: flex;
+    align-items: center;
+    gap: var(--pg-sp-3);
+    /* Pushed to the far edge, which is also what keeps the nav beside the wordmark. */
+    margin-left: auto;
+}
+
+.sitenav__link--icon {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--pg-sp-1) var(--pg-sp-2);
+}
+
+/* The search sits in the slack between the nav and the account, centred in it. */
+.sitesearch {
+    display: flex;
+    flex: 1 1 200px;
+    align-items: center;
+    max-width: 360px;
+    margin: 0 auto;
+}
+
+.search {
+    position: relative;
+    display: flex;
+    flex: 1;
+    align-items: center;
+}
+
+.search__icon {
+    position: absolute;
+    left: var(--pg-sp-3);
+    color: var(--pg-ink-muted);
+    pointer-events: none;
+}
+
+.search__input {
+    width: 100%;
+    height: 36px;
+    padding: 0 var(--pg-sp-3) 0 34px;
+    border: var(--pg-bw) solid var(--pg-edge);
+    background: var(--pg-surface);
+    box-shadow: inset var(--pg-lift) var(--pg-lift) 0 var(--pg-surface-2);
+    color: var(--pg-ink);
+    font-family: var(--pg-font-ui);
+    font-size: var(--pg-text);
+}
+
+.search__input::placeholder {
+    color: var(--pg-placeholder);
+    opacity: 1;
+}
+
+.search__input:focus-visible {
+    outline: var(--pg-bw) solid var(--pg-focus);
+    outline-offset: var(--pg-bw);
+}
+
+/* Not a positioning context: the panel hangs from the nav bar itself, so it clears the bar's
+   bottom edge whatever height the row wraps to. */
+.profilemenu {
+    position: static;
+}
+
+/* The bar, and the menu hanging from it, sit above everything the page draws. */
+.siteheader__inner {
+    position: relative;
+    z-index: var(--pg-z-chrome);
+}
+
+/* A plain icon, not a pressable block: it does not sink on click the way a button does. */
+.profilemenu__toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: none;
+    color: var(--pg-ink);
+    cursor: pointer;
+    transition:
+        background-color var(--pg-dur-fast) var(--pg-ease),
+        color var(--pg-dur-fast) var(--pg-ease);
+}
+
+.profilemenu__toggle:hover,
+.profilemenu__toggle[aria-expanded='true'] {
+    background: var(--pg-plate);
+    color: var(--pg-plate-ink);
+}
+
+.profilemenu__toggle:focus-visible {
+    outline: var(--pg-bw) solid var(--pg-focus);
+    outline-offset: var(--pg-bw);
+}
+
+/* Hung from the bar itself, under its edge and the block it drops; the kit draws the rest. */
+.profilemenu__panel {
+    top: calc(100% + var(--pg-bw) + var(--pg-lift) + var(--pg-sp-2));
+    right: calc(-1 * var(--pg-bw));
+}
+
+@media (max-width: 512px) {
+    .siteheader__inner {
+        justify-content: center;
+        text-align: center;
+    }
+
+    .sitenav {
+        order: 1;
+        width: 100%;
+        justify-content: center;
+    }
+
+    .siteheader__end {
+        margin-left: 0;
+    }
+}

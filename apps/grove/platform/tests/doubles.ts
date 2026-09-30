@@ -1,7 +1,15 @@
 // The fixtures every suite below drives the platform with: a service that answers out of memory,
 // and the account and games it answers about.
 
-import type { Account, Game, GameId, PlayerId, SignedIn } from '@grove/api-contract';
+import type {
+    Account,
+    Game,
+    GameId,
+    PlayerId,
+    PlaySession,
+    SessionId,
+    SignedIn,
+} from '@grove/api-contract';
 import { ApiError } from '../src/api/client';
 import type { Api } from '../src/api/client';
 
@@ -22,6 +30,7 @@ export const GAME: Game = {
     title: "Pip's Garden",
     visibility: 'private',
     createdAt: '2026-09-10T09:00:00.000Z',
+    publishedAt: null,
 };
 
 export const OLDER_GAME: Game = {
@@ -30,6 +39,18 @@ export const OLDER_GAME: Game = {
     title: 'Acorn Rally',
     visibility: 'private',
     createdAt: '2026-09-02T09:00:00.000Z',
+    publishedAt: null,
+};
+
+/** What the allocator answers a Play with, which the platform hands on without reading. */
+export const PLAY_SESSION: PlaySession = {
+    sessionId: '5d9a0c3b-7e21-4f44-9b0d-3c5e7a9f1b24' as SessionId,
+    serverUrl: 'wss://box.example:41337/play',
+    ticket: 'a.signed.ticket',
+    expiresAt: '2026-09-19T12:00:00.000Z',
+    revision: 7,
+    projectId: 'pips-garden',
+    projectHash: 'a'.repeat(64),
 };
 
 export interface FakeApi extends Api {
@@ -42,13 +63,15 @@ export interface FakeApi extends Api {
     readonly resetKeys: Set<string>;
     /** Every address a reset was asked for, in order. */
     readonly resetsAsked: string[];
+    /** Games with no finished build, which the allocator refuses as a conflict. */
+    readonly unplayable: Set<string>;
 }
 
 /**
  * The service, out of memory.
  *
- * It refuses the way the real one does — one answer for every bad credential, a taken address is a
- * conflict, and a wrong current password is a 403 — because those are the branches a form has to
+ * It refuses the way the real one does (one answer for every bad credential, a taken address is a
+ * conflict, and a wrong current password is a 403) because those are the branches a form has to
  * put words to.
  */
 export function fakeApi(over: Partial<FakeApi> = {}): FakeApi {
@@ -59,6 +82,7 @@ export function fakeApi(over: Partial<FakeApi> = {}): FakeApi {
         credentials: { email: ACCOUNT.email, password: 'a-long-enough-password' },
         resetKeys: new Set(),
         resetsAsked: [],
+        unplayable: new Set(),
 
         session: async () => (api.signedIn ? signedIn() : undefined),
 
@@ -137,9 +161,23 @@ export function fakeApi(over: Partial<FakeApi> = {}): FakeApi {
                 title,
                 visibility: 'private',
                 createdAt: '2026-09-17T09:00:00.000Z',
+                publishedAt: null,
             };
             api.owned = [made, ...api.owned];
             return made;
+        },
+
+        deleteGame: async (gameId) => {
+            guard(api, undefined);
+            api.owned = api.owned.filter((game) => game.gameId !== gameId);
+        },
+
+        play: async (gameId) => {
+            guard(api, undefined);
+            if (api.unplayable.has(gameId)) {
+                throw new ApiError(409, 'conflict', 'no playable build');
+            }
+            return PLAY_SESSION;
         },
 
         ...over,

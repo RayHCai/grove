@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Button, TextInput } from '@grove/ui';
-import { messageOf } from '../api/messages';
 import { Link } from '../router/Link';
 import { go } from '../router/useRoute';
+import { useAction } from '../session/useAction';
 import { useSession } from '../session/SessionProvider';
 import { AuthCard } from './AuthCard';
 
@@ -16,33 +16,26 @@ export function SignIn({ returnTo }: SignInProps): React.JSX.Element {
     const { signIn, openEditor } = useSession();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [refusal, setRefusal] = useState<string | undefined>(undefined);
-    const [busy, setBusy] = useState(false);
+    const action = useAction();
 
-    async function submit(): Promise<void> {
-        setBusy(true);
-        setRefusal(undefined);
-        try {
+    function submit(): Promise<void> {
+        return action.run(async () => {
             if (!(await signIn(email, password))) {
                 // The service answers a wrong address, a wrong password and a locked account the
                 // same way, and saying which it was is the fact an enumeration is looking for.
-                setRefusal('That address and password do not match an account.');
-                return;
+                return 'That address and password do not match an account.';
             }
             // Somebody the editor sent goes straight back to it, carrying the key it needs.
-            if (returnTo === undefined) go({ at: 'games' });
+            if (returnTo === undefined) go({ at: 'landing' });
             else openEditor(returnTo);
-        } catch (failure) {
-            setRefusal(messageOf(failure, 'Signing in did not go through. Try again.'));
-        } finally {
-            setBusy(false);
-        }
+            return undefined;
+        }, 'Signing in did not go through. Try again.');
     }
 
     return (
         <AuthCard
             title="Sign in to Grove"
-            refusal={refusal}
+            refusal={action.refusal}
             onSubmit={() => void submit()}
             footer={
                 <>
@@ -68,8 +61,13 @@ export function SignIn({ returnTo }: SignInProps): React.JSX.Element {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
             />
-            <Button type="submit" variant="primary" aria-busy={busy} aria-disabled={busy}>
-                {busy ? 'Signing in…' : 'Sign in'}
+            <Button
+                type="submit"
+                variant="primary"
+                aria-busy={action.busy}
+                aria-disabled={action.busy}
+            >
+                {action.busy ? 'Signing in…' : 'Sign in'}
             </Button>
             <p className="authcard__aside">
                 <Link to={{ at: 'forgot-password' }}>Forgot your password?</Link>

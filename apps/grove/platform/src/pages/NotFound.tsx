@@ -1,5 +1,5 @@
-import { Button, Eyebrow, Panel, SectionTitle } from '@grove/ui';
-import { go } from '../router/useRoute';
+import { Eyebrow, Panel, SectionTitle } from '@grove/ui';
+import { ButtonLink } from '../router/Link';
 
 export interface NotFoundProps {
     path: string;
@@ -14,9 +14,9 @@ export function NotFound({ path }: NotFoundProps): React.JSX.Element {
                 <SectionTitle as="h1" subline={`Grove has no page at ${path}.`}>
                     Lost in the trees
                 </SectionTitle>
-                <Button variant="primary" onClick={() => go({ at: 'landing' })}>
+                <ButtonLink variant="primary" to={{ at: 'landing' }}>
                     Back to the front
-                </Button>
+                </ButtonLink>
             </Panel>
         </main>
     );
