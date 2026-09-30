@@ -4,11 +4,10 @@
 import { readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { installed, skip } from './toolchain.mjs';
+import { installed, shell, skip } from './toolchain.mjs';
 
 const bin = 'terraform';
 const install = 'Install Terraform (https://developer.hashicorp.com/terraform/install)';
-const shell = process.platform === 'win32';
 
 if (!installed(bin, ['version'])) skip(bin, install);
 

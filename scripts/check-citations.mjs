@@ -4,14 +4,14 @@
 //
 // Two things are checked. A `§` outside the documents that may hold one is a citation whose
 // numbering the reader is not holding, and that is the ban. Inside `docs/`, where a citation is
-// allowed, it must still resolve to a section of `docs/api_design.md` that exists — a reference
+// allowed, it must still resolve to a section of `docs/api_design.md` that exists; a reference
 // that points at nothing is what the ban exists to prevent, and the only place it can still happen.
 //
 // With no arguments the whole tree is scanned. With paths, only those, which is what the hook hands
 // it for a partial commit.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -38,6 +38,12 @@ function tracked() {
 
 function read(path) {
     try {
+        // What git tracks for a symlink is the path it points at, not the prose at the other end.
+        // Following it reads the target a second time under a name the exemptions above do not know:
+        // `CLAUDE.md` -> `AGENTS.md` is this tree's case, and it turns the rule's own worked examples
+        // into two violations. It also only happens where the checkout has real symlinks, so the
+        // Windows hook passes what Linux CI fails.
+        if (lstatSync(join(root, path)).isSymbolicLink()) return '';
         return readFileSync(join(root, path), 'utf8');
     } catch {
         // A path git still lists but the tree no longer has, which a rename mid-commit produces.
@@ -65,7 +71,7 @@ for (const path of scanned.filter((p) => !exempt(p))) {
         .forEach((line, i) => {
             for (const hit of line.match(CITATION) ?? []) {
                 problems.push(
-                    `${path}:${i + 1}: ${hit.trim()} — state the constraint itself; the numbering drifts and the reader is not holding the doc.`,
+                    `${path}:${i + 1}: ${hit.trim()}: state the constraint itself; the numbering drifts and the reader is not holding the doc.`,
                 );
             }
         });
