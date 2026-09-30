@@ -19,7 +19,7 @@ export class ApiError extends Error {
  * is signed in but not allowed to do this.
  *
  * A 403 is deliberately excluded: `workspace`, `games` and `assets` all answer with one for a game
- * somebody else owns, which is a permission this account lacks, not a session it lost — bouncing
+ * somebody else owns, which is a permission this account lacks, not a session it lost; bouncing
  * that to sign-in would ask an already-signed-in creator to sign in again for a game that was
  * never theirs. `status === 401` is kept alongside the code for whatever sits in front of the gate
  * and names nothing of its own.
@@ -49,7 +49,7 @@ export interface ApiBase {
     keep(signedIn: SignedIn): SignedIn;
     /** Drops the token when the session it belonged to ends, so nothing stale rides the next write. */
     forget(): void;
-    /** The header a request built outside `call`/`write` — a keepalive send — still has to carry. */
+    /** The header a request built outside `call`/`write` (a keepalive send) still has to carry. */
     csrfHeader(): Record<string, string>;
     /** Throws on any refusal, including a network failure. */
     call(path: string, init?: RequestInit): Promise<Response>;
@@ -76,7 +76,7 @@ export function apiBaseUrl(): string {
  *
  * The CSRF token is kept here rather than in a component: it arrives with a session read or a
  * sign-in and is demanded by every write after it, and a component that had to carry it between
- * the two is one that can drop it. The cookie itself is never touched — it is `HttpOnly` and
+ * the two is one that can drop it. The cookie itself is never touched: it is `HttpOnly` and
  * belongs to the API origin, and `credentials: 'include'` is the whole of what makes the browser
  * carry it across from this one.
  */

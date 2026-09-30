@@ -5,6 +5,7 @@ export { ContentHash, GameId, HostId, InstanceId, PlayerId, SessionId, TaskId } 
 export { Account, Game, GameUpdate, GameVisibility, Profile, SignedIn } from './accounts.js';
 export { ErrorBody } from './errors.js';
 export { PlayHandoff, PlayRequestParams, PlaySession } from './allocator.js';
+export { decodeHandoff, encodeHandoff } from './handoff.js';
 export {
     BundleRef,
     BundleSet,

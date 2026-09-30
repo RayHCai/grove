@@ -8,7 +8,7 @@ export type GameId = z.infer<typeof GameId>;
 export type PlayerId = z.infer<typeof PlayerId>;
 export type SessionId = z.infer<typeof SessionId>;
 
-/** An EC2 box, and one game process on that box — a session is placed by naming both. */
+/** An EC2 box, and one game process on that box: a session is placed by naming both. */
 export const HostId = z.uuid().brand<'HostId'>();
 export const InstanceId = z.uuid().brand<'InstanceId'>();
 
