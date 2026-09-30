@@ -25,7 +25,7 @@ export interface SceneSink {
     /** Pushes a node's local transform values. Called once per flush-dirty node. */
     write(index: number, record: NodeRecord): void;
 
-    /** Toggles whether a node's art draws — never its children. */
+    /** Toggles whether a node's art draws, never its children. */
     setRenderable(index: number, renderable: boolean): void;
 
     /** A sprite node's texture name changed. */

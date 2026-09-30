@@ -4,7 +4,7 @@
 
 import { growF64, growI32, growU8, grownCapacity } from '@platform/math';
 
-/** Empty sentinel for the tree arrays. Not 0 — slot 0 is a perfectly good node. */
+/** Empty sentinel for the tree arrays. Not 0: slot 0 is a perfectly good node. */
 const NONE = -1;
 
 /** Slots the arrays start with. Growth doubles from here. */
@@ -46,7 +46,6 @@ export class TransformStore {
     #lastChild = new Int32Array(INITIAL_CAPACITY).fill(NONE);
     #prevSibling = new Int32Array(INITIAL_CAPACITY).fill(NONE);
     #nextSibling = new Int32Array(INITIAL_CAPACITY).fill(NONE);
-    #depth = new Int32Array(INITIAL_CAPACITY);
 
     /**
      * Roots in insertion order, `NONE` for a slot that left; roots hold no parent child list.
@@ -63,7 +62,6 @@ export class TransformStore {
     // Reused by the resolve walk, which runs every frame and must not allocate.
     readonly #pendingRoots: number[] = [];
     readonly #stack: number[] = [];
-    readonly #depthStack: number[] = [];
 
     /** Nodes whose resolved position/visibility may be stale. Subtree scope. */
     readonly #resolveDirty = new Set<number>();
@@ -78,7 +76,7 @@ export class TransformStore {
 
     #visits = 0;
 
-    /** How many nodes the last `resolve()` composed — what makes the skip claim checkable. */
+    /** How many nodes the last `resolve()` composed: what makes the skip claim checkable. */
     get lastResolveVisits(): number {
         return this.#visits;
     }
@@ -106,7 +104,7 @@ export class TransformStore {
         this.#addRoot(index);
     }
 
-    /** Unlinks and resets the slot. Does NOT touch children — the caller cascades. */
+    /** Unlinks and resets the slot. Does NOT touch children; the caller cascades. */
     releaseSlot(index: number): void {
         if (!this.#has(index)) return;
         // Detached directly rather than through `unlink`, which would re-add it as a root only for
@@ -286,8 +284,15 @@ export class TransformStore {
         return this.#int(this.#prevSibling, index, NONE);
     }
 
-    depth(index: number): number {
-        return this.#int(this.#depth, index, 0);
+    /** Whether sibling `a` was linked after sibling `b`, roots included: the backend's tie order. */
+    insertedAfter(a: number, b: number): boolean {
+        if ((this.#parent[a] ?? NONE) === NONE) {
+            return (this.#rootAt.get(a) ?? -1) > (this.#rootAt.get(b) ?? -1);
+        }
+        for (let s = this.#prevSibling[a] ?? NONE; s !== NONE; s = this.#prevSibling[s] ?? NONE) {
+            if (s === b) return true;
+        }
+        return false;
     }
 
     /** Appends `child` as `parent`'s last child; `parent === NONE` makes it a root. Stable. */
@@ -316,7 +321,6 @@ export class TransformStore {
             this.#lastChild[parent] = child;
         }
 
-        this.#refreshDepth(child);
         this.#flushDirty.add(child);
         this.#resolveDirty.add(child);
     }
@@ -328,7 +332,7 @@ export class TransformStore {
         this.link(child, NONE);
     }
 
-    /** `true` when `ancestor` is `node` or one of its ancestors — the cycle check. */
+    /** `true` when `ancestor` is `node` or one of its ancestors: the cycle check. */
     isAncestorOf(ancestor: number, node: number): boolean {
         if (!this.#has(ancestor) || !this.#has(node)) return false;
         let walk = node;
@@ -419,7 +423,7 @@ export class TransformStore {
         this.#resolveDirty.clear();
     }
 
-    /** Marks a node's local values as needing a push — a texture swap, a new string. */
+    /** Marks a node's local values as needing a push: a texture swap, a new string. */
     markFlushDirty(index: number): void {
         if (!this.#has(index)) return;
         this.#flushDirty.add(index);
@@ -501,7 +505,7 @@ export class TransformStore {
             const baseZ = parent === NONE ? 0 : (this.#resolvedZ[parent] ?? 0);
             const baseVisible = parent === NONE ? 1 : (this.#resolvedVisible[parent] ?? 0);
 
-            // Addition and nothing else — no matrix, no rotation of the offset — so it is exact.
+            // Addition and nothing else (no matrix, no rotation of the offset), so it is exact.
             const nx = baseX + (this.#posX[node] ?? 0);
             const ny = baseY + (this.#posY[node] ?? 0);
             const nz = baseZ + (this.#posZ[node] ?? 0);
@@ -548,26 +552,6 @@ export class TransformStore {
         this.#prevSibling[child] = NONE;
         this.#nextSibling[child] = NONE;
         this.#parent[child] = NONE;
-    }
-
-    /** Rewrites `depth` for `index` and everything under it, after a move. */
-    #refreshDepth(index: number): void {
-        const stack = this.#depthStack;
-        stack.length = 0;
-        stack.push(index);
-        while (stack.length > 0) {
-            const node = stack.pop();
-            if (node === undefined) break;
-            const parent = this.#parent[node] ?? NONE;
-            this.#depth[node] = parent === NONE ? 0 : (this.#depth[parent] ?? 0) + 1;
-            for (
-                let c = this.#firstChild[node] ?? NONE;
-                c !== NONE;
-                c = this.#nextSibling[c] ?? NONE
-            ) {
-                stack.push(c);
-            }
-        }
     }
 
     /** Appends a slot to the root order. */
@@ -628,7 +612,6 @@ export class TransformStore {
         this.#lastChild[index] = NONE;
         this.#prevSibling[index] = NONE;
         this.#nextSibling[index] = NONE;
-        this.#depth[index] = 0;
     }
 
     /** Grows every array to hold at least `needed` slots, preserving contents. */
@@ -658,12 +641,11 @@ export class TransformStore {
         this.#neverCull = growU8(this.#neverCull, capacity);
         this.#culled = growU8(this.#culled, capacity);
 
-        // New tree slots must read NONE, not 0 — 0 is a valid node.
+        // New tree slots must read NONE, not 0; 0 is a valid node.
         this.#parent = growI32(this.#parent, capacity, NONE);
         this.#firstChild = growI32(this.#firstChild, capacity, NONE);
         this.#lastChild = growI32(this.#lastChild, capacity, NONE);
         this.#prevSibling = growI32(this.#prevSibling, capacity, NONE);
         this.#nextSibling = growI32(this.#nextSibling, capacity, NONE);
-        this.#depth = growI32(this.#depth, capacity, 0);
     }
 }

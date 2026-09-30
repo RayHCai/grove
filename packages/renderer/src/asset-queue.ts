@@ -15,7 +15,7 @@ export const LOADER_ASSET_SCHEMES: ReadonlySet<string> = new Set([
     'blob:',
 ]);
 
-/** Schemes a server manifest may name; narrower — `data:` and `blob:` are ours to construct. */
+/** Schemes a server manifest may name; narrower: `data:` and `blob:` are ours to construct. */
 export const REMOTE_ASSET_SCHEMES: ReadonlySet<string> = new Set(['http:', 'https:']);
 
 /** Resolves a relative url. Only its scheme matters, and `http:` is in every allowed set. */
@@ -82,7 +82,7 @@ export interface MergedAssetWork {
 export class AssetQueue {
     readonly #intents = new Map<string, AssetIntent>();
 
-    /** Distinct names with a pending intent — feeds `pendingAssetOps`. */
+    /** Distinct names with a pending intent: the queue is bounded by names, not by calls. */
     get size(): number {
         return this.#intents.size;
     }
@@ -117,7 +117,7 @@ export class AssetQueue {
         const toUnload: string[] = [];
 
         // Retained first, so re-uploads keep their manifest order. A name that is both retained
-        // and queued-load uses the queued entry — the newer declaration.
+        // and queued-load uses the queued entry, the newer declaration.
         for (const [name, entry] of retained) {
             const intent = this.#intents.get(name);
             if (intent === undefined) {

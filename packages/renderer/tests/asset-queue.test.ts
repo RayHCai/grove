@@ -14,7 +14,7 @@ function image(name: string, url = `/assets/${name}.png`): AssetManifestEntry {
     return { name, kind: 'image', url };
 }
 
-/** The retained manifest a restore merges against — insertion order is the upload order. */
+/** The retained manifest a restore merges against; insertion order is the upload order. */
 function manifest(...entries: AssetManifestEntry[]): Map<string, AssetManifestEntry> {
     return new Map(entries.map((e) => [e.name, e]));
 }
@@ -136,7 +136,7 @@ describe('AssetQueue ordering', () => {
     });
 });
 
-describe('AssetQueue.merge — retained manifest x queue', () => {
+describe('AssetQueue.merge: retained manifest x queue', () => {
     it('retained with NO intent is re-uploaded', () => {
         const q = new AssetQueue();
         const hero = image('hero');
@@ -156,12 +156,12 @@ describe('AssetQueue.merge — retained manifest x queue', () => {
         const work = q.merge(manifest(retainedHero));
 
         expect(work.toLoad).toHaveLength(1);
-        // The queued entry is newer, so it wins — assert identity, not just the url.
+        // The queued entry is newer, so it wins; assert identity, not just the url.
         expect(work.toLoad[0]).toBe(queuedHero);
         expect(work.toUnload).toEqual([]);
     });
 
-    it('retained + queued UNLOAD suppresses the re-upload — unload wins', () => {
+    it('retained + queued UNLOAD suppresses the re-upload: unload wins', () => {
         const q = new AssetQueue();
         const hero = image('hero');
         const tiles = image('tiles');
@@ -186,7 +186,7 @@ describe('AssetQueue.merge — retained manifest x queue', () => {
         expect(work.toUnload).toEqual([]);
     });
 
-    it('queued UNLOAD not retained is still reported — idempotent, not an error', () => {
+    it('queued UNLOAD not retained is still reported: idempotent, not an error', () => {
         const q = new AssetQueue();
         q.unload('ghost');
 
@@ -237,7 +237,7 @@ describe('AssetQueue.merge — retained manifest x queue', () => {
         const tail = image('tail');
         // 'mid' is queued FIRST but sits in the MIDDLE of the retained manifest, so an
         // implementation that appended it instead of substituting in place would emit
-        // ['head', 'last', 'mid', 'tail'] — a manifest that was merely re-declared during a
+        // ['head', 'last', 'mid', 'tail']; a manifest that was merely re-declared during a
         // loss must re-upload in its original order (only genuinely new names move to the end).
         q.load(freshMid);
         q.load(tail);
@@ -408,7 +408,7 @@ describe('isAllowedAssetUrl', () => {
     });
 });
 
-describe('validateAssetEntry — url schemes', () => {
+describe('validateAssetEntry: url schemes', () => {
     it('accepts a relative path, https and data:', () => {
         const urls = ['/assets/hero.png', 'https://cdn.example.com/hero.png', 'data:image/png,x'];
         for (const url of urls) {

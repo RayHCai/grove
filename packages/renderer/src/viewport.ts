@@ -1,4 +1,4 @@
-// Reads no globals — the DPR is passed in. `stageRect` is the design stage mapped onto the canvas;
+// Reads no globals: the DPR is passed in. `stageRect` is the design stage mapped onto the canvas;
 // `visibleRect` is the screen region world content occupies; they coincide only when bars are
 // drawn. Nothing here throws: option validation belongs to the renderer.
 
@@ -45,7 +45,7 @@ export function isLetterboxed(framing: Framing, scaleMode: ScaleMode, letterbox:
 }
 
 /**
- * The stage in screen space — y-down, so `bottom > top`.
+ * The stage in screen space, y-down, so `bottom > top`.
  * `'free'` has no stage, so the canvas is it; `'fill'` crops a HUD exactly as it crops the world.
  */
 export function stageRect(
@@ -103,7 +103,7 @@ export function worldViewport(
     let halfW: number;
     let halfH: number;
     if (isLetterboxed(framing, scaleMode, letterbox)) {
-        // `fitScale` cancels, so it must not appear here — see the doc comment above.
+        // `fitScale` cancels, so it must not appear here; see the doc comment above.
         const denominator = 2 * zoom;
         halfW = safeHalfExtent(positiveOr(design.width, 0) / denominator);
         halfH = safeHalfExtent(positiveOr(design.height, 0) / denominator);

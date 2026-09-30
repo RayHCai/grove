@@ -39,7 +39,7 @@ export function isCameraTransformed(surface: Surface): boolean {
     return CAMERA_TRANSFORMED.has(surface);
 }
 
-/** `true` for the screen-space surfaces — `ui` and `editorUi`. */
+/** `true` for the screen-space surfaces: `ui` and `editorUi`. */
 export function isScreenSpace(surface: Surface): boolean {
     return !CAMERA_TRANSFORMED.has(surface);
 }

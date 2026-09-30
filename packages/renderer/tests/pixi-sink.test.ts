@@ -2,7 +2,7 @@
 // below `Application` is testable in Node.
 
 import { describe, it, expect } from 'vitest';
-import { Container } from 'pixi.js';
+import { BufferImageSource, Container, Sprite, Texture } from 'pixi.js';
 import { bounds } from '@platform/math';
 import { AssetRegistry } from '../src/pixi/asset-registry.js';
 import { PixiSink } from '../src/pixi/pixi-sink.js';
@@ -23,7 +23,6 @@ function record(over: Partial<NodeRecord> = {}): NodeRecord {
         style: undefined,
         uiAnchor: undefined,
         layer: 0,
-        ordinal: 0,
         ...over,
     };
 }
@@ -240,5 +239,30 @@ describe('PixiSink placement', () => {
         sink.create(0, orphan, NO_PARENT);
 
         expect(sink.objectsAt(0)).toBeUndefined();
+    });
+});
+
+describe('PixiSink texture repointing', () => {
+    it('moves a sprite made before its art loaded off the placeholder', () => {
+        const xf = new TransformStore();
+        const assets = new AssetRegistry();
+        const sink = new PixiSink(new SurfaceTree(new Container(), ['world']), assets);
+        sink.bind(xf);
+        xf.initSlot(0);
+        sink.create(0, record(), NO_PARENT);
+        const art = sink.objectsAt(0)?.art;
+        if (!(art instanceof Sprite)) throw new Error('expected a sprite');
+        expect(art.texture).toBe(assets.placeholder);
+
+        const loaded = new Texture({
+            source: new BufferImageSource({ resource: new Uint8Array(4), width: 1, height: 1 }),
+        });
+        assets.registerTexture({ name: 'block', kind: 'image', url: '/b.png' }, loaded, {
+            width: 1,
+            height: 1,
+        });
+        sink.repointTo([0], 'block');
+
+        expect(art.texture).toBe(loaded);
     });
 });

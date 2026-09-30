@@ -1,5 +1,5 @@
 // Measurement is split from upload because `CanvasTextMetrics` uses a 2D canvas: a size is
-// obtainable while the GPU context is lost. Length, size and raster scale are clamped here —
+// obtainable while the GPU context is lost. Length, size and raster scale are clamped here:
 // unclamped, a 2000-character line asks the GPU for hundreds of megapixels.
 
 import { CanvasTextMetrics, Text, TextStyle as PixiTextStyle } from 'pixi.js';

@@ -11,6 +11,7 @@ import type {
     Surface,
     TextStyle,
 } from '../renderer.js';
+import { DEFAULT_TEXT_SIZE, PLACEHOLDER_SIZE } from '../defaults.js';
 import { rendererError } from '../errors.js';
 import { surfaceOrder } from '../surfaces.js';
 import type { NodeRecord } from '../node-store.js';
@@ -20,12 +21,6 @@ import type { SceneSink } from '../core/scene-sink.js';
 import { RendererCore, resolveInitOptions } from '../core/renderer-core.js';
 import { RendererShell } from '../core/renderer-shell.js';
 import { effectiveResolution } from '../viewport.js';
-
-/** What a headless backend reports for an image whose manifest declares no `size`. */
-const UNKNOWN_IMAGE_SIZE: Size = { width: 1, height: 1 };
-
-/** Default text size when a style omits it. */
-const DEFAULT_TEXT_SIZE = 16;
 
 /** Per-character advance as a fraction of the font size. See {@link measureTextHeadless}. */
 const HEADLESS_CHAR_ADVANCE = 0.5;
@@ -71,7 +66,7 @@ class NullSink implements SceneSink {
 
     sizeOf(_index: number, record: NodeRecord): Size {
         if (record.kind === 'text') return measureTextHeadless(record.text, record.style);
-        return this.#assets.get(record.texture)?.size ?? UNKNOWN_IMAGE_SIZE;
+        return this.#assets.get(record.texture)?.size ?? PLACEHOLDER_SIZE;
     }
 
     surfaceVisible(surface: Surface): boolean {
@@ -179,7 +174,7 @@ export class NullRenderer extends RendererShell {
     protected resizeSurface(): void {}
 
     protected get fallbackAssetSize(): Readonly<Size> {
-        return UNKNOWN_IMAGE_SIZE;
+        return PLACEHOLDER_SIZE;
     }
 
     protected measureTextSize(text: string, style: TextStyle | undefined): Size {
@@ -224,10 +219,10 @@ export class NullRenderer extends RendererShell {
             case 'image':
                 // A headless backend cannot decode a PNG, so a declared size is the only real
                 // answer; the 1x1 fallback keeps `AssetInfo` uniform rather than returning null.
-                return entry.size ?? UNKNOWN_IMAGE_SIZE;
+                return entry.size ?? PLACEHOLDER_SIZE;
             case 'atlas':
             case 'font':
-                return UNKNOWN_IMAGE_SIZE;
+                return PLACEHOLDER_SIZE;
         }
     }
 }
