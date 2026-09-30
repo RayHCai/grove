@@ -9,9 +9,15 @@ import type { ProjectManifest, ScriptId } from '@platform/project';
 import type { ScriptRegistry } from '@platform/scripting';
 import type { ConnectionId, InputBatch, LoadedRecord, OutputBatch, Sim } from '@platform/sim';
 import type { Codec, EncodedFrame, JsonValue, Transport } from '@platform/transport';
-import { jsonCodec } from '@platform/transport';
+import { MAX_FRAME_BYTES, jsonCodec } from '@platform/transport';
 import { Driver } from './driver.js';
 import type { PumpResult } from './driver.js';
+
+/** Frames one peer may send inside a second of the world's clock before it is closed as a flood. */
+const INBOUND_BUDGET_FRAMES = 600;
+
+/** Send-side backlog past which a droppable frame is shed, leaving the socket's room to reliable ones. */
+const DROPPABLE_BACKLOG_BYTES = MAX_FRAME_BYTES / 2;
 
 /** What a host supplies that an authored project cannot describe. */
 export interface InstanceOptions {
@@ -48,9 +54,9 @@ export class GameInstance {
     readonly #codec: Codec;
     readonly #kv: KVStore;
     readonly #log: (line: string) => void;
-    /** The clock `pump()` reads when the caller names none — injected, so a test turns it. */
+    /** The clock `pump()` reads when the caller names none: injected, so a test turns it. */
     readonly #now: () => number;
-    /** The sockets the sim's connection ids name — the half of a session the sim holds none of. */
+    /** The sockets the sim's connection ids name, the half of a session the sim holds none of. */
     readonly #transports = new Map<ConnectionId, Transport>();
     /** Disposers from each transport's `onMessage` / `onClose`, run once when it goes. */
     readonly #disposers = new Map<ConnectionId, Array<() => void>>();
@@ -79,19 +85,13 @@ export class GameInstance {
 
         // The store reaches the world twice over, and deliberately: as the creator's `storage`
         // seam, which a handler awaits, and as the load-and-save protocol this class runs for
-        // `@serverState`.
-        this.sim = createSim(project, {
-            ...forwarded,
-            kv: this.#kv,
-            log: { warn: this.#log, error: () => {} },
-        });
+        // `@serverState`. No `log` sink: every line already arrives in `OutputBatch.log`.
+        this.sim = createSim(project, { ...forwarded, kv: this.#kv });
 
-        // Read off the manifest rather than the booted sim, because the interval has to be known
-        // before there is a world to ask.
         this.#driver = new Driver(
             { stepOnce: (drain) => this.#step(drain) },
             {
-                simRate: project.settings.simRate,
+                simRate: this.sim.config.simRate,
                 sendRate: this.sim.config.sendRate,
                 ...(deliver === undefined ? {} : { deliver }),
                 ...(now === undefined ? {} : { now }),
@@ -108,7 +108,7 @@ export class GameInstance {
         return this.#shutdown;
     }
 
-    /** How many wakes hit the step cap with backlog left and shed it — the sim falling behind. */
+    /** How many wakes hit the step cap with backlog left and shed it: the sim falling behind. */
     get shedCount(): number {
         return this.#driver.shedCount;
     }
@@ -120,14 +120,14 @@ export class GameInstance {
         return this;
     }
 
-    /** One wake, for a host that drives its own clock — a test, or a shared scheduler. */
+    /** One wake, for a host that drives its own clock: a test, or a shared scheduler. */
     pump(nowSeconds?: number): PumpResult {
         if (this.#shutdown) return { steps: 0, sends: 0, shed: false };
         return this.#driver.pump(nowSeconds ?? this.#now());
     }
 
     /**
-     * Offers one established connection, under the identity the HOST resolved — never from a frame.
+     * Offers one established connection, under the identity the HOST resolved, never from a frame.
      * Must be per-game rather than an account key, since `player.id` reaches every other peer.
      */
     accept(transport: Transport, playerId?: string): ConnectionId | null {
@@ -140,10 +140,26 @@ export class GameInstance {
         }
         const connectionId = `c${this.#nextConnectionId++}`;
         this.#transports.set(connectionId, transport);
+        // The sim refuses excess input a tick later, so this is the only bound on how fast one
+        // socket can fill the next batch.
+        let windowStart = this.#driver.nowSeconds;
+        let inWindow = 0;
         // Registered before the sim is told, because `ws` resumes the stream on the next tick and a
         // frame arriving before this listener exists is simply gone.
         this.#disposers.set(connectionId, [
-            transport.onMessage((message) => this.#frames.push({ connectionId, message })),
+            transport.onMessage((message) => {
+                const now = this.#driver.nowSeconds;
+                if (now - windowStart >= 1) {
+                    windowStart = now;
+                    inWindow = 0;
+                }
+                if (++inWindow > INBOUND_BUDGET_FRAMES) {
+                    this.#log(`close conn=${connectionId} reason=inbound-flood`);
+                    this.#closeConnection(connectionId);
+                    return;
+                }
+                this.#frames.push({ connectionId, message });
+            }),
             transport.onClose(() => this.#closed.push(connectionId)),
         ]);
         this.#opened.push({ connectionId, identity: playerId ?? null });
@@ -219,6 +235,14 @@ export class GameInstance {
             for (const connectionId of send.to) {
                 const transport = this.#transports.get(connectionId);
                 if (transport === undefined) continue;
+                // Superseded by the next of its kind, so a peer that is not keeping up loses this
+                // one rather than falling further behind on the frames it cannot do without.
+                if (
+                    send.class === 'droppable' &&
+                    transport.bufferedBytes > DROPPABLE_BACKLOG_BYTES
+                ) {
+                    continue;
+                }
                 try {
                     if (send.to.length === 1) {
                         transport.send(send.envelope);
@@ -242,13 +266,13 @@ export class GameInstance {
         for (const save of out.saves) this.#save(save.hostKey, save.fields);
     }
 
-    /** Reads a player's record and hands it back on a later tick — the whole load protocol. */
+    /** Reads a player's record and hands it back on a later tick: the whole load protocol. */
     #load(connectionId: ConnectionId, hostKey: string): void {
         void this.#kv
             .get(PERSISTENCE_SCOPE, hostKey)
             .then((stored) => {
-                // `{}` for a store that held nothing — and for one holding a value no reader could
-                // use, which is the same answer core's own cache gave it — so the leave still
+                // `{}` for a store that held nothing (and for one holding a value no reader could
+                // use, which is the same answer core's own cache gave it), so the leave still
                 // writes what this session produced. `null` is reserved for the read below that
                 // FAILED.
                 this.#records.push({ connectionId, fields: asFields(stored) ?? {} });

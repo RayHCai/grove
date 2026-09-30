@@ -4,7 +4,7 @@ The composition of one game: an authored project in, a running world and the ses
 out.
 
 Every step it takes belongs to another package. What belongs here is that they happen in the one
-sequence that is correct — including the choices that fail **silently** when made wrongly.
+sequence that is correct, including the choices that fail **silently** when made wrongly.
 
 Its server half is also the **in-process host** for `@platform/sim`: the clock, the sockets and the
 store the sim deliberately holds none of. `@grove/game-instance` does the same job in Rust for a deployed
@@ -46,21 +46,21 @@ an editor previewing a game holds an authority in the browser, and importing one
 would drag `ws` and `node:fs` into a page that listens for nobody. `/server` re-exports it, so a
 deployed host still takes one import and gets the world plus what binds in front of it.
 
-The bare `.` path carries the one type both halves name and no values at all — the server declares
+The bare `.` path carries the one type both halves name and no values at all: the server declares
 a bundle, the client verifies what it fetched against it.
 
 ## The socket layer is beside each instance, never inside it
 
 Both instances are transport-agnostic: `GameInstance.accept(transport, playerId)` and
 `new ClientInstance({ transport })` each take a pipe someone else made. The socket is a separate
-function on top — `listenOn` for the authority, `connectTo` for a session — and both of those
+function on top (`listenOn` for the authority, `connectTo` for a session), and both of those
 **start** what they are put in front of, because a caller that reached for the socket layer wants the
 thing running.
 
 That split is what keeps a whole game drivable over `loopbackPair()` with no socket, no port and no
 GPU, which is how this package's own suite runs both ends on one hand-turned clock.
 
-A host builds an instance and its socket separately — `new GameInstance(...)`, then `listenOn(...)` —
+A host builds an instance and its socket separately (`new GameInstance(...)`, then `listenOn(...)`)
 because the seam between them is where it grants the instance a capability the project file cannot
 describe.
 
@@ -86,7 +86,7 @@ Two further choices are encoded rather than left to a caller:
 
 ## What a session's construction does, and in what order
 
-`new ClientInstance({ ... })` composes and registers, but joins nothing — `start()` is what sends
+`new ClientInstance({ ... })` composes and registers, but joins nothing; `start()` is what sends
 the request. Three orderings are encoded here rather than left to a caller, each of which fails
 quietly:
 
@@ -110,17 +110,17 @@ The sim reads no clock, opens no socket and writes to no store. Everything it ne
 input batch and everything it wants done comes back in one output batch, and this class is the half
 that acts on it: it writes the `sends` (one `encode` per envelope, however many peers are in its
 `to`), closes the sockets `closes` names, reads the records `loads` asks for and hands them back on
-a later tick, and writes `saves` through — telling the sim which of them landed, so a rejoin inside
+a later tick, and writes `saves` through, telling the sim which of them landed, so a rejoin inside
 one session reads its own values back whether or not the store has caught up.
 
-`close()` releases every session, then calls `endGame` — in that order, so a player's own hosts end
+`close()` releases every session, then calls `endGame`, in that order, so a player's own hosts end
 through their release and what `endGame` reaches is the Game and the hosts no session owned. It
 settles once every write it started has, over `allSettled` rather than `all`: a store that rejects
 must release the drain rather than hold a shutdown open on the one write that will never land.
 
 ## Identity is the host's
 
-`accept(transport, playerId)` takes the id from whatever the host resolved, never from a frame —
+`accept(transport, playerId)` takes the id from whatever the host resolved, never from a frame,
 which is why `ListenOptions.identify` reads the upgrade request. Whatever it returns is what the game
 trusts, and it reaches every other peer as `player.id`, so it must be a per-game id rather than an
 account key. Returning `undefined` admits the connection anonymously and persists nothing.
@@ -128,7 +128,7 @@ account key. Returning `undefined` admits the connection anonymously and persist
 ## One instance per process
 
 `GameInstance` is scoped to one world, and the current runtime is not safe to multiply. Core keeps a
-single module-global runtime — `loadGame` calls `createRuntime()` — so a second instance in one
+single module-global runtime (`loadGame` calls `createRuntime()`), so a second instance in one
 process repoints it. Core's own entry points wrap `withRuntime` and so survive that, but creator
 module state does not: a `let` at module scope in a script is per-process, not per-instance.
 
@@ -139,5 +139,5 @@ inside this package rather than to its callers.
 
 It does not build a script bundle. Lowering, the determinism check, linking and hashing are
 `@platform/scripting/toolchain`'s, they need a filesystem full of source and a bundler, and they run
-once when a creator publishes — not every time a world is spawned. This package takes an
+once when a creator publishes, not every time a world is spawned. This package takes an
 already-linked chunk's `BundleRef` and passes it to the handshake.

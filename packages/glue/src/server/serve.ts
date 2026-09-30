@@ -1,4 +1,4 @@
-// Installs no signal handlers — a library calling `process.on('SIGINT')` would fight the app's
+// Installs no signal handlers: a library calling `process.on('SIGINT')` would fight the app's
 // own shutdown, so `close()` is exposed and the wiring is the app's.
 
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
@@ -16,7 +16,7 @@ export interface ListenOptions {
     /** An existing HTTP server to share, for a game socket behind the same origin as a page. */
     server?: HttpServer;
     /**
-     * Who the game should think this socket is. From the upgrade request, NEVER a frame — this is
+     * Who the game should think this socket is. From the upgrade request, NEVER a frame; this is
      * what the game trusts, and it reaches every peer as `player.id`.
      */
     identify?: (request: IncomingMessage) => string | undefined;
@@ -85,12 +85,15 @@ export function listenOn(instance: GameInstance, opts: ListenOptions): ServedGam
         instance,
         wss,
         listening,
-        close: () =>
-            new Promise<void>((resolve) => {
-                // The world first: a socket closed while the instance still ticks would let the
-                // next pump broadcast to a connection nothing is listening on.
-                instance.close();
-                wss.close(() => resolve());
-            }),
+        close: async () => {
+            // The world first: a socket closed while the instance still ticks would let the next
+            // pump broadcast to a connection nothing is listening on. Its drain is awaited too, or
+            // a caller exiting on this promise cuts off the departing players' saves.
+            const drained = instance.close().catch((cause: unknown) => {
+                log(`closing the world failed: ${reason(cause)}`);
+            });
+            await new Promise<void>((resolve) => wss.close(() => resolve()));
+            await drained;
+        },
     };
 }
