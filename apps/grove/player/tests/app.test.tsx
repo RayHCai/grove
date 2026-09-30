@@ -3,11 +3,10 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { GameId, SessionId } from '@grove/api-contract';
+import { GameId, SessionId, encodeHandoff } from '@grove/api-contract';
 import type { PlayHandoff } from '@grove/api-contract';
 import type * as PlayerModule from '@grove/player';
 import { App } from '../src/App';
-import { encodeHandoff } from '../src/handoff';
 
 beforeAll(() => {
     // React refuses to run `act` without it, and says so at the first render rather than at setup.
@@ -24,7 +23,7 @@ const mounted = vi.hoisted(() => ({
 
 vi.mock('@grove/player', async (importOriginal) => ({
     // The stage size is a shared constant rather than this app's, so it comes from the real module
-    // — a mock of its own would be this test agreeing with itself about a number it does not own.
+    // (a mock of its own would be this test agreeing with itself about a number it does not own).
     ...(await importOriginal<typeof PlayerModule>()),
     GamePlayer: (props: Record<string, unknown>) => {
         mounted.props.push(props);
@@ -53,7 +52,14 @@ async function render(fragment: string, props: Record<string, unknown> = {}) {
     document.body.append(host);
 
     await act(async () => {
-        createRoot(host).render(<App fragment={fragment} navigate={() => undefined} {...props} />);
+        createRoot(host).render(
+            <App
+                fragment={fragment}
+                platformUrl="https://grove.example"
+                navigate={() => undefined}
+                {...props}
+            />,
+        );
     });
     return host;
 }
@@ -100,6 +106,20 @@ describe('arriving on the player origin', () => {
         expect(host.querySelector('canvas')).toBe(before);
     });
 
+    it('hands the surface the same join after it goes live, so nothing redials', async () => {
+        await render(`#${encodeHandoff(HANDOFF)}`);
+        await act(async () => {
+            mounted.ready?.();
+        });
+
+        // Going live rerenders this shell; fresh objects here would read as a second join, dialled
+        // with a ticket the first one already spent.
+        const [first, last] = [mounted.props[0], mounted.props.at(-1)];
+        expect(mounted.props.length).toBeGreaterThan(1);
+        expect(last?.['authority']).toBe(first?.['authority']);
+        expect(last?.['project']).toBe(first?.['project']);
+    });
+
     it('tells somebody who opened this origin directly what it is for', async () => {
         const host = await render('');
 
@@ -138,9 +158,7 @@ describe('arriving on the player origin', () => {
         ];
 
         for (const [reason, expected] of cases) {
-            // oxlint-disable-next-line no-await-in-loop
             const host = await render(`#${encodeHandoff(HANDOFF)}`);
-            // oxlint-disable-next-line no-await-in-loop
             await act(async () => {
                 mounted.refuse?.(reason, 'a token nobody should be shown');
             });
