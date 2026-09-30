@@ -52,7 +52,7 @@ describe('displayUpdate', () => {
         expect(sink.widgetOf('title')?.text).toBe('second');
     });
 
-    it('leaves a synced script alone — the tick owns that one', () => {
+    it('leaves a synced script alone: the tick owns that one', () => {
         Drift.frames = 0;
         const mirror = world();
         const entity = mirror.runtime.entityManager.spawn('thing', 0, 0);

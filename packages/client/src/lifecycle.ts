@@ -3,7 +3,7 @@ export type FailureReason =
     | { kind: 'rejected'; reason: string; serverProtocolVersion: number }
     /** A `Welcome` the client cannot use: no reason field to read, and no retry helps. */
     | { kind: 'undecodable' }
-    /** `encode-rejected` — our bug, and it must surface loudly. */
+    /** `encode-rejected`: our bug, and it must surface loudly. */
     | { kind: 'internal'; message: string }
     /** A peer that did not hold up its end: bad frames, a throw, or a join never answered. */
     | { kind: 'peer'; message: string }
@@ -21,7 +21,7 @@ export type SessionState =
     | 'stalled'
     /** `localTick < depictedTick`, or a `RateChange`. Input refused. */
     | 'resyncing'
-    /** `onClose` fired — clean, dropped, or refused. Input refused. */
+    /** `onClose` fired: clean, dropped, or refused. Input refused. */
     | 'disconnected'
     /** Terminal, with a reason. */
     | 'failed';
@@ -41,8 +41,6 @@ export class Lifecycle {
     #state: SessionState = 'connecting';
     #failure: FailureReason | undefined;
     readonly #listeners = new Set<(state: SessionState) => void>();
-    /** Reused, so a listener subscribing or unsubscribing cannot alter the dispatch it is in. */
-    readonly #dispatching: Array<(state: SessionState) => void> = [];
 
     get state(): SessionState {
         return this.#state;
@@ -63,13 +61,13 @@ export class Lifecycle {
         };
     }
 
-    /** Moves to `state` unless already terminal — a closed session does not become `live`. */
+    /** Moves to `state` unless already terminal; a closed session does not become `live`. */
     to(state: SessionState): void {
         if (isTerminal(this.#state)) return;
         this.#move(state);
     }
 
-    /** Ends the session with a reason, from any state — the one move terminal does not absorb. */
+    /** Ends the session with a reason, from any state, the one move terminal does not absorb. */
     fail(reason: FailureReason): void {
         // Recorded even on a repeat call: the first reason is the interesting one.
         this.#failure ??= reason;
@@ -80,16 +78,14 @@ export class Lifecycle {
         if (this.#state === state) return;
         this.#state = state;
 
-        this.#dispatching.length = 0;
-        for (const listener of this.#listeners) this.#dispatching.push(listener);
-        // A throwing listener must not cost the others their notification.
-        for (const listener of this.#dispatching) {
+        // Snapshotted per notify, so a listener that subscribes, unsubscribes or moves the state
+        // again cannot alter the dispatch it is in; a throwing one costs the others nothing.
+        for (const listener of Array.from(this.#listeners)) {
             try {
                 listener(state);
             } catch {
                 /* a listener's failure is its own */
             }
         }
-        this.#dispatching.length = 0;
     }
 }

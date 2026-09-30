@@ -2,12 +2,12 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime, request, withRuntime } from '@platform/core';
+import { MAX_REQUESTS_PER_FRAME } from '@platform/protocol';
 import type { RequestFrame } from '@platform/protocol';
 import { createReadyNullRenderer } from '@platform/renderer/null';
 import { loopbackPair } from '@platform/transport';
 import { LocalVault } from '../dist/testkit/fixtures.js';
 import { GameClient } from '../src/client.js';
-import { MAX_REQUESTS_PER_FRAME } from '../src/constants.js';
 import { ManualFrameSource, ScriptedInputDevice } from '../src/input.js';
 import { FakeServer } from './fake-server.js';
 
@@ -52,7 +52,7 @@ async function harness(): Promise<Harness> {
         },
         ask(name, payload): void {
             const rt = client.mirror?.runtime;
-            if (rt === undefined) throw new Error('no mirror — the session never opened');
+            if (rt === undefined) throw new Error('no mirror: the session never opened');
             withRuntime(rt, () => request(name, payload));
         },
         requests(): RequestFrame[] {

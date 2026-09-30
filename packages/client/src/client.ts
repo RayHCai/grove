@@ -8,7 +8,7 @@ import {
     pointerHit as dispatchPointer,
     pressWidget as dispatchPress,
 } from '@platform/core';
-import { defined } from '@platform/math';
+import { clamp, defined } from '@platform/math';
 import type { CameraState, IRenderer, PickOptions } from '@platform/renderer';
 import { NO_NODE } from '@platform/renderer';
 import type {
@@ -18,6 +18,7 @@ import type {
     Interaction,
     InteractionFrame,
     RateChange,
+    RenderManifest,
     Reject,
     RequestFrame,
     ServerToClient,
@@ -25,6 +26,7 @@ import type {
     TimeSyncReply,
     Welcome,
 } from '@platform/protocol';
+import { MAX_REQUESTS_PER_FRAME } from '@platform/protocol';
 import type { Message, Transport } from '@platform/transport';
 import { TransportError } from '@platform/transport';
 import {
@@ -33,7 +35,6 @@ import {
     DEFAULT_VIEWPORT,
     JOIN_DEADLINE_SECONDS,
     MAX_FRAME_DT,
-    MAX_REQUESTS_PER_FRAME,
     STALL_SECONDS,
     SYNC_INTERVAL_SECONDS,
 } from './constants.js';
@@ -80,11 +81,9 @@ export interface GameClientOptions {
     frames: FrameSource;
     device: InputDevice;
     clock: ClockSource;
-    /** Display name. Untrusted upward — the server sanitizes and may replace it. */
+    /** Display name. Untrusted upward; the server sanitizes and may replace it. */
     name: string;
     bindings?: readonly Binding[];
-    /** Held for a later reconnect; carried now so adding one needs no envelope change. */
-    token?: string;
     /** Pumps a loopback pair at the top of the frame; absent for a real socket. */
     pump?: () => void;
     /** Resolves the camera each frame from the local player. Defaults to the core `Camera`. */
@@ -112,7 +111,7 @@ export interface ClientStats {
     unknownNetId: number;
     outOfOrderParent: number;
     nodeCount: number;
-    /** Manifest loads that rejected. Nonzero means some art is drawing as a placeholder. */
+    /** Assets that failed to load. Nonzero means some art is drawing as a placeholder. */
     assetLoadFailed: number;
     /** Where the predicted world stands. Equal to `depictedTick` when nothing is predicted. */
     predictedTick: number;
@@ -131,7 +130,7 @@ export class GameClient {
     readonly #lifecycle = new Lifecycle();
     readonly #bindings: BindingTable;
     readonly #ring = new InputRing();
-    /** The local player's live action state — what a resync rebuilds the horizon from. */
+    /** The local player's live action state: what a resync rebuilds the horizon from. */
     readonly #actions: ActionStates = createActionStates();
     /** Core's HUD seam, filled here: the HUD is one client's, so this is where it exists at all. */
     readonly #hud = new ClientHUDSink();
@@ -146,7 +145,7 @@ export class GameClient {
 
     readonly #disposers: Array<() => void> = [];
 
-    /** Envelopes delivered since the last frame — drained in arrival order. */
+    /** Envelopes delivered since the last frame, drained in arrival order. */
     readonly #inbox: ServerToClient[] = [];
 
     /** The pieces of a snapshot too big for one frame, held for the `Welcome` that counts them. */
@@ -161,7 +160,7 @@ export class GameClient {
     readonly #requests: GameRequest[] = [];
 
     #rtt = 0;
-    /** Our own send stamps, in the injected clock's ms — never the value the server echoed back. */
+    /** Our own send stamps, in the injected clock's ms, never the value the server echoed back. */
     #joinSentMs = 0;
     #lastSyncSentMs: number | undefined;
     /** All of these are in the FRAME source's seconds, which is the only base `#now` ever holds. */
@@ -188,7 +187,7 @@ export class GameClient {
      *
      * Survives a resync beside the hash, for the same reason: the code is in this process, and a
      * re-join that declared the hash without holding the classes would resolve every `attach` to
-     * nothing — a world that joins and then renders empty.
+     * nothing: a world that joins and then renders empty.
      */
     #loaded: ScriptIndex | undefined;
 
@@ -336,7 +335,7 @@ export class GameClient {
         frames.start((now) => this.frame(now));
     }
 
-    /** The injected wall clock in ms — the base every wire stamp is in, and never `#now`'s. */
+    /** The injected wall clock in ms, the base every wire stamp is in, and never `#now`'s. */
     #nowMs(): number {
         return this.#opts.clock.nowSeconds() * 1000;
     }
@@ -348,12 +347,10 @@ export class GameClient {
         // `start()` is called before that source has produced one.
         this.#joinSentAt = undefined;
         const declared = this.#opts.project ?? unidentifiedProject();
-        return joinRequest(
-            this.#opts.name,
-            this.#joinSentMs,
-            { ...declared, bundleHash: this.#bundleHash },
-            this.#opts.token,
-        );
+        return joinRequest(this.#opts.name, this.#joinSentMs, {
+            ...declared,
+            bundleHash: this.#bundleHash,
+        });
     }
 
     /** One display frame: drain inbound, step the clock, enqueue outbound, push to the renderer. */
@@ -382,7 +379,7 @@ export class GameClient {
         this.#checkLiveness();
         this.#maybeSync();
 
-        // Client-located `@onUpdate`, once, at display rate — after prediction, before the push.
+        // Client-located `@onUpdate`, once, at display rate, after prediction, before the push.
         this.#displayUpdate(nowSeconds);
 
         if (this.#bridge !== undefined) {
@@ -392,14 +389,25 @@ export class GameClient {
         this.#opts.renderer.render();
     }
 
+    /** Missing art draws as a placeholder, so a failure is counted rather than left unhandled. */
+    #loadManifest(visuals: RenderManifest): void {
+        void this.#bridge?.loadManifest(visuals).then(
+            (failed) => {
+                this.#assetLoadFailed += failed;
+            },
+            () => {
+                this.#assetLoadFailed++;
+            },
+        );
+    }
+
     /** Runs every `ClientScript`'s `@onUpdate`; `dt` is the clamped real frame delta. */
     #displayUpdate(nowSeconds: number): void {
         const rt = this.#mirror?.runtime;
         const previous = this.#lastFrameAt;
         this.#lastFrameAt = nowSeconds;
         if (rt === undefined || this.#lifecycle.state === 'failed') return;
-        const dt =
-            previous === undefined ? 0 : Math.min(Math.max(nowSeconds - previous, 0), MAX_FRAME_DT);
+        const dt = previous === undefined ? 0 : clamp(nowSeconds - previous, 0, MAX_FRAME_DT);
         displayUpdate(rt, dt);
     }
 
@@ -478,9 +486,7 @@ export class GameClient {
                 // Additive, and started rather than awaited for the reason the welcome's is: the
                 // template half of the merge runs before the first `await`, so the spawn arriving
                 // behind this envelope already resolves its visual.
-                this.#bridge?.loadManifest(envelope.visuals).catch(() => {
-                    this.#assetLoadFailed++;
-                });
+                this.#loadManifest(envelope.visuals);
                 return;
             case 'time-sync-reply':
                 this.#onTimeSyncReply(envelope);
@@ -550,7 +556,7 @@ export class GameClient {
         void this.#load(source, welcome);
     }
 
-    /** Fetches, verifies and evaluates the bundle, then opens the session — or fails terminally. */
+    /** Fetches, verifies and evaluates the bundle, then opens the session, or fails terminally. */
     async #load(source: BundleSource, welcome: Welcome): Promise<void> {
         let loaded: ScriptIndex;
         try {
@@ -602,11 +608,8 @@ export class GameClient {
         // `sendRate` is the interval the render path buffers over; without it an unpredicted
         // entity holds its pose until the next envelope.
         this.#bridge = new RenderBridge(this.#opts.renderer, this.#mirror.view(), welcome.sendRate);
-        // Started, not awaited: the template table fills synchronously. A rejection means missing
-        // art, which the renderer draws as a placeholder, so it is counted rather than unhandled.
-        this.#bridge.loadManifest(welcome.visuals).catch(() => {
-            this.#assetLoadFailed++;
-        });
+        // Started, not awaited: the template table fills synchronously.
+        this.#loadManifest(welcome.visuals);
 
         // The snapshot's tick seeds the counter and the RTT seeds the lead; riding `snapshot.tick`
         // keeps the seeded tick and the world it describes from disagreeing.
@@ -621,7 +624,7 @@ export class GameClient {
         this.#mirror.runtime.hudSink = this.#hud;
         // The authority is the far end of this socket, so a `request()` must cross it. Without this
         // core falls back to its loopback sink and validates an untrusted ask on the machine that
-        // made it — against a mirror that holds no server-located script to validate it with.
+        // made it, against a mirror that holds no server-located script to validate it with.
         this.#mirror.runtime.requestUplink = (name, payload) => {
             this.#queueRequest(name, payload);
         };
@@ -727,7 +730,7 @@ export class GameClient {
         this.#actions.advanceTick();
         if (this.#pending.length === 0) return;
 
-        // One entry per (action, phase), coalesced — which makes the batch well-formed.
+        // One entry per (action, phase), coalesced, which makes the batch well-formed.
         const byAction = new Map<string, InputAction>();
         for (const edge of this.#pending) {
             const action: InputAction = { action: edge.action, on: edge.on };
@@ -781,7 +784,7 @@ export class GameClient {
         }
         // Chunked rather than sent whole: the receiver refuses an over-cap frame ENTIRE, so a burst
         // of seventeen would lose all seventeen. Carrying the excess costs it a frame, which a
-        // request — unacked and unreplayed — has no ordering claim against.
+        // request (unacked and unreplayed) has no ordering claim against.
         const frame: RequestFrame = {
             kind: 'request',
             tick: clock.localTick,
@@ -940,7 +943,7 @@ export class GameClient {
         return { position: camera.position, zoom: camera.zoom };
     }
 
-    /** Reverse of setup, and idempotent — a `failed` teardown and an unmount race. */
+    /** Reverse of setup, and idempotent: a `failed` teardown and an unmount race. */
     destroy(opts: { ownsRenderer?: boolean } = {}): void {
         if (this.#torn) return;
         this.#torn = true;

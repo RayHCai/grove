@@ -18,7 +18,7 @@ export function requestFields(payload: Record<string, unknown>): { [field: strin
 }
 
 /**
- * The value at `key`, boxed, or `undefined` for a getter — which the codec refuses outright, so
+ * The value at `key`, boxed, or `undefined` for a getter, which the codec refuses outright, so
  * reading one here would run a creator's code before anything could decline to send it.
  */
 function dataValue(source: object, key: string): { value: unknown } | undefined {

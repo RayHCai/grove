@@ -44,7 +44,7 @@ export interface MirrorReparent {
 export interface MirrorDelta {
     added: EntityId[];
     removed: EntityId[];
-    /** Reparents, in journal order — the render tree cannot infer these from `added`/`removed`. */
+    /** Reparents, in journal order; the render tree cannot infer these from `added`/`removed`. */
     reparented: MirrorReparent[];
     joined: Player[];
     left: string[];
@@ -52,7 +52,7 @@ export interface MirrorDelta {
 
 /** Counters for ops the mirror declined to apply; nonzero after a clean session is a bug. */
 export interface MirrorCounters {
-    /** An op naming a netId the mirror does not hold — a reconnect or interest-management race. */
+    /** An op naming a netId the mirror does not hold: a reconnect or interest-management race. */
     unknownNetId: number;
     /** A child applied before its parent, which the wire makes the server's obligation. */
     outOfOrderParent: number;
@@ -78,12 +78,9 @@ export interface MirrorView {
     entries(): IterableIterator<[NetId, EntityId]>;
 }
 
-/** A creator script class, as the host holds one — core's shape, so an attach needs no cast. */
-export type ScriptClass = AnyScriptClass;
-
 /** The bundle's classes by wire id; structural, so `ScriptRegistry` fits with no dependency. */
 export interface ScriptIndex {
-    resolve(id: ScriptId): ScriptClass | undefined;
+    resolve(id: ScriptId): AnyScriptClass | undefined;
     /** Where the class runs; a `ServerScript` is filtered from a client tick, so never attached. */
     locationOf(id: ScriptId): ScriptLocation | undefined;
 }
@@ -122,7 +119,7 @@ export class Mirror {
     readonly #simPasses: TickPasses;
     /** Where the server was when the wire last described it; not `rt.tick`, moved by prediction. */
     #depictedTick = 0;
-    /** Held until the `StateEnvelope` for the same tick lands — the join key is an equality. */
+    /** Held until the `StateEnvelope` for the same tick lands; the join key is an equality. */
     #heldTransforms: TransformEnvelope | undefined;
     /** Highest tick whose state envelope has been applied; the snapshot stands in for its own. */
     #stateAppliedTick = -1;
@@ -146,7 +143,7 @@ export class Mirror {
             simRate: opts.simRate,
             bounds: opts.bounds,
             regions: opts.regions,
-            // gameScripts: deliberately absent — the MVP instantiates no creator code.
+            // No `gameScripts`: this world runs only the scripts the wire attaches.
         });
         // No `startGame(rt)`: it dispatches `@onStart`, and nothing is attached here.
         this.#simPasses = this.#rt.passes ?? inertPasses();
@@ -214,7 +211,7 @@ export class Mirror {
         for (const netId of this.#pendingUnmap) this.#index.delete(netId);
         this.#pendingUnmap.length = 0;
 
-        // State after structural — `@serverState` on a newly spawned entity needs its host.
+        // State after structural: `@serverState` on a newly spawned entity needs its host.
         for (const diff of envelope.state) this.#applyStateField(diff);
 
         this.#stateAppliedTick = envelope.tick;
@@ -364,7 +361,7 @@ export class Mirror {
 
             default: {
                 // `noImplicitReturns` is off, so an arm added to the union without one here would
-                // fall through and no-op in silence — the shape of the bug this whole file counts.
+                // fall through and no-op in silence, the shape of the bug this whole file counts.
                 const unreachable: never = op;
                 return unreachable;
             }

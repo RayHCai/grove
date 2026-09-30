@@ -4,7 +4,8 @@
 import type { ScriptLocation } from '@platform/core';
 import { REMOTE_ASSET_SCHEMES, isAllowedAssetUrl } from '@platform/renderer';
 import { MAX_BUNDLE_BYTES } from './constants.js';
-import type { ScriptClass, ScriptIndex } from './mirror.js';
+import type { AnyScriptClass } from '@platform/core';
+import type { ScriptIndex } from './mirror.js';
 
 /** What the project's script bundle is fetched and evaluated with. Real owner: the host app. */
 export interface BundleSource {
@@ -12,7 +13,7 @@ export interface BundleSource {
     fetch(url: string): Promise<ArrayBuffer>;
     /** Lowercase-hex SHA-256 of `bytes`. */
     hash(bytes: ArrayBuffer): Promise<string>;
-    /** Evaluates bytes this client has already verified — never a second fetch of the url. */
+    /** Evaluates bytes this client has already verified, never a second fetch of the url. */
     evaluate(bytes: ArrayBuffer): Promise<unknown>;
 }
 
@@ -31,7 +32,7 @@ export class BundleLoadError extends Error {
 interface ChunkEntry {
     id: string;
     location: ScriptLocation;
-    ctor: ScriptClass;
+    ctor: AnyScriptClass;
 }
 
 /** What a client chunk's module exports. The side is checked: a server chunk here is the wrong half. */
@@ -114,7 +115,7 @@ export async function loadBundle(
     expectedHash: string,
 ): Promise<ScriptIndex> {
     // Code, not data: a scheme the client did not choose is refused outright, and a refused bundle
-    // fails the session — there is nothing to draw a placeholder for.
+    // fails the session; there is nothing to draw a placeholder for.
     if (!isAllowedAssetUrl(url, REMOTE_ASSET_SCHEMES)) {
         throw new BundleLoadError(
             `the game code is at an address this client will not fetch: ${url}`,
@@ -136,7 +137,7 @@ export async function loadBundle(
     const actual = await source.hash(bytes);
     if (actual !== expectedHash) {
         throw new BundleLoadError(
-            'the game code does not match what the server said it would send — refusing to run it',
+            'the game code does not match what the server said it would send: refusing to run it',
         );
     }
     return scriptIndexFrom(await source.evaluate(bytes));
