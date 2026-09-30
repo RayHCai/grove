@@ -314,6 +314,9 @@ mod tests {
     }
 
     /// The vector `signSessionToken` actually produced, read from the file the Go verifier reads.
+    /// `ticket` in that file is now the Ed25519 vector set (`libs/api-contract` mints game-instance
+    /// tickets under Ed25519 too; this box has not been migrated off HMAC yet, see the note on
+    /// `HmacAudience` in `session-token.ts`), so this reads `hmacTicket`, the HMAC-signed sibling.
     ///
     /// The three halves are in three languages over one shared secret, so agreeing about the FORMAT
     /// is not the same as agreeing about the bytes: this is the only test that would catch a base64
@@ -325,8 +328,8 @@ mod tests {
         let vector: serde_json::Value = serde_json::from_str(&raw).unwrap();
 
         let secret = vector["secret"].as_str().unwrap().as_bytes();
-        let claims = &vector["ticket"]["claims"];
-        let token = vector["ticket"]["token"].as_str().unwrap();
+        let claims = &vector["hmacTicket"]["claims"];
+        let token = vector["hmacTicket"]["token"].as_str().unwrap();
 
         let ok = verify(
             token,
