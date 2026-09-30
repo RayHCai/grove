@@ -97,6 +97,7 @@ class FlakyTransport implements Transport {
     failEncoded = false;
     failSend = false;
     closed = false;
+    bufferedBytes = 0;
     #onMessage: ((message: Message) => void) | null = null;
 
     send(message: Message): void {
@@ -200,7 +201,7 @@ describe('the host writes what the batch told it to', () => {
 describe('one peer’s failure is that peer’s alone', () => {
     it('closes the connection whose send threw and finishes the broadcast', async () => {
         const h = hosted();
-        // Taken first, so it is ahead of the healthy peer in the registry — behind it, an
+        // Taken first, so it is ahead of the healthy peer in the registry; behind it, an
         // unisolated throw would prove nothing.
         const flaky = new FlakyTransport();
         h.instance.accept(flaky, 'flaky');
@@ -221,6 +222,37 @@ describe('one peer’s failure is that peer’s alone', () => {
         expect(flaky.closed).toBe(true);
         expect(h.lines.some((l) => l.includes('reason=send-failed'))).toBe(true);
         expect(good.received.length).toBeGreaterThan(0);
+        void h.instance.close();
+    });
+});
+
+describe('a peer that is not keeping up', () => {
+    it('loses droppable frames while its backlog is deep, and keeps every reliable one', async () => {
+        const h = hosted();
+        const slow = new FlakyTransport();
+        h.instance.accept(slow, 'slow');
+        slow.receive(JOIN);
+        await h.step(12);
+        expect(slow.sent.some((e) => e.kind === 'transform')).toBe(true);
+
+        slow.sent.length = 0;
+        slow.bufferedBytes = Number.MAX_SAFE_INTEGER;
+        await h.step(12);
+
+        expect(slow.sent.some((e) => e.kind === 'transform')).toBe(false);
+        expect(slow.sent.some((e) => e.kind === 'state')).toBe(true);
+        expect(slow.closed).toBe(false);
+        void h.instance.close();
+    });
+
+    it('is closed once it sends more frames in a second than any client could', async () => {
+        const h = hosted();
+        const flood = new FlakyTransport();
+        h.instance.accept(flood, 'flood');
+        for (let i = 0; i < 601; i++) flood.receive({ kind: 'time-sync', clientSentMs: i });
+
+        expect(flood.closed).toBe(true);
+        expect(h.lines.some((l) => l.includes('reason=inbound-flood'))).toBe(true);
         void h.instance.close();
     });
 });
@@ -351,7 +383,7 @@ describe('the sim always learns that a socket is gone', () => {
 
         // Closed here and never reported, the sim keeps the session forever: its `Player` is never
         // released, its entities are never destroyed, and every later broadcast is built for a peer
-        // nothing is listening on. The socket's own close handler cannot report it — it was
+        // nothing is listening on. The socket's own close handler cannot report it; it was
         // unregistered on the way out.
         expect(h.instance.sim.sessions).toHaveLength(0);
         expect(h.instance.sim.runtime.playerManager?.players).toHaveLength(0);

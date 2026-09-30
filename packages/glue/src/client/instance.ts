@@ -1,4 +1,4 @@
-// It dials nothing and builds no renderer — a `Transport` and an `IRenderer` arrive already made,
+// It dials nothing and builds no renderer: a `Transport` and an `IRenderer` arrive already made,
 // which lets a session run over a loopback pair with no socket and no GPU.
 
 import type { ClientHUDSink, FailureReason, SessionState } from '@platform/client';
@@ -15,7 +15,7 @@ export interface ClientInstanceOptions extends CreateClientOptions {
     onState?: (state: SessionState, failure: FailureReason | undefined) => void;
     /**
      * Destroys the renderer with the session. Left false by a host whose renderer outlives the
-     * session — a React app whose canvas hook owns it, which is the usual case.
+     * session: a React app whose canvas hook owns it, which is the usual case.
      */
     ownsRenderer?: boolean;
 }

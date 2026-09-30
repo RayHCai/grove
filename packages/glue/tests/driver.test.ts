@@ -84,7 +84,7 @@ describe('the step cap sheds wall-clock, never ticks', () => {
         expect(result.steps).toBe(maxStepsPerWake(60));
         expect(result.shed).toBe(true);
         expect(spy.driver.shedCount).toBe(1);
-        // Zeroed, so the next wake starts level rather than owing five seconds forever — a bounded
+        // Zeroed, so the next wake starts level rather than owing five seconds forever: a bounded
         // visible slowdown instead of the spiral of death.
         expect(spy.driver.accumulator).toBe(0);
     });
@@ -150,7 +150,7 @@ describe('the driver owns the deliver→step sequence', () => {
         driver.pump(0);
         driver.pump(3 / 60);
 
-        // deliver, then this wake's steps — never the reverse, which still runs and reports nothing
+        // deliver, then this wake's steps, never the reverse, which still runs and reports nothing
         // while costing every input a tick of latency.
         expect(order).toStrictEqual(['deliver', 'deliver', 'step', 'step', 'step+send']);
     });

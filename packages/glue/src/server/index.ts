@@ -7,18 +7,11 @@
 export {
     Driver,
     GameInstance,
-    HostError,
     MAX_CATCHUP_MS,
     maxStepsPerWake,
     ticksPerSend,
 } from '../world/index.js';
-export type {
-    DriverHooks,
-    DriverOptions,
-    HostErrorCode,
-    InstanceOptions,
-    PumpResult,
-} from '../world/index.js';
+export type { DriverHooks, DriverOptions, InstanceOptions, PumpResult } from '../world/index.js';
 
 export { listenOn } from './serve.js';
 export type { ListenOptions, ServedGame } from './serve.js';

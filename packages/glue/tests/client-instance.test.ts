@@ -12,7 +12,7 @@ interface Built {
     received: Message[];
     deliver: () => void;
     seen: SessionState[];
-    /** Refuses the join from the peer end — the cheapest real transition to drive. */
+    /** Refuses the join from the peer end, the cheapest real transition to drive. */
     reject(): void;
     /** One client frame, which is where the inbox is drained. */
     frame(): void;
@@ -128,7 +128,7 @@ describe('a client instance', () => {
 });
 
 /**
- * The socket the dial reaches for when no factory is injected, recording its construction —
+ * The socket the dial reaches for when no factory is injected, recording its construction:
  * the only place a subprotocol is observable, since it rides the upgrade and not a frame.
  */
 class SpySocket {
@@ -170,7 +170,7 @@ describe('connectTo', () => {
         controller.abort();
 
         // Refused before the dial, so an aborted host never opens a socket it would then have to
-        // remember to close — which is the failure this signal exists to remove.
+        // remember to close, which is the failure this signal exists to remove.
         await expect(
             connectTo({
                 url: 'ws://127.0.0.1:1/never',

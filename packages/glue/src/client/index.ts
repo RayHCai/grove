@@ -13,7 +13,7 @@ export { ManualFrameSource, ScriptedInputDevice } from '@platform/client';
 
 // What a host names to hold a session's own members, re-exported so composing one needs one import.
 // Types only: the values `@platform/client` holds are the session itself, which `ClientInstance`
-// composes, and the DOM adapters, which stay behind `@platform/client/browser` — a session model
+// composes, and the DOM adapters, which stay behind `@platform/client/browser`; a session model
 // that dragged a `window` reference into its graph could not be built in Node.
 export type {
     Binding,

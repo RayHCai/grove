@@ -102,7 +102,7 @@ describe('fileKVStore', () => {
         await store.set('player', 'alice', 1);
 
         // The temp file is renamed OVER the target rather than written in place, so a crash cannot
-        // leave a truncated file that parses as an empty store — and the rename MOVES it, so
+        // leave a truncated file that parses as an empty store, and the rename MOVES it, so
         // nothing is left beside the target afterwards.
         await expect(readFile(`${path}.tmp`, 'utf8')).rejects.toThrow(/ENOENT/);
         expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({});
