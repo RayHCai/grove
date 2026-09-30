@@ -1,5 +1,5 @@
-// A @serverState setter observes assignment only — `this.scores.push(x)` never reaches it and
-// would replicate nothing — so a mutable declaration has to fail to compile instead.
+// A @serverState setter observes assignment only (`this.scores.push(x)` never reaches it and
+// would replicate nothing), so a mutable declaration has to fail to compile instead.
 
 declare const MUTABLE_BRAND: unique symbol;
 

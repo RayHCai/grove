@@ -19,7 +19,7 @@ describe('destroy', () => {
         expect(rt.wired.gameInstance.find({ tag: 'box' }).length).toBe(0); // torn down
     });
 
-    it('cascades to children — the whole subtree flips alive false', () => {
+    it('cascades to children: the whole subtree flips alive false', () => {
         const rt = loadGame();
         const parent = rt.wired.gameInstance.spawn('crate', 0, 0);
         const child = rt.wired.gameInstance.spawn('crate', 0, 0);
@@ -74,7 +74,7 @@ describe('getTouching', () => {
 describe('attachTo', () => {
     it('refuses a parent already inside the child’s own subtree', () => {
         // Two lines from any script build a chain with no root, and everything that walks a parent
-        // chain after it — the destroy cascade first — never terminates.
+        // chain after it (the destroy cascade first) never terminates.
         const rt = loadGame();
         const a = rt.wired.gameInstance.spawn('crate', 0, 0);
         const b = rt.wired.gameInstance.spawn('crate', 1, 0);

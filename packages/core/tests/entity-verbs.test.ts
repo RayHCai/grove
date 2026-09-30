@@ -181,7 +181,7 @@ describe('the verbs that hold nothing', () => {
         const rt = loadGame();
         const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         // Specified as template-configured; nothing in the template pipeline writes it, so it is
-        // absent until a script assigns one — and stopping does not mint one either.
+        // absent until a script assigns one, and stopping does not mint one either.
         expect(e.animation).toBeUndefined();
         expect(e.stopAnimation()).toBe(e);
         expect(e.animation).toBeUndefined();

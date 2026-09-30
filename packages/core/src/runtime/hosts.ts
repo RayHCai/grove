@@ -46,7 +46,7 @@ export class HostTable {
         return this.#byKey.get(key)?.scopeId ?? NO_SCOPE;
     }
 
-    /** The key owning `scopeId`, or undefined — the reverse lookup a scoped capture needs. */
+    /** The key owning `scopeId`, or undefined: the reverse lookup a scoped capture needs. */
     keyForScope(scopeId: ScopeId): string | undefined {
         return this.#byScope.get(scopeId);
     }

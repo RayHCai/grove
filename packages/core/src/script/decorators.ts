@@ -4,6 +4,7 @@ import type { HandlerKind } from './metadata.js';
 import { getOrCreateMetadata } from './metadata.js';
 import type { HandlerOptions, Concurrency } from './types.js';
 import { installStateAccessor } from '../state/backing.js';
+import type { Immutable, MutableStateRejected } from '../state/immutable.js';
 
 (Symbol as { metadata?: symbol }).metadata ??= Symbol('Symbol.metadata');
 
@@ -83,11 +84,15 @@ export type HandlerDecorator = <This, Args extends unknown[], Return>(
     context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Return>,
 ) => void;
 
-/** The `@serverState` shape; the returned initializer runs per instance. */
+/** The `@serverState` shape; a mutable field type leaves the context unsatisfiable. */
 export type StateDecorator = <This, Value>(
     value: undefined,
-    context: ClassFieldDecoratorContext<This, Value>,
+    context: ClassFieldDecoratorContext<This, Value> & ImmutableField<Value>,
 ) => (this: This, initial: Value) => Value;
+
+// An in-place mutation never reaches the setter, so it would replicate nothing.
+type ImmutableField<Value> =
+    Immutable<Value> extends MutableStateRejected ? MutableStateRejected : unknown;
 
 export function defaultConcurrency(kind: HandlerKind): Concurrency {
     switch (kind) {

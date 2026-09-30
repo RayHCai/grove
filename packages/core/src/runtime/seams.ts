@@ -5,25 +5,6 @@ import type { EntityId } from '../ids.js';
 import type { AssetRef } from './assets.js';
 import type { Countdown } from './wrappers.js';
 
-/** The frame clock. Core is pumped, never self-driving. */
-export interface Clock {
-    now(): number;
-}
-
-/** Manual, test-driven clock: the host's accumulator reads it, tests set it. */
-export class ManualClock implements Clock {
-    #t = 0;
-    now(): number {
-        return this.#t;
-    }
-    set(seconds: number): void {
-        this.#t = seconds;
-    }
-    tick(seconds: number): void {
-        this.#t += seconds;
-    }
-}
-
 /** The collision integrator. */
 export interface PhysicsSink {
     /** Sweeps `id` along `velocity` over `dt`, writes the position, reports what stopped it. */

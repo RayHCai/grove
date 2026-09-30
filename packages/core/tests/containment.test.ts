@@ -24,7 +24,7 @@ function faultyMover(rt: Runtime): Player {
 
 /**
  * Runs `fn` inside a handler invocation, which is the only place a callback can be registered with
- * an owner — the ambient invocation is where the owning instance comes from.
+ * an owner; the ambient invocation is where the owning instance comes from.
  */
 function inHandler(rt: Runtime, fn: () => void): { instance: object; id: number } {
     const e = rt.wired.gameInstance.spawn('crate', 0, 0);

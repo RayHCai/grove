@@ -80,7 +80,7 @@ export abstract class BaseMovement extends SyncedScript<Entity> {
         this.setIntent(0, 0, 0);
     }
 
-    /** @internal — the loop fills intent from the panel-mapped move axes before tick. */
+    /** @internal the loop fills intent from the panel-mapped move axes before tick. */
     fillIntent(x: number, y: number, z = 0): void {
         this.#ix = x;
         this.#iy = y;
@@ -145,7 +145,7 @@ export class PlatformerMovement extends BaseMovement {
     friction = 3000;
 
     // Always false until a physics sink stops the body, so gravity never stops pulling and
-    // `jump` never pushes — a platformer is not buildable on the null sink.
+    // `jump` never pushes; a platformer is not buildable on the null sink.
     get grounded(): boolean {
         return this.blocked.down;
     }

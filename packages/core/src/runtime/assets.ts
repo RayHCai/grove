@@ -1,8 +1,9 @@
 // Core never loads an asset: it holds whatever the manifest declared, so there is no load API here.
 
+import type { AssetKind } from '@platform/project';
 import { currentRuntime, hasRuntime } from './runtime.js';
 
-export type AssetKind = 'texture' | 'atlas' | 'audio' | 'font' | 'clip' | 'effect';
+export type { AssetKind };
 
 export class Asset {
     readonly key: string;
@@ -53,7 +54,7 @@ export class AssetRegistry implements Assets {
 
 const emptyRegistry = new AssetRegistry();
 
-/** The creator-facing `assets` const — a facade over the current runtime's registry. */
+/** The creator-facing `assets` const: a facade over the current runtime's registry. */
 export const assets: Assets = {
     get: (key) => resolve().get(key),
     all: (kind) => resolve().all(kind),

@@ -84,6 +84,24 @@ export class Target extends SyncedScript<Entity> {
     }
 }
 
+export class Relay extends ServerScript<Entity> {
+    target: Entity | null = null;
+
+    @onEvent('ping')
+    async relay(): Promise<void> {
+        await this.target?.send('pong');
+    }
+}
+
+export class Listener extends ServerScript<Entity> {
+    heard: Entity | null | undefined = undefined;
+
+    @onEvent('pong')
+    hear(ctx: Ctx): void {
+        this.heard = ctx.from;
+    }
+}
+
 // The pending promise is exposed so a test can settle the await deterministically, and this base
 // declares no handler because a decorated one here would register on both subclasses.
 abstract class Parked extends SyncedScript<Entity> {
@@ -160,7 +178,7 @@ export class Faulty extends SyncedScript<Entity> {
 }
 
 // `accelerate` is the stage every movement subclass must supply, and the movement pass calls it
-// through `tick` with no dispatch — so this throws where the dispatcher's boundary does not reach.
+// through `tick` with no dispatch, so this throws where the dispatcher's boundary does not reach.
 export class FaultyMovement extends BaseMovement {
     protected accelerate(): void {
         throw new Error('accelerate always throws');
@@ -244,7 +262,7 @@ export class ShadowsGameGetter extends ServerScript<Game> {
     @serverState players = 0;
 }
 
-/** `spawn` is a method on Game — a value hoisted over one is not callable. */
+/** `spawn` is a method on Game; a value hoisted over one is not callable. */
 export class ShadowsGameMethod extends ServerScript<Game> {
     @serverState spawn = 0;
 }
@@ -365,7 +383,7 @@ export class Configured extends ServerScript<Entity> {
     @serverState speed = 1;
     @serverState label = 'default';
 
-    /** Derived at construction, before the engine writes anything — never a field props name. */
+    /** Derived at construction, before the engine writes anything, never a field props name. */
     readonly configuredKeys: string[];
 
     constructor(props?: ScriptProps) {
@@ -374,7 +392,7 @@ export class Configured extends ServerScript<Entity> {
     }
 }
 
-/** Attached from a player-join handler, which runs between ticks — so its @onStart is deferred. */
+/** Attached from a player-join handler, which runs between ticks, so its @onStart is deferred. */
 export class LateJoiner extends ServerScript<Player> {
     @serverState greeted = false;
 
@@ -392,7 +410,7 @@ export class Greeter extends ServerScript {
     }
 }
 
-// Pass 9. Synced, so the same class is the one a client would run under prediction — which is why
+// Pass 9. Synced, so the same class is the one a client would run under prediction, which is why
 // the update pass forcing the server's locations is a claim worth an assertion of its own.
 export class Ticker extends SyncedScript<Entity> {
     updates = 0;
@@ -405,7 +423,7 @@ export class Ticker extends SyncedScript<Entity> {
     }
 }
 
-/** The same handler on a ClientScript, which pass 9 must NOT run — `displayUpdate` owns it. */
+/** The same handler on a ClientScript, which pass 9 must NOT run; `displayUpdate` owns it. */
 export class ClientTicker extends ClientScript<Entity> {
     updates = 0;
 
@@ -467,7 +485,7 @@ export class SyncedRoster extends SyncedScript<Entity> {
     }
 }
 
-/** A second class claiming `credits`, which `Wallet` already declares — one name, one host. */
+/** A second class claiming `credits`, which `Wallet` already declares: one name, one host. */
 export class RivalWallet extends ServerScript {
     @serverState credits = 99;
 }

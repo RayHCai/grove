@@ -58,7 +58,7 @@ describe('the update pass', () => {
         expect(instanceOf<ClientTicker>(rt, e, 'ClientTicker').updates).toBe(0);
     });
 
-    it('does not run one on a CLIENT runtime either — displayUpdate owns that handler', () => {
+    it('does not run one on a CLIENT runtime either: displayUpdate owns that handler', () => {
         // The load-bearing half. A client's active locations are client+synced, so without the pass
         // forcing the server's set this would fire here AND from the frame loop.
         const rt = loadGame({ role: 'client' });

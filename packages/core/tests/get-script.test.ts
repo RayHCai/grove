@@ -38,7 +38,7 @@ describe('Game.getScript', () => {
         expect(rt.gameInstance!.getScript(OtherRules)).toBeNull();
     });
 
-    it('is exact, never instanceof — a base class is a different script', () => {
+    it('is exact, never instanceof: a base class is a different script', () => {
         const rt = world();
         // `ServerScript` is `Rules`'s base, so an `instanceof` lookup would answer with it. Two
         // subclasses of one base are two scripts, and a query for the base could only guess.
@@ -64,7 +64,7 @@ describe('Player.getScript', () => {
         expect(b.getScript(Profile)?.credits).toBe(3);
     });
 
-    it('finds a client-located script too — location is not a filter here', () => {
+    it('finds a client-located script too: location is not a filter here', () => {
         const rt = world();
         const player = joinPlayer(rt, 'p1', 'one');
         player.addScript(Menu);

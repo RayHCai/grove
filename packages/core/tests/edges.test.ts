@@ -37,7 +37,7 @@ describe('region enter and exit', () => {
 
         e.setPosition(0, 0);
         loop.step(2); // crossed in
-        loop.step(3); // still inside — the edge already fired
+        loop.step(3); // still inside; the edge already fired
         expect(script.entered).toStrictEqual(['arena']);
         expect(script.exited).toStrictEqual([]);
 
@@ -84,7 +84,7 @@ describe('@onCollide is the enter edge', () => {
 
         self.setPosition(300, 0);
         loop.step(2); // touched
-        loop.step(3); // still touching — `getTouching` answers that, not a second dispatch
+        loop.step(3); // still touching; `getTouching` answers that, not a second dispatch
         expect(script.contacts).toBe(1);
 
         self.setPosition(200, 0);

@@ -91,7 +91,7 @@ describe('the game const', () => {
         const second = loadGame({ bounds: WORLD });
         const fromSecond = game.spawn;
 
-        // The same prototype function both times — a BOUND copy would be a different object each
+        // The same prototype function both times; a BOUND copy would be a different object each
         // read and would pin the world it was read from.
         expect(fromFirst).toBe(fromSecond);
 
@@ -188,7 +188,7 @@ describe('Camera', () => {
         player.camera.zoom = 2;
         loop.restore(snap);
 
-        // Survived the rewind, because no store holds it — camera state is the client's to draw.
+        // Survived the rewind, because no store holds it; camera state is the client's to draw.
         expect(player.camera.position).toEqual({ x: 100, y: 50, z: 0 });
         expect(player.camera.zoom).toBe(2);
         expect(rt.channels.structuralCount).toBe(0);
@@ -251,7 +251,7 @@ describe('Storage', () => {
 describe('hoistReplicated', () => {
     it('lets a receiver running no scripts read a replicated field by name', () => {
         // The mirror's half of `@serverState`. Wiring installs the pair from an instance; a client
-        // running no scripts has none, so the value would arrive in the record and stop there —
+        // running no scripts has none, so the value would arrive in the record and stop there:
         // `game.phase` would read undefined on the machine that draws it.
         const record = createHostRecord('game');
         const host = {} as Record<string, unknown>;
@@ -321,7 +321,7 @@ describe('oscillate and orbit', () => {
 
         orbit(moon, centre, 10, Math.PI);
         loop.step(1);
-        // The centre is the OTHER entity's position, read once when orbit was called — so the moon
+        // The centre is the OTHER entity's position, read once when orbit was called, so the moon
         // circles (200, 0) rather than the origin it was spawned at.
         expect(Math.hypot(moon.position.x - 200, moon.position.y)).toBeCloseTo(10, 6);
         expect(moon.position.x).toBeGreaterThan(200);

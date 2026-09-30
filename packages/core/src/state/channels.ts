@@ -10,7 +10,7 @@ export type SingleStructuralOp =
     | { kind: 'destroy'; id: EntityId }
     | { kind: 'reparent'; id: EntityId; parent: EntityId }
     | { kind: 'tag'; id: EntityId; tag: string; added: boolean }
-    /** The id the bundle stamped, never the class name — a minifier rewrites one, not the other. */
+    /** The id the bundle stamped, never the class name; a minifier rewrites one, not the other. */
     | { kind: 'attach'; id: EntityId; script: ScriptId; props?: ScriptProps };
 
 /** Every op one template instantiation produced, applied as one. Flat, parents before children. */

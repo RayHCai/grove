@@ -1,4 +1,4 @@
-// Each instance carries a stable id because concurrency locks are keyed per instance —
+// Each instance carries a stable id because concurrency locks are keyed per instance:
 // keyed by method alone, one player's cooldown would gate every other player's.
 
 import type { ScriptProps } from '@platform/project';
@@ -14,7 +14,7 @@ const NO_KINDS: ReadonlySet<HandlerKind> = new Set();
 
 /**
  * Which handler kinds a class declares, memoised on the metadata array every instance of that
- * class shares — so a thousand copies of one script build the set once.
+ * class shares, so a thousand copies of one script build the set once.
  */
 const KINDS = new WeakMap<readonly HandlerDecl[], ReadonlySet<HandlerKind>>();
 

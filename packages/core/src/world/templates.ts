@@ -9,6 +9,7 @@ import type {
     ScriptProps,
     TemplateId,
 } from '@platform/project';
+import { MAX_TEMPLATE_DEPTH } from '@platform/project/limits';
 import { defined } from '@platform/math';
 import { LoadError } from '../errors.js';
 import type { EntityId } from '../ids.js';
@@ -24,15 +25,14 @@ export type TemplateDef = ResolvedTemplate;
 export type TemplateAttachment = ResolvedAttachment;
 
 /**
- * A script class as it ARRIVES — from a bundle, or resolved by `@platform/project`, which types a
+ * A script class as it ARRIVES: from a bundle, or resolved by `@platform/project`, which types a
  * class opaquely because it may not name `BaseScript`. Loose for that reason alone; what core
  * requires of one is `AttachedScriptClass`, and `Wiring` is where the two meet.
  */
 // oxlint-disable-next-line typescript/no-explicit-any -- an authored class arrives host-typed
 export type AnyScriptClass = new (props?: ScriptProps) => any;
 
-/** Levels one instantiation may nest, and entities it may mint; a child names a template. */
-export const MAX_TEMPLATE_DEPTH = 8;
+/** Entities one instantiation may mint; the depth bound alone still allows a wide tree. */
 export const MAX_TEMPLATE_NODES = 256;
 
 /** The templates a world can spawn, by the key `game.spawn` names; a miss is not an error. */
@@ -90,7 +90,7 @@ export function instantiate(rt: Runtime, template: string, opts: InstantiateOpti
     const extra = opts.scripts ?? [];
     if (def === undefined && extra.length === 0 && (opts.tags ?? []).length === 0) {
         // A key the registry does not hold is one bare entity, which is what an ad-hoc spawn has
-        // always been — and grouping a single op would put a boundary on the wire that bounds
+        // always been, and grouping a single op would put a boundary on the wire that bounds
         // nothing.
         return spawnNode(rt, template, opts);
     }

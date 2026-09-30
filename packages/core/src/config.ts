@@ -7,7 +7,7 @@ export const DEFAULT_SIM_RATE = 60;
 /** Default replication rate; governs the transform channel's cadence. */
 export const DEFAULT_SEND_RATE = 20;
 
-/** Consecutive throws that disable a handler — any success resets the count. */
+/** Consecutive throws that disable a handler; any success resets the count. */
 export const BREAKER_THRESHOLD = 100;
 
 /** Max `send` re-entry depth before the dispatcher aborts the chain. */

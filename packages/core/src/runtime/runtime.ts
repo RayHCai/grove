@@ -19,8 +19,8 @@ import type { HandlerErrorRecord } from '../errors.js';
 import { LoadError } from '../errors.js';
 import { entityIdOfKey, HostTable } from './hosts.js';
 import { PRNGStore } from './prng-store.js';
-import { ManualClock, MemoryKVStore, NullEffectSink, NullHUDSink } from './seams.js';
-import type { Clock, EffectSink, HUDSink, KVStore, PhysicsSink } from './seams.js';
+import { MemoryKVStore, NullEffectSink, NullHUDSink } from './seams.js';
+import type { EffectSink, HUDSink, KVStore, PhysicsSink } from './seams.js';
 import { NullPhysicsSink } from './physics.js';
 
 import type { DispatchOptions } from '../dispatch/dispatcher.js';
@@ -154,7 +154,6 @@ export class Runtime {
     readonly entityManager = new EntityManager(this);
 
     // Null implementations by default, so every member is exercisable in Node.
-    clock: Clock = new ManualClock();
     physics: PhysicsSink = new NullPhysicsSink(this.transforms);
     kv: KVStore = new MemoryKVStore();
     effects: EffectSink = new NullEffectSink();
@@ -184,16 +183,16 @@ export class Runtime {
 
     /** Everything `loadGame` built. */
     get wired(): Wired {
-        if (this.#wired === null) throw new LoadError('runtime not loaded — call loadGame() first');
+        if (this.#wired === null) throw new LoadError('runtime not loaded: call loadGame() first');
         return this.#wired;
     }
 
-    /** The same set, or null — for facades whose contract is to no-op outside a loaded world. */
+    /** The same set, or null, for facades whose contract is to no-op outside a loaded world. */
     get wiredOrNull(): Wired | null {
         return this.#wired;
     }
 
-    /** @internal — `loadGame` installs the whole set at once. */
+    /** @internal `loadGame` installs the whole set at once. */
     install(wired: Wired): void {
         this.#wired = wired;
     }
@@ -265,7 +264,7 @@ export class Runtime {
     }
 
     // Through the host table's reverse index: a scan of every slot per pending timer put a scoped
-    // snapshot — which the client takes every frame — well past a whole frame's budget.
+    // snapshot (which the client takes every frame) well past a whole frame's budget.
     #entityForScope(scopeId: number): number {
         const key = this.hosts.keyForScope(scopeId);
         const id = key === undefined ? undefined : entityIdOfKey(key);
@@ -284,7 +283,7 @@ export function createRuntime(): Runtime {
 /** The current runtime; throws if none is active. */
 export function currentRuntime(): Runtime {
     if (current === null) {
-        throw new Error('no active runtime — call createRuntime() or loadGame() first');
+        throw new Error('no active runtime: call createRuntime() or loadGame() first');
     }
     return current;
 }
@@ -305,7 +304,7 @@ export function withRuntime<T>(rt: Runtime, fn: () => T): T {
     }
 }
 
-/** Clears the current runtime — for test teardown. */
+/** Clears the current runtime, for test teardown. */
 export function clearRuntime(): void {
     current = null;
 }

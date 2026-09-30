@@ -137,7 +137,7 @@ describe('BaseMovement state', () => {
         move.setVelocity(0, 0);
         move.addForce(0, 600);
         loop.step(1);
-        // 600 * 1/60 = 10, applied once — and the accumulator is cleared, so the next tick adds
+        // 600 * 1/60 = 10, applied once, and the accumulator is cleared, so the next tick adds
         // none.
         const afterOne = move.velocity.y;
         expect(afterOne).toBeCloseTo(10, 9);
@@ -150,7 +150,7 @@ describe('BaseMovement state', () => {
     it('clampSpeed holds the direction while capping the magnitude', () => {
         const { loop, move } = world(Probe);
         move.maxSpeed = 10;
-        move.setIntent(3, 4); // Probe accelerates to 100x the intent — far over the cap
+        move.setIntent(3, 4); // Probe accelerates to 100x the intent, far over the cap
         loop.step(1);
         expect(move.speed).toBeCloseTo(10, 9);
         // 3:4 preserved, so a clamp never turns a diagonal into an axis.
@@ -198,7 +198,7 @@ describe('TopDownMovement', () => {
         expect(top.velocity).toEqual({ x: 200, y: 0, z: 0 });
     });
 
-    it('stops the moment the intent goes neutral — no momentum', () => {
+    it('stops the moment the intent goes neutral: no momentum', () => {
         const { loop, move } = world(TopDownMovement);
         move.setIntent(1, 0);
         loop.step(1);

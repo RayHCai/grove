@@ -27,15 +27,14 @@ export interface DispatchLog {
     error(record: HandlerErrorRecord & { phase?: string; disabled?: boolean }): void;
 }
 
-// `performance` is a host global on both ends but sits in neither this package's `lib` nor its
-// types, and core stays free of DOM and Node typings; `Date.now` is the fallback because a budget
-// that silently stopped being enforced is worse than one a clock step can misread once.
-/** The "nothing to await" answer, shared — a dispatch matching no handler is the common case. */
+/** The "nothing to await" answer, shared; a dispatch matching no handler is the common case. */
 const RESOLVED: Promise<void> = Promise.resolve();
 
+// Captured at load, so a determinism shim installed afterwards cannot reach the handler budget.
 const elapsedMs: () => number = (() => {
     const host = (globalThis as { performance?: { now(): number } }).performance;
-    return host === undefined ? () => Date.now() : () => host.now();
+    const dateNow = Date.now;
+    return host === undefined ? () => dateNow() : () => host.now();
 })();
 
 function matches(
@@ -101,7 +100,7 @@ export class Dispatcher {
     }
 
     /**
-     * Reports every breaker trip to the host. Diagnostics, not wire traffic — a disabled handler is
+     * Reports every breaker trip to the host. Diagnostics, not wire traffic: a disabled handler is
      * something whoever runs the server needs to see, and nothing a player's client can act on.
      */
     onTrip(listener: ((trip: BreakerTrip) => void) | null): void {
@@ -113,7 +112,7 @@ export class Dispatcher {
      * dedup, log and breaker as `#invoke`. False when disabled, when it threw, or when it overran.
      */
     guard(owner: GuardOwner | null, site: GuardSite, fn: () => void): boolean {
-        // An unowned callback cannot be disabled — there is no instance to charge — but it is still
+        // An unowned callback cannot be disabled (there is no instance to charge), but it is still
         // contained and logged, which is the half that keeps the tick alive.
         if (owner !== null && this.#breaker.count(owner.id, site.method) >= BREAKER_THRESHOLD) {
             return false;
@@ -190,7 +189,7 @@ export class Dispatcher {
         }
 
         if (first === null) return RESOLVED;
-        // One handler is the overwhelming case, and its own promise already settles when it does —
+        // One handler is the overwhelming case, and its own promise already settles when it does;
         // joining a single promise buys nothing and costs the array, the join and its reaction job.
         if (pending === null) return first;
         return Promise.all(pending).then(() => undefined);
@@ -265,8 +264,8 @@ export class Dispatcher {
         // waits.
         const overran = this.#chargeOverrun(si, site, startedAt);
 
-        // Only once the promise settles: recording success when the call returns — at the first
-        // await — resets the count before the rejection arrives, so the breaker never trips.
+        // Only once the promise settles: recording success when the call returns (at the first
+        // await) resets the count before the rejection arrives, so the breaker never trips.
         // Wrapped after the ambient has gone back to `outer`, so a handler that settles between
         // ticks leaves the slot where it found it rather than holding a finished invocation open.
         return resumeWith(result as Promise<unknown>).then(

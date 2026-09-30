@@ -22,7 +22,7 @@ describe('replication channels', () => {
         expect(rt.channels.structuralCount).toBe(0);
     });
 
-    it('the channels are not captured by snapshot — a restore leaves live marks alone', () => {
+    it('the channels are not captured by snapshot: a restore leaves live marks alone', () => {
         const rt = loadGame();
         const loop = new Loop(rt);
         const e = rt.wired.gameInstance.spawn('crate', 0, 0);

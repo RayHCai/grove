@@ -9,7 +9,7 @@ import { entityKey } from '../src/runtime/hosts.js';
 
 afterEach(() => clearRuntime());
 
-/** A heap at 60 Hz with no runtime behind it — the store on its own. */
+/** A heap at 60 Hz with no runtime behind it: the store on its own. */
 function heap(): TimerHeap {
     const h = new TimerHeap();
     h.setSimRate(60);
@@ -211,7 +211,7 @@ describe('cancellation', () => {
 
     it('a timer against an entity with no host record is hostless, and outlives it', () => {
         // The asymmetry worth pinning: `scopeForEntity` answers NO_SCOPE for an entity nothing is
-        // attached to, and NO_SCOPE is nobody's to cancel — so this timer survives the destroy.
+        // attached to, and NO_SCOPE is nobody's to cancel, so this timer survives the destroy.
         const rt = loadGame();
         const loop = new Loop(rt);
         const e = rt.wired.gameInstance.spawn('crate', 0, 0);
@@ -262,7 +262,7 @@ describe('firing order', () => {
 
 describe('duration validation', () => {
     it('refuses a non-finite duration rather than parking forever', () => {
-        // `remaining` would be NaN, and NaN <= 0 is false for good — so the timer would neither
+        // `remaining` would be NaN, and NaN <= 0 is false for good, so the timer would neither
         // fire nor ever leave the heap, which is a leak that looks like a hung callback.
         const h = heap();
         expect(() => h.after(Infinity, SCOPE, () => {})).toThrow(RangeError);

@@ -150,7 +150,7 @@ describe('MAX_DEDUP_KEYS', () => {
         // Through an UNOWNED guard, which is the only way to reach this cap: an owned handler is
         // disabled by the breaker after 100 consecutive throws, long before 1024 distinct messages
         // exist. An unowned callback has no instance to charge, so it throws for as long as it
-        // likes — which is exactly the case this bound is here for.
+        // likes, which is exactly the case this bound is here for.
         const rt = loadGame();
         const throwOnce = (n: number): void => {
             rt.dispatcher.guard(null, siteAt(n), () => {
@@ -251,7 +251,7 @@ describe('MAX_BUBBLE_LENGTH', () => {
         expect(op.tag).toBe('say:hello');
     });
 
-    it('carries one bubble at a time — a second say clears the first', () => {
+    it('carries one bubble at a time: a second say clears the first', () => {
         const rt = loadGame();
         const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         e.say('first');

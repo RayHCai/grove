@@ -96,7 +96,7 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
 
     sleep(seconds: number, hostScopeId: ScopeId): Promise<void> {
         // Converted before the id is minted and before the executor runs, so a bad duration throws
-        // where `after` and `every` do. Inside the executor it became a rejected promise instead —
+        // where `after` and `every` do. Inside the executor it became a rejected promise instead,
         // and an unawaited `sleep` then raised an unhandled rejection rather than a call-site
         // error.
         const remaining = this.#toTicks(seconds);
@@ -124,11 +124,11 @@ export class TimerHeap implements SnapshotStore<TimerBuffer> {
         const timer = this.#timers.get(id);
         if (!timer) return;
         timer.cancelled = true;
-        // A cancelled sleep never resolves — its continuation is meant to be unreachable.
+        // A cancelled sleep never resolves; its continuation is meant to be unreachable.
         this.#timers.delete(id);
     }
 
-    /** Cancels every timer owned by a scope — the host-destroy cascade. */
+    /** Cancels every timer owned by a scope: the host-destroy cascade. */
     cancelScope(hostScopeId: ScopeId): void {
         // NO_SCOPE is every hostless timer at once, never one host's, so no teardown may claim it.
         if (hostScopeId === NO_SCOPE) return;

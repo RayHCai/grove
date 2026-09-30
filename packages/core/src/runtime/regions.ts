@@ -9,7 +9,7 @@ import type { EntityId } from '../ids.js';
 export interface RegionCrossing {
     region: string;
     id: EntityId;
-    /** True for an entry, false for an exit — the two edges @onEnter and @onExit name. */
+    /** True for an entry, false for an exit: the two edges @onEnter and @onExit name. */
     entered: boolean;
 }
 
@@ -20,7 +20,7 @@ export class RegionIndex {
     readonly #crossings: RegionCrossing[] = [];
     readonly #present = new Set<EntityId>();
 
-    /** Build-time only — loadGame populates this from the manifest. */
+    /** Build-time only; loadGame populates this from the manifest. */
     define(name: string, bounds: Bounds): void {
         this.#regions.set(name, bounds);
         this.#occupants.set(name, new Set());
