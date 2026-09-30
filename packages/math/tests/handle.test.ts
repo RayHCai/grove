@@ -82,11 +82,6 @@ describe('nextGeneration', () => {
         expect(nextGeneration(127)).toBe(128);
         expect(nextGeneration(MAX_GENERATION - 1)).toBe(MAX_GENERATION);
     });
-
-    it('wraps to the first generation at the cap rather than leaving the safe range', () => {
-        expect(nextGeneration(MAX_GENERATION)).toBe(FIRST_GENERATION);
-        expect(nextGeneration(MAX_GENERATION + 1)).toBe(FIRST_GENERATION);
-    });
 });
 
 describe('index re-exports', () => {

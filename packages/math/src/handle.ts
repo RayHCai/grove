@@ -30,10 +30,7 @@ export function handleGeneration(handle: number): number {
     return Math.floor(handle / INDEX_RANGE);
 }
 
-/**
- * The generation a slot moves to when freed. Wraps rather than growing: past `MAX_GENERATION`
- * a packed handle leaves the safe-integer range, so `SlotTable` retires the slot instead.
- */
+/** The generation a slot moves to when freed; the caller retires a slot at `MAX_GENERATION` instead. */
 export function nextGeneration(generation: number): number {
-    return generation >= MAX_GENERATION ? FIRST_GENERATION : generation + 1;
+    return generation + 1;
 }
