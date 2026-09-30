@@ -14,7 +14,7 @@
     display: block;
     width: 100%;
     min-height: var(--pg-field-h);
-    padding: 9px 12px;
+    padding: var(--pg-field-pad);
     border: var(--pg-bw) solid var(--pg-edge);
     background: var(--pg-surface);
     box-shadow: inset var(--pg-lift) var(--pg-lift) 0 var(--pg-surface-2);
@@ -42,6 +42,23 @@
     margin-top: var(--pg-sp-2);
     color: var(--pg-ink-muted);
     font-size: var(--pg-text-sm);
+}
+/* A field in a rail: flat, one face for label and value, and the type stepping down to the hint. */
+.pg-field--dense .pg-field__label {
+    margin-bottom: var(--pg-sp-1);
+    font: 600 var(--pg-field-label-dense) / 1.2 var(--pg-font-ui);
+    letter-spacing: 0;
+}
+.pg-field--dense .pg-field__control {
+    min-height: var(--pg-field-h-dense);
+    padding: var(--pg-field-pad-dense);
+    box-shadow: none;
+    font-size: var(--pg-field-text-dense);
+}
+.pg-field--dense .pg-field__hint {
+    margin-top: var(--pg-sp-1);
+    font-size: var(--pg-field-hint-dense);
+    line-height: 1.4;
 }
 .pg-field__control[readonly] {
     background: var(--pg-surface-2);

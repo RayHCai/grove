@@ -1,7 +1,7 @@
 import { createRef } from 'react';
 import { describe, expect, it } from 'vitest';
 import { Tag } from '../src/components/Tag.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 describe('Tag', () => {
     it('is a span with the tag class and its text', async () => {

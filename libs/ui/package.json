@@ -12,7 +12,11 @@
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
         },
-        "./styles.css": "./dist/styles/index.css"
+        "./styles.css": "./dist/styles/index.css",
+        "./testing": {
+            "types": "./dist/testing.d.ts",
+            "import": "./dist/testing.js"
+        }
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -22,7 +26,7 @@
     "scripts": {
         "build": "tsc -b && node -e \"require('node:fs').cpSync('src/styles', 'dist/styles', { recursive: true })\"",
         "typecheck": "tsc -p tsconfig.test.json",
-        "test": "vitest run --passWithNoTests",
+        "test": "vitest run",
         "clean": "rm -rf dist .turbo"
     },
     "peerDependencies": {
@@ -35,6 +39,6 @@
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
         "typescript": "^7.0.2",
-        "vitest": "^4.1.10"
+        "vitest": "^5.0.1"
     }
 }

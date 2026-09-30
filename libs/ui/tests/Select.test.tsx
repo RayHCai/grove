@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Select } from '../src/components/Select.js';
 import type { SelectOption } from '../src/components/Select.js';
 import { CodeIcon } from '../src/icons/CodeIcon.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 const modes: SelectOption[] = [
     { value: 'ts', label: 'TypeScript', icon: <CodeIcon /> },

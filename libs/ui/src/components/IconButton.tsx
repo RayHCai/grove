@@ -14,6 +14,17 @@ export interface IconButtonProps extends Omit<ComponentPropsWithRef<'button'>, '
     children: ReactNode;
 }
 
+/** The classes that draw an `IconButton`, for an element that has to be something else, such as a link. */
+export function iconButtonClass(
+    {
+        variant = 'secondary',
+        size = 'md',
+    }: { variant?: IconButtonVariant | undefined; size?: IconButtonSize | undefined } = {},
+    className?: string,
+): string {
+    return cx('pg-iconbtn', `pg-iconbtn--${variant}`, size === 'sm' && 'pg-iconbtn--sm', className);
+}
+
 /** A square button holding one icon, in the same variants and sizes as `Button`. */
 export function IconButton({
     label,
@@ -31,12 +42,7 @@ export function IconButton({
     return (
         <button
             type={type}
-            className={cx(
-                'pg-iconbtn',
-                `pg-iconbtn--${variant}`,
-                size === 'sm' && 'pg-iconbtn--sm',
-                className,
-            )}
+            className={iconButtonClass({ variant, size }, className)}
             aria-label={label}
             aria-pressed={pressed}
             title={title ?? label}

@@ -1,0 +1,29 @@
+/* The page an app shows before it has one: the card centred in whatever room the app gives it. */
+.pg-splash {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    padding: var(--pg-sp-6) var(--pg-sp-4);
+}
+.pg-splash__card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--pg-sp-4);
+    width: 100%;
+    max-width: 360px;
+    padding: var(--pg-sp-6);
+    text-align: center;
+}
+.pg-splash__card > .pg-progress {
+    width: 100%;
+}
+.pg-splash__note {
+    color: var(--pg-ink-muted);
+    font-size: var(--pg-text);
+}
+.pg-splash__alert {
+    color: var(--pg-warm-ink);
+    font-size: var(--pg-text);
+}

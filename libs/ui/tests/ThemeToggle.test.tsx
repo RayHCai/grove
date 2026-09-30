@@ -2,7 +2,7 @@ import { act } from 'react';
 import { describe, expect, it } from 'vitest';
 import { ThemeProvider } from '../src/theme/ThemeProvider.js';
 import { ThemeToggle } from '../src/theme/ThemeToggle.js';
-import { mount } from './helpers.js';
+import { mount } from '../src/testing.js';
 
 async function press(button: HTMLButtonElement | null): Promise<void> {
     await act(async () => {

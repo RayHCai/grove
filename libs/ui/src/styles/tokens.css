@@ -73,6 +73,25 @@
     --pg-mark-text: 16px;
     --pg-text: 21px;
     --pg-text-sm: 19px;
+    --pg-field-pad: 9px 12px;
+    --pg-field-h-dense: 24px;
+    --pg-field-pad-dense: 4px 8px;
+    --pg-field-text-dense: 12px;
+    --pg-field-label-dense: 11px;
+    --pg-field-hint-dense: 10px;
+    --pg-plate-pad: 12px 16px;
+    --pg-plate-sub-text: 23px;
+    --pg-badge-text: 10px;
+    --pg-badge-pad: 8px 12px;
+    --pg-tag-text: 9px;
+    --pg-tag-pad: 6px 8px;
+    --pg-eyebrow-text: 11px;
+    --pg-eyebrow-pad: 9px 12px;
+    --pg-eyebrow-gap: 10px;
+    --pg-eyebrow-pip: 8px;
+
+    /* The tile the strip across the top is ruled in, which is also how tall the strip is. */
+    --pg-tile: 8px;
 
     --pg-sp-1: 4px;
     --pg-sp-2: 8px;
@@ -166,6 +185,13 @@
     --pg-dur-fast: 120ms;
     --pg-dur: 180ms;
     --pg-dur-slow: 260ms;
+
+    /* The page's layers, bottom to top; a component's own stacking inside itself stays literal. */
+    --pg-z-raised: 1;
+    --pg-z-overlay: 30;
+    --pg-z-chrome: 40;
+    --pg-z-menu: 50;
+    --pg-z-wash: 90;
 }
 
 :root[data-theme='dark'] {
