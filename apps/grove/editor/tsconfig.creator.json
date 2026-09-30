@@ -1,7 +1,7 @@
 {
     // The creator's own program: every file the editor seeds or compiles, checked the way the
-    // workbench checks it. No import resolves anything from this app — `src/creator/globals.d.ts`
-    // is the whole surface — and the DOM library is deliberately absent, because a game is not a
+    // workbench checks it. No import resolves anything from this app; `src/creator/globals.d.ts`
+    // is the whole surface, and the DOM library is deliberately absent, because a game is not a
     // page and two of its names collide with the engine's.
     "extends": "../../../tsconfig.base.json",
     "compilerOptions": {

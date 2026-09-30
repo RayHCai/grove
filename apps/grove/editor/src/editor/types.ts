@@ -5,7 +5,7 @@
 /**
  * The closure a creator's program needs, and nothing above it.
  *
- * `engine/dist/index.d.ts` alone, deliberately — its `host` subpath is the composition roots a
+ * `engine/dist/index.d.ts` alone, deliberately: its `host` subpath is the composition roots a
  * server stands a game up with, which is not a creator's to see. The other four are what those
  * declarations reach: core is the API, math and project are what core names, and transport is the
  * one type project borrows.
@@ -28,7 +28,7 @@ export interface TypeLib {
     filePath: string;
 }
 
-/** `…/packages/<name>/dist/<rest>` — the two halves a lib path is rebuilt from. */
+/** `…/packages/<name>/dist/<rest>`: the two halves a lib path is rebuilt from. */
 const BUILT = /\/packages\/([^/]+)\/dist\/(.+\.d\.ts)$/u;
 
 /**
