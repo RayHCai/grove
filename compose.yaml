@@ -17,6 +17,8 @@
 # that behaved differently because it noticed it was local would be the one thing this cannot test.
 #
 # Secrets and the handful of values a developer might move live in `.env`; copy `.env.example` to it.
+# The three secrets are `:?`, so a missing `.env` fails here rather than as a service that refuses
+# to start. Every service that drains is given 35s to stop, past the 30s drain each one runs.
 
 services:
     postgres:
@@ -25,8 +27,9 @@ services:
             POSTGRES_USER: ${POSTGRES_USER:-grove}
             POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grove}
             POSTGRES_DB: ${POSTGRES_DB:-grove}
+        # Loopback only: the development password is in a file everybody can read.
         ports:
-            - '5432:5432'
+            - '127.0.0.1:5432:5432'
         volumes:
             - grove-pgdata:/var/lib/postgresql/data
         healthcheck:
@@ -36,12 +39,12 @@ services:
             retries: 10
 
     # The task streams and the line of waiting joins. No persistence: a stream holds task ids, and the
-    # rows in Postgres are the record — a restart that lost the messages is what the sweeper
+    # rows in Postgres are the record; a restart that lost the messages is what the sweeper
     # re-announces.
     redis:
         image: redis:8-alpine
         ports:
-            - '6379:6379'
+            - '127.0.0.1:6379:6379'
         healthcheck:
             test: ['CMD', 'redis-cli', 'ping']
             interval: 5s
@@ -76,7 +79,7 @@ services:
             start_period: 30s
 
     # The schema, before anything opens a connection pool against it. Separate from `api` because a
-    # migration is a thing that happened once, not a thing a server does on the way up — which is also
+    # migration is a thing that happened once, not a thing a server does on the way up, which is also
     # how it is deployed, as a release command rather than a step in the entrypoint.
     api-migrate:
         image: grove-api:local
@@ -97,6 +100,7 @@ services:
     api:
         image: grove-api:local
         profiles: ['app', 'fleet']
+        stop_grace_period: 35s
         build:
             context: .
             dockerfile: apps/grove/api/Dockerfile
@@ -112,15 +116,15 @@ services:
             GAMES_BUCKET: ${GAMES_BUCKET:-grove-games}
             # A bucket name is not a hostname here, so the SDK is put in path style with it.
             S3_ENDPOINT: http://localstack:4566
-            # No distribution locally, so build output is addressed straight at the bucket — and at the
+            # No distribution locally, so build output is addressed straight at the bucket, and at the
             # address a BROWSER reaches it on, which is the host's and not this network's.
             GAMES_CDN_URL: http://localhost:4566/${GAMES_BUCKET:-grove-games}
             AWS_REGION: ${AWS_REGION:-us-east-1}
             AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
             AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
-            SESSION_SECRET: ${SESSION_SECRET}
-            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET}
-            FLEET_SECRET: ${FLEET_SECRET}
+            SESSION_SECRET: ${SESSION_SECRET:?copy .env.example to .env}
+            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET:?copy .env.example to .env}
+            FLEET_SECRET: ${FLEET_SECRET:?copy .env.example to .env}
             SERVER_MANAGER_URL: http://server-manager:4003
             # This network is the only peer in front of the process, so the forwarded headers believed
             # here are the ones it writes.
@@ -141,6 +145,7 @@ services:
     game-builder:
         image: grove-game-builder:local
         profiles: ['app', 'fleet']
+        stop_grace_period: 35s
         build:
             context: .
             dockerfile: apps/grove/game-builder/Dockerfile
@@ -149,7 +154,7 @@ services:
             NODE_ENV: development
             GAME_BUILDER_HOST: 0.0.0.0
             GAME_BUILDER_PORT: 4002
-            FLEET_SECRET: ${FLEET_SECRET}
+            FLEET_SECRET: ${FLEET_SECRET:?copy .env.example to .env}
             API_URL: http://api:4000
             REDIS_URL: redis://redis:6379
             # Two builders sharing a name share their claims. One box locally, but named rather than
@@ -164,12 +169,13 @@ services:
     asset-upload-service:
         image: grove-asset-upload-service:local
         profiles: ['app', 'fleet']
+        stop_grace_period: 35s
         build:
             context: .
             dockerfile: apps/grove/asset-upload-service/Dockerfile
         environment:
             ASSET_UPLOAD_SERVICE_BIND: 0.0.0.0:4005
-            FLEET_SECRET: ${FLEET_SECRET}
+            FLEET_SECRET: ${FLEET_SECRET:?copy .env.example to .env}
             UPLOAD_ROOT: /var/lib/grove/objects
             API_URL: http://api:4000
             REDIS_URL: redis://redis:6379
@@ -183,29 +189,27 @@ services:
             redis:
                 condition: service_healthy
 
-    #
-    # `fleet` is `app` and one box on top of it, which is why every service above carries both names: a
-    # box with no allocator to take a ticket from and no build output to fetch can hold no session.
-
     game-manager:
         image: grove-game-manager:local
         profiles: ['app', 'fleet']
+        stop_grace_period: 35s
         build:
             context: .
             dockerfile: apps/grove/game-manager/Dockerfile
         environment:
             GROVE_ENV: development
-            # Every service here is reached across this network, so loopback — the right default for a
-            # box in a real fleet — is the one thing that cannot be kept.
+            # Every service here is reached across this network, so loopback, the right default for a
+            # box in a real fleet, is the one thing that cannot be kept.
             GAME_MANAGER_HOST: 0.0.0.0
             GAME_MANAGER_PORT: 4001
-            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET}
+            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET:?copy .env.example to .env}
         ports:
             - '4001:4001'
 
     server-manager:
         image: grove-server-manager:local
         profiles: ['app', 'fleet']
+        stop_grace_period: 35s
         build:
             context: .
             dockerfile: apps/grove/server-manager/Dockerfile
@@ -213,7 +217,7 @@ services:
             GROVE_ENV: development
             SERVER_MANAGER_HOST: 0.0.0.0
             SERVER_MANAGER_PORT: 4003
-            FLEET_SECRET: ${FLEET_SECRET}
+            FLEET_SECRET: ${FLEET_SECRET:?copy .env.example to .env}
             # Nothing here terminates TLS, so a placement handed out as `wss` is one no local player can
             # dial.
             INGRESS_SCHEME: ws
@@ -225,12 +229,16 @@ services:
             redis:
                 condition: service_healthy
 
+    # `fleet` is `app` and one box on top of it, which is why every service above carries both names: a
+    # box with no allocator to take a ticket from and no build output to fetch can hold no session.
+    #
     # One box of the fleet: the agent, and the game binary it forks. A second box is
-    # `--scale instance-manager=2` with `HOST_ID` left to the container, which this file cannot do — the
+    # `--scale instance-manager=2` with `HOST_ID` left to the container, which this file cannot do: the
     # id is issued with the box, and two boxes sharing one are one box to the router.
     instance-manager:
         image: grove-local-fleet-box:local
         profiles: ['fleet']
+        stop_grace_period: 35s
         build:
             context: .
             dockerfile: docker/local-fleet-box.Dockerfile
@@ -238,8 +246,8 @@ services:
             GROVE_ENV: development
             INSTANCE_MANAGER_HOST: 0.0.0.0
             INSTANCE_MANAGER_PORT: 4004
-            FLEET_SECRET: ${FLEET_SECRET}
-            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET}
+            FLEET_SECRET: ${FLEET_SECRET:?copy .env.example to .env}
+            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET:?copy .env.example to .env}
             SERVER_MANAGER_URL: http://server-manager:4003
             GAME_MANAGER_URL: http://game-manager:4001
             HOST_ID: ${LOCAL_HOST_ID:-6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70}
