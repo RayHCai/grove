@@ -51,7 +51,7 @@ describe('allocation windows', () => {
     it('marks a window inexact when even the floor cannot stay clean', async () => {
         const meter = new Meter();
         try {
-            // The suite runs at the default semi-space, so four of these cannot fit in it — which
+            // The suite runs at the default semi-space, so four of these cannot fit in it, which
             // is the case the `exact` flag exists for, and the one that must never read as a
             // number.
             const sample = await meter.allocation(driverOf(HEAVY), 8);
