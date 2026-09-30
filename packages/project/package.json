@@ -8,6 +8,10 @@
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./limits": {
+            "types": "./dist/limits.d.ts",
+            "import": "./dist/limits.js"
         }
     },
     "main": "./dist/index.js",
@@ -18,7 +22,7 @@
     "scripts": {
         "build": "tsc -b",
         "typecheck": "tsc -p tsconfig.test.json",
-        "test": "vitest run --passWithNoTests",
+        "test": "vitest run",
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
@@ -26,6 +30,6 @@
     },
     "devDependencies": {
         "typescript": "^7.0.2",
-        "vitest": "^4.1.10"
+        "vitest": "^5.0.1"
     }
 }

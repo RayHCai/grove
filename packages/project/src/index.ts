@@ -1,11 +1,9 @@
-// @platform/project
-// The authoring shape a game is saved as, its validator and format migrations, and the two
-// narrowings every runtime input is derived from.
-
 export type { AssetId, ScriptId, TemplateId } from './ids.js';
 export { assetId, scriptId, templateId } from './ids.js';
 
 export { PROJECT_FORMAT_VERSION } from './manifest.js';
+
+export { MAX_TEMPLATE_DEPTH, RESERVED_KEYS } from './limits.js';
 
 export type { ScriptProps } from './props.js';
 
