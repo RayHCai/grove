@@ -1,5 +1,5 @@
 /**
- * A template's spawn key — what `game.spawn('coin')` names and a template visual keys by.
+ * A template's spawn key: what `game.spawn('coin')` names and a template visual keys by.
  * Branded to stay unassignable with the other authoring ids and with `EntityId` / `NetId`.
  */
 export type TemplateId = string & { readonly __templateId: unique symbol };
