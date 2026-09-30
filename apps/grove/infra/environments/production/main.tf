@@ -28,6 +28,10 @@ module "grove" {
   bucket_name        = var.bucket_name
   fleet              = var.fleet
   server_manager_url = var.server_manager_url
+  game_manager_url   = var.game_manager_url
+
+  fleet_ami_parameter = var.fleet_ami_parameter
+  browser_origins     = var.browser_origins
 
   # A replica in every fleet region. A `@serverState` write sits inside a tick, and a tick that
   # crossed the continent to reach the store would spend its whole budget waiting.
@@ -40,9 +44,6 @@ module "grove" {
 
   cdn_price_class         = "PriceClass_All"
   cdn_access_logs_enabled = true
-
-  task_alarm_actions = var.task_alarm_actions
-  task_client_cidrs  = var.task_client_cidrs
 
   tags = local.tags
 }

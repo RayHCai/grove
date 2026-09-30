@@ -19,19 +19,11 @@ module "storage" {
 
   environment         = var.environment
   bucket_name         = var.bucket_name
+  browser_origins     = var.browser_origins
   price_class         = var.cdn_price_class
   access_logs_enabled = var.cdn_access_logs_enabled
   force_destroy       = !var.deletion_protection
   tags                = local.tags
-}
-
-module "tasks" {
-  source = "../task-streams"
-
-  environment   = var.environment
-  client_cidrs  = var.task_client_cidrs
-  alarm_actions = var.task_alarm_actions
-  tags          = local.tags
 }
 
 module "data" {
@@ -56,11 +48,12 @@ module "fleet_a" {
   max_instances_per_box = var.fleet["a"].max_instances_per_box
   root_volume_gb        = var.fleet["a"].root_volume_gb
 
-  server_manager_url    = var.server_manager_url
-  fleet_cidrs           = local.agent_cidrs
-  artifact_bucket_arn   = module.storage.bucket_arn
-  dynamodb_arn_patterns = module.data.table_arn_patterns
-  tags                  = local.tags
+  ami_ssm_parameter   = var.fleet_ami_parameter
+  server_manager_url  = var.server_manager_url
+  game_manager_url    = var.game_manager_url
+  fleet_cidrs         = local.agent_cidrs
+  artifact_bucket_arn = module.storage.bucket_arn
+  tags                = local.tags
 }
 
 module "fleet_b" {
@@ -75,11 +68,12 @@ module "fleet_b" {
   max_instances_per_box = var.fleet["b"].max_instances_per_box
   root_volume_gb        = var.fleet["b"].root_volume_gb
 
-  server_manager_url    = var.server_manager_url
-  fleet_cidrs           = local.agent_cidrs
-  artifact_bucket_arn   = module.storage.bucket_arn
-  dynamodb_arn_patterns = module.data.table_arn_patterns
-  tags                  = local.tags
+  ami_ssm_parameter   = var.fleet_ami_parameter
+  server_manager_url  = var.server_manager_url
+  game_manager_url    = var.game_manager_url
+  fleet_cidrs         = local.agent_cidrs
+  artifact_bucket_arn = module.storage.bucket_arn
+  tags                = local.tags
 }
 
 module "fleet_c" {
@@ -94,9 +88,10 @@ module "fleet_c" {
   max_instances_per_box = var.fleet["c"].max_instances_per_box
   root_volume_gb        = var.fleet["c"].root_volume_gb
 
-  server_manager_url    = var.server_manager_url
-  fleet_cidrs           = local.agent_cidrs
-  artifact_bucket_arn   = module.storage.bucket_arn
-  dynamodb_arn_patterns = module.data.table_arn_patterns
-  tags                  = local.tags
+  ami_ssm_parameter   = var.fleet_ami_parameter
+  server_manager_url  = var.server_manager_url
+  game_manager_url    = var.game_manager_url
+  fleet_cidrs         = local.agent_cidrs
+  artifact_bucket_arn = module.storage.bucket_arn
+  tags                = local.tags
 }
