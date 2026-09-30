@@ -106,7 +106,7 @@ describe('the chunk a registry is built from', () => {
         expect(registry.locationOf('synced/runner#Runner')).toBe('synced');
     });
 
-    it('finds the decorator metadata intact — the lowering survived the bundler', async () => {
+    it('finds the decorator metadata intact: the lowering survived the bundler', async () => {
         const registry = await load('server');
         const metadata = registry.metadataOf('synced/runner#Runner');
         expect(metadata?.handlers.map((h) => [h.kind, h.event, h.methodName])).toEqual([

@@ -22,14 +22,6 @@ export interface ScriptChunkModule<Id extends string = string> {
 /** The two link targets. A `SyncedScript` reaches both; the other two locations reach one. */
 export type ScriptSide = 'client' | 'server';
 
-/** Which locations link into a side's chunk — server+synced there, client+synced here. */
-export function locationsFor(side: ScriptSide): ReadonlySet<ScriptLocation> {
-    return side === 'server' ? SERVER_LOCATIONS : CLIENT_LOCATIONS;
-}
-
-const SERVER_LOCATIONS: ReadonlySet<ScriptLocation> = new Set(['server', 'synced']);
-const CLIENT_LOCATIONS: ReadonlySet<ScriptLocation> = new Set(['client', 'synced']);
-
 /** A chunk's classes by stamped id; the id parameter stays open so a brand narrows. */
 export class ScriptRegistry<Id extends string = string> {
     readonly #byId: ReadonlyMap<Id, ScriptEntry<Id>>;
@@ -78,7 +70,7 @@ export class ScriptRegistry<Id extends string = string> {
         return this.#byId.get(id)?.location;
     }
 
-    /** The id a class was stamped with — the reverse edge an attach site needs for the wire. */
+    /** The id a class was stamped with: the reverse edge an attach site needs for the wire. */
     idOf(ctor: ScriptClass): Id | undefined {
         return this.#byClass.get(ctor);
     }

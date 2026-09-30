@@ -6,21 +6,21 @@ export interface Diagnostic {
     readonly column: number;
     /** The `SyncedScript` subclass the reference sits in. */
     readonly klass: string;
-    /** What was written — `Date`, `Math.sin`, `Math[expr]`. */
+    /** What was written: `Date`, `Math.sin`, `Math[expr]`. */
     readonly found: string;
     /** What to write instead. */
     readonly use: string;
     readonly because: string;
 }
 
-/** `file:line:column — Klass reads X. Use Y; because Z.` */
+/** `file:line:column: Klass reads X. Use Y; because Z.` */
 export function formatDiagnostic(d: Diagnostic): string {
-    return `${d.file}:${d.line}:${d.column} — ${d.klass} reads ${d.found}. Use ${d.use}; ${d.because}.`;
+    return `${d.file}:${d.line}:${d.column}: ${d.klass} reads ${d.found}. Use ${d.use}; ${d.because}.`;
 }
 
 /** A determinism rule refused something: the build's static pass, or a realm shim behind it. */
 export class DeterminismError extends Error {
-    /** Empty when a shim raised this at run time — it refuses one access, not a file. */
+    /** Empty when a shim raised this at run time; it refuses one access, not a file. */
     readonly diagnostics: readonly Diagnostic[];
 
     constructor(message: string, diagnostics: readonly Diagnostic[] = []) {
@@ -40,6 +40,8 @@ export type BundleErrorCode =
     | 'tsconfig-missing'
     /** `tsc` could not be spawned at all, so nothing was compiled. */
     | 'tsc-unavailable'
+    /** `tsc` ran past its deadline and was killed. */
+    | 'tsc-timeout'
     /** `tsc` ran and reported errors. */
     | 'tsc-failed'
     /** A declared module has no lowered `.js`, so the analysed root is not the `rootDir`. */

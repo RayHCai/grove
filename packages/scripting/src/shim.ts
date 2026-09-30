@@ -1,11 +1,11 @@
-// This guards a whole realm, so it belongs only on one that runs synced code alone — never on a
+// This guards a whole realm, so it belongs only on one that runs synced code alone, never on a
 // host application's, where a ClientScript's `Date` is legal and this would break it.
 
 import { DENIED_GLOBALS, DENIED_MATH } from './policy.js';
 import { DeterminismError } from './errors.js';
 
 export interface ShimOptions {
-    /** The realm to guard — a `vm` context's global, or a worker's. Defaults to `globalThis`. */
+    /** The realm to guard: a `vm` context's global, or a worker's. Defaults to `globalThis`. */
     readonly target?: object;
     /** Names to leave as they are. */
     readonly allow?: Iterable<string>;
@@ -35,7 +35,7 @@ export function installDeterminismShim(options: ShimOptions = {}): Shim {
             enumerable: false,
             get(): never {
                 throw new DeterminismError(
-                    `${name} is not reachable from a synced script — use ${redirect.use}; ${redirect.because}.`,
+                    `${name} is not reachable from a synced script: use ${redirect.use}; ${redirect.because}.`,
                 );
             },
         });
@@ -72,7 +72,7 @@ function guardedMath(): typeof Math {
             enumerable: false,
             get(): never {
                 throw new DeterminismError(
-                    `Math.${name} is not reachable from a synced script — use ${redirect.use}; ${redirect.because}.`,
+                    `Math.${name} is not reachable from a synced script: use ${redirect.use}; ${redirect.because}.`,
                 );
             },
         });

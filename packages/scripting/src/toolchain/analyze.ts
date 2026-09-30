@@ -12,7 +12,7 @@ import type { Node } from './ast.js';
 export const DEFAULT_BASE_MODULES: readonly string[] = ['@platform/engine', '@platform/core'];
 
 export interface AnalyzeOptions {
-    /** The project's script sources — the `rootDir` its tsconfig emits from. */
+    /** The project's script sources: the `rootDir` its tsconfig emits from. */
     readonly srcDir: string;
     readonly baseModules?: readonly string[] | undefined;
 }
@@ -21,7 +21,7 @@ export interface AnalyzeOptions {
 export interface ScriptClassInfo {
     /** POSIX, relative to `srcDir`. */
     readonly file: string;
-    /** `file` without its extension — how the lowered chunk names the module. */
+    /** `file` without its extension: how the lowered chunk names the module. */
     readonly module: string;
     /** The binding name inside the module. */
     readonly local: string;
@@ -127,7 +127,7 @@ export function analyzeScripts(options: AnalyzeOptions): Analysis {
 
 type Resolution =
     | { readonly kind: 'location'; readonly location: ScriptLocation }
-    /** `BaseScript` — abstract, and it names no location, so nothing attachable stops here. */
+    /** `BaseScript`: abstract, and it names no location, so nothing attachable stops here. */
     | { readonly kind: 'base' }
     | { readonly kind: 'unknown' };
 
