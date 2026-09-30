@@ -15,25 +15,19 @@ type service struct {
 	instances *supervisor.Registry
 	// The id the fleet knows this box by, which the box names in the row it answers a redeploy with.
 	hostID string
-	// Where @grove/game-manager is, which every child this box forks is given. A fleet address the
-	// box holds, not one a placement carries: the router holds no game data to be naming one.
-	managerURL string
-	log        *slog.Logger
+	log    *slog.Logger
 }
 
-// New builds the handler: the two open routes, the fleet scope, and the wraps around both.
-//
-// Nothing at this level decides who may call what — the scope carries the only check there is, so
-// a route mounted outside it starts open and a route mounted inside it starts closed.
+// New builds the handler. A box that can accept a start and then fail every one should be given
+// none, which is what ready answers.
 func New(
 	instances *supervisor.Registry,
 	ready func(context.Context) error,
 	fleetSecret []byte,
 	hostID string,
-	managerURL string,
 	l *slog.Logger,
 ) http.Handler {
-	s := &service{instances: instances, hostID: hostID, managerURL: managerURL, log: l}
+	s := &service{instances: instances, hostID: hostID, log: l}
 
 	scope := http.NewServeMux()
 	scope.HandleFunc("POST /v1/instances", s.startInstance)
@@ -42,29 +36,6 @@ func New(
 	scope.HandleFunc("DELETE /v1/instances/{instanceId}", s.stopInstance)
 	scope.HandleFunc("GET /v1/instances/{instanceId}/logs", s.readLogs)
 	scope.HandleFunc("POST /v1/games/{gameId}/redeploy", s.redeployGame)
-	// A wrong path under the scope answers only once the bearer has, so a caller without one cannot
-	// map the routes from here.
-	scope.HandleFunc("/v1/", httpx.NotFound)
 
-	root := http.NewServeMux()
-	// Polled by whatever supervises this agent on the box, which holds no fleet secret.
-	root.HandleFunc("GET /health", httpx.Health)
-	// A box that can accept a start request and then fail every one of them should be given none.
-	root.HandleFunc("GET /ready", httpx.Ready(ready, l))
-	root.Handle("/v1/", httpx.Chain(scope, httpx.FleetBearer(fleetSecret, l)))
-	root.HandleFunc("/", httpx.NotFound)
-
-	return httpx.Chain(root, httpx.RequestID(), httpx.Recover(l), httpx.RequestLog(l))
-}
-
-// bad is the 400 a request that never reaches the supervisor gets.
-func bad(w http.ResponseWriter, message string) {
-	httpx.WriteError(w, http.StatusBadRequest, httpx.CodeInvalidRequest, message)
-}
-
-// fail keeps what went wrong here and tells the caller only that something did.
-func (s *service) fail(w http.ResponseWriter, r *http.Request, what string, err error) {
-	s.log.ErrorContext(r.Context(), what,
-		"err", err, "path", r.URL.Path, "requestId", httpx.RequestIDFrom(r.Context()))
-	httpx.WriteError(w, http.StatusInternalServerError, httpx.CodeInternal, "internal error")
+	return httpx.Service(scope, ready, l, httpx.FleetBearer(fleetSecret, l))
 }

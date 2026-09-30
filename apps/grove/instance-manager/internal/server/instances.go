@@ -22,45 +22,32 @@ const (
 // the supervisor's budget and still has to be reaped before Stop returns.
 const stopWriteGrace = 10 * time.Second
 
-// startBody is one placement @grove/server-manager already decided. This agent carries it out; it
-// does not weigh it, because which box should hold a session is not a question one box can answer.
-type startBody struct{ contract.InstanceStart }
-
 type logPage struct {
 	InstanceID string   `json:"instanceId"`
 	Lines      []string `json:"lines"`
 }
 
 type instanceList struct {
-	Instances []supervisor.View `json:"instances"`
+	Instances []contract.InstanceReport `json:"instances"`
 }
 
 func (s *service) startInstance(w http.ResponseWriter, r *http.Request) {
-	var body startBody
+	var body contract.InstanceStart
 	if !httpx.DecodeJSON(w, r, &body, maxBodyBytes) {
 		return
 	}
-	if problem := body.problem(); problem != "" {
-		bad(w, problem)
+	if problem := startProblem(body); problem != "" {
+		httpx.BadRequest(w, problem)
 		return
 	}
 
-	view, err := s.instances.Start(r.Context(), supervisor.Request{
-		InstanceID: body.InstanceID,
-		GameID:     body.GameID,
-		SessionID:  body.SessionID,
-		Revision:   body.Revision,
-		Bundles:    body.Bundles,
-		// This box's own, never the placement's: where the data plane is, is a fleet address, and
-		// @grove/server-manager holds no game data to be restating one.
-		ManagerURL: s.managerURL,
-	})
+	view, err := s.instances.Start(r.Context(), body)
 	switch {
 	case errors.Is(err, supervisor.ErrAtCapacity):
 		httpx.WriteError(w, http.StatusConflict, httpx.CodeConflict, "host is at its instance cap")
 		return
 	case err != nil:
-		s.fail(w, r, "start an instance", err)
+		httpx.Fail(w, r, s.log, "start an instance", err)
 		return
 	}
 
@@ -92,7 +79,7 @@ func (s *service) stopInstance(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	case err != nil:
-		s.fail(w, r, "stop an instance", err)
+		httpx.Fail(w, r, s.log, "stop an instance", err)
 		return
 	}
 
@@ -108,7 +95,7 @@ func (s *service) readLogs(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 0 {
-			bad(w, "limit must be a whole number")
+			httpx.BadRequest(w, "limit must be a whole number")
 			return
 		}
 		limit = parsed
@@ -128,7 +115,7 @@ func notFound(w http.ResponseWriter) {
 
 // The ids are checked here because a child is spawned with them: a game process refuses a ticket
 // naming another game, and it can only do that if the id it was started with is the real one.
-func (b startBody) problem() string {
+func startProblem(b contract.InstanceStart) string {
 	switch {
 	case !contract.ValidUUID(b.GameID):
 		return "gameId must be a uuid"
@@ -138,16 +125,6 @@ func (b startBody) problem() string {
 		return "instanceId must be a uuid"
 	case b.Revision < 1:
 		return "revision must be positive"
-	// The hashes are checked here because they become filenames under this box's cache directory,
-	// and they are the only part of a start that reaches its filesystem at all.
-	case !contract.ValidContentHash(b.Bundles.Server.Hash):
-		return "bundles.server.hash must be a sha-256"
-	case !contract.ValidContentHash(b.Bundles.SimConfig.Hash):
-		return "bundles.simConfig.hash must be a sha-256"
-	case !contract.ValidURL(b.Bundles.Server.URL):
-		return "bundles.server.url must be a url"
-	case !contract.ValidURL(b.Bundles.SimConfig.URL):
-		return "bundles.simConfig.url must be a url"
 	}
-	return ""
+	return b.Bundles.Problem()
 }

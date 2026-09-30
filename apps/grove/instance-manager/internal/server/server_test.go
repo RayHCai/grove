@@ -129,7 +129,7 @@ func newTestService(max int) http.Handler {
 // newTestServiceWith is the same service where a test needs a seam, a budget or a readiness answer
 // of its own; a nil probe is the answer a box with its binary in place gives.
 func newTestServiceWith(opts supervisor.Options, ready func(context.Context) error) http.Handler {
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 
 	if opts.Launcher == nil {
 		opts.Launcher = stubLauncher{}
@@ -145,10 +145,10 @@ func newTestServiceWith(opts supervisor.Options, ready func(context.Context) err
 	opts.Log = log
 	opts.TokenSecret = []byte(strings.Repeat("s", 32))
 
-	return New(supervisor.New(opts), ready, []byte(fleetSecret), hostID, "http://game-manager:4001", log)
+	return New(supervisor.New(opts), ready, []byte(fleetSecret), hostID, log)
 }
 
-// The version and the code every start below carries. The hashes are only ever names here — the
+// The version and the code every start below carries. The hashes are only ever names here; the
 // bundle store is a double, and what it does with a real one is its own suite's.
 const (
 	testRevision  = 7
@@ -209,7 +209,7 @@ func answerPresenting(handler http.Handler, presented string) *httptest.Response
 	return w
 }
 
-func startOne(t *testing.T, handler http.Handler, i int) supervisor.View {
+func startOne(t *testing.T, handler http.Handler, i int) contract.InstanceReport {
 	t.Helper()
 
 	res := call(handler, http.MethodPost, "/v1/instances", startBodyFor(i))
@@ -217,7 +217,7 @@ func startOne(t *testing.T, handler http.Handler, i int) supervisor.View {
 		t.Fatalf("start %d: got %d, body %s", i, res.Code, res.Body.String())
 	}
 
-	var view supervisor.View
+	var view contract.InstanceReport
 	if err := json.Unmarshal(res.Body.Bytes(), &view); err != nil {
 		t.Fatalf("decode a started instance: %v", err)
 	}
@@ -438,7 +438,7 @@ func TestListingAndReadingOne(t *testing.T) {
 	startOne(t, handler, 1)
 
 	var listed struct {
-		Instances []supervisor.View `json:"instances"`
+		Instances []contract.InstanceReport `json:"instances"`
 	}
 	res := call(handler, http.MethodGet, "/v1/instances", "")
 	if err := json.Unmarshal(res.Body.Bytes(), &listed); err != nil {
@@ -453,7 +453,7 @@ func TestListingAndReadingOne(t *testing.T) {
 		t.Fatalf("read one: got %d", one.Code)
 	}
 
-	var view supervisor.View
+	var view contract.InstanceReport
 	if err := json.Unmarshal(one.Body.Bytes(), &view); err != nil {
 		t.Fatalf("decode one: %v", err)
 	}

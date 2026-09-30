@@ -171,7 +171,7 @@ func (p fakeProber) Probe(_ context.Context, addr string) (Vitals, string, error
 	return Vitals{Players: child.players}, "probe-id", nil
 }
 
-// A kernel that counts upward and, like the real one, offers any number nothing is bound to — so
+// A kernel that counts upward and, like the real one, offers any number nothing is bound to, so
 // what keeps two children off one port is the issued set, not the fake.
 type fakePorts struct {
 	mu       sync.Mutex
@@ -236,7 +236,9 @@ func testOptions(max int) Options {
 	return Options{
 		Ports:   newFakePorts(),
 		Bundles: fakeBundles{},
-		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log:     slog.New(slog.DiscardHandler),
+
+		ManagerURL: "http://game-manager:4001",
 
 		MaxInstances: max,
 		LogLines:     4,
@@ -284,8 +286,8 @@ func (refusingBundles) Fetch(context.Context, contract.BundleSet) (bundles.Paths
 
 const testRevision = 7
 
-func request(i int) Request {
-	return Request{
+func request(i int) contract.InstanceStart {
+	return contract.InstanceStart{
 		InstanceID: fmt.Sprintf("%08d-2222-4222-8222-222222222222", i),
 		GameID:     "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
 		SessionID:  fmt.Sprintf("%08d-1111-4111-8111-111111111111", i),
@@ -305,14 +307,13 @@ func request(i int) Request {
 			},
 			SyncedHash: strings.Repeat("d", 64),
 		},
-		ManagerURL: "http://game-manager:4001",
 	}
 }
 
-func startN(t *testing.T, r *Registry, n int) []View {
+func startN(t *testing.T, r *Registry, n int) []contract.InstanceReport {
 	t.Helper()
 
-	views := make([]View, 0, n)
+	views := make([]contract.InstanceReport, 0, n)
 	for i := range n {
 		view, err := r.Start(context.Background(), request(i))
 		if err != nil {
@@ -454,7 +455,7 @@ func TestPollReadsEachChild(t *testing.T) {
 	}
 }
 
-// A game-instance that died took its world with it, so nothing here brings one back — however many
+// A game-instance that died took its world with it, so nothing here brings one back, however many
 // times this box looks at it.
 func TestADeadChildIsNeverRestarted(t *testing.T) {
 	registry, launcher := newTestRegistry(2)
@@ -573,7 +574,7 @@ func TestARetriedStartReusesTheSessionsProcess(t *testing.T) {
 		t.Errorf("instance id: got %q, want the first %q", second.InstanceID, first.InstanceID)
 	}
 	if launcher.started != 1 {
-		t.Errorf("processes forked: got %d, want 1 — a second world for one session", launcher.started)
+		t.Errorf("processes forked: got %d, want 1: a second world for one session", launcher.started)
 	}
 }
 
@@ -655,8 +656,8 @@ func TestARestartAdoptsTheChildrenItLeftRunning(t *testing.T) {
 }
 
 // A port belongs to the survivor holding it across the restart too. The agent comes back knowing
-// only what it wrote down, and a survivor that has not bound its port yet — this agent is restarted
-// five seconds after it dies — is one the kernel would offer that number for again.
+// only what it wrote down, and a survivor that has not bound its port yet (this agent is restarted
+// five seconds after it dies) is one the kernel would offer that number for again.
 func TestAnAdoptedChildKeepsItsPort(t *testing.T) {
 	dir := t.TempDir()
 	launcher := newFakeLauncher()
@@ -779,6 +780,34 @@ func TestAFailedSpawnGivesItsPortBack(t *testing.T) {
 
 	if got := ports.gaveBack(); len(got) != 1 || got[0] != 30001 {
 		t.Errorf("ports given back: got %v, want [30001]", got)
+	}
+}
+
+// A box that cannot get the code is a session this agent must not claim to hold. Start reaches the
+// edge before it takes the lock, so a refused fetch has to leave the registry and the port pool
+// exactly as it found them.
+func TestAStartWhoseCodeNeverArrivedClaimsNothing(t *testing.T) {
+	launcher := newFakeLauncher()
+	ports := newFakePorts()
+	opts := testOptions(1)
+	opts.Launcher = launcher
+	opts.Prober = fakeProber{launcher: launcher}
+	opts.Bundles = refusingBundles{}
+	opts.Ports = ports
+
+	registry := New(opts)
+	if _, err := registry.Start(context.Background(), request(0)); err == nil {
+		t.Fatal("a start whose code never arrived was accepted")
+	}
+
+	if live := registry.Live(); len(live) != 0 {
+		t.Errorf("instances reported after a refused fetch: got %d, want 0", len(live))
+	}
+
+	// The first port this pool ever issues. Anything else means the refused start spent one on its
+	// way out, and no record names it to hand it back.
+	if port, err := ports.Take(); err != nil || port != 30001 {
+		t.Errorf("first port after a refused fetch: got %d (err %v), want 30001", port, err)
 	}
 }
 

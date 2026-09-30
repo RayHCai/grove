@@ -196,7 +196,7 @@ func TestAWorldNoProbeHasAnsweredForIsNotTakenAsEmpty(t *testing.T) {
 		t.Errorf("state: got %q, want %q", got, contract.InstanceDraining)
 	}
 
-	// The same zero, once a probe has actually returned it, does end the world — or the wait above
+	// The same zero, once a probe has actually returned it, does end the world, or the wait above
 	// proves only that the drain loop never ran.
 	registry.Poll(context.Background())
 	waitFor(t, "the probed-empty world to end", func() bool { return !child.living() })
