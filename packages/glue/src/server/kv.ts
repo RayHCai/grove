@@ -1,4 +1,4 @@
-// A `KVStore` over one JSON file — the store a host has before it has infrastructure, and the
+// A `KVStore` over one JSON file: the store a host has before it has infrastructure, and the
 // one with three independent ways to lose data when it is written by hand.
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -18,7 +18,7 @@ function key(scope: string, name: string): string {
  * Loaded ONCE then authoritative in memory; writes are CHAINED; each is RENAMED into place.
  */
 export function fileKVStore(path: string): KVStore {
-    /** Loaded once and then authoritative in memory — the file is the copy, not the source. */
+    /** Loaded once and then authoritative in memory; the file is the copy, not the source. */
     let loaded: Promise<Map<string, unknown>> | undefined;
     let writing: Promise<void> = Promise.resolve();
 

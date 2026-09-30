@@ -42,8 +42,8 @@ export async function connectTo(opts: ConnectOptions): Promise<ClientInstance> {
 
     const instance = new ClientInstance({ ...forwarded, transport }).start();
     // The signal owns the session from here. An abort landing between this promise resolving and
-    // the caller's own continuation is a window no caller can close for itself — it does not hold
-    // the instance yet — so the session is closed from the signal instead. `close()` is idempotent,
+    // the caller's own continuation is a window no caller can close for itself (it does not hold
+    // the instance yet), so the session is closed from the signal instead. `close()` is idempotent,
     // so a host that also closes its own is no different.
     signal?.addEventListener('abort', () => instance.close(), { once: true });
     return instance;

@@ -148,7 +148,7 @@ describe('a game instance', () => {
     it('builds the whole world before it will admit anything', async () => {
         const instance = new GameInstance({ project: project(), scripts: registry() });
         // Construction is the boot: the manifest is validated, the registry resolved, the templates
-        // built and the placed world instantiated — all before `accept` is reachable.
+        // built and the placed world instantiated, all before `accept` is reachable.
         expect(instance.sim.booted).toBe(true);
         expect(constructed).toEqual(['rules']);
         const placed = instance.sim.runtime.entities.liveIds();
@@ -199,7 +199,7 @@ describe('a game instance', () => {
         expect(instance.accept(pair.server, 'late')).toBeNull();
         expect(instance.closed).toBe(true);
         // A loopback end tells its peer on the next drain rather than inside `close()`, so the
-        // refusal is observable one delivery later — not never.
+        // refusal is observable one delivery later, not never.
         pair.deliver();
         expect(closed).toBe(true);
     });

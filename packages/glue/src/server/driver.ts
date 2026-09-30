@@ -2,6 +2,8 @@
 // It drives nothing itself: `pump` reports the ticks owed and the caller runs them, which keeps
 // the batch loop on one side of the seam rather than behind a callback the driver owns.
 
+import { assertRate } from '@platform/sim';
+
 /** Slack on the accumulator's `>= dt` test: exactly `1 / simRate` rounds short and steps zero. */
 const STEP_EPSILON = 1e-9;
 
@@ -19,35 +21,7 @@ export function ticksPerSend(simRate: number, sendRate: number): number {
     return Math.max(1, Math.round(simRate / sendRate));
 }
 
-/** Why the driver refused. The code, not the message, is what a host branches on. */
-export type HostErrorCode = 'invalid-config';
-
-/** A host failure with a machine-readable {@link HostErrorCode}. */
-export class HostError extends Error {
-    readonly code: HostErrorCode;
-
-    constructor(code: HostErrorCode, message: string, options?: ErrorOptions) {
-        super(message, options);
-        this.name = 'HostError';
-        this.code = code;
-    }
-}
-
-/**
- * Throws unless `rate` is positive and finite — nothing upstream validates a resolved default.
- * The same rule `@platform/sim` holds, restated: this module takes no dependency, and a caller
- * branches on `HostError` rather than on sim's code.
- */
-export function assertRate(name: string, rate: number): void {
-    if (!Number.isFinite(rate) || rate <= 0) {
-        throw new HostError(
-            'invalid-config',
-            `${name} must be a positive finite number, received ${rate}`,
-        );
-    }
-}
-
-/** What the driver drives — an interface, so it needs no runtime. */
+/** What the driver drives: an interface, so it needs no runtime. */
 export interface DriverHooks {
     /** One tick, and the passes inside it. `drain` marks a send-tick. */
     stepOnce(drain: boolean): void;
@@ -90,7 +64,7 @@ export class Driver {
         this.#sendRate = opts.sendRate;
     }
 
-    /** The clock the last `pump` reported — the host's only reading of time. */
+    /** The clock the last `pump` reported, the host's only reading of time. */
     get nowSeconds(): number {
         return this.#nowSeconds;
     }
@@ -100,7 +74,7 @@ export class Driver {
         return this.#accumulator;
     }
 
-    /** How many times the step cap has shed a backlog — a visible slowdown, not a silent one. */
+    /** How many times the step cap has shed a backlog, a visible slowdown, not a silent one. */
     get shedCount(): number {
         return this.#shedCount;
     }
