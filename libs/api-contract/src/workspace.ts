@@ -134,7 +134,7 @@ export type WorkspaceSave = z.infer<typeof WorkspaceSave>;
 /**
  * The set one save froze: written once under the revision that named it, and never rewritten.
  *
- * This is the version history and the rollback target — every path the game held at that instant
+ * This is the version history and the rollback target: every path the game held at that instant
  * and the exact version of the bytes at it. A build pins to one, which is what stops it picking up
  * an edit made after the button was pressed.
  */
@@ -180,7 +180,7 @@ export type PublishedVersion = z.infer<typeof PublishedVersion>;
  *
  * A publish asks for a build; this is the newest build that finished and wrote a build manifest.
  * Reading `PublishedVersion` here would send a player at a revision that failed to compile, or at
- * one still compiling — neither of which any box can be asked to run.
+ * one still compiling, neither of which any box can be asked to run.
  */
 export const PlayableVersion = z.object({
     revision: z.int().positive(),
@@ -188,7 +188,7 @@ export const PlayableVersion = z.object({
      * What the authority will claim about itself, and what a joiner has to claim back.
      *
      * The handshake compares these before a `Player` is allocated, and only `bundleHash` has an
-     * empty-string escape — so a browser that knows neither cannot join at all, and they travel
+     * empty-string escape, so a browser that knows neither cannot join at all, and they travel
      * with the ticket rather than being learned from the world it is trying to get into.
      */
     projectId: z.string().min(1).max(128),
@@ -202,7 +202,7 @@ export type PlayableVersion = z.infer<typeof PlayableVersion>;
  *
  * The output half of the pair: `manifests/<revision>.json` names the source a build compiled, this
  * names what came out of it. Sibling prefixes rather than one, because a save writes a manifest on
- * every revision and only a publish ever produces a build — most revisions have the first and no
+ * every revision and only a publish ever produces a build; most revisions have the first and no
  * second, and a rollback needs both to be findable on their own.
  *
  * Written before the task that produced it is settled, so a settled build always has one: the file

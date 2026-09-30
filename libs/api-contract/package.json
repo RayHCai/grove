@@ -26,15 +26,15 @@
     "scripts": {
         "build": "tsc -b",
         "typecheck": "tsc -p tsconfig.test.json",
-        "test": "vitest run --passWithNoTests",
+        "test": "vitest run",
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {
         "zod": "^4.5.4"
     },
     "devDependencies": {
-        "@types/node": "^26.1.2",
+        "@types/node": "^24.12.0",
         "typescript": "^7.0.2",
-        "vitest": "^4.1.10"
+        "vitest": "^5.0.1"
     }
 }
