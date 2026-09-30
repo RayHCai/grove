@@ -7,10 +7,10 @@
     "scripts": {
         "build:bundle": "node bundle/build.mjs",
         "build": "node bundle/build.mjs && node ../../../scripts/cargo.mjs build --release",
-        "typecheck": "node ../../../scripts/cargo.mjs clippy --all-targets -- -D warnings",
-        "test": "node ../../../scripts/cargo.mjs test",
-        "format": "node ../../../scripts/cargo.mjs fmt",
-        "format:check": "node ../../../scripts/cargo.mjs fmt --check",
+        "typecheck": "node ../../../scripts/cargo.mjs clippy -p grove-game-instance -p grove-request-id --all-targets -- -D warnings",
+        "test": "node ../../../scripts/cargo.mjs test -p grove-game-instance -p grove-request-id",
+        "format": "node ../../../scripts/cargo.mjs fmt --all",
+        "format:check": "node ../../../scripts/cargo.mjs fmt --all --check",
         "clean": "node ../../../scripts/cargo.mjs clean && rm -rf dist .turbo"
     },
     "devDependencies": {

@@ -34,7 +34,7 @@ pub struct Wake {
 }
 
 /// The accumulator, the step cap, and the send cadence. It steps nothing itself: `wake` reports
-/// what is owed and the caller runs it, which keeps the isolate — neither `Send` nor re-entrant —
+/// what is owed and the caller runs it, which keeps the isolate (neither `Send` nor re-entrant)
 /// off the far side of a callback.
 pub struct Clock {
     sim_rate: f64,
@@ -81,12 +81,12 @@ impl Clock {
         }
     }
 
-    /// The clock the last wake reported — the host's only reading of time.
+    /// The clock the last wake reported: the host's only reading of time.
     pub fn now_seconds(&self) -> f64 {
         self.now_seconds
     }
 
-    /// How many times the cap has shed a backlog — a visible slowdown, not a silent one.
+    /// How many times the cap has shed a backlog: a visible slowdown, not a silent one.
     pub fn shed_count(&self) -> u64 {
         self.shed_count
     }
@@ -218,7 +218,7 @@ mod tests {
         let mut drains = Vec::new();
         clock.wake(0.0, &mut drains);
         // Two wakes of two ticks each: the send lands on the third TICK, which falls inside the
-        // second wake — a boundary a cadence derived from the tick index could not see.
+        // second wake, a boundary a cadence derived from the tick index could not see.
         assert_eq!(clock.wake(2.0 / 60.0, &mut drains).sends, 0);
         assert_eq!(clock.wake(4.0 / 60.0, &mut drains).sends, 1);
         assert_eq!(drains, vec![true, false]);

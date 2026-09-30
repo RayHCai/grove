@@ -1,5 +1,5 @@
 //! `@serverState` that outlives a session, over `@grove/game-manager`. This process holds no
-//! database credential — it presents a session-scoped bearer — so a load and a save are HTTP
+//! database credential (it presents a session-scoped bearer), so a load and a save are HTTP
 //! calls, which is why neither can happen inside a tick.
 
 use std::collections::HashMap;
@@ -53,20 +53,20 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn new(base: String, token: String) -> Self {
-        Self {
+    pub fn new(base: String, token: String) -> Result<Self> {
+        Ok(Self {
             client: reqwest::Client::builder()
                 .timeout(REQUEST_TIMEOUT)
                 .build()
-                .expect("building the store client"),
+                .context("building the store client")?,
             base,
             token,
             revisions: Arc::new(Mutex::new(HashMap::new())),
-        }
+        })
     }
 
     /// Reads one host's persisted fields. `Ok(Some)` for a record, `Ok(None)` for a key holding
-    /// nothing, `Err` for a read that FAILED — three answers, because the sim writes back over the
+    /// nothing, `Err` for a read that FAILED: three answers, because the sim writes back over the
     /// second and must never write back over the third.
     pub async fn load(&self, host_key: &str) -> Result<Option<Box<RawValue>>> {
         // Minted rather than inherited: a load is the sim's errand and sits inside no request of
@@ -115,7 +115,7 @@ impl Store {
         bail!("the game manager refused two compare-and-sets for {host_key}")
     }
 
-    /// One attempt. `false` is a 409 and nothing else — every other failure is an `Err`.
+    /// One attempt. `false` is a 409 and nothing else; every other failure is an `Err`.
     async fn put(&self, host_key: &str, fields: &RawValue) -> Result<bool> {
         let id = request_id::mint();
         let response = self
@@ -207,7 +207,7 @@ mod tests {
         });
 
         (
-            Store::new(base, "a-session-scoped-bearer".to_owned()),
+            Store::new(base, "a-session-scoped-bearer".to_owned()).unwrap(),
             handle,
         )
     }
@@ -289,5 +289,31 @@ mod tests {
         .unwrap();
 
         assert_eq!(body, r#"{"value":{"coins":3},"ifRevision":7}"#);
+    }
+
+    fn fixture(name: &str) -> String {
+        let path = format!("../../../libs/api-contract/fixtures/wire/{name}");
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+    }
+
+    #[test]
+    fn reads_the_contracts_state_record() {
+        let record: StateRecord = serde_json::from_str(&fixture("state-record.json")).unwrap();
+
+        assert_eq!(record.revision, 7);
+        assert_eq!(record.value.get(), r#"{"coins":3,"name":"Wren"}"#);
+    }
+
+    #[test]
+    fn writes_the_contracts_state_write() {
+        let wire = fixture("state-write.json");
+        let value = RawValue::from_string(r#"{"coins":4,"name":"Wren"}"#.to_owned()).unwrap();
+        let body = serde_json::to_string(&StateWrite {
+            value: &value,
+            if_revision: 7,
+        })
+        .unwrap();
+
+        assert_eq!(body, wire.trim());
     }
 }

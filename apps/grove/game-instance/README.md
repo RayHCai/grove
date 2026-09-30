@@ -4,27 +4,27 @@ One game session, in one process: the sockets, the ticket check, the tick clock,
 world runs in, and the drain. Written in Rust.
 
 The process boundary is the outer isolation and the V8 isolate is the inner one. This process holds
-no database credential and no platform secret — a shared secret it verifies join tickets with, and a
+no database credential and no platform secret: a shared secret it verifies join tickets with, and a
 session-scoped bearer for `@grove/game-manager`, which is the only store it can reach.
 
 ## The two halves, and why they never share a thread
 
 `tokio` owns the listener, one task per peer, and the store. One dedicated thread owns the V8
-isolate. They meet at a single channel of `HostEvent`, and that is what gives a tick one order over
-everything that happened to it — a `deno_core` `JsRuntime` is not `Send`, and a tick that could be
+isolate. They meet at a single bounded channel of `HostEvent`, and that is what gives a tick one order over
+everything that happened to it: a `deno_core` `JsRuntime` is not `Send`, and a tick that could be
 moved mid-step would not be a fixed step at all.
 
-| File          | Holds                                                                            |
-| ------------- | -------------------------------------------------------------------------------- |
-| `main.rs`     | the composition root: config, listener, the drain signal, the session thread     |
-| `config.rs`   | the environment `@grove/instance-manager` spawns this process with               |
-| `ticket.rs`   | join-ticket verification, byte for byte with `libs/api-contract`'s minting       |
-| `net.rs`      | the WebSocket listener, one task per peer, and the frame-size and idle bounds    |
-| `session.rs`  | the tick loop, the write-out, and the watchdog that kills a runaway span         |
-| `isolate.rs`  | the V8 isolate, the two ops a batch crosses in, the heap limit and the kill path |
-| `clock.rs`    | the accumulator, the step cap and shed, and the send cadence                     |
-| `protocol.rs` | the batch types, mirroring `packages/sim/src/batch.ts` — two of them encoded     |
-| `store.rs`    | `@serverState` over `@grove/game-manager`, which is the only thing it can reach  |
+| File          | Holds                                                                             |
+| ------------- | --------------------------------------------------------------------------------- |
+| `main.rs`     | the composition root: config, listener, the drain signals, the session thread     |
+| `config.rs`   | the environment `@grove/instance-manager` spawns this process with                |
+| `ticket.rs`   | join-ticket verification, byte for byte with `libs/api-contract`'s minting        |
+| `net.rs`      | the WebSocket listener, one task per peer, and the frame, inbound and idle bounds |
+| `session.rs`  | the tick loop, the write-out, and the watchdog that kills a runaway span          |
+| `isolate.rs`  | the V8 isolate, the two ops a batch crosses in, the heap limit and the kill path  |
+| `clock.rs`    | the accumulator, the step cap and shed, and the send cadence                      |
+| `protocol.rs` | the batch types, mirroring `packages/sim/src/batch.ts`, two of them encoded       |
+| `store.rs`    | `@serverState` over `@grove/game-manager`, which is the only thing it can reach   |
 
 `Send` and `OutputBatch` mirror the ENCODED variants in `packages/sim/src/isolate-entry.ts`
 (`EncodedSend`, `EncodedBatch`), whose envelopes are already the codec's bytes; every other type in
@@ -34,15 +34,15 @@ moved mid-step would not be a fixed step at all.
 
 Two ops, and nothing else: one takes a message in, one puts a message out. There is no clock op,
 because core's only wall-clock probe falls back to `Date.now` and its handler budget is 50 ms, where
-a millisecond of resolution is a rounding error. There is no ambient Node or DOM global either —
+a millisecond of resolution is a rounding error. There is no ambient Node or DOM global either:
 nothing in the engine reaches one, which is what lets the isolate stay this bare.
 
 A tick is a bounded function, not an event loop: the microtask queue is drained explicitly after each
-call, which is what lets `startGame` — deliberately not awaited — and every awaiting handler make
-progress inside a 16 ms budget.
+call, which is what lets `startGame` (deliberately not awaited) and every awaiting handler make
+progress inside the tick budget, 250 ms by default.
 
 `@serverState` is checkpointed through `store.rs` and the batch. The creator's `storage` object is a
-different seam — a promise a handler awaits — and this crate does not grant one, so a world it runs
+different seam (a promise a handler awaits) and this crate does not grant one, so a world it runs
 falls back to core's in-memory store and loses those writes at session end. The in-process host
 grants it; this one does not yet.
 
@@ -60,15 +60,15 @@ process. The isolate is discarded either way, so the headroom is never actually 
 
 ## What it does not own
 
-The world. Everything from a decoded inbound frame to an outbound envelope is `@platform/sim`'s —
+The world. Everything from a decoded inbound frame to an outbound envelope is `@platform/sim`'s:
 the narrowing, admission, the input buffer, the join, the snapshot, the drain of the replication
 channels. This half never learns what an entity is, which is what keeps the sim portable enough to
-host anywhere — including, eventually, a browser doing its own prediction.
+host anywhere, including, eventually, a browser doing its own prediction.
 
 Its in-process twin is `@platform/glue`'s `GameInstance`: the same clock, sockets and store around
 the same sim, in TypeScript, which is what the tests, the integration suite and `apps/playground`
 drive. Where the two disagree about the clock, a game behaves differently under load in a way no
-playtest reproduces — so `clock.rs` and `packages/glue/src/server/driver.ts` are one policy written
+playtest reproduces, so `clock.rs` and `packages/glue/src/server/driver.ts` are one policy written
 twice, and both suites answer the same cases.
 
 ## The ticket
@@ -89,15 +89,17 @@ cargo run --release
 ```
 
 `bundle/entry.ts` is the file a real game replaces: it imports its own project manifest and script
-registry and hands `createSim` both. What cannot change is its last line — `installIsolateEntry` is
-what puts the three functions on the global this process reaches the bundle through. It is bundled
+registry and hands `createSim` both. What cannot change is its last line: `installIsolateEntry` is
+what puts the three functions on the global this process reaches the bundle through, and the
+determinism shim goes on ahead of it with `globalThis` allowed, since that is the name every call
+from this process reads. It is bundled
 `platform: neutral`, so esbuild refuses a Node built-in here rather than shimming one in.
 
 | Variable                 | What                                                                            |
 | ------------------------ | ------------------------------------------------------------------------------- |
 | `GROVE_GAME_ID`          | which game this process serves; a ticket naming another is refused              |
 | `GROVE_SESSION_ID`       | which session this process is; a ticket minted for another is refused           |
-| `GROVE_BIND`             | address to bind, `0.0.0.0:0` by default — the port is reported                  |
+| `GROVE_BIND`             | address to bind, `0.0.0.0:0` by default; the port is reported                   |
 | `GROVE_BUNDLE`           | the compiled sim bundle this world runs                                         |
 | `GROVE_SIM_CONFIG`       | the `SimConfig` it boots with, as JSON                                          |
 | `GAME_TOKEN_SECRET`      | shared with `@grove/api`, which mints the tickets                               |
@@ -107,13 +109,13 @@ what puts the three functions on the global this process reaches the bundle thro
 | `GROVE_TICK_BUDGET_MS`   | wall-clock one tick may spend inside the isolate, 250 ms by default             |
 
 `pnpm run build | test | typecheck` at the repo root reach this crate through `package.json`, whose
-scripts shell to cargo — `build` bundles the sim first, `typecheck` is `clippy -D warnings`. With no
+scripts shell to cargo: `build` bundles the sim first, `typecheck` is `clippy -D warnings`. With no
 Rust toolchain on `PATH` they print one `skipped:` line and succeed, so working on the TypeScript
 half does not require installing Rust.
 
 This crate, `@grove/asset-upload-service` and the `request-id` crate they share are one cargo
 workspace rooted at `apps/grove`, which is where the lock, the pinned toolchain and the release
-profile live — `cargo` finds all three by walking up from here. On Windows the crate links against the **static** CRT, because V8 ships
+profile live; `cargo` finds all three by walking up from here. On Windows the crate links against the **static** CRT, because V8 ships
 prebuilt that way and a process with two CRTs has two allocators in it.
 
 ## What the bundle must publish

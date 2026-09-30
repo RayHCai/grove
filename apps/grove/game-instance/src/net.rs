@@ -1,6 +1,6 @@
 //! The sockets: one listener, one task per peer, and the ticket check before either.
 //! Nothing here knows what an entity is. The narrowing, and every bound on what one frame may
-//! contain, is the sim's — this half refuses only what it can judge: the bytes, and the bearer.
+//! contain, is the sim's; this half refuses only what it can judge: the bytes, and the bearer.
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -8,14 +8,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::extract::{ConnectInfo, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{middleware, Json, Router};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::value::RawValue;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 
 use crate::protocol::{ConnectionId, SendClass};
 use crate::session::HostEvent;
@@ -30,14 +31,17 @@ pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 const WRITE_QUEUE_DEPTH: usize = 64;
 
 /// How long a joined peer may send nothing before its socket is closed. The client refreshes
-/// `time-sync` every two seconds, so silence this long is a peer that stopped running —
+/// `time-sync` every two seconds, so silence this long is a peer that stopped running,
 /// including a tab the browser throttled to a stop, which is the point.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Frames one peer may send inside `INBOUND_WINDOW` before it is closed as a flood.
 /// The sim refuses extra input a tick later, so this is the only bound on how fast one socket
-/// can feed the event queue — an order of magnitude above what a 60 Hz client sends.
+/// can feed the event queue, an order of magnitude above what a 60 Hz client sends.
 const INBOUND_BUDGET_FRAMES: usize = 600;
+/// Bytes one peer may send inside `INBOUND_WINDOW`: two whole frames at the codec's ceiling, so a
+/// legitimate large frame fits, while a peer cannot hold the frame budget at 4 MiB apiece.
+const INBOUND_BUDGET_BYTES: usize = 2 * MAX_FRAME_BYTES;
 const INBOUND_WINDOW: Duration = Duration::from_secs(1);
 
 /// How long the writer gets to drain its queue once the session has hung the peer up.
@@ -77,9 +81,11 @@ impl Outgoing {
 
 /// The session thread's end of one peer's life: dropping it closes that socket.
 ///
-/// A sender rather than a flag because the reader is parked in `.next()` and cannot poll anything —
+/// A sender rather than a flag because the reader is parked in `.next()` and cannot poll anything:
 /// only a cancellation it is selecting on can wake it, and a dropped sender is that cancellation.
-pub struct HangUp(#[allow(dead_code)] mpsc::Sender<()>);
+pub struct HangUp {
+    _sender: mpsc::Sender<()>,
+}
 
 /// What `/healthz` answers with, mirroring the `Vitals` the agent on this box decodes.
 #[derive(serde::Serialize)]
@@ -89,7 +95,7 @@ struct Vitals {
 
 #[derive(Clone)]
 pub struct Listener {
-    events: mpsc::UnboundedSender<HostEvent>,
+    events: mpsc::Sender<HostEvent>,
     secret: Arc<Vec<u8>>,
     game_id: Arc<String>,
     session_id: Arc<String>,
@@ -97,14 +103,14 @@ pub struct Listener {
     /// this box takes the roster from there, and a bare 200 reports a full box as empty.
     players: Arc<AtomicUsize>,
     /// Set when the process is draining, which is what stops a new peer joining a world that is
-    /// about to end — and what lets the drain reach an empty roster at all.
+    /// about to end, and what lets the drain reach an empty roster at all.
     draining: Arc<AtomicBool>,
     next_id: Arc<AtomicU64>,
 }
 
 impl Listener {
     pub fn new(
-        events: mpsc::UnboundedSender<HostEvent>,
+        events: mpsc::Sender<HostEvent>,
         secret: Vec<u8>,
         game_id: String,
         session_id: String,
@@ -129,29 +135,8 @@ impl Listener {
             .with_state(self)
             // Outermost, so the agent's probe and an upgrade refused before any handler ran are
             // both answered under the id their caller is tracing.
-            .layer(middleware::from_fn(correlate))
+            .layer(middleware::from_fn(request_id::correlate))
     }
-}
-
-/// Joins one request to the caller that made it: the id it presented when that is one token this
-/// process can log unchanged, and a fresh one when it is not. Put back on the request too, so a
-/// handler reads the id the caller will quote.
-async fn correlate(mut request: Request, next: middleware::Next) -> Response {
-    let id = request
-        .headers()
-        .get(request_id::HEADER)
-        .and_then(|presented| presented.to_str().ok())
-        .filter(|presented| request_id::valid(presented))
-        .map_or_else(request_id::mint, str::to_owned);
-
-    let value = HeaderValue::from_str(&id).expect("a checked request id is a header value");
-    request
-        .headers_mut()
-        .insert(request_id::HEADER, value.clone());
-
-    let mut response = next.run(request).await;
-    response.headers_mut().insert(request_id::HEADER, value);
-    response
 }
 
 /// The ticket rides the WebSocket SUBPROTOCOL, not the query string: a browser cannot set a
@@ -178,7 +163,7 @@ async fn upgrade(
     let now = unix_seconds();
     if now < EARLIEST_PLAUSIBLE_SECONDS {
         // A clock this process cannot trust is a check it cannot make, and `exp` is the only bound
-        // a stolen ticket has — so the box refuses rather than admits.
+        // a stolen ticket has, so the box refuses rather than admits.
         tracing::error!(%peer, "accept-refused reason=no-clock");
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
@@ -193,7 +178,7 @@ async fn upgrade(
         Ok(claims) => claims,
         Err(failure) => {
             // Logged here and answered with nothing but a status: a peer that cannot present a
-            // ticket has no session to be told about, and the reason is the operator's — carrying
+            // ticket has no session to be told about, and the reason is the operator's, carrying
             // both readings, since a box a minute fast refuses every honest ticket as `expired` and
             // no token names which of the two clocks moved.
             tracing::warn!(
@@ -217,7 +202,7 @@ async fn upgrade(
         "accept conn"
     );
     let identity = claims.player_id;
-    // Held on the codec as well, because its own defaults are 16 MiB a frame and 64 MiB a message —
+    // Held on the codec as well, because its own defaults are 16 MiB a frame and 64 MiB a message,
     // against which the check in `serve` only ever sees bytes this process has already buffered.
     let ws = ws
         .max_message_size(MAX_FRAME_BYTES)
@@ -258,8 +243,9 @@ async fn serve(
             connection_id: connection_id.clone(),
             identity,
             writes,
-            hangup: HangUp(hangup),
+            hangup: HangUp { _sender: hangup },
         })
+        .await
         .is_err()
     {
         return;
@@ -299,7 +285,7 @@ async fn serve(
                 _ => break,
             },
         };
-        if !inbound.admit(Instant::now()) {
+        if !inbound.admit(Instant::now(), frame_bytes(&frame)) {
             tracing::warn!(conn = %connection_id, "close conn reason=inbound-flood");
             break;
         }
@@ -320,15 +306,18 @@ async fn serve(
         let Ok(message) = RawValue::from_string(text.to_string()) else {
             continue;
         };
-        if listener
-            .events
-            .send(HostEvent::Frame {
-                connection_id: connection_id.clone(),
-                message,
-            })
-            .is_err()
-        {
-            break;
+        match listener.events.try_send(HostEvent::Frame {
+            connection_id: connection_id.clone(),
+            message,
+        }) {
+            Ok(()) => {}
+            // The session is a whole queue behind: a peer that waited here would hold every frame it
+            // has read in memory, so it goes, as a flood would.
+            Err(TrySendError::Full(_)) => {
+                tracing::warn!(conn = %connection_id, "close conn reason=event-queue-full");
+                break;
+            }
+            Err(TrySendError::Closed(_)) => break,
         }
     }
 
@@ -339,7 +328,18 @@ async fn serve(
         let _ = tokio::time::timeout(FLUSH_GRACE, &mut writer).await;
     }
     writer.abort();
-    let _ = listener.events.send(HostEvent::Closed { connection_id });
+    let _ = listener
+        .events
+        .send(HostEvent::Closed { connection_id })
+        .await;
+}
+
+fn frame_bytes(frame: &Message) -> usize {
+    match frame {
+        Message::Text(text) => text.len(),
+        Message::Binary(bytes) => bytes.len(),
+        _ => 0,
+    }
 }
 
 /// One peer's inbound allowance, refilled a window at a time.
@@ -349,6 +349,7 @@ async fn serve(
 struct Inbound {
     window_opened: Instant,
     frames: usize,
+    bytes: usize,
 }
 
 impl Inbound {
@@ -356,17 +357,20 @@ impl Inbound {
         Self {
             window_opened: now,
             frames: 0,
+            bytes: 0,
         }
     }
 
-    /// Counts one frame and answers whether the peer is still inside its budget.
-    fn admit(&mut self, now: Instant) -> bool {
+    /// Counts one frame of `bytes` and answers whether the peer is still inside both budgets.
+    fn admit(&mut self, now: Instant, bytes: usize) -> bool {
         if now.duration_since(self.window_opened) >= INBOUND_WINDOW {
             self.window_opened = now;
             self.frames = 0;
+            self.bytes = 0;
         }
         self.frames += 1;
-        self.frames <= INBOUND_BUDGET_FRAMES
+        self.bytes = self.bytes.saturating_add(bytes);
+        self.frames <= INBOUND_BUDGET_FRAMES && self.bytes <= INBOUND_BUDGET_BYTES
     }
 }
 
@@ -386,7 +390,7 @@ mod tests {
 
     /// A listener holding nothing: every route under test answers without a world behind it.
     fn listening() -> Listener {
-        let (events, _receiver) = mpsc::unbounded_channel();
+        let (events, _receiver) = mpsc::channel(1);
         Listener::new(
             events,
             b"a-token-secret-at-least-thirty-two-ch".to_vec(),
@@ -443,7 +447,7 @@ mod tests {
     }
 
     /// A refusal is what an operator traces, and this one is written by the extractors rather than
-    /// by any handler — which is exactly the answer a layer mounted inside the router would miss.
+    /// by any handler, which is exactly the answer a layer mounted inside the router would miss.
     #[tokio::test]
     async fn carries_the_id_onto_an_upgrade_refused_before_a_handler_ran() {
         let response = listening()
@@ -472,9 +476,20 @@ mod tests {
         let mut inbound = Inbound::new(opened);
 
         for _ in 0..INBOUND_BUDGET_FRAMES {
-            assert!(inbound.admit(opened));
+            assert!(inbound.admit(opened, 1));
         }
-        assert!(!inbound.admit(opened));
+        assert!(!inbound.admit(opened, 1));
+    }
+
+    #[test]
+    fn closes_a_peer_that_sends_too_many_bytes_in_few_frames() {
+        let opened = Instant::now();
+        let mut inbound = Inbound::new(opened);
+
+        assert!(inbound.admit(opened, MAX_FRAME_BYTES));
+        assert!(inbound.admit(opened, MAX_FRAME_BYTES));
+        assert!(!inbound.admit(opened, 1));
+        assert!(inbound.admit(opened + INBOUND_WINDOW, MAX_FRAME_BYTES));
     }
 
     #[test]
@@ -483,8 +498,8 @@ mod tests {
         let mut inbound = Inbound::new(opened);
 
         for _ in 0..=INBOUND_BUDGET_FRAMES {
-            inbound.admit(opened);
+            inbound.admit(opened, 1);
         }
-        assert!(inbound.admit(opened + INBOUND_WINDOW));
+        assert!(inbound.admit(opened + INBOUND_WINDOW, 1));
     }
 }

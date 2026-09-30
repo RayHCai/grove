@@ -1,6 +1,6 @@
 //! One V8 isolate per session, holding the compiled `@platform/sim` bundle and the creator's code.
 //! The isolate is the containment: its own heap limit, its own `terminate_execution` handle, and
-//! no ambient capability — the bundle reaches out only through the two ops declared here.
+//! no ambient capability; the bundle reaches out only through the two ops declared here.
 //! A `JsRuntime` is neither `Send` nor re-entrant, so this runs on the one session thread.
 
 use std::cell::RefCell;
@@ -16,7 +16,7 @@ use crate::protocol::{InputBatch, OutputBatch};
 /// What the bundle is called in a stack trace.
 const BUNDLE_URL: &str = "grove:sim";
 
-/// Boot, one tick, and close — the three scripts this host ever runs, held as constants so a tick
+/// Boot, one tick, and close: the three scripts this host ever runs, held as constants so a tick
 /// never builds a source string out of peer-influenced bytes.
 const BOOT_SOURCE: &str = "globalThis.__grove.boot(Deno.core.ops.op_grove_take_message());";
 const TICK_SOURCE: &str =
@@ -115,8 +115,8 @@ impl Isolate {
         runtime.add_near_heap_limit_callback(move |current, _initial| {
             flag.store(true, Ordering::SeqCst);
             terminator.terminate_execution();
-            // The grant is REQUIRED, not a concession: `terminate_execution` is not instantaneous —
-            // V8 keeps allocating as it unwinds — so an unchanged limit reaches
+            // The grant is REQUIRED, not a concession: `terminate_execution` is not instantaneous:
+            // V8 keeps allocating as it unwinds, so an unchanged limit reaches
             // `FatalProcessOutOfMemory` and aborts every other session here.
             current * 2
         });
@@ -152,7 +152,7 @@ impl Isolate {
         self.take_output()
     }
 
-    /// Releases the world and takes the last batch — every online player's save, and nothing else.
+    /// Releases the world and takes the last batch: every online player's save, and nothing else.
     pub fn close(&mut self) -> Result<OutputBatch> {
         self.run("[grove:close]", CLOSE_SOURCE)?;
         self.take_output()
@@ -173,8 +173,8 @@ impl Isolate {
             .execute_script(name, deno_core::FastString::from_static(source));
 
         // Drained explicitly, because deno_core runs V8 under an Explicit microtask policy and
-        // nothing else here polls an event loop: this is what lets `startGame` — deliberately not
-        // awaited — and every awaiting handler make progress. It runs even on a throw, so a
+        // nothing else here polls an event loop: this is what lets `startGame` (deliberately not
+        // awaited) and every awaiting handler make progress. It runs even on a throw, so a
         // rejection settled before the throw still reaches its own handler.
         {
             deno_core::scope!(scope, &mut self.runtime);
