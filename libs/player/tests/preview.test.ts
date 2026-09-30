@@ -1,7 +1,7 @@
 // A world running in this page, which is what an editor's preview mounts a session against.
 //
 // The classes below carry no decorators: vitest's transform does not lower TC39 decorators, and
-// what this file is about is the wiring — that a real `Sim` boots, that a pair reaches it, and that
+// what this file is about is the wiring: that a real `Sim` boots, that a pair reaches it, and that
 // the session is handed the classes its own half needs.
 
 import { describe, expect, it, vi } from 'vitest';
@@ -149,7 +149,6 @@ describe('booting a world in this page', () => {
                 frames.frame(now);
                 // An identified join awaits a store read before a Player is allocated, so the
                 // admission finishes on the microtask queue rather than inside the pump.
-                // oxlint-disable-next-line no-await-in-loop
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
 
@@ -214,17 +213,16 @@ describe('booting a world in this page', () => {
         if (preview.authority.kind !== 'local') throw new Error('expected a local authority');
 
         try {
-            // The world's own clock off, this test's on — see the note in the admission case.
+            // The world's own clock off, this test's on; see the note in the admission case.
             preview.pause();
             // One preview is one player, so a second stage opened before the first has joined is
-            // refused — and the only place that refusal is ever stated is this channel.
+            // refused, and the only place that refusal is ever stated is this channel.
             preview.authority.open();
             preview.authority.open();
             let now = 0;
             for (let i = 0; i < 5 && lines.length === 0; i += 1) {
                 now += 1 / 60;
                 preview.pump(now);
-                // oxlint-disable-next-line no-await-in-loop
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
             expect(lines.join(' ')).toContain('accept-refused');
