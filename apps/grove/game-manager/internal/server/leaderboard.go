@@ -22,7 +22,7 @@ func (s *service) readLeaderboard(w http.ResponseWriter, r *http.Request) {
 	page, err := s.store.Leaderboard(r.Context(), gameID(r), query)
 	switch {
 	case errors.Is(err, store.ErrBadCursor):
-		bad(w, "cursor is not one this board issued")
+		httpx.BadRequest(w, "cursor is not one this board issued")
 	case err != nil:
 		s.fail(w, r, "read leaderboard", err)
 	default:
@@ -35,7 +35,7 @@ func leaderboardQuery(w http.ResponseWriter, r *http.Request) (contract.Leaderbo
 
 	board := params.Get("board")
 	if board == "" || len(board) > contract.LeaderboardNameMaxLen {
-		bad(w, fmt.Sprintf("board must be 1 to %d characters", contract.LeaderboardNameMaxLen))
+		httpx.BadRequest(w, fmt.Sprintf("board must be 1 to %d characters", contract.LeaderboardNameMaxLen))
 		return contract.LeaderboardQuery{}, false
 	}
 
@@ -43,7 +43,7 @@ func leaderboardQuery(w http.ResponseWriter, r *http.Request) (contract.Leaderbo
 	if raw := params.Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
-			bad(w, "limit must be an integer")
+			httpx.BadRequest(w, "limit must be an integer")
 			return contract.LeaderboardQuery{}, false
 		}
 		// Clamped rather than refused: a caller asking for more rows than a page holds wants the
