@@ -3,10 +3,13 @@
 
 import { runToolchain } from './toolchain.mjs';
 
+// Kept at or above the toolchain go.mod pins: staticcheck reads the standard library with the
+// compiler it was built against, and an older one fails to parse a newer one. CI installs the
+// version named on this line, so it is the one place the pin lives.
+const version = '2026.2.1';
+
 runToolchain({
     bin: 'staticcheck',
     probe: ['-version'],
-    // Kept at or above the toolchain go.mod pins: staticcheck reads the standard library with the
-    // compiler it was built against, and an older one fails to parse a newer one.
-    install: 'go install honnef.co/go/tools/cmd/staticcheck@2026.2.1',
+    install: `go install honnef.co/go/tools/cmd/staticcheck@${version}`,
 });
