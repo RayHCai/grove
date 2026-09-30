@@ -33,7 +33,7 @@ describe('the transcendental list', () => {
     });
 });
 
-/** The specifiers of the value re-export block naming `source` — the one carrying `contains`. */
+/** The specifiers of the value re-export block naming `source`: the one carrying `contains`. */
 function reexportedFrom(file: string, source: string, contains?: string): string[] {
     const text = readFileSync(path.join(REPO_ROOT, file), 'utf8');
     const program = parseAst(text, { lang: 'ts' }, file) as unknown as {

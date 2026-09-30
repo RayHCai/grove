@@ -4,7 +4,7 @@ Script policy and toolchain: it turns a project's creator scripts into one deter
 content-hashed ESM chunk per side, refuses the things a `SyncedScript` may not run, and resolves a
 script id back to a constructor at run time.
 
-This is policy and build, not runtime — which is why it is not part of `@platform/core`. Core owns
+This is policy and build, not runtime, which is why it is not part of `@platform/core`. Core owns
 the script model itself: the four bases, the sixteen handler decorators and `@serverState`, the
 per-class metadata registry, and dispatch. Nothing in core depends on this package, and nothing here
 reimplements any of it.
@@ -32,7 +32,9 @@ runs after it so it only ever sees lowered output. `apps/playground`'s `tsconfig
 | `@platform/scripting/toolchain` | Node, at build time        | the analysis, the determinism pass, `tsc`, the linker           |
 
 The split is the point: a browser bundle that reaches the registry must not pull a compiler and a
-bundler into its module graph.
+bundler into its module graph. That is also why `typescript` is an optional peer: whoever imports
+`./toolchain` installs it, and `tsc` is spawned with a deadline (`lowerTimeoutMs`, 60 s by default)
+past which the build is refused with `tsc-timeout`.
 
 ## Building a bundle
 
@@ -52,7 +54,7 @@ specifiers it still imports. `scripts` names every class that reached a chunk. P
 supplies the ids from a manifest; omitting it takes every exported script class as
 `<module>#<Export>`.
 
-**Ids are stamped here, never read off `klass.name`** — a minifier renames the class, and the wire
+**Ids are stamped here, never read off `klass.name`**: a minifier renames the class, and the wire
 carries the id across a process boundary where the name is no contract.
 
 **One chunk per side, and `synced` reaches both.** A `ServerScript` never appears in the client
@@ -75,13 +77,13 @@ directory.
 A Grove script is written with no imports at all: every engine name is a bare global, because the
 editor declares the engine to its checker that way and a creator never types one. Something has to
 put the import back before a compiler reads the file, and `preludeFor` and `typePreludeFor` are what
-do it — the values in one import, the erased types in another, and only the names that file actually
+do it: the values in one import, the erased types in another, and only the names that file actually
 reaches, since an import of everything would shadow the file's own declarations.
 
 The lists live here rather than in either of the two places that compile a creator's source, because
 a name in one and not the other is a game that typechecks in the workbench and fails to build on a
-box. `@platform/engine` cannot be imported here to check them against — the dependency runs the
-other way — so `@grove/editor`, which holds both these lists and the declarations a creator is
+box. `@platform/engine` cannot be imported here to check them against (the dependency runs the
+other way), so `@grove/editor`, which holds both these lists and the declarations a creator is
 checked against, is where the two are held to agree.
 
 ## What a chunk exports, and what has to resolve its imports
@@ -93,7 +95,7 @@ export const scripts = [{ id: 'rules', location: 'server', ctor: Rules }];
 
 The chunk keeps `@platform/engine` and `@platform/core` external, because the runtime evaluating it
 already holds them and a second copy of core would be a second runtime. Resolving those specifiers
-is the evaluation boundary's job — an import map in the browser, plain resolution in Node — and
+is the evaluation boundary's job (an import map in the browser, plain resolution in Node), and
 `SideChunk.imports` is the list to build one from.
 
 ```ts
@@ -108,12 +110,12 @@ registry.metadataOf('rules'); //  core's handler and @serverState tables for it
 `metadataOf` is the join to core's decorator metadata, and it is also the assertion that the
 pipeline ran in the right order: empty tables on a decorated class mean the decorators reached the
 chunk unlowered. The id is a type parameter defaulting to `string`, so a consumer holding an
-authoring id brand narrows to it — `ScriptRegistry<ScriptId>` — without this package depending on
+authoring id brand narrows to it, `ScriptRegistry<ScriptId>`, without this package depending on
 the package that mints one.
 
 ## The determinism pass
 
-Inside a `SyncedScript` subclass, a **build error** — not a lint warning, and not a run-time
+Inside a `SyncedScript` subclass, a **build error**, not a lint warning, and not a run-time
 surprise on the tick a prediction diverges:
 
 | Refused                              | Write instead                                |
@@ -146,8 +148,9 @@ Six names root a hierarchy, not three: `BaseMovement`, `TopDownMovement` and `Pl
 are engine classes a creator extends without ever naming `SyncedScript`, and a walk no pass located
 is a walk whose `Date.now()` nothing refuses and whose class reaches neither chunk.
 
-The 22 names exist in four places — here, `@platform/math`'s barrel, `@platform/engine`'s re-export
-block, and `.oxlintrc.json`'s repo-wide `Math.*` pin — and they agree. A list that drifts is a
+The 22 names exist in five places (here, which `ENGINE_VALUES` spreads, `@platform/math`'s barrel,
+`@platform/engine`'s re-export block, the editor's creator `globals.d.ts`, and `.oxlintrc.json`'s
+repo-wide `Math.*` pin), and they agree. A list that drifts is a
 `SyncedScript` that desyncs, and nothing else in the repo would notice.
 
 The pass is lexical. A helper a synced script calls is not inside it, and neither is
@@ -156,12 +159,10 @@ The pass is lexical. A helper a synced script calls is not inside it, and neithe
 ## The shim, and who it is for
 
 **Determinism here is enforced at build time and nowhere else.** The static pass above is the whole
-mechanism: nothing in this repo evaluates a chunk in a realm of its own, so the lexical hole the
-pass names — a helper a synced script calls — is not closed by anything downstream.
+mechanism, so the lexical hole it names (a helper a synced script calls) is not closed downstream.
 
 `installDeterminismShim({ target })` replaces the refused globals with accessors that throw, and
 `Math` with one that keeps its exact members. It guards a whole **realm**, which is why nothing here
-installs it: a `SideChunk` is evaluated in the page's own realm, where a `ClientScript`'s `Date` is
-perfectly legal and this would break it. It is exported for an embedder that gives synced code a
-realm to itself — a `vm` context or a worker — and that embedder owns both the `target` and the
-`dispose()`.
+installs it: a server chunk's realm also runs `ServerScript`s, which may read a clock, and a
+`SideChunk` runs in the page's realm, where a `ClientScript`'s `Date` is legal. It is exported for an
+embedder that gives synced code a realm to itself, and that embedder owns the `target` and `dispose()`.

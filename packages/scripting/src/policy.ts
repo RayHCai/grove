@@ -1,8 +1,8 @@
-// This list also exists in @platform/math's barrel, @platform/engine's re-export block and
-// .oxlintrc.json, and all four must agree: one that drifts is a SyncedScript that desyncs.
+// This list also exists in @platform/math's barrel, @platform/engine's re-export block, the
+// editor's globals.d.ts and .oxlintrc.json; all five must agree, or a SyncedScript desyncs.
 
 /** The transcendentals @platform/math reimplements, in @platform/engine's re-export order. */
-export const TRANSCENDENTALS: readonly string[] = [
+export const TRANSCENDENTALS = [
     'sin',
     'cos',
     'tan',
@@ -25,7 +25,7 @@ export const TRANSCENDENTALS: readonly string[] = [
     'pow',
     'cbrt',
     'hypot',
-];
+] as const;
 
 /** What a denied form must be written as instead, and the reason it cannot stand. */
 export interface Redirect {
@@ -48,12 +48,12 @@ export const DENIED_MATH: ReadonlyMap<string, Redirect> = new Map([
         name,
         {
             use: `\`${name}\` from @platform/engine`,
-            because: `Math.${name} is approximated — ${APPROXIMATED}`,
+            because: `Math.${name} is approximated: ${APPROXIMATED}`,
         },
     ]),
     [
         'random',
-        { use: '`random` from @platform/engine', because: `Math.random takes no seed — ${PRNG}` },
+        { use: '`random` from @platform/engine', because: `Math.random takes no seed: ${PRNG}` },
     ],
 ]);
 
@@ -104,7 +104,7 @@ export const DENIED_GLOBALS: ReadonlyMap<string, Redirect> = new Map<string, Red
         'Function',
         {
             use: 'a function literal',
-            because: `the Function constructor compiles its last argument — ${COMPILED}`,
+            because: `the Function constructor compiles its last argument: ${COMPILED}`,
         },
     ],
     ['Reflect', { use: 'the property read written out', because: UNNAMED }],

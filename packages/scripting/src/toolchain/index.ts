@@ -1,4 +1,4 @@
-// Node only — never import this from a browser graph, which would pull tsc and rolldown into it.
+// Node only; never import this from a browser graph, which would pull tsc and rolldown into it.
 
 import { BundleError } from '../errors.js';
 import type { Analysis, ScriptClassInfo } from './analyze.js';
@@ -9,12 +9,10 @@ import type { ScriptBundle, ScriptDeclaration, ScriptRef } from './link.js';
 import { linkChunks } from './link.js';
 
 export type { AnalyzeOptions, Analysis, ScriptClassInfo, SyncedClass } from './analyze.js';
-export { analyzeScripts, DEFAULT_BASE_MODULES } from './analyze.js';
+export { analyzeScripts } from './analyze.js';
 export { checkDeterminism, assertDeterminism } from './check.js';
 export type { LowerOptions } from './lower.js';
-export { lowerScripts } from './lower.js';
 export type { LinkOptions, ScriptBundle, ScriptDeclaration, ScriptRef, SideChunk } from './link.js';
-export { linkChunks } from './link.js';
 export type { BundleErrorCode, Diagnostic } from '../errors.js';
 export { BundleError, DeterminismError, formatDiagnostic } from '../errors.js';
 
@@ -29,6 +27,8 @@ export interface BuildOptions<Id extends string = string> {
     /** The ids to stamp. Omitted, every exported script class is taken as `<module>#<Export>`. */
     readonly scripts?: readonly ScriptRef<Id>[] | undefined;
     readonly baseModules?: readonly string[] | undefined;
+    /** How long `tsc` may run; {@link DEFAULT_LOWER_TIMEOUT_MS} when omitted. */
+    readonly lowerTimeoutMs?: number | undefined;
 }
 
 /** The whole pipeline: analyse, refuse, lower, link. Refusal comes before the compiler. */
@@ -42,7 +42,11 @@ export async function buildScriptBundle<Id extends string = string>(
     assertDeterminism(analysis.synced);
 
     const scripts = declarationsFor(analysis, options.scripts);
-    lowerScripts({ tsconfig: options.tsconfig, outDir: options.loweredDir });
+    await lowerScripts({
+        tsconfig: options.tsconfig,
+        outDir: options.loweredDir,
+        timeoutMs: options.lowerTimeoutMs,
+    });
     return linkChunks({ loweredDir: options.loweredDir, outDir: options.outDir, scripts });
 }
 
@@ -84,7 +88,7 @@ function locate<Id extends string>(analysis: Analysis, ref: ScriptRef<Id>): Scri
     if (!found) {
         throw new BundleError(
             'unknown-script',
-            `${ref.module} exports no script class named ${ref.export} — a script class extends ServerScript, ClientScript or SyncedScript`,
+            `${ref.module} exports no script class named ${ref.export}: a script class extends ServerScript, ClientScript or SyncedScript`,
         );
     }
     return found;
