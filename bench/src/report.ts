@@ -7,7 +7,7 @@ import type { GcTally, Mode } from './meter.js';
 import { gitStamp, hostStamp } from './stamp.js';
 import type { GitStamp, HostStamp } from './stamp.js';
 
-/** One simulated frame at 60 Hz, in nanoseconds — what every share-of-budget figure divides by. */
+/** One simulated frame at 60 Hz, in nanoseconds, what every share-of-budget figure divides by. */
 const FRAME_NS = 1e9 / 60;
 
 export interface Measurement {
@@ -29,7 +29,7 @@ export interface Measurement {
     allocTicks?: number;
     gc?: GcTally;
     simSeconds?: number;
-    /** Free-form scenario output that is not a per-tick cost — a pass breakdown, a pair count. */
+    /** Free-form scenario output that is not a per-tick cost: a pass breakdown, a pair count. */
     notes?: Readonly<Record<string, number | string>>;
 }
 
@@ -95,7 +95,7 @@ function round(value: number | undefined, places: number): number | string {
     return value === undefined ? '' : Number(value.toFixed(places));
 }
 
-/** The same numbers as the JSON, arranged for a terminal — a run is usually read before filed. */
+/** The same numbers as the JSON, arranged for a terminal; a run is usually read before filed. */
 export function printRun(run: RunFile): void {
     const rows = run.measurements.map((m) => ({
         id: m.id,

@@ -1,4 +1,4 @@
-// Every scenario, at its quick size. This is not a performance assertion — it is the check that the
+// Every scenario, at its quick size. This is not a performance assertion; it is the check that the
 // suite still runs at all, which is what rots when a pass is renamed or a world builder drifts.
 
 import { describe, expect, it } from 'vitest';
@@ -20,7 +20,7 @@ describe('world construction', () => {
 
     it('counts colliderless bodies stacked at one point as overlapping', () => {
         // Zero half-extents compare equal, so this is the world shape a benchmark must not build
-        // by accident — the spacing dial exists because of it.
+        // by accident; the spacing dial exists because of it.
         const rt = buildWorld({ entities: 50, colliders: false, spacing: 0 });
         expect(overlappingPairs(rt)).toBeGreaterThan(0);
     });

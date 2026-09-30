@@ -60,7 +60,7 @@ function extent(spec: WorldSpec): number {
     return Math.max(1000, (Math.max(side, rows) + 1) * spec.spacing);
 }
 
-/** Where the nth body sits — a square grid, so neighbours are `spacing` apart on both axes. */
+/** Where the nth body sits: a square grid, so neighbours are `spacing` apart on both axes. */
 export function gridPosition(index: number, side: number, spacing: number): [number, number] {
     return [(index % side) * spacing, Math.floor(index / side) * spacing];
 }

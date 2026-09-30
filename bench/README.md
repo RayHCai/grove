@@ -4,7 +4,7 @@ Tick cost, bytes per tick and GC pressure, measured against the built packages.
 
 Every other suite here asks whether the engine is correct. This one asks what it costs, and answers
 in three numbers: nanoseconds per tick, bytes allocated per tick, and collections plus pause time per
-simulated second. It belongs to no package — the same meters drive core's loop on its own, the
+simulated second. It belongs to no package; the same meters drive core's loop on its own, the
 authority with its codec and fan-out, and the composed application with clients predicting against it.
 
 ## Running one
@@ -75,7 +75,7 @@ TC39 standard decorators and the test runner's transform does not.
 
 ## Reading a result
 
-`nsPerTick` is machine-bound — useful for locating a cost on the machine that measured it, not for
+`nsPerTick` is machine-bound, useful for locating a cost on the machine that measured it, not for
 comparing two machines. `bytesPerTick` under `alloc` is the figure worth comparing between commits,
 and it is reproducible to the byte when the same scenario is compared against itself.
 
@@ -84,7 +84,7 @@ seen, and it optimises the contact walk's boxed half-extents away once it has en
 thousand-entity world measured first in its process allocates 8.5 MB a tick; the same world measured
 after another has run allocates 573 KB. Both are collection-free, both are honest, and they are not
 comparable. Each scenario therefore gets its own process, and within a scenario the measurements are
-ordered to make the comparison it exists for — so `core.role-split`'s four rows are a set, and its
+ordered to make the comparison it exists for, so `core.role-split`'s four rows are a set, and its
 `server` row is not the same measurement as `core.n-sweep`'s thousand-entity row.
 
 Two scenarios answer questions the others cannot. `core.pass-breakdown` prices each pass by removing

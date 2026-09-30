@@ -86,7 +86,7 @@ export function selectScenarios(only: readonly string[]): readonly Scenario[] {
     const chosen = SCENARIOS.filter((s) => only.some((prefix) => s.name.startsWith(prefix)));
     if (chosen.length === 0) {
         throw new Error(
-            `no scenario matches ${only.join(', ')} — known: ${SCENARIOS.map((s) => s.name).join(', ')}`,
+            `no scenario matches ${only.join(', ')}: known: ${SCENARIOS.map((s) => s.name).join(', ')}`,
         );
     }
     return chosen;

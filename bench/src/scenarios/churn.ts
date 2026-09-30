@@ -106,7 +106,7 @@ export async function churnScenarios(
     });
 
     // A rising world spawns on every tick of every window, so the run is bounded by the entity cap
-    // rather than by the time budget — and the faster a tick gets, the more ticks the budget buys.
+    // rather than by the time budget, and the faster a tick gets, the more ticks the budget buys.
     // Stated in the result, because a window silently cut short is a different measurement.
     const spawningTicks = WARM_TICKS + PROBE_TICKS;
     const ceiling = Math.floor(

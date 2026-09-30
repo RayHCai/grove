@@ -16,7 +16,7 @@ const WARM_TICKS = 200;
 export const N_SWEEP = [100, 300, 1000, 3000, 10_000] as const;
 export const SCRIPT_SWEEP = [0, 50, 150, 300] as const;
 
-/** Every pass the loop drives, in tick order — the keys `passes` stubs through one at a time. */
+/** Every pass the loop drives, in tick order: the keys `passes` stubs through one at a time. */
 const PASS_NAMES = [
     'starts',
     'input',
@@ -201,7 +201,7 @@ export async function passBreakdown(
 
 /**
  * What `isServer` costs, with the contact walk stubbed out. The flag gates the lag-ring capture
- * and the dispatching locations, both single-digit microseconds — the walk would hide them.
+ * and the dispatching locations, both single-digit microseconds; the walk would hide them.
  */
 export async function roleSplit(
     meter: Meter,
