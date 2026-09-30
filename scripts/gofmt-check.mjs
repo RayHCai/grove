@@ -1,15 +1,14 @@
 // `gofmt -l` lists the offenders and exits zero either way, so this reads its output, not status.
 
 import { spawnSync } from 'node:child_process';
-import { installed, skip } from './toolchain.mjs';
+import { installed, shell, skip } from './toolchain.mjs';
 
-// Probed through `go`, which ships gofmt beside itself — gofmt with no arguments reads stdin
+// Probed through `go`, which ships gofmt beside itself: gofmt with no arguments reads stdin
 // forever, so it has no probe of its own that terminates.
 if (!installed('go', ['version'])) skip('go', 'Install Go (https://go.dev/dl)');
 
 // Paths are optional so the pre-commit hook can hand over the staged files alone; with none, the
 // whole of the calling module.
-const shell = process.platform === 'win32';
 
 const args = process.argv.slice(2);
 // Quoted for the Windows shell, which concatenates argv into one string and would otherwise read a
