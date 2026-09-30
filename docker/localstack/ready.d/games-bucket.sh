@@ -14,8 +14,8 @@ awslocal s3api put-bucket-versioning \
     --bucket "$bucket" \
     --versioning-configuration Status=Enabled >/dev/null
 
-# An asset's bytes go straight from the browser to the bucket over a presigned PUT, so the two
-# origins that hold a logged-in person are the two this has to allow.
+# An asset's bytes go straight from the browser to the bucket over a presigned PUT, so the three
+# dev servers a signed-in person works from are the origins this has to allow.
 awslocal s3api put-bucket-cors --bucket "$bucket" --cors-configuration '{
     "CORSRules": [
         {

@@ -37,17 +37,20 @@ RUN apt-get update \
 COPY apps/grove/Cargo.toml apps/grove/Cargo.lock apps/grove/rust-toolchain.toml ./
 COPY apps/grove/game-instance/Cargo.toml ./game-instance/
 COPY apps/grove/asset-upload-service/Cargo.toml ./asset-upload-service/
-RUN mkdir -p game-instance/src asset-upload-service/src \
-    && echo 'fn main() {}' | tee game-instance/src/main.rs asset-upload-service/src/main.rs >/dev/null
+COPY apps/grove/request-id/Cargo.toml ./request-id/
+RUN mkdir -p game-instance/src asset-upload-service/src request-id/src \
+    && echo 'fn main() {}' | tee game-instance/src/main.rs asset-upload-service/src/main.rs >/dev/null \
+    && : > request-id/src/lib.rs
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo build --release --package grove-game-instance
+    cargo build --release --locked --package grove-game-instance
 
 # The real sources over the placeholder. `touch`, because cargo decides what is stale by timestamp and
 # a copied file can land with one older than the placeholder build it has to invalidate.
 COPY apps/grove/game-instance ./game-instance
-RUN touch game-instance/src/main.rs
+COPY apps/grove/request-id ./request-id
+RUN touch game-instance/src/main.rs request-id/src/lib.rs
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo build --release --package grove-game-instance --bin grove-game-instance
+    cargo build --release --locked --package grove-game-instance --bin grove-game-instance
 
 # A full userland rather than a distroless base, because this stands in for a Linux box: the agent
 # forks a child process, supervises it, and outlives a restart by adopting what it finds still running.
