@@ -111,12 +111,12 @@ export class Health extends SyncedScript<Entity> {
     @serverState health = 3;
 }
 
-/** Player-hosted `@serverState` — replicated to its owner alone. */
+/** Player-hosted `@serverState`, replicated to its owner alone. */
 export class Wallet extends ServerScript<Player> {
     @serverState credits = 10;
 }
 
-/** Game-hosted `@serverState` — replicated to everyone, and never named by a load or a save. */
+/** Game-hosted `@serverState`, replicated to everyone, and never named by a load or a save. */
 export class Era extends ServerScript {
     @serverState epoch = 1;
 }

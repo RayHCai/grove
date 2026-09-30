@@ -2,7 +2,7 @@
 
 The deterministic fixed-step advance: **one input batch in, one output batch out**.
 
-It holds core's runtime and everything between a decoded inbound frame and an outbound envelope —
+It holds core's runtime and everything between a decoded inbound frame and an outbound envelope:
 the narrowing, admission, the tick-keyed input buffer, the join and its snapshot, the call into
 `Loop.step`, and the drain of core's three replication channels. `@platform/client` is its wire
 peer, and the two share exactly one thing: the envelopes in `@platform/protocol`. It never imports
@@ -21,7 +21,7 @@ const sim = new Sim({
 
 const out = sim.tick({
     nowMs, // the host's wall clock, stamped into two envelopes and differenced against nothing
-    drain: true, // whether this tick closes a send interval — the cadence is the host's
+    drain: true, // whether this tick closes a send interval; the cadence is the host's
     opened: [{ connectionId: 'c1', identity: 'alice' }],
     frames: [{ connectionId: 'c1', message }],
     closed: [],
@@ -44,7 +44,7 @@ each of them is owed.
 
 **A socket, a clock, a store or a codec for I/O.** It opens nothing, reads no time, and cannot
 persist anything: the time it stamps arrives in the batch, and a persisted record is asked for in one
-output batch and answered in a later input batch. Two hosts drive it — `@grove/game-instance` in Rust for a
+output batch and answered in a later input batch. Two hosts drive it: `@grove/game-instance` in Rust for a
 deployed session, and `@platform/glue`'s `GameInstance` in process for local play, the test suites
 and the integration suite.
 
@@ -56,11 +56,11 @@ prediction and interpolation (the client).
 
 ## Why the batch, and not a socket
 
-A shape this narrow is what lets the host be a different language — the Rust host runs this bundle in
+A shape this narrow is what lets the host be a different language: the Rust host runs this bundle in
 a V8 isolate and speaks to it through exactly the two types above. It is also what would let this
 advance run **in a browser**, where there is no socket, no store and no clock to give it: nothing
 here imports `node:` anything and nothing reads ambient state. `@platform/client` does not do that
-today — it re-produces the input fold itself in `passes.ts` — so that is a property of the shape
+today; it re-produces the input fold itself in `passes.ts`, so that is a property of the shape
 rather than a wire in place.
 
 It is also what makes a tick replayable. Everything that reaches the world reaches it at the top of a
@@ -72,7 +72,7 @@ tick, in the order the batch names, so a session is a sequence of batches and no
 timers and tweens advance one unit per `step()` call whatever index they are handed, so a host that
 skipped indices would compress every `after`, `every`, `sleep` and tween by the gap.
 
-Falling behind is therefore the host's to shed in **wall-clock**, never in ticks — it simply calls
+Falling behind is therefore the host's to shed in **wall-clock**, never in ticks; it simply calls
 `tick` fewer times than real time owed. Input buffered for a tick the world has already passed is
 merge-forwarded, so a shed costs latency rather than existence.
 
@@ -91,5 +91,5 @@ installIsolateEntry(() => createSim(PROJECT, { scripts: SERVER_SCRIPTS }));
 ```
 
 `boot(config)`, `tick(batch)` and `close()` then take and answer JSON, because a string is the only
-shape a host in another language can hold — and because a world that booted at evaluation time would
+shape a host in another language can hold, and because a world that booted at evaluation time would
 run every Game `@onStart` before the host had a clock to advance them with.

@@ -17,7 +17,7 @@ function storekeeper(h: Harness): Storekeeper {
         ?.instance as Storekeeper;
 }
 
-/** The avatar's handle as the wire spells it — a NetId IS the server's EntityId. */
+/** The avatar's handle as the wire spells it: a NetId IS the server's EntityId. */
 function avatarNetId(h: Harness, playerId: string): NetId {
     const avatar = h.sim.runtime.playerManager?.byId(playerId)?.avatar;
     return avatar?.entityId as unknown as NetId;
@@ -55,7 +55,7 @@ describe('a widget press survives the round trip', () => {
         expect(storekeeper(h).presses).toStrictEqual([]);
     });
 
-    it('drops a press that arrived before the join — identity comes from the connection', () => {
+    it('drops a press that arrived before the join: identity comes from the connection', () => {
         const h = harness({ config: { gameScripts: [Rules, Storekeeper] } });
         const peer = h.connect();
         peer.interaction(1, [{ kind: 'press', widget: 'buy' }]);
@@ -90,7 +90,7 @@ describe('a pointer hit lands on the entity the client named', () => {
         const touchable = touchableOn(h, 'c1');
 
         // A plausible handle that names nothing: the check is liveness, and nothing beyond it is
-        // decidable here — the hit was resolved against a camera the server does not hold.
+        // decidable here: the hit was resolved against a camera the server does not hold.
         peer.interaction(h.tick + 1, [{ kind: 'click', netId: 999_999 as NetId }]);
         h.pumpTicks(2);
 

@@ -21,7 +21,7 @@ function updates(peer: Peer): ManifestUpdate[] {
 }
 
 describe('ManifestStore', () => {
-    it('holds the boot manifest without queueing it — nobody is behind at boot', () => {
+    it('holds the boot manifest without queueing it: nobody is behind at boot', () => {
         const store = new ManifestStore(coin);
         expect(store.snapshot().templates).toHaveLength(1);
         expect(store.drain()).toBeNull();
@@ -39,7 +39,7 @@ describe('ManifestStore', () => {
         expect(store.snapshot().templates).toHaveLength(1);
     });
 
-    it('drains once — the additions belong to one send', () => {
+    it('drains once: the additions belong to one send', () => {
         const store = new ManifestStore();
         store.declare(coin);
         expect(store.drain()).not.toBeNull();
