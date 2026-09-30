@@ -4,7 +4,7 @@
 import type { IRenderer, RendererInitOptions } from '../renderer.js';
 import { NullRenderer } from './null-renderer.js';
 
-/** A headless `IRenderer` — for tests, the server, and CI. No DOM, no GPU. */
+/** A headless `IRenderer`: for tests, the server, and CI. No DOM, no GPU. */
 export function createNullRenderer(): IRenderer {
     return new NullRenderer();
 }

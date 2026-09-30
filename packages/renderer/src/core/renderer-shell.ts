@@ -1,6 +1,7 @@
 // The shared state is `protected` rather than `#`: a subclass cannot reach a private field, so
 // the erasure is the price of holding these members in one copy.
 
+import { defaultCamera } from '../defaults.js';
 import type { Bounds, MutableVec3, Size, Vec3Like } from '@platform/math';
 import type {
     AssetInfo,
@@ -105,7 +106,7 @@ export abstract class RendererShell implements IRenderer {
     }
 
     hasAsset(name: string): boolean {
-        // Intended state, post-queue, so a caller cannot branch wrongly mid-loss — routed this way
+        // Intended state, post-queue, so a caller cannot branch wrongly mid-loss, routed this way
         // even for a backend that never queues, so both take the same path.
         return this.queue.intendedHas(name, this.isResident(name));
     }
@@ -190,7 +191,7 @@ export abstract class RendererShell implements IRenderer {
     }
 
     get camera(): Readonly<CameraState> {
-        return this.core?.camera ?? { position: { x: 0, y: 0, z: 0 }, zoom: 1, framing: 'stage' };
+        return this.core?.camera ?? defaultCamera();
     }
 
     localTransformOf(id: NodeId, out?: Transform): Transform | null {
@@ -307,7 +308,7 @@ export abstract class RendererShell implements IRenderer {
     /** Measures a string without touching the GPU, so it answers during a context loss too. */
     protected abstract measureTextSize(text: string, style: TextStyle | undefined): Size;
 
-    /** Resident names with copied sizes — the one input to `inspect` a backend owns. */
+    /** Resident names with copied sizes: the one input to `inspect` a backend owns. */
     protected abstract residentAssets(): Array<{ name: string; size: Size }>;
 
     protected abstract isResident(name: string): boolean;
@@ -315,7 +316,7 @@ export abstract class RendererShell implements IRenderer {
     /** The kind a resident name was loaded as, or `null` when it is not resident. */
     protected abstract kindOf(name: string): AssetManifestEntry['kind'] | null;
 
-    /** Live nodes referencing a name — the `inUse` count. */
+    /** Live nodes referencing a name: the `inUse` count. */
     protected abstract referenceCount(name: string): number;
 
     /** Drops one resident name, along with whatever the backend pointed at it. */

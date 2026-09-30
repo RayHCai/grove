@@ -1,5 +1,6 @@
 // Separate from the core so nothing in the frame path can come to depend on it.
 
+import { defaultCamera } from '../defaults.js';
 import type { Bounds, Size } from '@platform/math';
 import { bounds, boundsCopy, vec3 } from '@platform/math';
 import type {
@@ -139,7 +140,7 @@ export function emptySnapshot(contextState: ContextState): SceneSnapshot {
         roots: {},
         nodes: new Map(),
         surfaces: [],
-        camera: { position: { x: 0, y: 0, z: 0 }, zoom: 1, framing: 'stage' },
+        camera: defaultCamera(),
         canvas: { width: 0, height: 0 },
         stageRect: bounds(),
         viewport: bounds(),

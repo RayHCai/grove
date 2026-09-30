@@ -1,10 +1,11 @@
 // The Pixi half of the `SceneSink` seam: display objects and nothing else, and the only place in
-// the backend that touches an xform/art pair — which is what keeps the tree shape enforceable.
+// the backend that touches an xform/art pair, which is what keeps the tree shape enforceable.
 
 import type { Container } from 'pixi.js';
 import type { Bounds, Size } from '@platform/math';
 import { bounds, boundsCopy, boundsEqual, vec3 } from '@platform/math';
 import type { CameraState, ScaleMode, Surface } from '../renderer.js';
+import { PLACEHOLDER_SIZE } from '../defaults.js';
 import type { NodeRecord } from '../node-store.js';
 import type { TransformStore } from '../transform-store.js';
 import type { SceneSink } from '../core/scene-sink.js';
@@ -25,9 +26,6 @@ import {
     setArtText,
     setArtTexture,
 } from './node-tree.js';
-
-/** Fallback when a texture name is not resident — the placeholder is 1x1. */
-const PLACEHOLDER_SIZE: Size = { width: 1, height: 1 };
 
 /** Creates and mutates the xform/art pairs the core asks for. */
 export class PixiSink implements SceneSink {
@@ -124,7 +122,7 @@ export class PixiSink implements SceneSink {
 
         if (screen) {
             // A child's origin arrives through its parent's xform, so only a surface root adds the
-            // anchor origin — which is also what keeps this in step with `screenPositionOf`.
+            // anchor origin, which is also what keeps this in step with `screenPositionOf`.
             let originX = 0;
             let originY = 0;
             if (xf.parent(index) === NO_PARENT) {
@@ -149,7 +147,7 @@ export class PixiSink implements SceneSink {
         art.rotation = pixiRotation(xf.rotation(index));
         art.alpha = xf.alpha(index);
         art.tint = xf.tint(index);
-        // The 0..1 pivot inside this node's own art — not hierarchy.
+        // The 0..1 pivot inside this node's own art, not hierarchy.
         art.anchor.set(xf.anchorX(index), xf.anchorY(index));
     }
 
@@ -204,7 +202,7 @@ export class PixiSink implements SceneSink {
         this.#surfaces.applyLetterbox(stage, camera, scaleMode, letterbox);
 
         // UI placement is anchored to the stage and scaled by `fitScale`, so a stage that actually
-        // moved has to re-place every screen-space node — and one that did not must cost nothing,
+        // moved has to re-place every screen-space node, and one that did not must cost nothing,
         // since `setCamera` reaches here every frame.
         const scale = fitScale(camera.framing ?? 'stage', scaleMode, canvas, design);
         if (scale === this.#fitScale && boundsEqual(this.#stage, stage)) return;
@@ -234,6 +232,15 @@ export class PixiSink implements SceneSink {
         for (const index of slots) {
             const objects = this.#objects.get(index);
             if (objects !== undefined) setArtTexture(objects, this.#assets.placeholder);
+        }
+    }
+
+    /** Repoints the given sprites at `name`'s texture, after it became resident. */
+    repointTo(slots: readonly number[], name: string): void {
+        const texture = this.#assets.get(name);
+        for (const index of slots) {
+            const objects = this.#objects.get(index);
+            if (objects !== undefined) setArtTexture(objects, texture);
         }
     }
 

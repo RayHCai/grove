@@ -82,7 +82,7 @@ export function spriteLocalBounds(
     );
 }
 
-/** A zero-extent rect at the origin — a group's local bounds. */
+/** A zero-extent rect at the origin: a group's local bounds. */
 export function emptyLocalBounds(out: Bounds = bounds()): Bounds {
     return boundsSet(out, 0, 0, 0, 0);
 }

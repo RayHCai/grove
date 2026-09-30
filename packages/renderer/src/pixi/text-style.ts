@@ -2,18 +2,16 @@
 // compile error, so an absent field has to be an absent key.
 
 import type { TextStyle as PixiTextStyle } from 'pixi.js';
+import { DEFAULT_TEXT_SIZE } from '../defaults.js';
 import type { TextStyle } from '../renderer.js';
 
 /** Pixi's default when a style omits `font`. */
 const DEFAULT_FAMILY = 'Arial';
 
-/** Pixi's default when a style omits `size`. */
-const DEFAULT_SIZE = 26;
-
 /** Largest font size a style may ask for, in px. */
 const MAX_SIZE = 512;
 
-/** Largest wrap width a style may ask for, in px — the same bound a raster is capped to. */
+/** Largest wrap width a style may ask for, in px: the same bound a raster is capped to. */
 const MAX_WRAP = 4096;
 
 /** A `0xRRGGBB` colour, or the fallback: Pixi throws outside the 24-bit range. */
@@ -33,17 +31,17 @@ function dimension(value: number, max: number): number {
  * raster path wants to reuse the same construction.
  */
 // `NonNullable` because Pixi's constructor parameter is optional, so the raw
-// `ConstructorParameters[0]` includes `undefined` — which this function never returns.
+// `ConstructorParameters[0]` includes `undefined`, which this function never returns.
 export function toPixiTextStyleOptions(
     style: TextStyle | undefined,
 ): NonNullable<ConstructorParameters<typeof PixiTextStyle>[0]> {
     if (style === undefined) {
-        return { fontFamily: DEFAULT_FAMILY, fontSize: DEFAULT_SIZE };
+        return { fontFamily: DEFAULT_FAMILY, fontSize: DEFAULT_TEXT_SIZE };
     }
 
     return {
         fontFamily: style.font ?? DEFAULT_FAMILY,
-        fontSize: style.size === undefined ? DEFAULT_SIZE : dimension(style.size, MAX_SIZE),
+        fontSize: style.size === undefined ? DEFAULT_TEXT_SIZE : dimension(style.size, MAX_SIZE),
         // `color` is 0xRRGGBB; Pixi calls the same concept `fill`.
         ...(style.color !== undefined && { fill: color(style.color, 0xffffff) }),
         ...(style.align !== undefined && { align: style.align }),

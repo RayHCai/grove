@@ -31,14 +31,14 @@ describe('NO_NODE', () => {
     it('is zero, so a zeroed field is never a live handle', () => {
         expect(NO_NODE).toBe(0);
         expect(nodeIndex(NO_NODE)).toBe(0);
-        // Generation 0 is unreachable — the store starts at 1 — so index 0 here is not
+        // Generation 0 is unreachable (the store starts at 1), so index 0 here is not
         // mistakable for slot 0's real handle, which is packNodeId(0, 1).
         expect(nodeGeneration(NO_NODE)).toBe(0);
         expect(packNodeId(0, 1)).not.toBe(NO_NODE);
     });
 });
 
-describe('generation 128 and above — the int32 wrap', () => {
+describe('generation 128 and above: the int32 wrap', () => {
     it('stays positive at generation 128, where `gen << 24` goes negative', () => {
         const id = packNodeId(0, 128);
         expect(id).toBe(2_147_483_648); // 128 * 2^24
@@ -130,7 +130,7 @@ describe('safe-integer guarantees', () => {
         }
     });
 
-    it('decodes with integer arithmetic — no fractional slop at the top of the range', () => {
+    it('decodes with integer arithmetic: no fractional slop at the top of the range', () => {
         const id = (Number.MAX_SAFE_INTEGER - 1) as NodeId;
         expect(Number.isInteger(nodeIndex(id))).toBe(true);
         expect(Number.isInteger(nodeGeneration(id))).toBe(true);

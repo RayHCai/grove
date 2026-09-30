@@ -81,7 +81,7 @@ export class SurfaceTree {
         const active = isLetterboxed(camera.framing ?? 'stage', scaleMode, letterbox);
 
         // `clear()` + `rect()` + `fill()` costs a re-triangulation and a buffer upload, and this
-        // runs off `setCamera` — every frame — for a rectangle that only changes on resize.
+        // runs off `setCamera`, every frame, for a rectangle that only changes on resize.
         if (active === this.#maskActive && (!active || boundsEqual(this.#maskRect, stageRect))) {
             return;
         }

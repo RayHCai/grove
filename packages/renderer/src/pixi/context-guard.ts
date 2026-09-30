@@ -68,7 +68,7 @@ export class ContextGuard {
         return this.#state !== 'ok';
     }
 
-    /** Queued GPU operations — feeds `pendingAssetOps`. */
+    /** Queued GPU operations; feeds `pendingAssetOps`. */
     get pendingCount(): number {
         return this.#pending.length;
     }

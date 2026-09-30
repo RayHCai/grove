@@ -14,9 +14,9 @@ import {
 } from '../src/viewport.js';
 
 const DESIGN = { width: 800, height: 600 };
-/** sx = 2, sy = 1.5 — the height governs under `fit`, the width under `fill`. */
+/** sx = 2, sy = 1.5: the height governs under `fit`, the width under `fill`. */
 const WIDE = { width: 1600, height: 900 };
-/** sx = 1, sy = 3 — the width governs under `fit`, the height under `fill`. */
+/** sx = 1, sy = 3: the width governs under `fit`, the height under `fill`. */
 const TALL = { width: 800, height: 1800 };
 
 const MODES: readonly ScaleMode[] = ['fit', 'fill', 'expand'];
@@ -41,7 +41,7 @@ describe('fitScale', () => {
         expect(fitScale('stage', 'expand', TALL, DESIGN)).toBe(1);
     });
 
-    it("is 1 under 'free' framing for every scale mode — zoom is then literal px/unit", () => {
+    it("is 1 under 'free' framing for every scale mode: zoom is then literal px/unit", () => {
         for (const mode of MODES) {
             expect(fitScale('free', mode, WIDE, DESIGN)).toBe(1);
             expect(fitScale('free', mode, TALL, DESIGN)).toBe(1);
@@ -81,7 +81,7 @@ describe('isLetterboxed', () => {
         }
     });
 
-    it('is false under fill and expand even with letterbox on — the settled decision', () => {
+    it('is false under fill and expand even with letterbox on: the settled decision', () => {
         expect(isLetterboxed('stage', 'fill', true)).toBe(false);
         expect(isLetterboxed('stage', 'expand', true)).toBe(false);
     });
@@ -111,7 +111,7 @@ describe('stageRect', () => {
         });
     });
 
-    it('overflows the canvas under fill — that is what "crops" means', () => {
+    it('overflows the canvas under fill: that is what "crops" means', () => {
         // s = 2 -> 1600x1200 inside 1600x900, so 150 px hangs off each of top and bottom.
         expect(stageRect('stage', 'fill', WIDE, DESIGN)).toEqual({
             left: 0,
@@ -204,7 +204,7 @@ describe('worldViewport', () => {
         });
     });
 
-    it('keeps top > bottom — the world viewport is y-up', () => {
+    it('keeps top > bottom: the world viewport is y-up', () => {
         for (const mode of MODES) {
             for (const letterbox of [true, false]) {
                 for (const canvas of [WIDE, TALL]) {
@@ -259,7 +259,7 @@ describe('worldViewport', () => {
         expect(boundsHeight(bigger)).toBeGreaterThan(boundsHeight(rect));
     });
 
-    it('sees more world under fit with letterbox OFF — the bars become world, not bars', () => {
+    it('sees more world under fit with letterbox OFF: the bars become world, not bars', () => {
         // s = 1.5, visible = the full canvas: halfW = 1600/(2*1.5) = 533.33 > 400.
         const rect = worldViewport(camera(0, 0, 1), 'fit', false, WIDE, DESIGN);
         expect(rect.right).toBeCloseTo(1600 / 3, 12);
@@ -318,7 +318,7 @@ describe('worldViewport', () => {
 
         it('degrades to the design stage at the camera under fit + letterbox', () => {
             // `fitScale` falls back to 1 and the visible rect is the design rect, so this is
-            // the design/(2*zoom) formula with s = 1 — still finite, which is all that is required.
+            // the design/(2*zoom) formula with s = 1, still finite, which is all that is required.
             expect(worldViewport(camera(7, -3, 1), 'fit', true, ZERO, DESIGN)).toEqual({
                 left: -393,
                 right: 407,
@@ -364,7 +364,7 @@ describe('worldViewport', () => {
             }
         });
 
-        // The dangerous degenerate inputs are not the obviously-bad ones above — those are
+        // The dangerous degenerate inputs are not the obviously-bad ones above; those are
         // caught by the `positiveOr` guards. These are inputs where every INDIVIDUAL number
         // is an ordinary finite positive and only the arithmetic between them breaks.
         it('stays finite for a very small but finite zoom', () => {
@@ -391,7 +391,7 @@ describe('worldViewport', () => {
 
         it('stays finite for an extreme but finite canvas:design RATIO', () => {
             // `cw / dw` alone overflows to Infinity or underflows to 0 here. A 0 scale then
-            // makes the half-extent 0/0 = NaN — the exact value this module exists to keep
+            // makes the half-extent 0/0 = NaN, the exact value this module exists to keep
             // out of `camera.viewport`.
             const ratios = [
                 [1e300, 1e-300],
@@ -434,7 +434,7 @@ describe('worldViewport', () => {
     describe('canvas-independence under fit + letterbox is BIT-exact, not approximate', () => {
         const REAL_CANVASES = [
             { width: 1600, height: 900 },
-            { width: 1366, height: 768 }, // fitScale 1.4229... — the one that used to drift
+            { width: 1366, height: 768 }, // fitScale 1.4229..., the one that used to drift
             { width: 1440, height: 900 },
             { width: 1920, height: 1080 },
             { width: 1000, height: 700 },
@@ -465,7 +465,7 @@ describe('worldViewport', () => {
             }
         });
 
-        it('gives byte-identical rects across all of them — one distinct value', () => {
+        it('gives byte-identical rects across all of them: one distinct value', () => {
             const distinct = new Set(
                 REAL_CANVASES.map((canvas) =>
                     JSON.stringify(
