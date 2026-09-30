@@ -43,8 +43,8 @@ export interface LocalLink {
  * Where the other end of a session is.
  *
  * The one thing that differs between playing a deployed game and previewing the one in an editor,
- * and the reason it is a union rather than two components: everything below it — the renderer, the
- * frame loop, the device, the handshake, the refusals — is the same session either way, and a
+ * and the reason it is a union rather than two components: everything below it (the renderer, the
+ * frame loop, the device, the handshake, the refusals) is the same session either way, and a
  * preview that composed its own would be a preview of something else.
  */
 export type GameAuthority =
@@ -81,8 +81,8 @@ export interface GamePlayerProps {
      *
      * Defaults to white rather than the renderer's own black: a game with no art yet draws nothing,
      * and a creator pressing Play should be able to tell an empty stage from a stage that never
-     * came up. It is a prop because it wants to be a project setting one day, and the renderer is
-     * built before the session — so, like `design`, it cannot be read off the `Welcome`.
+     * came up. The renderer is built before the session, so, like `design`, it cannot be read off
+     * the `Welcome`.
      */
     background?: number | 'transparent';
     onReady?: () => void;
@@ -96,8 +96,8 @@ export interface GamePlayerProps {
 /**
  * WASD and the arrow keys, onto the two axes `BaseMovement` reads.
  *
- * `moveX`/`moveY` are the engine's fixed, panel-mapped move axes — not something a creator's script
- * binds — so this is the one control scheme every game with a movement class gets, the same way a
+ * `moveX`/`moveY` are the engine's fixed, panel-mapped move axes, not something a creator's script
+ * binds, so this is the one control scheme every game with a movement class gets, the same way a
  * deployed session and a preview both get a renderer and a frame loop without asking for either.
  */
 const DEFAULT_MOVE_BINDINGS: readonly Binding[] = [
@@ -125,12 +125,12 @@ export function ticketProtocol(ticket: string): string {
  *
  * It holds no authority and checks nothing about the world: admission, request checking and ticket
  * verification are all the authority's, wherever that authority is. What it owns is the three
- * things a session cannot compose for itself in a browser — a renderer over a real canvas, the
+ * things a session cannot compose for itself in a browser: a renderer over a real canvas, the
  * frame loop that drives it, and the device that turns pointer and key events into input.
  *
  * Against a deployed world the creator's code is **not** fetched here: the authority names it in
  * the `Welcome`, and the session fetches, bounds, hashes and verifies it before evaluating a byte.
- * Against a local one there is nothing to fetch, because the classes are already in this page —
+ * Against a local one there is nothing to fetch, because the classes are already in this page,
  * which is the whole of what a preview does differently.
  */
 export function GamePlayer({
@@ -153,20 +153,31 @@ export function GamePlayer({
     readyRef.current = onReady;
     const refusedRef = useRef(onRefused);
     refusedRef.current = onRefused;
+    // The session keys on what these objects say, not their identity: a parent rendering equal
+    // literals would otherwise tear the session down and redial with a ticket already spent.
+    const latest = useRef({ authority, project, design, createRenderer, connect });
+    latest.current = { authority, project, design, createRenderer, connect };
+    const serverUrl = authority.kind === 'remote' ? authority.serverUrl : undefined;
+    const ticket = authority.kind === 'remote' ? authority.ticket : undefined;
+    const open = authority.kind === 'local' ? authority.open : undefined;
+    const scripts = authority.kind === 'local' ? authority.scripts : undefined;
+    const { projectId, projectHash } = project;
+    const { width, height } = design;
 
     useEffect(() => {
         const container = stage.current;
         if (container === null) return;
+        const current = latest.current;
 
         // StrictMode mounts twice and both a renderer init and a dial resolve on their own
         // schedule, so every await below is guarded by this and a session built into a teardown is
         // closed through the signal rather than by a flag the dial cannot see.
         const abort = new AbortController();
-        const renderer: IRenderer = createRenderer();
+        const renderer: IRenderer = current.createRenderer();
         let session: ClientInstance | null = null;
         let link: LocalLink | undefined;
         // Whether `init()` has settled. Destroying before it has no-ops and init then appends its
-        // canvas anyway, leaking a live WebGL context — which StrictMode hits every mount.
+        // canvas anyway, leaking a live WebGL context, which StrictMode hits every mount.
         let initialized = false;
 
         const onState = (next: SessionState, failure: FailureReason | undefined): void => {
@@ -180,7 +191,7 @@ export function GamePlayer({
 
         void (async () => {
             try {
-                await renderer.init({ container, design, background });
+                await renderer.init({ container, design: current.design, background });
                 initialized = true;
                 if (abort.signal.aborted) {
                     renderer.destroy();
@@ -193,7 +204,7 @@ export function GamePlayer({
                     device: createCanvasInputDevice({ container, renderer }),
                     clock: createPerformanceClock(),
                     bindings: DEFAULT_MOVE_BINDINGS,
-                    project,
+                    project: current.project,
                     name,
                     // Taken as an option rather than subscribed afterwards: a session joins as it
                     // is started, so a listener attached to what that hands back would already
@@ -201,8 +212,8 @@ export function GamePlayer({
                     onState,
                 };
 
-                if (authority.kind === 'local') {
-                    link = authority.open();
+                if (current.authority.kind === 'local') {
+                    link = current.authority.open();
                     // Built and started here rather than dialled: there is no socket to open, and
                     // the pair only moves when `pump` turns it.
                     session = new ClientInstance({
@@ -211,18 +222,18 @@ export function GamePlayer({
                         pump: link.pump,
                         // Passed in, because no `Welcome` will name code to fetch: a world in this
                         // page declares no bundle, and the classes are already loaded.
-                        scripts: authority.scripts,
+                        scripts: current.authority.scripts,
                     }).start();
                     return;
                 }
 
-                session = await connect({
+                session = await current.connect({
                     ...seams,
-                    url: authority.serverUrl,
+                    url: current.authority.serverUrl,
                     signal: abort.signal,
                     // The ticket rides the subprotocol rather than the url: a url reaches access
                     // logs, proxy traces and `Referer`, and a subprotocol reaches none of them.
-                    protocols: [ticketProtocol(authority.ticket)],
+                    protocols: [ticketProtocol(current.authority.ticket)],
                     // What the session fetches the creator's code with, once the welcome names it.
                     bundle: createBrowserBundleSource(),
                 });
@@ -246,7 +257,7 @@ export function GamePlayer({
             link?.close?.();
             if (initialized) renderer.destroy();
         };
-    }, [authority, project, name, design, background, createRenderer, connect]);
+    }, [serverUrl, ticket, open, scripts, projectId, projectHash, name, width, height, background]);
 
     return <div ref={stage} className="grove-stage" data-state={state} />;
 }

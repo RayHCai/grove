@@ -2,7 +2,7 @@
 // this reaches `@platform/glue/world`, and a deployed player has no business carrying a Sim.
 
 import { GameInstance } from '@platform/glue/world';
-import { ScriptRegistry, locationsFor } from '@platform/scripting';
+import { ScriptRegistry } from '@platform/scripting';
 import type { ScriptEntry } from '@platform/scripting';
 import type { ProjectManifest, ScriptId } from '@platform/project';
 import { loopbackPair } from '@platform/transport';
@@ -11,8 +11,8 @@ import type { GameAuthority, LocalLink } from './GamePlayer.js';
 /**
  * What a game hands this page when the world runs here rather than on a box.
  *
- * The same two things a deployed session gets from two different places — the authored world, and
- * the classes an `attach` names — except that here one module graph serves both halves, so the
+ * The same two things a deployed session gets from two different places (the authored world, and
+ * the classes an `attach` names), except that here one module graph serves both halves, so the
  * entries carry every location and each side filters to its own.
  */
 export interface PreviewGame {
@@ -31,7 +31,7 @@ export interface Preview {
      * Advances the world by hand, against `nowSeconds` if one is given.
      *
      * The boot starts an interval that does this against the wall clock, which is what a browser
-     * preview wants. The argument is what makes a caller holding its own clock possible at all —
+     * preview wants. The argument is what makes a caller holding its own clock possible at all;
      * without it this reads the wall clock too, and "drive the world by hand" would mean "wait".
      *
      * A caller driving its own clock must `pause()` first. Two clocks on one world is a driver
@@ -56,8 +56,8 @@ const PREVIEW_PLAYER = 'preview';
 /**
  * Boots a world in this page and answers what to mount a session against.
  *
- * The authority is a real `GameInstance` over a real `Sim` — the same one `@grove/game-instance`
- * runs in Rust — so what a preview shows is the world a deployed session would show, less the
+ * The authority is a real `GameInstance` over a real `Sim` (the same one `@grove/game-instance`
+ * runs in Rust), so what a preview shows is the world a deployed session would show, less the
  * socket between them. It declares no bundle, because there is nothing to fetch: the classes are
  * already here, and the session is handed them rather than told where to look.
  */
@@ -65,8 +65,10 @@ export function bootPreview(game: PreviewGame): Preview {
     // One registry, filtered per side. The wire names a `ScriptId` and each end resolves it, so
     // handing an authority a client-located class would let an `attach` reach code no tick runs.
     const registry = (side: 'server' | 'client'): ScriptRegistry<ScriptId> => {
-        const locations = locationsFor(side);
-        return ScriptRegistry.from(game.scripts.filter((s) => locations.has(s.location)));
+        // A synced class links into both sides; the other two locations reach the side they name.
+        return ScriptRegistry.from(
+            game.scripts.filter((s) => s.location === 'synced' || s.location === side),
+        );
     };
 
     const instance = new GameInstance({
@@ -103,7 +105,7 @@ export function bootPreview(game: PreviewGame): Preview {
         },
         project: {
             projectId: game.project.projectId,
-            // `contentHash` IS `projectHash` on the wire — the handshake compares a digest of what
+            // `contentHash` IS `projectHash` on the wire: the handshake compares a digest of what
             // was authored, and the two names are one value.
             projectHash: game.project.contentHash,
         },

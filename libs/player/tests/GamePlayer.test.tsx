@@ -2,7 +2,7 @@
 // teardown takes back.
 //
 // The renderer and the dial are injected, because the real ones want a GPU and a socket. What is
-// asserted is this component's own job — the order it does things in, the credential it presents,
+// asserted is this component's own job: the order it does things in, the credential it presents,
 // and the failure it turns each refusal into.
 
 import { act } from 'react';
@@ -82,14 +82,14 @@ describe('the game surface', () => {
         const { dial } = await mount();
 
         // A browser cannot set a header on `new WebSocket(url)`, and a url reaches access logs,
-        // proxy traces and `Referer` — which is the whole reason the ticket rides here.
+        // proxy traces and `Referer`, which is the whole reason the ticket rides here.
         expect(dial?.dialled[0]?.protocols).toEqual([ticketProtocol('a-signed-ticket')]);
         expect(dial?.dialled[0]?.url).toBe('wss://box.example/play');
         expect(dial?.dialled[0]?.url).not.toContain('a-signed-ticket');
     });
 
     it('binds WASD and the arrows onto the move axes, without being asked', async () => {
-        // moveX/moveY are the engine's fixed axes, not a creator's own — a game with a movement
+        // moveX/moveY are the engine's fixed axes, not a creator's own; a game with a movement
         // class and nobody having composed a binding table would otherwise never move at all.
         const { dial } = await mount();
 
@@ -133,7 +133,7 @@ describe('the game surface', () => {
 
     it('grounds the stage in white, not the renderer’s own black', async () => {
         // A game with no art draws nothing, and on black that is indistinguishable from a stage
-        // that never came up — which is the one thing a creator pressing Play needs to tell apart.
+        // that never came up, which is the one thing a creator pressing Play needs to tell apart.
         const { renderer } = await mount();
         expect(renderer.inits[0]).toMatchObject({ background: 0xffffff });
     });
@@ -188,6 +188,75 @@ describe('the game surface', () => {
         expect(ready).toBe(1);
     });
 
+    it('keeps its session when a parent rerenders it with equal but new props', async () => {
+        const dial = fakeConnect((opts) => opts.onState?.('live', undefined));
+        const renderer = fakeRenderer();
+        const host = document.createElement('div');
+        document.body.append(host);
+        const root = createRoot(host);
+        // What a host does on ready: rerender with fresh literals, which must not redial a ticket
+        // the first dial already spent.
+        const render = (onReady?: () => void) =>
+            root.render(
+                <GamePlayer
+                    authority={{ kind: 'remote', serverUrl: 'wss://box.example/play', ticket: 't' }}
+                    project={{ ...PROJECT }}
+                    name="Ray"
+                    design={{ ...DESIGN }}
+                    createRenderer={() => renderer}
+                    connect={dial.connect}
+                    {...(onReady === undefined ? {} : { onReady })}
+                />,
+            );
+
+        await act(async () => {
+            render(() => render());
+        });
+        await act(async () => {
+            render();
+        });
+
+        expect(dial.dialled).toHaveLength(1);
+        expect(dial.closedCount()).toBe(0);
+        expect(renderer.inits).toHaveLength(1);
+        await act(async () => {
+            root.unmount();
+        });
+    });
+
+    it('dials again when the ticket itself changes', async () => {
+        const dial = fakeConnect();
+        const host = document.createElement('div');
+        document.body.append(host);
+        const root = createRoot(host);
+        const render = (ticket: string) =>
+            root.render(
+                <GamePlayer
+                    authority={{ kind: 'remote', serverUrl: 'wss://box.example/play', ticket }}
+                    project={PROJECT}
+                    name="Ray"
+                    design={DESIGN}
+                    createRenderer={fakeRenderer}
+                    connect={dial.connect}
+                />,
+            );
+
+        await act(async () => {
+            render('first');
+        });
+        await act(async () => {
+            render('second');
+        });
+
+        expect(dial.dialled.map((opts) => opts.protocols)).toEqual([
+            [ticketProtocol('first')],
+            [ticketProtocol('second')],
+        ]);
+        await act(async () => {
+            root.unmount();
+        });
+    });
+
     it('turns each refusal into something a person can act on', async () => {
         const cases: Array<[unknown, RefusalReason, RegExp]> = [
             [{ kind: 'rejected', reason: 'full', serverProtocolVersion: 1 }, 'full', /is full/u],
@@ -207,7 +276,6 @@ describe('the game surface', () => {
 
         for (const [failure, reason, message] of cases) {
             const seen: Array<[RefusalReason, string]> = [];
-            // oxlint-disable-next-line no-await-in-loop
             await mount({
                 onRefused: (why, text) => seen.push([why, text]),
                 connect: (async (opts: ConnectOptions) => {
@@ -354,7 +422,7 @@ describe('a world in this page', () => {
             root.unmount();
         });
 
-        // The world is this page's, so its teardown is too — and it outlives the peer leaving it.
+        // The world is this page's, so its teardown is too, and it outlives the peer leaving it.
         expect(link.spy.closed).toBe(1);
         expect(renderer.destroyed).toBe(1);
     });
