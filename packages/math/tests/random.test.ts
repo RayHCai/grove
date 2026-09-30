@@ -1,5 +1,5 @@
 // The contract is reproducibility, not quality: one seed plus one call count fixes the value.
-// `capture`/`restore` carry the same weight — a partial restore desyncs a peer ticks later.
+// `capture`/`restore` carry the same weight: a partial restore desyncs a peer ticks later.
 
 import { describe, it, expect } from 'vitest';
 import { SeededRandom } from '../src/random.js';
@@ -46,7 +46,7 @@ describe('seeding', () => {
     });
 
     it('takes a negative or fractional seed without collapsing the state', () => {
-        // `seed` truncates to int32, so these are legal inputs rather than errors — but two of them
+        // `seed` truncates to int32, so these are legal inputs rather than errors, but two of them
         // must not land on one stream.
         const a = new SeededRandom(-1);
         const b = new SeededRandom(-2);
@@ -155,7 +155,7 @@ describe('capture / restore', () => {
         expect(drawn(target, 5)).toStrictEqual(drawn(source, 5));
     });
 
-    it('captures a value, not a view — drawing after does not disturb it', () => {
+    it('captures a value, not a view: drawing after does not disturb it', () => {
         const r = new SeededRandom(41);
         const state = r.capture();
         const copy: [number, number, number, number] = [...state];
@@ -172,7 +172,7 @@ describe('capture / restore', () => {
         }
 
         // The xors in `next` leave a signed int32 behind, so three of the four words go negative
-        // once the stream has advanced — a consumer that stores the state must keep it as-is.
+        // once the stream has advanced; a consumer that stores the state must keep it as-is.
         drawn(fresh, 16);
         const advanced = fresh.capture();
         expect(advanced).toHaveLength(4);

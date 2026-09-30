@@ -1,7 +1,3 @@
-// @platform/math
-// Pure, dependency-free primitives: vectors, bounds, easing, scalar helpers, seeded random,
-// deterministic transcendentals, generation-packed handles, the slot table, typed-array growth.
-
 export type { Vec3, MutableVec3, Vec3Like } from './vec3.js';
 export {
     vec3,

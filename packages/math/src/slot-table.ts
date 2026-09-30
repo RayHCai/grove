@@ -49,7 +49,7 @@ export class SlotTable<Id extends number, R> {
         return this.#live;
     }
 
-    /** Highest slot index ever allocated, plus one — the bound for a flat scan. */
+    /** Highest slot index ever allocated, plus one: the bound for a flat scan. */
     get slotCount(): number {
         return this.#records.length;
     }
@@ -129,7 +129,7 @@ export class SlotTable<Id extends number, R> {
         if (this.#recycle(index)) this.#freeList.push(index);
     }
 
-    /** Live handles in ascending slot order — creation order. Fills `out` when given. */
+    /** Live handles in ascending slot order: creation order. Fills `out` when given. */
     liveIds(out: Id[] = []): Id[] {
         out.length = 0;
         for (let index = 0; index < this.#records.length; index++) {
@@ -160,7 +160,7 @@ export class SlotTable<Id extends number, R> {
         }
 
         // Rebuilt descending so the stack pops ascending: reuse stays dense from slot 0, which
-        // keeps this table's flat scan — and that of every store indexed by the same slot — short.
+        // keeps this table's flat scan (and that of every store indexed by the same slot) short.
         this.#freeList.length = 0;
         for (let index = this.#records.length - 1; index >= 0; index--) {
             if (this.#generations[index] === RETIRED_GENERATION) continue;
@@ -171,7 +171,7 @@ export class SlotTable<Id extends number, R> {
         // cleared slot validate again once that slot was re-minted at generation 1.
     }
 
-    /** A detached copy of every slot — the allocating pairing for {@link apply}. */
+    /** A detached copy of every slot, the allocating pairing for {@link apply}. */
     capture(cloneRecord: (r: R) => R): SlotTableSnapshot<R> {
         const target: SlotTableSnapshot<R> = {
             records: [],
