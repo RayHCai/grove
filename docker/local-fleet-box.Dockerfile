@@ -54,7 +54,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # A full userland rather than a distroless base, because this stands in for a Linux box: the agent
 # forks a child process, supervises it, and outlives a restart by adopting what it finds still running.
-FROM debian:12-slim AS runtime
+FROM debian:13-slim AS runtime
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
