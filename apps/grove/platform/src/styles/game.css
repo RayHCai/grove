@@ -1,0 +1,334 @@
+.gamepage {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--pg-sp-7);
+    width: 100%;
+    max-width: calc(var(--shell-measure) + 256px);
+    margin: 0 auto;
+    padding: var(--pg-sp-7) var(--shell-gutter);
+}
+
+/* The pictures take the wider share, the way in sits beside them at the height they set. */
+.gamehero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(264px, 1fr);
+    align-items: start;
+    gap: var(--pg-sp-6);
+}
+
+.gamemedia {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-4);
+}
+
+.gamemedia__stage {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    border: var(--pg-bw) solid var(--pg-edge);
+    box-shadow: var(--pg-lift) var(--pg-lift) 0 var(--pg-lift-ink);
+}
+
+/*
+ * A scene rather than a swatch: sky, a sun block, a row of blocky trees and two bands of ground,
+ * every layer a hard stop so it reads as pixels. The hue is the game's, so its tile and its page
+ * are recognisably the same place.
+ */
+.gameart {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background:
+        linear-gradient(hsl(46 95% 72%) 0 0) var(--art-sun) 20% / 9% 16% no-repeat,
+        linear-gradient(hsl(calc(var(--art-hue) + 110) 38% 26%) 0 0) 0 100% / 100% 16% no-repeat,
+        repeating-linear-gradient(
+                90deg,
+                hsl(calc(var(--art-hue) + 120) 40% 30%) 0 6%,
+                transparent 6% 11%
+            )
+            0 calc(100% - var(--art-hill)) / 100% 12% no-repeat,
+        linear-gradient(hsl(calc(var(--art-hue) + 100) 34% 40%) 0 0) 0 100% / 100% var(--art-hill)
+            no-repeat,
+        linear-gradient(
+            180deg,
+            hsl(var(--art-hue) 60% 70%),
+            hsl(calc(var(--art-hue) + 30) 50% 48%)
+        );
+}
+
+.gamemedia__step {
+    position: absolute;
+    top: 50%;
+    translate: 0 -50%;
+}
+
+.gamemedia__step--back {
+    left: var(--pg-sp-4);
+}
+
+.gamemedia__step--next {
+    right: calc(var(--pg-sp-4) + var(--pg-lift));
+}
+
+.gamemedia__step--back > svg {
+    transform: scaleX(-1);
+}
+
+.gamemedia__thumbs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--pg-sp-4);
+}
+
+.gamemedia__thumb {
+    aspect-ratio: 16 / 9;
+    padding: 0;
+    border: var(--pg-bw) solid var(--pg-edge);
+    background: none;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity var(--pg-dur-fast) var(--pg-step-1);
+}
+
+.gamemedia__thumb:hover,
+.gamemedia__thumb[aria-pressed='true'] {
+    opacity: 1;
+}
+
+/* The one on the stage drops a block like any selected surface does. */
+.gamemedia__thumb[aria-pressed='true'] {
+    box-shadow: var(--pg-shadow-sm);
+    border-color: var(--pg-accent);
+}
+
+.gamemedia__thumb:focus-visible {
+    outline: var(--pg-bw) solid var(--pg-focus);
+    outline-offset: var(--pg-bw);
+}
+
+.gameinfo {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-4);
+    padding: var(--pg-sp-6);
+}
+
+.gameinfo__title {
+    color: var(--pg-ink);
+    font-family: var(--pg-font-brand);
+    font-size: clamp(13px, 1.6vw, 17px);
+    font-weight: normal;
+    line-height: 1.6;
+    letter-spacing: 1px;
+    overflow-wrap: anywhere;
+    text-shadow: 3px 3px 0 var(--pg-surface-2);
+}
+
+.gameinfo__by {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--pg-sp-3);
+    color: var(--pg-ink-muted);
+    font-size: 19px;
+}
+
+.gameinfo__creator {
+    color: var(--pg-accent-strong);
+}
+
+.gameinfo__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--pg-sp-2);
+}
+
+/* The one thing on the page to press, so it takes the column and a size up from every other. */
+.gameinfo__play.pg-btn {
+    --pg-ctl-h: 46px;
+    --pg-ctl-text: 13px;
+    width: 100%;
+    margin-top: var(--pg-sp-2);
+}
+
+.gameinfo__play .pg-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.gameinfo__note {
+    color: var(--pg-ink-muted);
+    font-size: var(--pg-text);
+}
+
+.gameinfo__social {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--pg-sp-5);
+    padding-top: var(--pg-sp-4);
+    border-top: var(--pg-bw) dashed var(--pg-border);
+}
+
+.gameinfo__counter {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--pg-sp-3);
+    color: var(--pg-ink);
+    font-size: 19px;
+}
+
+.gamevotes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-3);
+}
+
+.gamevotes .pg-progress__head {
+    font-size: var(--pg-field-label);
+}
+
+.gamevotes .pg-progress__bar {
+    height: 20px;
+}
+
+.gamevotes__row {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--pg-sp-4);
+}
+
+/* Tabs are menu lines on the page's own field, the selected one inverted onto the plate. */
+.gametabs__list {
+    display: flex;
+    gap: var(--pg-sp-2);
+    margin-bottom: var(--pg-sp-4);
+}
+
+.gametabs__tab {
+    padding: var(--pg-sp-3) var(--pg-sp-5);
+    border: var(--pg-bw) solid transparent;
+    background: none;
+    color: var(--pg-ink-muted);
+    font: normal var(--pg-ctl-text) / 1 var(--pg-font-brand);
+    letter-spacing: 1px;
+    cursor: pointer;
+}
+
+.gametabs__tab:hover {
+    border-color: var(--pg-edge);
+    color: var(--pg-ink);
+}
+
+.gametabs__tab[aria-selected='true'] {
+    background: var(--pg-plate);
+    box-shadow: var(--pg-lift) var(--pg-lift) 0 var(--pg-plate-lift);
+    color: var(--pg-plate-ink);
+}
+
+.gametabs__tab:focus-visible,
+.gametabs__panel:focus-visible {
+    outline: var(--pg-bw) solid var(--pg-focus);
+    outline-offset: var(--pg-bw);
+}
+
+.gametabs__panel {
+    padding: var(--pg-sp-6);
+}
+
+.gameabout,
+.gameservers {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-5);
+}
+
+.gameabout__text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-4);
+    max-width: 64ch;
+    color: var(--pg-ink);
+    font-size: 19px;
+    line-height: 1.45;
+}
+
+.gameabout__empty {
+    color: var(--pg-ink-muted);
+}
+
+/* The facts under the description, in a grid of label-over-value cells like a stat screen. */
+.gamestats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--pg-sp-4);
+    padding-top: var(--pg-sp-5);
+    border-top: var(--pg-bw) dashed var(--pg-border);
+}
+
+.gamestats__item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-2);
+}
+
+.gamestats__term {
+    color: var(--pg-ink-muted);
+    font: normal var(--pg-field-label) / 1.4 var(--pg-font-brand);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.gamestats__value {
+    color: var(--pg-ink);
+    font-size: 21px;
+    text-transform: capitalize;
+}
+
+.gameservers__list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--pg-sp-5);
+    list-style: none;
+}
+
+.server {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-4);
+    padding: var(--pg-sp-5);
+}
+
+.server .pg-progress__head {
+    font-size: var(--pg-field-label);
+}
+
+.server .pg-btn {
+    align-self: flex-start;
+}
+
+@media (max-width: 768px) {
+    .gamehero {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .gamestats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 512px) {
+    .gamepage {
+        gap: var(--pg-sp-6);
+        padding-top: var(--pg-sp-6);
+    }
+
+    .gameinfo,
+    .gametabs__panel {
+        padding: var(--pg-sp-5);
+    }
+
+    .gamemedia__thumbs {
+        gap: var(--pg-sp-2);
+    }
+}

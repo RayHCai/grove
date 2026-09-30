@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
-import { Button, TextInput } from '@grove/ui';
-import { PASSWORD_MAX, PASSWORD_MIN } from '@grove/api-contract';
-import { messageOf } from '../api/messages';
+import { useEffect, useState } from 'react';
+import { Button } from '@grove/ui';
 import { Link } from '../router/Link';
 import { replace } from '../router/useRoute';
+import { useAction } from '../session/useAction';
 import { useSession } from '../session/SessionProvider';
 import { AuthCard } from './AuthCard';
+import { NewPasswordField, TOO_SHORT, tooShort } from './NewPasswordField';
 
 export interface ResetPasswordProps {
     /** The key the reset mail linked with, which is a password until it is spent. */
@@ -15,47 +15,39 @@ export interface ResetPasswordProps {
 /** Spending the key from a reset mail for a new password. */
 export function ResetPassword({ token }: ResetPasswordProps): React.JSX.Element {
     const { api } = useSession();
-    // Held before the effect below takes it out of the address bar, which re-renders this page with
-    // no token left in the route to read.
-    const held = useRef(token);
+    // Taken once, before the effect below takes it out of the address bar, which re-renders this
+    // page with no token left in the route to read.
+    const [key] = useState(token);
     const [password, setPassword] = useState('');
-    const [refusal, setRefusal] = useState<string | undefined>(undefined);
-    const [busy, setBusy] = useState(false);
-    const [done, setDone] = useState(false);
+    const action = useAction();
 
     /**
      * Out of the address bar as soon as it has been read.
      *
      * A URL reaches the history, a bookmark and the `Referer` of every request this page goes on to
-     * make — and this one opens somebody's account until it is spent.
+     * make, and this one opens somebody's account until it is spent.
      */
     useEffect(() => {
         if (token !== undefined) replace({ at: 'reset-password', token: undefined });
     }, [token]);
 
-    const key = held.current;
-    const tooShort = password.length > 0 && password.length < PASSWORD_MIN;
-
-    async function submit(): Promise<void> {
+    function submit(): void {
         if (key === undefined) return;
-        if (tooShort) {
-            setRefusal(`A password is at least ${String(PASSWORD_MIN)} characters.`);
+        if (tooShort(password)) {
+            action.fail(TOO_SHORT);
             return;
         }
-        setBusy(true);
-        setRefusal(undefined);
-        try {
-            if (await api.resetPassword(key, password)) setDone(true);
-            // Wrong, already spent and expired are one answer, so this page cannot say which.
-            else setRefusal('That link is no longer good. Ask for a new one.');
-        } catch (failure) {
-            setRefusal(messageOf(failure, 'That did not go through. Try again.'));
-        } finally {
-            setBusy(false);
-        }
+        void action.run(
+            async () =>
+                (await api.resetPassword(key, password))
+                    ? undefined
+                    : // Wrong, already spent and expired are one answer, so this page cannot say which.
+                      'That link is no longer good. Ask for a new one.',
+            'That did not go through. Try again.',
+        );
     }
 
-    if (done) {
+    if (action.state.at === 'done') {
         return (
             <AuthCard
                 title="Your new password is set"
@@ -89,25 +81,23 @@ export function ResetPassword({ token }: ResetPasswordProps): React.JSX.Element 
     return (
         <AuthCard
             title="Set a new password"
-            refusal={refusal}
-            onSubmit={() => void submit()}
+            refusal={action.refusal}
+            onSubmit={submit}
             footer={<Link to={{ at: 'sign-in', returnTo: undefined }}>Back to sign in</Link>}
         >
-            <TextInput
+            <NewPasswordField
                 label="New password"
-                type="password"
                 name="newPassword"
-                autoComplete="new-password"
-                required
-                minLength={PASSWORD_MIN}
-                maxLength={PASSWORD_MAX}
-                aria-invalid={tooShort || undefined}
-                hint={tooShort ? `At least ${String(PASSWORD_MIN)} characters.` : undefined}
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={setPassword}
             />
-            <Button type="submit" variant="primary" aria-busy={busy} aria-disabled={busy}>
-                {busy ? 'Setting it…' : 'Set the password'}
+            <Button
+                type="submit"
+                variant="primary"
+                aria-busy={action.busy}
+                aria-disabled={action.busy}
+            >
+                {action.busy ? 'Setting it…' : 'Set the password'}
             </Button>
         </AuthCard>
     );

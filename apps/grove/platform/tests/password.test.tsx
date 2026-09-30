@@ -20,7 +20,7 @@ async function page(path: string, api = fakeApi()) {
 describe('asking for a reset link', () => {
     /**
      * The route is unauthenticated and answers 202 either way, so this page must not be the end
-     * that distinguishes them — which addresses have accounts is not its to tell.
+     * that distinguishes them; which addresses have accounts is not its to tell.
      */
     it('says the same thing whether or not the address has an account', async () => {
         const known = await page('/forgot-password');

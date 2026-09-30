@@ -1,0 +1,103 @@
+/* One screenful and no more: the hero is centred in whatever the header leaves. */
+.landing {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    width: 100%;
+    max-width: var(--shell-measure);
+    margin: 0 auto;
+    padding: var(--pg-sp-6) var(--shell-gutter);
+}
+
+/* The two ways in stand beside the words rather than under them. */
+.hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(152px, 192px);
+    align-items: center;
+    gap: var(--pg-sp-6);
+    width: 100%;
+}
+
+/*
+ * The headline sits on a sand copy of itself, offset by the same step every surface drops, so the
+ * type is built the way the panels are.
+ */
+.hero__title {
+    color: var(--pg-ink);
+    font-family: var(--pg-font-brand);
+    /* Sized to hold the line rather than to fill the column: the headline never wraps. */
+    font-size: clamp(15px, 2.1vw, 25px);
+    font-weight: normal;
+    line-height: 1.5;
+    letter-spacing: 2px;
+    text-shadow: var(--pg-lift) var(--pg-lift) 0 var(--pg-surface-2);
+}
+
+.hero__lede {
+    margin-top: var(--pg-sp-5);
+    max-width: 46ch;
+    /* Two even lines rather than a long one and a stub; ignored where it is not understood. */
+    text-wrap: balance;
+    color: var(--pg-ink-muted);
+    font-size: 20px;
+    line-height: 1.45;
+}
+
+.hero__side {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-5);
+}
+
+/* Stacked, so the pair reads as one column against the block of text beside it. */
+.hero__actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pg-sp-5);
+}
+
+/* A column of one, so the button inside fills the width the pair shares. */
+.hero__float {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Out of step with the first, so the pair drifts rather than marches. */
+.hero__float + .hero__float {
+    animation-delay: 1.8s;
+}
+
+/*
+ * The headline owes its one line more than the buttons owe their place beside it, so the pair
+ * drops under the words as soon as holding both would wrap it.
+ */
+@media (max-width: 768px) {
+    .hero {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--pg-sp-5);
+    }
+
+    .hero__side {
+        align-items: stretch;
+    }
+}
+
+@media (max-width: 512px) {
+    .landing {
+        padding-block: var(--pg-sp-4);
+    }
+
+    .hero__title {
+        text-shadow: 3px 3px 0 var(--pg-surface-2);
+    }
+
+    /* A narrow window is also a short one, and the hero still owes it one screenful. */
+    .hero__lede {
+        margin-top: var(--pg-sp-4);
+        font-size: 18px;
+    }
+
+    .hero__actions {
+        gap: var(--pg-sp-4);
+    }
+}

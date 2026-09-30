@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Button, TextInput } from '@grove/ui';
-import { PASSWORD_MAX, PASSWORD_MIN } from '@grove/api-contract';
-import { messageOf } from '../api/messages';
 import { Link } from '../router/Link';
 import { go } from '../router/useRoute';
+import { useAction } from '../session/useAction';
 import { useSession } from '../session/SessionProvider';
 import { AuthCard } from './AuthCard';
+import { NewPasswordField, TOO_SHORT, tooShort } from './NewPasswordField';
 
 export interface SignUpProps {
     /** Where the editor asked to be sent back to, if it was the editor that sent somebody here. */
@@ -18,34 +18,25 @@ export function SignUp({ returnTo }: SignUpProps): React.JSX.Element {
     const [displayName, setDisplayName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [refusal, setRefusal] = useState<string | undefined>(undefined);
-    const [busy, setBusy] = useState(false);
+    const action = useAction();
 
-    const tooShort = password.length > 0 && password.length < PASSWORD_MIN;
-
-    async function submit(): Promise<void> {
-        if (tooShort) {
-            setRefusal(`A password is at least ${String(PASSWORD_MIN)} characters.`);
+    function submit(): void {
+        if (tooShort(password)) {
+            action.fail(TOO_SHORT);
             return;
         }
-        setBusy(true);
-        setRefusal(undefined);
-        try {
+        void action.run(async () => {
             await signUp(email, password, displayName);
-            if (returnTo === undefined) go({ at: 'games' });
+            if (returnTo === undefined) go({ at: 'landing' });
             else openEditor(returnTo);
-        } catch (failure) {
-            setRefusal(messageOf(failure, 'That did not go through. Try again.'));
-        } finally {
-            setBusy(false);
-        }
+        }, 'That did not go through. Try again.');
     }
 
     return (
         <AuthCard
             title="Create your Grove account"
-            refusal={refusal}
-            onSubmit={() => void submit()}
+            refusal={action.refusal}
+            onSubmit={submit}
             footer={
                 <>
                     Already have one? <Link to={{ at: 'sign-in', returnTo }}>Sign in</Link>
@@ -70,21 +61,19 @@ export function SignUp({ returnTo }: SignUpProps): React.JSX.Element {
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
             />
-            <TextInput
+            <NewPasswordField
                 label="Password"
-                type="password"
                 name="password"
-                autoComplete="new-password"
-                required
-                minLength={PASSWORD_MIN}
-                maxLength={PASSWORD_MAX}
-                aria-invalid={tooShort || undefined}
-                hint={tooShort ? `At least ${String(PASSWORD_MIN)} characters.` : undefined}
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={setPassword}
             />
-            <Button type="submit" variant="primary" aria-busy={busy} aria-disabled={busy}>
-                {busy ? 'Creating your account…' : 'Create account'}
+            <Button
+                type="submit"
+                variant="primary"
+                aria-busy={action.busy}
+                aria-disabled={action.busy}
+            >
+                {action.busy ? 'Creating your account…' : 'Create account'}
             </Button>
         </AuthCard>
     );
