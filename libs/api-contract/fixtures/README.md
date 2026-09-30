@@ -5,8 +5,9 @@ these shapes reads the same files, so a rename on any one side fails on all of t
 join.
 
 `wire/` holds one compact document per shape, with its members in the order the Go structs declare
-them. The Go suite unmarshals each into its struct and re-marshals it, comparing bytes; the vitest
-suite parses each with the matching zod schema and compares the value. A member added to one copy
+them, or the zod schema does for a shape no Go service carries. The Go suite unmarshals each it has a
+struct for and re-marshals it, comparing bytes; the vitest suite parses every one with the matching
+zod schema and compares the value, and holds `manifest.json` to the bytes `encodeManifest` writes. A member added to one copy
 and not the other fails whichever suite the fixture no longer describes.
 
 `session-token.json` holds tokens `signSessionToken` actually produced, with the payload each

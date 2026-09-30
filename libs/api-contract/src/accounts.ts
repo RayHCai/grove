@@ -4,7 +4,7 @@ import { GameId, PlayerId } from './ids.js';
 /**
  * Who the caller is, and the token their next write has to carry.
  *
- * What every route that mints a session answers with — signing up, signing in, and asking the
+ * What every route that mints a session answers with: signing up, signing in, and asking the
  * service for another token while still holding the cookie.
  */
 export const SignedIn = z.object({ playerId: PlayerId, csrfToken: z.string() });
@@ -39,6 +39,8 @@ export const Game = z.object({
     title: z.string(),
     visibility: GameVisibility,
     createdAt: z.iso.datetime(),
+    /** When the last publish was asked for, or `null` for a game that has never been published. */
+    publishedAt: z.iso.datetime().nullable(),
 });
 export type Game = z.infer<typeof Game>;
 

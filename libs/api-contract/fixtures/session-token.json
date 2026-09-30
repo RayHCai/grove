@@ -1,16 +1,5 @@
 {
     "secret": "grove-test-secret",
-    "ticket": {
-        "claims": {
-            "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
-            "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
-            "playerId": "f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b",
-            "aud": "game-instance",
-            "exp": 1893456000
-        },
-        "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"playerId\":\"f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b\",\"aud\":\"game-instance\",\"exp\":1893456000}",
-        "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjE4OTM0NTYwMDB9.SJzWQc5FT0UiLL0at3i19Mh8yYbKuHIowlt0gMu29bU"
-    },
     "storeBearer": {
         "claims": {
             "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
@@ -21,15 +10,125 @@
         "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"aud\":\"game-manager\",\"exp\":1893456000}",
         "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4OTM0NTYwMDB9.pXwex0Dzh-gpuu5gnqoeIxz1BNqGVO7LlwRzwt5Wd9U"
     },
-    "anotherTicketByTheSameSigner": {
+    "admin": {
         "claims": {
             "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
-            "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
-            "playerId": "f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b",
-            "aud": "game-instance",
-            "exp": 4102444800
+            "sessionId": "5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d",
+            "aud": "game-manager-admin",
+            "exp": 1893456000
         },
-        "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"playerId\":\"f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b\",\"aud\":\"game-instance\",\"exp\":4102444800}",
-        "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjQxMDI0NDQ4MDB9.r6XWOaq7HBMTho1NVV0L_OJglleTPJirzxU4KhZV-18"
+        "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d\",\"aud\":\"game-manager-admin\",\"exp\":1893456000}",
+        "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI1YTRiM2MyZC0xZTBmLTRhOWItOGM3ZC02ZTVmNGEzYjJjMWQiLCJhdWQiOiJnYW1lLW1hbmFnZXItYWRtaW4iLCJleHAiOjE4OTM0NTYwMDB9.j0Ot8K4S_20nX46hOSBZg-6WIAnsWoILZJe5ZqgIVsY"
+    },
+    "hmacRefused": [
+        {
+            "name": "an Ed25519-signed store bearer",
+            "audience": "game-manager",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4OTM0NTYwMDB9.YBqxRDQt8bpblZhJu8RrjeYnXuH1wf9_IAavFnl412cG1lEzrHfCkNaygYD3KAytf-55fipSXzKppq1pDwjNDQ",
+            "expect": "bad_signature"
+        },
+        {
+            "name": "a purge credential at a session route",
+            "audience": "game-manager",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI1YTRiM2MyZC0xZTBmLTRhOWItOGM3ZC02ZTVmNGEzYjJjMWQiLCJhdWQiOiJnYW1lLW1hbmFnZXItYWRtaW4iLCJleHAiOjE4OTM0NTYwMDB9.j0Ot8K4S_20nX46hOSBZg-6WIAnsWoILZJe5ZqgIVsY",
+            "expect": "wrong_audience"
+        },
+        {
+            "name": "a store bearer at the purge route",
+            "audience": "game-manager-admin",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4OTM0NTYwMDB9.pXwex0Dzh-gpuu5gnqoeIxz1BNqGVO7LlwRzwt5Wd9U",
+            "expect": "wrong_audience"
+        },
+        {
+            "name": "an HMAC-signed join ticket",
+            "audience": "game-manager",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjE4OTM0NTYwMDB9.SJzWQc5FT0UiLL0at3i19Mh8yYbKuHIowlt0gMu29bU",
+            "expect": "wrong_audience"
+        }
+    ],
+    "ticket": {
+        "seed": "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A",
+        "publicKey": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+        "now": 1800000000,
+        "vectors": [
+            {
+                "name": "join ticket",
+                "claims": {
+                    "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
+                    "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
+                    "playerId": "f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b",
+                    "aud": "game-instance",
+                    "exp": 1893456000
+                },
+                "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"playerId\":\"f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b\",\"aud\":\"game-instance\",\"exp\":1893456000}",
+                "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjE4OTM0NTYwMDB9.rWCWyoW0RLb38wi8tZYlDF52zx6FBh6nhnBJslMSTflmLqH2JoBD7AoSfjhMO9EN9OjP-_JzVekyykF1nziZBg",
+                "expect": "ok"
+            },
+            {
+                "name": "another ticket by the same signer",
+                "claims": {
+                    "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
+                    "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
+                    "playerId": "f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b",
+                    "aud": "game-instance",
+                    "exp": 4102444800
+                },
+                "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"playerId\":\"f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b\",\"aud\":\"game-instance\",\"exp\":4102444800}",
+                "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjQxMDI0NDQ4MDB9.7FsO_OflYSN0PqNE7zBi88zZEaFUQfnggrPpJN8sYo2yesq1OB_T3j96oDjqUf2CzO3jngiV1Gq67DYGtVAzAw",
+                "expect": "ok"
+            },
+            {
+                "name": "expired at now",
+                "claims": {
+                    "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
+                    "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
+                    "playerId": "f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b",
+                    "aud": "game-instance",
+                    "exp": 1700000000
+                },
+                "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"playerId\":\"f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b\",\"aud\":\"game-instance\",\"exp\":1700000000}",
+                "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjE3MDAwMDAwMDB9.UefcqEKBbU09zcU6DUojuMxhr6EgQOnGstVirY2jZNnuTJDF0gfLHJR6ThHTqyN0NZDXyNSMTEJZZ62znxvoCA",
+                "expect": "expired"
+            },
+            {
+                "name": "payload edited after signing",
+                "claims": {
+                    "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
+                    "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
+                    "playerId": "f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5c",
+                    "aud": "game-instance",
+                    "exp": 1893456000
+                },
+                "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"playerId\":\"f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5c\",\"aud\":\"game-instance\",\"exp\":1893456000}",
+                "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YyIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjE4OTM0NTYwMDB9.rWCWyoW0RLb38wi8tZYlDF52zx6FBh6nhnBJslMSTflmLqH2JoBD7AoSfjhMO9EN9OjP-_JzVekyykF1nziZBg",
+                "expect": "bad_signature"
+            },
+            {
+                "name": "HMAC-SHA256 with the store secret",
+                "claims": {
+                    "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
+                    "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
+                    "playerId": "f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b",
+                    "aud": "game-instance",
+                    "exp": 1893456000
+                },
+                "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"playerId\":\"f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b\",\"aud\":\"game-instance\",\"exp\":1893456000}",
+                "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjE4OTM0NTYwMDB9.SJzWQc5FT0UiLL0at3i19Mh8yYbKuHIowlt0gMu29bU",
+                "expect": "bad_signature"
+            },
+            {
+                "name": "signed by another Ed25519 key",
+                "claims": {
+                    "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
+                    "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
+                    "playerId": "f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b",
+                    "aud": "game-instance",
+                    "exp": 1893456000
+                },
+                "payload": "{\"gameId\":\"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10\",\"sessionId\":\"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f\",\"playerId\":\"f1e2d3c4-b5a6-4978-8a9b-0c1d2e3f4a5b\",\"aud\":\"game-instance\",\"exp\":1893456000}",
+                "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjE4OTM0NTYwMDB9.UTLfiSTfvWgyurV83KPYDczM0GiqeX48Cwk1IV5WTqrMicRDmmVkIvH44mz7gNgGeeH_Fm7-WFvfAGv2vZEBDw",
+                "expect": "bad_signature"
+            }
+        ]
     }
 }

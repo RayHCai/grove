@@ -45,7 +45,7 @@ export const TaskDetail = z.object({
     /** A clean build may still carry warnings, so this is present on a success too. */
     diagnostics: z.array(BuildDiagnostic).optional(),
     /**
-     * Present only on a build that succeeded — nothing else produces one.
+     * Present only on a build that succeeded; nothing else produces one.
      *
      * The same bytes the build wrote to `build/<revision>/build.json`, echoed here because the
      * allocator reads it on the path of every join and a bucket round trip does not belong there.
@@ -102,7 +102,7 @@ export type TaskStatusUpdate = z.infer<typeof TaskStatusUpdate>;
  * The message a stream carries, which is a task id and nothing else.
  *
  * The row is written before this is pushed, so a worker reads the task from the database rather
- * than from the message — and a push that was lost is a row a sweeper can still find.
+ * than from the message, and a push that was lost is a row a sweeper can still find.
  */
 export const TaskMessage = z.object({ taskId: TaskId });
 export type TaskMessage = z.infer<typeof TaskMessage>;

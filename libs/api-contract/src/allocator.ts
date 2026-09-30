@@ -20,7 +20,7 @@ export const PlaySession = z.object({
      * trying to get into: the authority compares these before it allocates a `Player`, and only
      * the bundle hash has an empty-string escape.
      *
-     * No bundle refs beside them, deliberately. What code to run is the `Welcome`'s to say — it
+     * No bundle refs beside them, deliberately. What code to run is the `Welcome`'s to say: it
      * names a url and a hash, and the client fetches and verifies that. A second copy here would
      * be this service's guess at what the world a player actually landed in is running.
      */

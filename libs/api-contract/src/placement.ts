@@ -105,7 +105,7 @@ export type HostHeartbeat = z.infer<typeof HostHeartbeat>;
 export const HostLiveness = z.enum(['healthy', 'suspected', 'left', 'failed']);
 export type HostLiveness = z.infer<typeof HostLiveness>;
 
-/** One row of the fleet as the router sees it — liveness follows `lastSeenAt`, never a claim. */
+/** One row of the fleet as the router sees it: liveness follows `lastSeenAt`, never a claim. */
 export const HostView = z.object({
     hostId: HostId,
     region: z.string(),
@@ -143,7 +143,7 @@ export const FleetEvent = z.object({
     /** The incarnation the box ran, so a restart's events do not read as the last life's. */
     incarnation: z.uuid(),
     at: z.iso.datetime(),
-    /** Why, where the kind alone does not say it — the signal a suspicion came from, say. */
+    /** Why, where the kind alone does not say it: the signal a suspicion came from, say. */
     detail: z.string().max(512).optional(),
 });
 export type FleetEvent = z.infer<typeof FleetEvent>;
