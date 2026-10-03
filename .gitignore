@@ -1,10 +1,25 @@
 node_modules/
 .pnpm-store/
+.venv/
+venv/
+
 dist/
+build/
+out/
+.next/
 target/
-.turbo/
 *.tsbuildinfo
+
+.turbo/
 coverage/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Terraform's per-root provider plugins and state. The lock files stay tracked.
+.terraform/
+*.tfstate
+*.tfstate.*
 
 # Prisma writes its client as TypeScript source under src/, where this package's own tsc compiles it.
 apps/grove/api/src/generated/
@@ -13,14 +28,18 @@ apps/grove/api/src/generated/
 bench/runs/
 
 *.log
+logs/
 .DS_Store
 .env
-.env.local
+.env.*
+!.env.example
 
 .idea/
-.vscode/*
-!.vscode/extensions.json
+.vscode/
 
 .claude/
+CLAUDE.md
+AGENTS.md
+
 # One build tree per task, under @grove/game-builder so the platform packages resolve from it.
 apps/grove/game-builder/.builds/

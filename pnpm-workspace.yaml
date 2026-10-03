@@ -34,6 +34,10 @@ allowBuilds:
 # @prisma/config pins 7.1.5 exactly and merges this repo's own config files with it.
 # mysql2: an auth-plugin downgrade that leaks the password in the clear, GHSA-3f6p-5ww8-9rcr, fixed
 # in 3.22. prisma ships every driver and the datasource here is postgresql, so nothing loads it.
+#
+# dompurify: sanitizer bypasses, GHSA-cmwh-pvxp-8882 and GHSA-55q2-fjhq-7xh7, fixed in 3.4.13.
+# monaco-editor 0.56 pins 3.4.8 exactly, and the release that moves it is a 0.x minor of the editor.
 overrides:
     deepmerge-ts: ^8.0.0
     mysql2: ^3.22.0
+    dompurify: ^3.4.13

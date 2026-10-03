@@ -1,4 +1,4 @@
-# Grove
+# Development
 
 Grove is a 2D multiplayer game platform for students, roughly elementary through high school. Younger creators build with blocks; older ones write TypeScript against the same API. The blocks _are_ the TypeScript, just shown differently, so creators move up gradually instead of jumping from a "toy" tool to a "real" one. Games run on a deterministic engine (`packages/*`). The same engine runs in-process for the editor's live preview and inside a Rust `game-instance` on the production fleet.
 
