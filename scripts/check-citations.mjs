@@ -23,10 +23,7 @@ const DESIGN = 'docs/api_design.md';
 
 /** True where a citation belongs: the docs themselves, and each package's README and DESIGN. */
 function exempt(path) {
-    return (
-        path.startsWith('docs/') ||
-        /(^|\/)(DESIGN\.md|README\.md|readme\.md)$/u.test(path)
-    );
+    return path.startsWith('docs/') || /(^|\/)(DESIGN\.md|README\.md|readme\.md)$/u.test(path);
 }
 
 function tracked() {
