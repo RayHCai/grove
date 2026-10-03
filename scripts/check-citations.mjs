@@ -21,11 +21,10 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const CITATION = /§ ?\d+(?:\.\d+)*/gu;
 const DESIGN = 'docs/api_design.md';
 
-/** True where a citation belongs: the docs themselves, and the prose that states the rule. */
+/** True where a citation belongs: the docs themselves, and each package's README and DESIGN. */
 function exempt(path) {
     return (
         path.startsWith('docs/') ||
-        path === 'AGENTS.md' ||
         /(^|\/)(DESIGN\.md|README\.md|readme\.md)$/u.test(path)
     );
 }
@@ -39,10 +38,9 @@ function tracked() {
 function read(path) {
     try {
         // What git tracks for a symlink is the path it points at, not the prose at the other end.
-        // Following it reads the target a second time under a name the exemptions above do not know:
-        // `CLAUDE.md` -> `AGENTS.md` is this tree's case, and it turns the rule's own worked examples
-        // into two violations. It also only happens where the checkout has real symlinks, so the
-        // Windows hook passes what Linux CI fails.
+        // Following it reads the target a second time under a name the exemptions above may not know,
+        // and only where the checkout has real symlinks, so the Windows hook would pass what Linux CI
+        // fails.
         if (lstatSync(join(root, path)).isSymbolicLink()) return '';
         return readFileSync(join(root, path), 'utf8');
     } catch {

@@ -38,6 +38,8 @@ logs/
 .vscode/
 
 .claude/
+CLAUDE.md
+AGENTS.md
 
 # One build tree per task, under @grove/game-builder so the platform packages resolve from it.
 apps/grove/game-builder/.builds/
