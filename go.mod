@@ -9,4 +9,4 @@ go 1.24
 // Pinned newer than the go line, which stays a language floor: 1.24 is out of support and most
 // stdlib advisories against it were never backported, while a floor is what still builds under
 // GOTOOLCHAIN=local on a machine that cannot download this one.
-toolchain go1.26.8
+toolchain go1.26.10
