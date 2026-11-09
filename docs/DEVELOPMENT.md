@@ -36,7 +36,7 @@ flowchart LR
   platform --> api
   editor --> api
   editor -->|presigned PUT| s3
-  player <-->|websocket| gi
+  player <-->|wss, through the box's proxy| im
 
   api --> pg
   api --> s3
@@ -57,7 +57,7 @@ flowchart LR
 
 `compose.yaml` at the root is for development only; nothing deploys from it. It comes in three
 layers, because most work needs only the first. Copy `.env.example` to `.env` first: compose refuses
-to start without the three secrets in it.
+to start without the secrets and keys in it.
 
 ```sh
 docker compose up                    # Postgres, Redis and LocalStack
@@ -74,15 +74,16 @@ pnpm --filter @grove/editor dev      # localhost:5176
 pnpm --filter @grove/player-app dev  # localhost:5177
 ```
 
-| Reached at           | What                                                 |
-| -------------------- | ---------------------------------------------------- |
-| `localhost:4000`     | `api`                                                |
-| `localhost:4001/3/4` | `game-manager`, `server-manager`, `instance-manager` |
-| `localhost:4002`     | `game-builder`                                       |
-| `localhost:4005`     | `asset-upload-service`                               |
-| `127.0.0.1:5432`     | Postgres, for `psql` or a GUI on the host            |
-| `127.0.0.1:6379`     | Redis                                                |
-| `localhost:4566`     | LocalStack: S3, and only S3                          |
+| Reached at           | What                                                  |
+| -------------------- | ----------------------------------------------------- |
+| `localhost:4000`     | `api`                                                 |
+| `localhost:4001/3/4` | `game-manager`, `server-manager`, `instance-manager`  |
+| `localhost:4002`     | `game-builder`                                        |
+| `localhost:4005`     | `asset-upload-service`                                |
+| `box.localhost:4006` | the local box's player proxy, which a placement names |
+| `127.0.0.1:5432`     | Postgres, for `psql` or a GUI on the host             |
+| `127.0.0.1:6379`     | Redis                                                 |
+| `localhost:4566`     | LocalStack: S3, and only S3                           |
 
 The stores are the three a deployment hands the fleet, so nothing in a service knows it is running
 locally: the games bucket is LocalStack's, reached through `S3_ENDPOINT` with versioning on because a
@@ -103,32 +104,36 @@ package cannot resolve alone:
 docker build -f apps/grove/api/Dockerfile -t grove-api .
 ```
 
-| Where     | What                                                                                                                  | Provisioned by                |
-| --------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| Static    | `platform`, `editor`, `player`, each built by its own `pnpm build`                                                    | any static host               |
-| Railway   | `api`, `game-builder`, `game-manager`, `server-manager`, `asset-upload-service`                                       | each one's `railway.json`     |
-| AWS       | the games bucket and its CloudFront distribution, the DynamoDB tables, the task streams' ElastiCache Serverless cache | Terraform, `apps/grove/infra` |
-| EC2 fleet | `instance-manager` and `game-instance`, three regions, one autoscaling group each                                     | Terraform, `apps/grove/infra` |
+| Where     | What                                                                              | Provisioned by                |
+| --------- | --------------------------------------------------------------------------------- | ----------------------------- |
+| Static    | `platform`, `editor`, `player`, each built by its own `pnpm build`                | any static host               |
+| Railway   | `api`, `game-builder`, `game-manager`, `server-manager`, `asset-upload-service`   | each one's `railway.json`     |
+| AWS       | the games bucket and its CloudFront distribution, the DynamoDB tables             | Terraform, `apps/grove/infra` |
+| EC2 fleet | `instance-manager` and `game-instance`, three regions, one autoscaling group each | Terraform, `apps/grove/infra` |
 
 Each Railway service's `railway.json` names its Dockerfile, a `/health` check, and a 35-second drain
-past the 30 seconds each service spends draining. Every service listens on the `PORT` Railway
+past the at most 30 seconds each service spends draining. Every service listens on the `PORT` Railway
 assigns. `api` applies its migrations as a pre-deploy command rather than on the way up, so a process
 that starts has a schema already.
 
 A fleet box runs no container. Its launch template boots an AMI that must already carry
 `/opt/grove/bin/instance-manager` and `/opt/grove/bin/grove-game-instance`, found through the SSM
-parameter each environment names in `fleet_ami_parameter`; user-data only writes the systemd unit
-and the script that fetches the two shared secrets from Parameter Store before every start.
+parameter each environment names in `fleet_ami_parameter`; user-data writes the systemd units, the
+box's DNS name and the script that fetches its parameters (the fleet secret, the api's ticket public
+keys and the TLS pair) from Parameter Store before every start. No box holds a signing key.
 `apps/grove/infra/README.md` states how that image is built. `docker/local-fleet-box.Dockerfile` is
 the same pair arranged so one machine can hold a session, and it deploys nowhere.
 
-Two network paths have to exist before a deployment works, and neither Terraform nor Railway
-builds them:
+These have to exist before a deployment works, and neither Terraform nor Railway builds them:
 
-- The task streams are an ElastiCache Serverless cache in a private VPC, answering only TLS
-  (`rediss://`). `api`, `game-builder` and `asset-upload-service` reach it only once that VPC is
-  peered, or joined by VPN or a transit gateway, with the network they run in, and
-  `task_client_cidrs` names their blocks.
+- The task streams run on a Redis that `api`, `game-builder` and `asset-upload-service` each reach
+  as `REDIS_URL`, and that no fleet box can.
 - Every fleet box beats to `server_manager_url` and hands its game processes `game_manager_url`,
   both `*.grove.internal` names. They resolve only where a private DNS zone and a route from the
   fleet VPCs to those Railway services have been set up.
+- `server-manager` dials every box at `<host-id>.<fleet_domain>` from static egress addresses,
+  named in `server_manager_cidrs`, and a certificate covering `*.<fleet_domain>` sits in each fleet
+  region's Parameter Store as `TLS_CERT` and `TLS_KEY`.
+- Each service's secrets are set where it runs: one bearer per pair of services that talk, and the
+  two Ed25519 pairs (the api's ticket key and server-manager's store key) whose public halves the
+  fleet and `game-manager` verify with; `.env.example` names them all.
