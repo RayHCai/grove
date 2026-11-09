@@ -9,7 +9,7 @@
 # the agent is a box that can start nothing.
 #
 #     docker build -f docker/local-fleet-box.Dockerfile -t grove-local-fleet-box .
-ARG GO_IMAGE=golang:1.26-bookworm
+ARG GO_IMAGE=golang:1.26.10-bookworm
 ARG RUST_IMAGE=rust:1.98.1-bookworm
 
 FROM ${GO_IMAGE} AS agent
@@ -54,7 +54,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # A full userland rather than a distroless base, because this stands in for a Linux box: the agent
 # forks a child process, supervises it, and outlives a restart by adopting what it finds still running.
-FROM debian:12-slim AS runtime
+FROM debian:12-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*

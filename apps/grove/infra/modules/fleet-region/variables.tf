@@ -60,15 +60,52 @@ variable "heartbeat_interval" {
 }
 
 variable "instance_manager_port" {
-  description = "Port the agent binds. Reachable from the fleet network and from nowhere else."
+  description = "Port the agent's control listener binds. Reachable from the fleet's own blocks and from `server_manager_cidrs`, and from nowhere else."
   type        = number
   default     = 4004
 }
 
-variable "game_port_range" {
-  description = "Ports the game processes bind. The agent asks the kernel for a free one, so this is the kernel's ephemeral range, and it is open to the internet because a player dials their game process directly."
-  type        = list(number)
-  default     = [32768, 60999]
+variable "player_port" {
+  description = "Port the agent's player proxy binds, the one port on a box the internet reaches; `PLAYER_PORT` for the agent. Every game process binds loopback behind it."
+  type        = number
+  default     = 443
+}
+
+variable "fleet_domain" {
+  description = "Domain every box is named under, as `<host-id>.<fleet_domain>`: the name players and `@grove/server-manager` dial, and the one the TLS certificate in Parameter Store must cover. No default, because a box nothing can name is a box nothing can reach."
+  type        = string
+
+  validation {
+    condition     = can(regex("^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$", var.fleet_domain))
+    error_message = "fleet_domain is a lowercase DNS name with no trailing dot."
+  }
+}
+
+variable "fleet_zone_id" {
+  description = "Route 53 hosted zone holding `fleet_domain`, where each box writes its own A record at boot."
+  type        = string
+}
+
+variable "server_manager_cidrs" {
+  description = "Address blocks `@grove/server-manager` reaches the agents from (its static egress), which is what opens the control port to it. No default: an empty list is a fleet the router cannot start a world on."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.server_manager_cidrs) > 0 && alltrue([for block in var.server_manager_cidrs : can(cidrhost(block, 0))])
+    error_message = "server_manager_cidrs needs at least one block, and each must be a CIDR."
+  }
+}
+
+variable "child_memory_max_bytes" {
+  description = "Memory one game process's cgroup may hold, `memory.max`; `CHILD_MEMORY_MAX_BYTES` for the agent."
+  type        = number
+  default     = 1073741824
+}
+
+variable "child_pids_max" {
+  description = "Tasks one game process's cgroup may hold, `pids.max`; `CHILD_PIDS_MAX` for the agent."
+  type        = number
+  default     = 256
 }
 
 variable "server_manager_url" {

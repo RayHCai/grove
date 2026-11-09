@@ -50,6 +50,27 @@ variable "game_manager_url" {
   type        = string
 }
 
+variable "fleet_domain" {
+  description = "Domain every box is named under, as `<host-id>.<fleet_domain>`, in every fleet region."
+  type        = string
+}
+
+variable "fleet_zone_id" {
+  description = "Route 53 hosted zone holding `fleet_domain`, where each box writes its own record."
+  type        = string
+}
+
+variable "server_manager_cidrs" {
+  description = "Address blocks `@grove/server-manager` reaches the agents from."
+  type        = list(string)
+}
+
+variable "player_port" {
+  description = "Port every box's player proxy binds; the one port on a box the internet reaches."
+  type        = number
+  default     = 443
+}
+
 variable "fleet_ami_parameter" {
   description = "SSM parameter holding the fleet image's id, present under this name in every fleet region. No default: a stock image carries no agent."
   type        = string

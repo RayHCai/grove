@@ -13,8 +13,8 @@ resource "aws_launch_template" "fleet" {
 
   vpc_security_group_ids = [aws_security_group.fleet.id]
 
-  # IMDSv2 only, one hop: the instance profile's credentials are served here, and a single hop
-  # keeps them out of reach of anything the box later runs in a container.
+  # IMDSv2 only, one hop: a single hop keeps the profile from containers, and a firewall rule on the
+  # box keeps it from the game user, which a hop limit cannot tell apart from the agent.
   metadata_options {
     http_tokens                 = "required"
     http_put_response_hop_limit = 1
@@ -37,16 +37,21 @@ resource "aws_launch_template" "fleet" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user-data.sh.tftpl", {
-    region                = var.region
-    grove_env             = var.environment == "production" ? "production" : "development"
-    secret_path           = local.secret_path
-    server_manager_url    = var.server_manager_url
-    game_manager_url      = var.game_manager_url
-    instance_manager_port = var.instance_manager_port
-    max_instances         = var.max_instances_per_box
-    heartbeat_interval    = var.heartbeat_interval
-    agent_bin             = "/opt/grove/bin/instance-manager"
-    game_instance_bin     = "/opt/grove/bin/grove-game-instance"
+    region                 = var.region
+    grove_env              = var.environment == "production" ? "production" : "development"
+    secret_path            = local.secret_path
+    server_manager_url     = var.server_manager_url
+    game_manager_url       = var.game_manager_url
+    instance_manager_port  = var.instance_manager_port
+    player_port            = var.player_port
+    fleet_domain           = var.fleet_domain
+    fleet_zone_id          = var.fleet_zone_id
+    child_memory_max_bytes = var.child_memory_max_bytes
+    child_pids_max         = var.child_pids_max
+    max_instances          = var.max_instances_per_box
+    heartbeat_interval     = var.heartbeat_interval
+    agent_bin              = "/opt/grove/bin/instance-manager"
+    game_instance_bin      = "/opt/grove/bin/grove-game-instance"
   }))
 
   tag_specifications {

@@ -24,6 +24,6 @@ output "autoscaling_group_name" {
 }
 
 output "secret_path" {
-  description = "Parameter Store prefix holding this region's copy of the two shared secrets."
+  description = "Parameter Store prefix holding this region's copy of what a box reads: FLEET_SECRET, TICKET_PUBLIC_KEYS, TLS_CERT and TLS_KEY."
   value       = local.secret_path
 }

@@ -48,12 +48,16 @@ module "fleet_a" {
   max_instances_per_box = var.fleet["a"].max_instances_per_box
   root_volume_gb        = var.fleet["a"].root_volume_gb
 
-  ami_ssm_parameter   = var.fleet_ami_parameter
-  server_manager_url  = var.server_manager_url
-  game_manager_url    = var.game_manager_url
-  fleet_cidrs         = local.agent_cidrs
-  artifact_bucket_arn = module.storage.bucket_arn
-  tags                = local.tags
+  ami_ssm_parameter    = var.fleet_ami_parameter
+  server_manager_url   = var.server_manager_url
+  game_manager_url     = var.game_manager_url
+  fleet_domain         = var.fleet_domain
+  fleet_zone_id        = var.fleet_zone_id
+  server_manager_cidrs = var.server_manager_cidrs
+  player_port          = var.player_port
+  fleet_cidrs          = local.agent_cidrs
+  artifact_bucket_arn  = module.storage.bucket_arn
+  tags                 = local.tags
 }
 
 module "fleet_b" {
@@ -68,12 +72,16 @@ module "fleet_b" {
   max_instances_per_box = var.fleet["b"].max_instances_per_box
   root_volume_gb        = var.fleet["b"].root_volume_gb
 
-  ami_ssm_parameter   = var.fleet_ami_parameter
-  server_manager_url  = var.server_manager_url
-  game_manager_url    = var.game_manager_url
-  fleet_cidrs         = local.agent_cidrs
-  artifact_bucket_arn = module.storage.bucket_arn
-  tags                = local.tags
+  ami_ssm_parameter    = var.fleet_ami_parameter
+  server_manager_url   = var.server_manager_url
+  game_manager_url     = var.game_manager_url
+  fleet_domain         = var.fleet_domain
+  fleet_zone_id        = var.fleet_zone_id
+  server_manager_cidrs = var.server_manager_cidrs
+  player_port          = var.player_port
+  fleet_cidrs          = local.agent_cidrs
+  artifact_bucket_arn  = module.storage.bucket_arn
+  tags                 = local.tags
 }
 
 module "fleet_c" {
@@ -88,10 +96,14 @@ module "fleet_c" {
   max_instances_per_box = var.fleet["c"].max_instances_per_box
   root_volume_gb        = var.fleet["c"].root_volume_gb
 
-  ami_ssm_parameter   = var.fleet_ami_parameter
-  server_manager_url  = var.server_manager_url
-  game_manager_url    = var.game_manager_url
-  fleet_cidrs         = local.agent_cidrs
-  artifact_bucket_arn = module.storage.bucket_arn
-  tags                = local.tags
+  ami_ssm_parameter    = var.fleet_ami_parameter
+  server_manager_url   = var.server_manager_url
+  game_manager_url     = var.game_manager_url
+  fleet_domain         = var.fleet_domain
+  fleet_zone_id        = var.fleet_zone_id
+  server_manager_cidrs = var.server_manager_cidrs
+  player_port          = var.player_port
+  fleet_cidrs          = local.agent_cidrs
+  artifact_bucket_arn  = module.storage.bucket_arn
+  tags                 = local.tags
 }

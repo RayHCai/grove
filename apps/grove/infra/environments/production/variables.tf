@@ -31,6 +31,21 @@ variable "game_manager_url" {
   type        = string
 }
 
+variable "fleet_domain" {
+  description = "Domain every box is named under, covered by the TLS certificate in Parameter Store."
+  type        = string
+}
+
+variable "fleet_zone_id" {
+  description = "Route 53 hosted zone holding `fleet_domain`."
+  type        = string
+}
+
+variable "server_manager_cidrs" {
+  description = "Static egress blocks of `@grove/server-manager`, which open the agents' control port to it."
+  type        = list(string)
+}
+
 variable "fleet_ami_parameter" {
   description = "SSM parameter holding the fleet image's id, in every fleet region."
   type        = string

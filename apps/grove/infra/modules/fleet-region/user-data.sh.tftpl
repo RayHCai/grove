@@ -6,38 +6,81 @@
 # resolve the whole environment and hand it over.
 set -euo pipefail
 
-# The agent and every game process it forks run unprivileged; only the start script below is root.
+# The agent runs unprivileged, and every game process as a second user holding nothing of the
+# agent's: not its files, not its environment, not the instance profile behind the metadata service.
 id grove >/dev/null 2>&1 || useradd --system --home-dir /var/lib/grove --shell /sbin/nologin grove
-install -d -m 0750 /etc/grove
-install -d -o grove -g grove -m 0750 /var/lib/grove /var/lib/grove/bundles
+id grove-game >/dev/null 2>&1 || useradd --system --no-create-home --shell /sbin/nologin grove-game
+install -d -m 0750 -g grove /etc/grove /etc/grove/tls
+# Traversable and never listable by a game, and the bundle cache readable and never writable by one.
+install -d -o grove -g grove -m 0711 /var/lib/grove
+install -d -o grove -g grove -m 0755 /var/lib/grove/bundles
+command -v iptables >/dev/null 2>&1 || dnf install -y iptables-nft
 
 # Minted once and kept, because the fleet addresses a box by uuid and a restart must not rename it.
 if [ ! -s /etc/grove/host-id ]; then
     cat /proc/sys/kernel/random/uuid > /etc/grove/host-id
 fi
 
-# Run before every start rather than once at boot, so a secret rotated in Parameter Store reaches
-# the agent on its next restart instead of the box's next replacement.
+# The metadata service hands the instance profile's credentials to any local process that asks, and
+# the hop limit stops only containers, so the game user is refused it before any game can start.
+cat > /usr/local/sbin/grove-imds-block <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+uid=$(id -u grove-game)
+iptables -C OUTPUT -m owner --uid-owner "$uid" -d 169.254.169.254 -j REJECT 2>/dev/null ||
+    iptables -I OUTPUT -m owner --uid-owner "$uid" -d 169.254.169.254 -j REJECT
+ip6tables -C OUTPUT -m owner --uid-owner "$uid" -d fd00:ec2::254 -j REJECT 2>/dev/null ||
+    ip6tables -I OUTPUT -m owner --uid-owner "$uid" -d fd00:ec2::254 -j REJECT
+SCRIPT
+chmod 0700 /usr/local/sbin/grove-imds-block
+
+# Run before every start rather than once at boot, so a value rotated in Parameter Store reaches the
+# agent on its next restart instead of the box's next replacement; `tls` refreshes the pair alone.
 cat > /usr/local/sbin/grove-instance-manager-env <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
 
-secret() {
+param() {
     aws ssm get-parameter --with-decryption --region '${region}' \
         --name "${secret_path}/$1" --query Parameter.Value --output text
 }
-fleet_secret=$(secret FLEET_SECRET)
-game_token_secret=$(secret GAME_TOKEN_SECRET)
-host_id=$(cat /etc/grove/host-id)
 
-# 0600 and root's, because the file holds both shared secrets: systemd reads it before dropping to
-# the agent's user, and a game process must never inherit either from anywhere but the agent.
+# root:grove 0640, renamed into place, so the agent never reads half a file and a game reads none.
+put() {
+    staged=$(mktemp "$2.XXXXXX")
+    param "$1" > "$staged"
+    chgrp grove "$staged"
+    chmod 0640 "$staged"
+    mv "$staged" "$2"
+}
+put TLS_CERT /etc/grove/tls/tls.crt
+put TLS_KEY /etc/grove/tls/tls.key
+if [ "$#" -gt 0 ] && [ "$1" = tls ]; then
+    exit 0
+fi
+
+host_id=$(cat /etc/grove/host-id)
+public_host="$host_id.${fleet_domain}"
+
+# Named at every start, so a box whose public address changed with a stop and start is found again.
+imds=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
+public_ip=$(curl -fsS -H "X-aws-ec2-metadata-token: $imds" http://169.254.169.254/latest/meta-data/public-ipv4)
+aws route53 change-resource-record-sets --hosted-zone-id '${fleet_zone_id}' --change-batch \
+    "{\"Changes\":[{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"$public_host\",\"Type\":\"A\",\"TTL\":60,\"ResourceRecords\":[{\"Value\":\"$public_ip\"}]}}]}" \
+    >/dev/null
+
+# 0600 and root's, because the file holds the fleet secret: systemd reads it before dropping to the
+# agent's user, and a game process, under another uid, can reach it from nowhere.
 umask 077
 staged=$(mktemp /etc/grove/instance-manager.env.XXXXXX)
 cat > "$staged" <<ENV
 GROVE_ENV=${grove_env}
 INSTANCE_MANAGER_HOST=0.0.0.0
 INSTANCE_MANAGER_PORT=${instance_manager_port}
+PLAYER_PORT=${player_port}
+PUBLIC_HOST=$public_host
+TLS_CERT_FILE=/etc/grove/tls/tls.crt
+TLS_KEY_FILE=/etc/grove/tls/tls.key
 SERVER_MANAGER_URL=${server_manager_url}
 GAME_MANAGER_URL=${game_manager_url}
 HOST_ID=$host_id
@@ -47,18 +90,56 @@ HEARTBEAT_INTERVAL=${heartbeat_interval}
 GAME_INSTANCE_BIN=${game_instance_bin}
 INSTANCE_STATE_DIR=/var/lib/grove
 BUNDLE_CACHE_DIR=/var/lib/grove/bundles
-FLEET_SECRET=$fleet_secret
-GAME_TOKEN_SECRET=$game_token_secret
+GAME_UID=$(id -u grove-game)
+GAME_GID=$(id -g grove-game)
+CGROUP_ROOT=/sys/fs/cgroup/system.slice/grove-instance-manager.service
+CHILD_MEMORY_MAX_BYTES=${child_memory_max_bytes}
+CHILD_PIDS_MAX=${child_pids_max}
+FLEET_SECRET=$(param FLEET_SECRET)
+TICKET_PUBLIC_KEYS=$(param TICKET_PUBLIC_KEYS)
 ENV
 mv "$staged" /etc/grove/instance-manager.env
 SCRIPT
 chmod 0700 /usr/local/sbin/grove-instance-manager-env
 
+# systemd attaches every start of the agent to its unit's own cgroup, which the kernel refuses while
+# controllers are on below it. The agent turns them off as it exits; an agent that crashed could not,
+# so this turns them off from outside the unit and starts it again.
+cat > /usr/local/sbin/grove-cgroup-unstick <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+unit=/sys/fs/cgroup/system.slice/grove-instance-manager.service
+systemctl is-active --quiet grove-instance-manager.service && exit 0
+[ -s "$unit/cgroup.subtree_control" ] || exit 0
+for controller in $(cat "$unit/cgroup.subtree_control"); do
+    echo "-$controller" > "$unit/cgroup.subtree_control"
+done
+systemctl reset-failed grove-instance-manager.service || true
+systemctl restart grove-instance-manager.service
+SCRIPT
+chmod 0700 /usr/local/sbin/grove-cgroup-unstick
+
+cat > /etc/systemd/system/grove-imds-block.service <<'UNIT'
+[Unit]
+Description=Refuse the metadata service to grove game processes
+Before=grove-instance-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/grove-imds-block
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 cat > /etc/systemd/system/grove-instance-manager.service <<'UNIT'
 [Unit]
 Description=Grove instance manager
-After=network-online.target
+After=network-online.target grove-imds-block.service
 Wants=network-online.target
+# Never started without the block, so no game process ever runs where it could reach the profile.
+Requires=grove-imds-block.service
 
 [Service]
 Type=simple
@@ -72,6 +153,14 @@ ExecStart=${agent_bin}
 Restart=always
 RestartSec=5
 
+# A spawn as another user, a signal to it, and a player port under 1024, and nothing else; the
+# agent clears the ambient set once it holds them, so no game process inherits one.
+AmbientCapabilities=CAP_SETUID CAP_SETGID CAP_KILL CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_KILL CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+# The unit's cgroup is the agent's to divide: one leaf for itself and one per game.
+Delegate=yes
+
 # Kill the agent alone, never its cgroup. A game in progress outlives the agent that started it, and
 # a redeploy here must not end anyone's session.
 KillMode=process
@@ -81,5 +170,49 @@ KillSignal=SIGTERM
 WantedBy=multi-user.target
 UNIT
 
+cat > /etc/systemd/system/grove-cgroup-unstick.service <<'UNIT'
+[Unit]
+Description=Restart a crashed grove agent that systemd cannot attach
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/grove-cgroup-unstick
+UNIT
+
+cat > /etc/systemd/system/grove-cgroup-unstick.timer <<'UNIT'
+[Unit]
+Description=Check every half minute for a grove agent systemd cannot attach
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=30s
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+cat > /etc/systemd/system/grove-tls-refresh.service <<'UNIT'
+[Unit]
+Description=Refresh the fleet certificate from Parameter Store
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/grove-instance-manager-env tls
+UNIT
+
+# Hourly, so a renewed certificate is served without the agent restart that drops every player's socket.
+cat > /etc/systemd/system/grove-tls-refresh.timer <<'UNIT'
+[Unit]
+Description=Refresh the fleet certificate hourly
+
+[Timer]
+OnBootSec=1h
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 systemctl daemon-reload
-systemctl enable --now grove-instance-manager.service
+systemctl enable --now grove-imds-block.service grove-instance-manager.service \
+    grove-tls-refresh.timer grove-cgroup-unstick.timer

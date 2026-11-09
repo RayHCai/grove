@@ -1,8 +1,8 @@
 # @grove/infra
 
-The AWS deployment: the bucket every game lives in, the distribution in front of it, the Redis the
-fleet's queued work is announced on, the tables shaped for game data, and the EC2 fleet the sessions
-run on. Terraform.
+The AWS deployment: the bucket every game lives in, the distribution in front of it, the tables shaped
+for game data, and the EC2 fleet the sessions run on. Terraform. The Redis the task streams run on is
+not provisioned here: the services that share it are handed it as `REDIS_URL`.
 
 Two deployments, `staging` and `production`, built from one composing module. What differs between
 them is the values each root passes (durability, replication, edge reach and the size of a box)
@@ -14,10 +14,9 @@ the other.
 | Path                      | Owns                                                                             |
 | ------------------------- | -------------------------------------------------------------------------------- |
 | `modules/game-storage`    | the games bucket, the origin access control, and the distribution in front of it |
-| `modules/task-streams`    | the Redis every queued task is announced on, and the network it sits in          |
 | `modules/game-data`       | the two tables `@grove/game-manager`'s store is keyed for                        |
 | `modules/fleet-region`    | one region's network, role, launch template and group                            |
-| `modules/environment`     | one whole deployment, composing the four above                                   |
+| `modules/environment`     | one whole deployment, composing the three above                                  |
 | `environments/staging`    | the state key, the four providers, and staging's values                          |
 | `environments/production` | the same three things, and production's                                          |
 
@@ -27,35 +26,39 @@ the shape of a deployment is in `modules/environment`, and everything that separ
 
 ## The bucket, and what the edge can reach
 
-One bucket, keyed game first (every key a game owns begins `<game-id>/`), and the bucket policy is
-what tells the classes under that apart.
+One bucket, keyed game first (every key a game owns begins `<game-id>/`) except an upload awaiting
+inspection, and the bucket policy is what tells the classes apart.
 
-| Key                           | Holds                              | Readable by                            |
-| ----------------------------- | ---------------------------------- | -------------------------------------- |
-| `<game>/source/<path>`        | what a creator writes              | no principal this configuration grants |
-| `<game>/manifests/<revision>` | the set one save froze             | no principal this configuration grants |
-| `<game>/assets/<path>`        | what a game draws with             | the distribution, and the fleet        |
-| `<game>/build/<revision>/`    | what a build of that manifest made | the distribution, and the fleet        |
+| Key                                     | Holds                                  | Readable by                            |
+| --------------------------------------- | -------------------------------------- | -------------------------------------- |
+| `uploads/<game>/<path>`                 | an upload not yet inspected; expires   | no principal this configuration grants |
+| `<game>/source/<path>`                  | what a creator writes                  | no principal this configuration grants |
+| `<game>/manifests/<rev>-<saveId>.json`  | the set one save froze                 | no principal this configuration grants |
+| `<game>/assets/<path>`                  | an inspected copy of an upload         | the distribution, and the fleet's role |
+| `<game>/build/<taskId>/<sha256>/<name>` | what one build made, content-addressed | the distribution, and the fleet's role |
 
 `cdn_prefixes` is a list of patterns relative to a game rather than of leading prefixes, and each is
-rendered `<bucket>/*/<pattern>*`. The wildcard is mid-string because the game comes first, so one
-pattern covers every game's build output without naming one, and `source/` and `manifests/` match
-none of them, which is what keeps a creator's code inside the fleet. A creator's source is private
+rendered `<bucket>/<game-id>/<pattern>*` with the game id spelled as a uuid of `?` wildcards, so one
+pattern covers every game without naming one and matches only the class directly beneath the game
+(`*` would span slashes, and `*/build/*` reached a `source/build/` folder). `source/`, `manifests/`
+and `uploads/` match none of them, which is what keeps a creator's code and an uninspected upload off
+the edge. A creator's source is private
 because a request for it through the edge is refused by S3, not because no URL for it was published.
 
 Versioning is the history rather than a recovery window. A save overwrites a creator's file in place,
 so the version id a manifest freezes is what makes every prior byte-set of every path still
 addressable, and a delete leaves a marker rather than taking bytes an older manifest still names.
-No lifecycle rule expires a noncurrent version; the one rule aborts multipart uploads left
-incomplete for a week.
+Lifecycle rules expire `uploads/` after `upload_retention_days` (1), expire a noncurrent version after
+`noncurrent_version_retention_days` (30) along with the delete markers that leaves, and abort a
+multipart upload left incomplete for a week.
 
-CORS allows `GET`, `PUT` and `HEAD` from `browser_origins` alone, because an asset goes from the
-browser straight to the bucket over a presigned PUT. The variable has no default: a root has to name
+CORS allows `GET`, `PUT` and `HEAD` from `browser_origins` alone, because an upload goes from the
+browser straight to its quarantine key over a presigned PUT signed for its type and length. The variable has no default: a root has to name
 the platform, editor and player origins before its first plan, and `docker/localstack` makes the
 same rule for the three local dev servers.
 
-Every grant here is a read. The configuration creates one role, the fleet box's, and nothing in it
-grants a write to any prefix, so an object arrives in this bucket under a principal held outside
+Every grant here is a read. The configuration creates one role, the fleet box's, whose reads are
+anchored to the game-id segment the same way, and nothing in it grants a write to any prefix, so an object arrives in this bucket under a principal held outside
 this deployment.
 
 ACLs are off (`BucketOwnerEnforced`), so what an object is readable by is the policy's answer alone
@@ -63,54 +66,33 @@ and an upload cannot widen it. The access-log bucket is the one exception, becau
 standard log delivery writes as its own canonical user and grants the owner nothing unless an ACL
 says so.
 
-Cached under the managed `CachingOptimized` policy with CORS request and response policies attached:
-a bundle is fetched cross-origin by the player, and an object under `build/` is immutable because the
-revision naming it is, so a long cache is never wrong.
+Cached with CORS request and response policies attached, since a bundle is fetched cross-origin by the
+player: build output under the managed `CachingOptimized` policy, never wrong because its key holds its
+digest and it carries an immutable `Cache-Control`, and assets for `asset_cache_ttl_seconds` (60),
+since a re-inspected path is rewritten in place.
 
 ## The task streams
 
 A publish and an asset-carrying save each write a row in `@grove/api`'s database and push its id onto
 a Redis stream, one stream per kind. What makes that queued work visible is the row; the message is
-only what wakes a worker, and a sweeper re-pushes anything still sitting unclaimed. That is why there
+only what wakes a worker, and a sweeper re-announces anything unclaimed or whose lease ran out. That is why there
 is no bucket notification here: an event is something you can only hope fired.
 
-Serverless, because the load is a message per save and per publish; a sized node would be chosen for
-a peak nobody can name yet, and this one carries no capacity decision at all. Encryption in transit
-and at rest is not a setting on it; both are always on, which is half of why it is one. That makes it
-reachable only over TLS (`rediss://`) and only from inside its VPC, so a service reaches it through
-a peering, a transit gateway or a VPN into that network, never over the internet.
-
-The cache gets a network of its own. The three services that touch these streams (`@grove/api`,
-`@grove/game-builder` and `@grove/asset-upload-service`) are not built by this configuration, and the one
-thing that is, the game-instance fleet, must never reach them: a box running creator code that could
-read the build stream could settle somebody else's build. `client_cidrs` is what opens it to the
-blocks those services are deployed into, and an empty list leaves the cache reachable from nothing,
-which is what an unwired deployment should be.
-
-One alarm, on read latency with `breaching` on missing data: a cache that has stopped answering is
-every save that lands an asset and every publish going unqueued, and nothing else here reports it.
+That Redis belongs to the platform the three services that touch it run on (`@grove/api`,
+`@grove/game-builder` and `@grove/asset-upload-service`), and no fleet box is handed its address: a box
+runs creator code, and the queue it would read is the work it is the target of.
 
 ## The tables
 
 Two tables, keyed for the questions `@grove/game-manager` asks a datastore. That service keeps its
-store in memory, so nothing reads or writes these yet, and no role here is granted either. `gameId` partitions both,
+store in memory, and no role here is granted either table. `gameId` partitions both,
 which puts the guarantee that service's scope makes at the datastore too: a row belonging to another
 game is not in a partition a handler's token lets it name.
 
-| Table     | Keys             | Shaped for                                                                  |
-| --------- | ---------------- | --------------------------------------------------------------------------- |
-| `state`   | `gameId` / `key` | `Read`, `Write` and `Leaderboard`; `revision` is the compare-and-set column |
-| `bundles` | `gameId`         | `Bundles`                                                                   |
-
-A board is a value under a key in `state` rather than a table of its own. Ordering it is then the
-store's work and not the datastore's, and that is what the key schema buys: an index keyed on score
-has to be partitioned by the board, a board id carries no `gameId`, and the isolation every other
-row gets from the partition key would have held for a leaderboard only by convention.
-
-What it costs is the item ceiling. A board is read and written whole, so it is bounded by DynamoDB's
-400 KB item (a few thousand entries), and a score update rewrites all of them. The compare-and-set
-on `revision` is what makes that safe rather than lossy: two ticks updating one board race on the
-key like any other pair of writers, and the loser is told.
+| Table     | Keys             | Shaped for                                                             |
+| --------- | ---------------- | ---------------------------------------------------------------------- |
+| `state`   | `gameId` / `key` | `Read`, `Write` and `Delete`; `revision` is the compare-and-set column |
+| `bundles` | `gameId`         | the bundle set a game's sessions load                                  |
 
 Production replicates both into every fleet region. A `@serverState` write sits inside a tick, and a
 tick that crossed the continent to reach the store would spend its whole budget waiting.
@@ -122,11 +104,12 @@ failure a player notices, and `@grove/server-manager` treats a requested region 
 than a preference: a region with no box in it is a region no player can be placed in.
 
 Each region gets a network of its own, and the three blocks are distinct so any two of them can be
-routed to each other later. The subnets are public: a player's client opens a WebSocket straight to
-its game process, and putting the boxes behind NAT would mean terminating every session at a load
-balancer, which is the one thing the architecture keeps off the per-tick path. The security group
-opens the kernel's ephemeral range to the internet for that traffic, and the agent's own port to the
-three fleet blocks alone, of which only the region's own is routable until two of them are peered.
+routed to each other later. The subnets are public: a player's client opens a WebSocket to its box
+by name, and putting the boxes behind NAT would mean terminating every session at a load balancer,
+which is the one thing the architecture keeps off the per-tick path. The box's own agent terminates
+TLS on `player_port` and proxies each socket to the game process on loopback, so the security group
+opens `player_port` to the internet and nothing else to it, and the agent's control port to the three
+fleet blocks and `server_manager_cidrs` alone.
 
 There is no key pair and no inbound SSH rule. An operator reaches a box through Session Manager,
 which makes access an IAM decision that leaves a trail rather than a key someone still holds.
@@ -136,31 +119,44 @@ All three are the same fact: terminating a box ends every session it was holding
 ever replaced when the machine itself is gone, and rolling a new launch template version out is an
 operator's call made when the sessions on it can be drained.
 
-The launch template's user data creates a `grove` system user owning `/var/lib/grove`, installs a
-root-only script that reads both secrets from Parameter Store and writes the whole of
-`@grove/instance-manager`'s environment to `/etc/grove/instance-manager.env` at 0600, and runs the
-agent as `grove` under systemd with that script as `ExecStartPre=+`, so every start (a restart, a
-reboot) reads the secrets afresh. `KillMode=process`, because a redeploy of the agent must not end
-anyone's session. `HOST_ID` is a uuid minted on first boot and kept at `/etc/grove/host-id`, so a
-restarted agent keeps the identity the fleet knows it by. The boxes reach `server_manager_url` and
-`game_manager_url`, both `*.grove.internal` names, which resolve only where a private DNS zone and a
-route to those services have been set up for the fleet VPCs.
+The launch template's user data creates a `grove` system user owning `/var/lib/grove` and a
+`grove-game` user every game process runs as, and installs a root-only script that reads the
+parameters below from Parameter Store, writes the TLS pair to `/etc/grove/tls` (root:grove, 0640) and
+the whole of `@grove/instance-manager`'s environment to `/etc/grove/instance-manager.env` at 0600. The
+agent runs as `grove` under systemd with that script as `ExecStartPre=+`, so every start (a restart,
+a reboot) reads them afresh, and holds only `CAP_SETUID`, `CAP_SETGID` and `CAP_KILL` (to spawn and
+signal `grove-game` processes, which it clears before each spawn) plus `CAP_NET_BIND_SERVICE` for
+`player_port`, with `NoNewPrivileges` and `Delegate=yes`, the subtree each game's own cgroup is cut
+from. `grove-imds-block` runs first and refuses `grove-game` any route to the instance metadata
+service, so a game process can neither read the box's role nor its parameters; `grove-tls-refresh`
+re-reads the TLS pair hourly, and `grove-cgroup-unstick` restarts an agent that died with game
+cgroups still delegated. `KillMode=process`, because a redeploy of the agent must not end anyone's
+session. `HOST_ID` is a uuid minted on first boot and kept at `/etc/grove/host-id`, so a restarted
+agent keeps the identity the fleet knows it by, and each boot writes the A record
+`<host-id>.<fleet_domain>` into `fleet_zone_id`: the name players and `@grove/server-manager` dial,
+and the one the TLS certificate covers. The boxes reach `server_manager_url` and `game_manager_url`,
+both `*.grove.internal` names, which resolve only where a private DNS zone and a route to those
+services have been set up for the fleet VPCs.
 
 The image is not a stock one. `fleet_ami_parameter` names an SSM parameter, which must exist in each
 of the three fleet regions, holding the id of an AMI built from Amazon Linux 2023 with the AWS CLI,
+curl and `iptables-nft` (user data installs the last with `dnf` when it is missing),
 `/opt/grove/bin/instance-manager` (`go build ./apps/grove/instance-manager`, static) and
 `/opt/grove/bin/grove-game-instance` (`cargo build --release --locked -p grove-game-instance` in
 `apps/grove`, on a glibc no newer than the image's), and no `/etc/grove/host-id` of its own, which
 would give every box launched from it the same identity. Publishing a new id to that parameter is a
 new launch template version on the next plan.
 
-## The two secrets
+## The box's parameters
 
-`FLEET_SECRET` and `GAME_TOKEN_SECRET` live in Parameter Store as `SecureString`, one copy per
-region because Parameter Store is regional, under `/grove/<environment>/fleet/`. Terraform creates
-the parameter and never its value: a secret passed as a variable is a secret in the state file and
-in every plan output. Each is created holding `replace-me`, rotated in out of band, and ignored here
-from then on; a box picks a rotated value up on the agent's next restart.
+Four live in Parameter Store, one copy per region because Parameter Store is regional, under
+`/grove/<environment>/fleet/`: `FLEET_SECRET` and `TLS_KEY` as `SecureString`, `TLS_CERT` (Advanced
+tier, for a chain's length) and `TICKET_PUBLIC_KEYS` as plain `String`, since a public key protects
+nothing. No box holds a key that signs anything: tickets are verified against the api's public keys,
+and a store bearer arrives with each world from `@grove/server-manager`. Terraform creates each
+parameter and never its value: a secret passed as a variable is a secret in the state file and in
+every plan output. Each is created holding `replace-me`, set out of band, and ignored here from then
+on; a box picks a new value up on the agent's next restart, and a renewed TLS pair within the hour.
 
 ## Running it
 

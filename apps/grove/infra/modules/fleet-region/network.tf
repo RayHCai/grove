@@ -37,9 +37,9 @@ resource "aws_internet_gateway" "fleet" {
   tags = merge(var.tags, { Name = local.name })
 }
 
-# Public subnets, because a player's client opens a WebSocket straight to the game process. Putting
-# the boxes behind NAT would mean terminating every session at a load balancer, which is the one
-# thing the architecture keeps off the per-tick path.
+# Public subnets, because a player's client opens a WebSocket straight to its box's player proxy.
+# Putting the boxes behind NAT would mean terminating every session at a load balancer, which is the
+# one thing the architecture keeps off the per-tick path.
 resource "aws_subnet" "fleet" {
   count = var.subnet_count
 
@@ -77,23 +77,22 @@ resource "aws_security_group" "fleet" {
   tags = merge(var.tags, { Name = local.name })
 }
 
-# The one rule the outside world gets. A game process binds a port the kernel picked, so the range
-# rather than a port, and the process itself verifies a signed join ticket before a frame crosses,
-# which is what makes an open range safe rather than merely necessary.
-resource "aws_vpc_security_group_ingress_rule" "game_sessions" {
+# The one rule the outside world gets: the player proxy, behind which every game process binds
+# loopback, and which carries a socket on only to a world whose child checks a signed ticket.
+resource "aws_vpc_security_group_ingress_rule" "players" {
   security_group_id = aws_security_group.fleet.id
-  description       = "Players dialling their game process directly"
+  description       = "Players reaching their world through the player proxy"
   ip_protocol       = "tcp"
-  from_port         = var.game_port_range[0]
-  to_port           = var.game_port_range[1]
+  from_port         = var.player_port
+  to_port           = var.player_port
   cidr_ipv4         = "0.0.0.0/0"
 }
 
 resource "aws_vpc_security_group_ingress_rule" "agent" {
-  for_each = toset(var.fleet_cidrs)
+  for_each = toset(concat(var.fleet_cidrs, var.server_manager_cidrs))
 
   security_group_id = aws_security_group.fleet.id
-  description       = "The fleet's own blocks reaching this box's agent"
+  description       = "The fleet and its router reaching this box's agent"
   ip_protocol       = "tcp"
   from_port         = var.instance_manager_port
   to_port           = var.instance_manager_port

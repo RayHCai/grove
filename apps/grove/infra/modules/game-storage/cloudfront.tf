@@ -12,6 +12,31 @@ data "aws_cloudfront_response_headers_policy" "cors_and_security" {
   name = "Managed-CORS-and-SecurityHeadersPolicy"
 }
 
+# An asset key is overwritten in place, so the edge asks again within a minute rather than a day;
+# build output is content-addressed and carries its own year-long Cache-Control.
+resource "aws_cloudfront_cache_policy" "assets" {
+  name        = "grove-${var.environment}-assets"
+  comment     = "Assets are overwritten in place, so cached briefly"
+  min_ttl     = 0
+  default_ttl = var.asset_cache_ttl_seconds
+  max_ttl     = var.asset_cache_ttl_seconds
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
+}
+
 resource "aws_cloudfront_origin_access_control" "games" {
   name                              = "grove-${var.environment}-games"
   description                       = "Signs the distribution's reads of the ${var.environment} games bucket"
@@ -43,6 +68,19 @@ resource "aws_cloudfront_distribution" "games" {
     compress               = true
 
     cache_policy_id            = data.aws_cloudfront_cache_policy.optimized.id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.cors_s3.id
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.cors_and_security.id
+  }
+
+  ordered_cache_behavior {
+    path_pattern           = "*/assets/*"
+    target_origin_id       = "games"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD", "OPTIONS"]
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+
+    cache_policy_id            = aws_cloudfront_cache_policy.assets.id
     origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.cors_s3.id
     response_headers_policy_id = data.aws_cloudfront_response_headers_policy.cors_and_security.id
   }
