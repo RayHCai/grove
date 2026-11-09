@@ -12,11 +12,11 @@ Importing `@platform/renderer` yields the interface and types **without pulling 
 the module graph**; otherwise anything touching the type (server-side tooling, the panel's type
 emission) would drag a WebGL library along.
 
-| Import                    | Gives you                                                              |
-| ------------------------- | ---------------------------------------------------------------------- |
-| `@platform/renderer`      | `IRenderer`, every type, `NO_NODE`, `RendererError`, `AssetQueue`      |
-| `@platform/renderer/pixi` | `createPixiRenderer()` (the real backend)                              |
-| `@platform/renderer/null` | `createNullRenderer()`, `createReadyNullRenderer()` (headless, no DOM) |
+| Import                    | Gives you                                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------ |
+| `@platform/renderer`      | `IRenderer`, every type, `NO_NODE`, `RendererError`, `isAllowedAssetUrl`, `REMOTE_ASSET_SCHEMES` |
+| `@platform/renderer/pixi` | `createPixiRenderer()` (the real backend)                                                        |
+| `@platform/renderer/null` | `createNullRenderer()`, `createReadyNullRenderer()` (headless, no DOM)                           |
 
 ```ts
 import type { IRenderer } from '@platform/renderer';
@@ -78,6 +78,7 @@ src/
 ├── renderer.ts         IRenderer, options, descs, patches, events
 ├── node-id.ts          NodeId brand and NO_NODE over math's packed handle
 ├── errors.ts           RendererError + codes
+├── defaults.ts         the one copy of each fallback both backends answer with
 ├── surfaces.ts         PURE: surface order, camera-transformed predicate
 ├── viewport.ts         PURE: framing + scaleMode -> fitScale, viewport, stageRect
 ├── projection.ts       PURE: world<->screen, y-flip, deg->rad, UI anchors

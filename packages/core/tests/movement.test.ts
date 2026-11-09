@@ -1,9 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { bounds } from '@platform/math';
 import type { Vec3 } from '@platform/math';
-// From dist, like every other decorator-bearing import here: `movement.ts` declares
-// `@onEvent('jump')`, and the test transform passes standard decorators through unlowered.
-import { BaseMovement, PlatformerMovement, TopDownMovement } from '../dist/runtime/movement.js';
+import { BaseMovement, PlatformerMovement, TopDownMovement } from '../src/runtime/movement.js';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import type { Runtime } from '../src/runtime/runtime.js';
@@ -37,7 +35,6 @@ class Probe extends BaseMovement {
     }
 }
 
-/** The dist copy's instance type; the `src` declaration is a different class to `tsc`. */
 type Movement = BaseMovement;
 
 function world(movement: new () => Movement): {

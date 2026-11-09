@@ -14,7 +14,7 @@ import {
     MAX_UNJOINED_CONNECTIONS,
 } from '../src/constants.js';
 import { harness } from './harness.js';
-import { Rules } from '../dist/testkit/fixtures.js';
+import { Rules } from '../src/testkit/fixtures.js';
 
 function presses(count: number, name = (i: number) => `a${i}`): InputAction[] {
     return Array.from({ length: count }, (_, i) => ({ action: name(i), on: 'press' }) as const);

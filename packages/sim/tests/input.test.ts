@@ -1,8 +1,6 @@
-// Fixtures are compiled by the build.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import { TopDownMovement, clearRuntime, entityKey } from '@platform/core';
-import { Dasher, Recorder, Rules } from '../dist/testkit/fixtures.js';
+import { Dasher, Recorder, Rules } from '../src/testkit/fixtures.js';
 import {
     HORIZON_CLAMP_TICKS,
     INPUT_BUCKET_FRAMES,

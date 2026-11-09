@@ -111,25 +111,25 @@ export function loadGame(manifest: GameManifest = {}, opts: LoadOptions = {}): R
         passes: makePasses(rt),
     });
 
-    // Wire and hoist only; @onStart waits for startGame, so a handler sees a built world.
-    for (const spec of manifest.gameScripts ?? []) {
-        const { klass, props } =
-            typeof spec === 'function' ? { klass: spec, props: undefined } : spec;
-        wiring.attachToGame(gameInstance, klass as never, props);
-    }
+    // Under `rt`, since a creator constructor or field initializer may already reach a facade.
+    withRuntime(rt, () => {
+        // Wire and hoist only; @onStart waits for startGame, so a handler sees a built world.
+        for (const spec of manifest.gameScripts ?? []) {
+            const { klass, props } =
+                typeof spec === 'function' ? { klass: spec, props: undefined } : spec;
+            wiring.attachToGame(gameInstance, klass as never, props);
+        }
 
-    // After the Game scripts are hoisted and before any @onStart: the placed world is what a start
-    // handler expects to find, and a script hoisted after it would miss its own record's seeding.
-    instantiatePlaced(rt, manifest.entities ?? []);
+        // After the Game scripts are hoisted and before any @onStart: the placed world is what a
+        // start handler expects to find, and a script hoisted after it would miss its own seeding.
+        instantiatePlaced(rt, manifest.entities ?? []);
+    });
 
     return rt;
 }
 
 /** Drains the first batch of deferred `@onStart`s, before the loop has stepped at all. */
 export function startGame(rt: Runtime): Promise<void> {
-    // Ambient runtime established for the same reason `joinPlayer` establishes it: a second
-    // `loadGame` between building this world and starting it repoints the slot every `@onStart`
-    // resolves, and the starts pass gets the wrap from the loop rather than from here.
     return withRuntime(rt, () =>
         drainStarts(rt, {
             activeLocations: roleLocations(rt),
@@ -152,17 +152,12 @@ function drainStarts(rt: Runtime, dispatch: DispatchOptions): Promise<void> {
 
 /** The world stopped existing, so every attached script's @onEnd runs, the mirror of startGame. */
 export function endGame(rt: Runtime): Promise<void> {
-    // Ambient runtime established for the same reason `joinPlayer` establishes it; a teardown is as
-    // far from a tick as an entry point gets.
     return withRuntime(rt, () => dispatchEach(rt, 'onEnd', '@end'));
 }
 
 /** Creates the player record, then lets @onPlayerJoin decide spawn or spectate. */
 export function joinPlayer(rt: Runtime, id: string, name: string): Player {
     const player = rt.wired.playerManager.create(id, name);
-    // Under `rt`, for the reason `pressWidget` establishes it: a join arrives from a transport
-    // callback rather than a tick, so `every`, `after` and `sleep` inside the handler would resolve
-    // whichever world `loadGame` ran last, and register a timer in it, silently.
     withRuntime(rt, () => {
         void dispatchAt(rt, GAME_KEY, 'onPlayerJoin', '@playerJoin', { extra: { player } });
     });
@@ -175,8 +170,6 @@ export function leavePlayer(rt: Runtime, id: string): void {
     const player = players.byId(id);
     if (!player) return;
     const ended = { player, alive: false };
-    // Ambient runtime established for the same reason `joinPlayer` establishes it; all three are
-    // creator handlers reached from a transport callback rather than from a tick.
     withRuntime(rt, () => {
         void dispatchAt(rt, playerKey(id), 'onEnd', '@end', { extra: ended });
         void dispatchAt(rt, cameraKey(id), 'onEnd', '@end', { extra: ended });
@@ -196,10 +189,6 @@ export interface WidgetPress {
 
 /** Dispatches `@onPress` for one widget; a screen-hosted handler answers only its own screen. */
 export function pressWidget(rt: Runtime, press: WidgetPress): Promise<void> {
-    // Under `rt`, like a tick is: a handler reached from here writes widgets through `hud`, which
-    // resolves the AMBIENT runtime, so without this a press dispatched outside a tick lands in
-    // whichever world `loadGame` ran last. One client per page hides it; a process holding a server
-    // and two clients does not.
     return withRuntime(rt, () => {
         const onScreen = press.screen === undefined ? undefined : screenKey(press.screen);
         const pending: Promise<void>[] = [];
@@ -260,7 +249,6 @@ export function pointerHit(
     player?: Player,
 ): Promise<void> {
     if (!rt.entities.isAlive(id)) return Promise.resolve();
-    // Ambient runtime established for the same reason `pressWidget` establishes it.
     return withRuntime(rt, () =>
         dispatchAt(rt, entityKey(id as number), edge, POINTER_EVENT[edge], {
             extra: player === undefined ? { other: rt.entityManager.facade(id) } : { player },
@@ -348,7 +336,6 @@ export interface PlayerRequest {
 
 /** Dispatches `@onRequest` at every SERVER-located handler: the trust boundary itself. */
 export function deliverRequest(rt: Runtime, request: PlayerRequest): Promise<void> {
-    // Ambient runtime established for the same reason `pressWidget` establishes it.
     return withRuntime(rt, () =>
         dispatchEach(rt, 'onRequest', request.name, {
             only: 'server',
@@ -403,8 +390,7 @@ function makePasses(rt: Runtime): TickPasses {
             for (const player of rt.wired.playerManager.players) {
                 const movement = player.movement;
                 if (!movement) continue;
-                // A destroyed avatar leaves its movement instance live, and the physics sink would
-                // otherwise keep writing positions for whatever entity reuses the released slot.
+                // A destroyed avatar leaves its movement instance live, with a host that no longer exists.
                 const host = movement.host as unknown as { entityId: EntityId };
                 if (!rt.entities.isAlive(host.entityId)) continue;
                 tickMovement(rt, movement, host.entityId, dt);

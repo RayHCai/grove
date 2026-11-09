@@ -1,5 +1,3 @@
-// Fixtures compiled by the build.
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
     Listener,
@@ -9,7 +7,7 @@ import {
     Rules,
     Shopper,
     Target,
-} from '../dist/testkit/fixtures.js';
+} from '../src/testkit/fixtures.js';
 import { joinPlayer, loadGame, pressWidget } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import type { Runtime } from '../src/runtime/runtime.js';

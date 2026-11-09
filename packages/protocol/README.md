@@ -11,9 +11,10 @@ move bytes: transport does that.
 
 This package exists because `Message` is `JsonValue` and the transport does no narrowing; inbound socket data
 is untrusted, so a typed inbound value would assert a shape nothing verified. The endpoints validate and narrow
-on receive, and protocol is where the types they narrow _to_ are defined once rather than twice.
+on receive, and protocol is where the types they narrow _to_ are defined once rather than twice, along with the
+authority's narrowing of a client frame and the caps it holds that frame to, which the client sizes its frames by.
 
-Protocol sits **one layer above transport and below both endpoints**, importing one type from it, `JsonValue`,
+Protocol sits **one layer above transport and below both endpoints**, importing `JsonValue` and `RESERVED_KEYS` from it
 and nothing else. It may not depend on core, the renderer, or either endpoint:
 core would put the simulation in a client's module graph just to parse a frame and would let core's branded
 `EntityId` reach the wire, the renderer would drag a rendering library into the headless server, and an
@@ -42,5 +43,5 @@ The envelope catalogue and the reasoning are in [DESIGN.md](./DESIGN.md); this f
 document is authoritative for the wire: the transport, server, and client designs each specified parts of the
 protocol before this package existed, so where they disagree with it they are the ones that are wrong.
 
-`src/{ids,version,envelopes,index}.ts` is the whole wire, and `src/version.ts` holds the `PROTOCOL_VERSION` a
+`src/{ids,version,envelopes,limits,validate,index}.ts` is the whole wire, and `src/version.ts` holds the `PROTOCOL_VERSION` a
 codec change negotiates against.

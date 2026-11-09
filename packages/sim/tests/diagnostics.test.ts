@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { LogSink } from '@platform/core';
 import { clearRuntime } from '@platform/core';
 import { PROTOCOL_VERSION } from '@platform/protocol';
-import { Rules } from '../dist/testkit/fixtures.js';
+import { Rules } from '../src/testkit/fixtures.js';
 import {
     INPUT_BUCKET_FRAMES,
     JOIN_DEADLINE_MS,

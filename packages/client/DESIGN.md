@@ -13,7 +13,7 @@ server ──state/transform envelopes──> Transport ──> Mirror (core run
        <──── input frames (tick-stamped) ──┘                    └──> RenderBridge ──> IRenderer
 ```
 
-Deps: `core`, `math`, `protocol`, `renderer`, `transport`. Never `server`. No React.
+Deps: `core`, `math`, `project`, `protocol`, `renderer`, `transport`. Never `sim`. No React.
 
 ## Layout
 
@@ -88,7 +88,7 @@ and each `TimeSync`, so the two time bases never meet in one subtraction.
 ## Handshake ([src/handshake.ts](src/handshake.ts))
 
 The client speaks first: `JoinRequest { protocolVersion, name, clientSentMs, projectId, projectHash,
-bundleHash, token? }`. The three identity fields are the client's claim about what it is running, built from
+bundleHash }`. The three identity fields are the client's claim about what it is running, built from
 `GameClientOptions.project` with `bundleHash` overridden by whatever this process has actually verified, so
 a resync after a load declares the newer bundle and a server that has moved on refuses. `Welcome` supplies
 `simRate`, `sendRate` (the interval the render path interpolates over), `yourPlayerId`, `bounds`, `regions`,
@@ -248,7 +248,7 @@ authoritative state lands. The scope narrows the snapshot, the movement pass and
 table ignores the `scope` a step hands it, so [src/passes.ts](src/passes.ts) is where the narrowing happens
 or a remote avatar is extrapolated off input this client never had.
 
-**The input pass is the server's, restated.** It cannot be imported (the client never imports the server),
+**The input pass is the authority's.** It folds edges through core's `foldInputEdges`, the code the sim runs,
 and its order is the contract: one `advanceTick` before any edge lands, then the tick's edges, then one
 synthesized `hold` per held button **union** non-neutral axis, then `fillIntent` ahead of the movement pass.
 A sampled `hold` in a frame updates the axis and dispatches nothing; the synthesized one is the only `hold`.
@@ -299,7 +299,10 @@ server-located script, so a loopback here would check an untrusted ask on the ma
 against no authoritative state. The call is gated like input, queued, and flushed once per frame as one
 `RequestFrame` stamped with `localTick`, carrying at most `MAX_REQUESTS_PER_FRAME` and holding the excess
 for the next frame, since the receiver refuses an over-cap frame whole and a burst would otherwise lose
-every call in it; a resync drops the queue with the world it belonged to. The
+every call in it; interactions are chunked the same way at `MAX_INTERACTIONS_PER_FRAME`, an input frame keeps
+its first `MAX_ACTIONS_PER_FRAME` coalesced actions and folds only those, and a press, action or request the
+protocol's predicates refuse (a name past its cap, a payload `isAdmissiblePayload` rejects) never leaves and
+is counted in `stats().outboundRefused`; a resync drops the queue with the world it belonged to. The
 payload is encoded by `src/request.ts` at queue time rather than at `send`, dropping a reserved key, a
 cycle, anything past `MAX_REQUEST_DEPTH` levels, and any value the wire would deliver as something other
 than itself, because `encode` throws on each and that throw would end the session over a field a creator

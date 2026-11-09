@@ -18,9 +18,9 @@ export function formatDiagnostic(d: Diagnostic): string {
     return `${d.file}:${d.line}:${d.column}: ${d.klass} reads ${d.found}. Use ${d.use}; ${d.because}.`;
 }
 
-/** A determinism rule refused something: the build's static pass, or a realm shim behind it. */
+/** A determinism rule refused something: the build's static pass, the one place it is enforced. */
 export class DeterminismError extends Error {
-    /** Empty when a shim raised this at run time; it refuses one access, not a file. */
+    /** Where each refused read sits, for the editor to gutter. */
     readonly diagnostics: readonly Diagnostic[];
 
     constructor(message: string, diagnostics: readonly Diagnostic[] = []) {

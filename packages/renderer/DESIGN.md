@@ -10,9 +10,10 @@ an authoritative CPU-side scene graph, so the backend's display objects are deri
 
 | File                     | Owns                                                                                                                                                                                      |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `index.ts`               | Public barrel: types, `IRenderer`, `NO_NODE`, `RendererError`, `AssetQueue`, the url-scheme check. **Must not import pixi.**                                                              |
+| `index.ts`               | Public barrel: types, `IRenderer`, `NO_NODE`, `RendererError`, the url-scheme check (`isAllowedAssetUrl`, `REMOTE_ASSET_SCHEMES`). **Must not import pixi.**                              |
 | `renderer.ts`            | `IRenderer`, options, node descs, patches, snapshots, events                                                                                                                              |
 | `node-id.ts`             | `NodeId` brand and `NO_NODE` over math's packed handle                                                                                                                                    |
+| `defaults.ts`            | `PLACEHOLDER_SIZE`, `DEFAULT_TEXT_SIZE`, `defaultCamera`: one copy of each fallback, so the headless backend answers what the real one would                                              |
 | `errors.ts`              | `RendererError` + `RendererErrorCode`                                                                                                                                                     |
 | `surfaces.ts`            | Surface order, camera-transformed / screen-space / clipped predicates                                                                                                                     |
 | `viewport.ts`            | `fitScale`, `stageRect`, `visibleRect`, `worldViewport`, DPR cap                                                                                                                          |

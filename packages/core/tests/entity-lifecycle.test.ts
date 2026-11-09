@@ -1,6 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
+import { entityKey } from '../src/runtime/hosts.js';
+import { Loop } from '../src/loop/loop.js';
 import { LoadError } from '../src/errors.js';
 import { bounds } from '@platform/math';
 
@@ -42,6 +44,71 @@ describe('destroy', () => {
         expect(e.alive).toBe(false);
         expect(() => e.setPosition(5, 5)).not.toThrow();
         expect(() => e.tag('x')).not.toThrow();
+    });
+});
+
+/** Destroys one entity, drains it, and mints the next into the slot it freed. */
+function reused(): {
+    rt: ReturnType<typeof loadGame>;
+    stale: ReturnType<ReturnType<typeof loadGame>['wired']['gameInstance']['spawn']>;
+    fresh: ReturnType<ReturnType<typeof loadGame>['wired']['gameInstance']['spawn']>;
+} {
+    const rt = loadGame();
+    const stale = rt.wired.gameInstance.spawn('bullet', 10, 20);
+    stale.destroy();
+    rt.entityManager.drainDestroyed();
+    const fresh = rt.wired.gameInstance.spawn('enemy', 100, 200);
+    // The premise: the same slot, a newer generation.
+    expect(rt.entities.indexOf(fresh.entityId)).toBe((stale.entityId as number) % 0x100_0000);
+    return { rt, stale, fresh };
+}
+
+describe('a stale handle whose slot was reused', () => {
+    it('writes nothing to the entity that now owns the slot', () => {
+        const { rt, stale, fresh } = reused();
+        rt.transforms.consumeDirty();
+        stale.setPosition(5, 5).setRotation(90).setScale(3).moveBy(1, 1);
+        stale.opacity = 0;
+        stale.layer = 7;
+
+        expect(fresh.position).toEqual({ x: 100, y: 200, z: 0 });
+        expect(fresh.rotation).toBe(0);
+        expect(fresh.scale).toBe(1);
+        expect(fresh.opacity).toBe(1);
+        expect(fresh.layer).toBe(0);
+        // Nothing marked either: a dirty slot replicates the new entity's transform as if it moved.
+        expect(rt.transforms.consumeDirty()).toEqual([]);
+    });
+
+    it('reads the identity transform rather than the new owner’s', () => {
+        const { stale } = reused();
+        expect(stale.position).toEqual({ x: 0, y: 0, z: 0 });
+        expect(stale.scale).toBe(1);
+    });
+
+    it('tags nothing, so the new owner carries only its own tags', () => {
+        const { rt, stale, fresh } = reused();
+        stale.tag('ghost');
+        stale.say('boo');
+        expect(fresh.tags).toEqual([]);
+        expect(fresh.hasTag('ghost')).toBe(false);
+        expect(rt.wired.gameInstance.find({ tag: 'ghost' })).toHaveLength(0);
+    });
+
+    it('starts no tween and no timer, and resolves at once', async () => {
+        const { rt, stale, fresh } = reused();
+        await stale.glideTo(500, 500, 1);
+        await stale.fadeOut(1);
+        await stale.say('late', 1);
+        await stale.think('later', 1);
+        expect(rt.timers.pendingCount).toBe(0);
+        // No host record resurrected for a dead entity: one would sit in the table for good.
+        expect(rt.hosts.get(entityKey(stale.entityId as number))).toBeUndefined();
+
+        const loop = new Loop(rt);
+        for (let tick = 1; tick <= rt.simRate; tick++) loop.step(tick);
+        expect(fresh.position).toEqual({ x: 100, y: 200, z: 0 });
+        expect(fresh.opacity).toBe(1);
     });
 });
 

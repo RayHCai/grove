@@ -3,10 +3,10 @@
 The deterministic fixed-step advance: **one input batch in, one output batch out**.
 
 It holds core's runtime and everything between a decoded inbound frame and an outbound envelope:
-the narrowing, admission, the tick-keyed input buffer, the join and its snapshot, the call into
-`Loop.step`, and the drain of core's three replication channels. `@platform/client` is its wire
-peer, and the two share exactly one thing: the envelopes in `@platform/protocol`. It never imports
-the client.
+admission, the tick-keyed input buffer, the join and its snapshot, the call into `Loop.step`, and the
+drain of core's three replication channels. `@platform/client` is its wire peer, and the two share
+exactly one thing: `@platform/protocol`, whose envelopes, per-frame caps and client-frame narrowing
+the sim applies on receipt. It never imports the client.
 
 See [DESIGN.md](DESIGN.md) for the internals.
 
@@ -59,9 +59,7 @@ prediction and interpolation (the client).
 A shape this narrow is what lets the host be a different language: the Rust host runs this bundle in
 a V8 isolate and speaks to it through exactly the two types above. It is also what would let this
 advance run **in a browser**, where there is no socket, no store and no clock to give it: nothing
-here imports `node:` anything and nothing reads ambient state. `@platform/client` does not do that
-today; it re-produces the input fold itself in `passes.ts`, so that is a property of the shape
-rather than a wire in place.
+here imports `node:` anything and nothing reads ambient state.
 
 It is also what makes a tick replayable. Everything that reaches the world reaches it at the top of a
 tick, in the order the batch names, so a session is a sequence of batches and nothing else.

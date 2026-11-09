@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { ClientTicker, FaultyTicker, Rules, Ticker } from '../dist/testkit/fixtures.js';
+import { ClientTicker, FaultyTicker, Rules, Ticker } from '../src/testkit/fixtures.js';
 import { endGame, loadGame, startGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import { Loop } from '../src/loop/loop.js';

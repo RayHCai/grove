@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitest/config';
+import { standardDecorators } from '../../scripts/vitest-decorators.mjs';
 
-// Decorated fixtures are imported from the tsc-built `dist`, since the test transform leaves TC39
-// decorators unlowered and Node cannot parse them; `test` runs `tsc -b` first to keep them current.
 export default defineConfig({
+    plugins: [standardDecorators()],
     test: {
         include: ['tests/**/*.test.ts'],
     },

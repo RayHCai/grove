@@ -1,11 +1,9 @@
-// Fixtures are compiled by the build.
-
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SingleStructuralOp } from '@platform/core';
 import { GAME_KEY, clearRuntime, entityKey } from '@platform/core';
 import { scriptId, templateId } from '@platform/project';
 import type { WireStructuralOp } from '@platform/protocol';
-import { Health, Rules, Squad, Standings, Wallet } from '../dist/testkit/fixtures.js';
+import { Health, Rules, Squad, Standings, Wallet } from '../src/testkit/fixtures.js';
 import { drainOnce } from '../src/replicate.js';
 import { harness } from './harness.js';
 import type { Peer } from './harness.js';

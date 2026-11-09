@@ -1,6 +1,7 @@
 // The Runtime is the swappable world the ambient consts are facades over, so they stay per-world.
 
 import { DEFAULT_SIM_RATE, MAX_LOG_RECORDS } from '../config.js';
+import { currentInvocation, setCurrentInvocation } from '../dispatch/ambient.js';
 import { ScopeTree } from '../dispatch/scope-tree.js';
 import type { GuardOwner } from '../dispatch/scope-tree.js';
 import { BreakerCounters } from '../dispatch/breaker.js';
@@ -135,7 +136,7 @@ export class Runtime {
     readonly registry = new StoreRegistry();
 
     readonly entities = new EntityTable();
-    readonly transforms = new SimTransformStore();
+    readonly transforms = new SimTransformStore((id) => this.entities.exists(id));
     readonly tags = new TagIndex();
     readonly prng = new PRNGStore();
     readonly breaker = new BreakerCounters();
@@ -274,14 +275,35 @@ export class Runtime {
 
 let current: Runtime | null = null;
 
+/** Registered rather than unique, since the `src` and `dist` copies of core can share a process. */
+export const OWNING_RUNTIME = Symbol.for('@platform/core:owning-runtime');
+
+interface Owned {
+    [OWNING_RUNTIME]?: Runtime;
+}
+
+/** The world a script object was attached in, or undefined for one never attached. */
+export function ownedRuntime(instance: object): Runtime | undefined {
+    return (instance as Owned)[OWNING_RUNTIME];
+}
+
+/** The world of the invocation now ambient, which an engine awaitable restores on resume. */
+function invocationRuntime(): Runtime | undefined {
+    const owner = currentInvocation()?.owner as { readonly instance?: unknown } | null | undefined;
+    const instance = owner?.instance;
+    return typeof instance === 'object' && instance !== null ? ownedRuntime(instance) : undefined;
+}
+
 /** Builds an isolated runtime and makes it current. */
 export function createRuntime(): Runtime {
     current = new Runtime();
     return current;
 }
 
-/** The current runtime; throws if none is active. */
+/** The invocation's world, else the slot's, which names whatever loaded last; throws with neither. */
 export function currentRuntime(): Runtime {
+    const owned = invocationRuntime();
+    if (owned !== undefined) return owned;
     if (current === null) {
         throw new Error('no active runtime: call createRuntime() or loadGame() first');
     }
@@ -290,17 +312,20 @@ export function currentRuntime(): Runtime {
 
 /** True when a runtime is active, so a facade can decide whether to no-op. */
 export function hasRuntime(): boolean {
-    return current !== null;
+    return invocationRuntime() !== undefined || current !== null;
 }
 
-/** Runs `fn` with `rt` as the current runtime, restoring the previous slot after. */
+/** Runs `fn` in `rt` with no invocation ambient, so another world's leftover cannot outrank it. */
 export function withRuntime<T>(rt: Runtime, fn: () => T): T {
     const prev = current;
+    const invocation = currentInvocation();
     current = rt;
+    setCurrentInvocation(null);
     try {
         return fn();
     } finally {
         current = prev;
+        setCurrentInvocation(invocation);
     }
 }
 

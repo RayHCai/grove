@@ -1391,7 +1391,7 @@ Three reasons this is worth a package boundary rather than a `math.ts` in `core`
 | Exp / log     | `exp` `expm1` `log` `log1p` `log2` `log10`     |
 | Power / other | `pow` `cbrt` `hypot`                           |
 
-**What stays safe, so the ban is narrow rather than a blanket.** The arithmetic operators and every function that reduces to an exact IEEE-754 operation agree bit-for-bit on every target: `abs`, `sign`, `min`, `max`, `floor`, `ceil`, `round`, `trunc`, `fround`, and `sqrt`, which is correctly rounded and a hardware instruction everywhere we run. So the seed-sprint and battle-royale samples reaching for `Math.max`, `Math.min`, `Math.floor` and `Math.ceil` are fine as written; the two `Math.cos`/`Math.sin` calls in `shot.ts` are the kind of line this section exists to catch.
+**What stays safe, so the ban is narrow rather than a blanket.** The arithmetic operators and every function that reduces to an exact IEEE-754 operation agree bit-for-bit on every target: `abs`, `sign`, `min`, `max`, `floor`, `ceil`, `round`, `trunc`, `fround`, and `sqrt`, which is correctly rounded and a hardware instruction everywhere we run. So a game reaching for `Math.max`, `Math.min`, `Math.floor` and `Math.ceil` is fine as written; a `Math.cos` or `Math.sin` call is the kind of line this section exists to catch.
 
 **Three notes that decide whether the rule actually holds:**
 

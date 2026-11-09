@@ -30,7 +30,7 @@ export interface DispatchLog {
 /** The "nothing to await" answer, shared; a dispatch matching no handler is the common case. */
 const RESOLVED: Promise<void> = Promise.resolve();
 
-// Captured at load, so a determinism shim installed afterwards cannot reach the handler budget.
+// Captured at load, so a script that later reassigns `Date.now` or `performance` cannot skew the handler budget.
 const elapsedMs: () => number = (() => {
     const host = (globalThis as { performance?: { now(): number } }).performance;
     const dateNow = Date.now;

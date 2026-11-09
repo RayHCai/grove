@@ -7,12 +7,12 @@ between `@platform/sim` (which drains core's three replication channels) and `@p
 **It names no engine type: transport is a leaf of the package graph, beside `@platform/math`.** One
 interface serves both run modes: **networked** (N clients, one remote server) and **local** (one client,
 a co-located server over `loopbackPair()`, no deployment to stand up); only the implementation behind it
-changes, which is what keeps the "no solo-versus-networked fork" promise (api_design.md §1.1). Local mode
+changes, which is what keeps the "no solo-versus-networked fork" promise. Local mode
 drops the server _deployment_, not the server: there is no client-authoritative path and no local co-op
 mode.
 
 The wire codec is an injected `Codec { encode, decode, byteLength }` seam, the same shape as core's
-`ReplicationSink` / `KVStore`. Transport ships `jsonCodec` as the default and a **conformance suite**
+`KVStore`. Transport ships `jsonCodec` as the default and a **conformance suite**
 every codec must pass before it can be injected, exported as `@platform/transport/testing` so the
 implementer of the next codec can actually run it; `@platform/protocol` (a second leaf both endpoints
 import) supplies the shared envelope types and the `PROTOCOL_VERSION` the handshake stamps. The codec is

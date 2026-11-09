@@ -1,5 +1,3 @@
-// Fixtures are compiled by the build; this file carries no decorator syntax.
-
 import { describe, it, expect, afterEach } from 'vitest';
 import { PERSISTENCE_SCOPE, PersistedState } from '../src/runtime/persistence.js';
 import { MemoryKVStore } from '../src/runtime/seams.js';

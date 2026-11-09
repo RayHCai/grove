@@ -63,6 +63,18 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
     /** Slot indexes written since the last drain. */
     readonly #dirty = new Set<number>();
 
+    /** Whether a handle still names its slot's occupant; the store itself sees only slots. */
+    readonly #holds: (id: EntityId) => boolean;
+
+    constructor(holds: (id: EntityId) => boolean = () => true) {
+        this.#holds = holds;
+    }
+
+    /** The slot a live handle addresses, or -1 for a stale one, whose slot may hold a newer entity. */
+    #slot(id: EntityId): number {
+        return this.#holds(id) ? entityIndex(id) : -1;
+    }
+
     initSlot(id: EntityId): void {
         const index = entityIndex(id);
         this.#ensure(index + 1);
@@ -89,7 +101,8 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
     }
 
     setPosition(id: EntityId, x: number, y: number, z = 0): void {
-        const i = entityIndex(id);
+        const i = this.#slot(id);
+        if (i < 0) return;
         this.#posX[i] = x;
         this.#posY[i] = y;
         this.#posZ[i] = z;
@@ -97,49 +110,54 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
     }
 
     setRotation(id: EntityId, degrees: number): void {
-        const i = entityIndex(id);
+        const i = this.#slot(id);
+        if (i < 0) return;
         this.#rot[i] = degrees;
         this.#dirty.add(i);
     }
 
     setScale(id: EntityId, scale: number): void {
-        const i = entityIndex(id);
+        const i = this.#slot(id);
+        if (i < 0) return;
         this.#scale[i] = scale;
         this.#dirty.add(i);
     }
 
     setOpacity(id: EntityId, opacity: number): void {
-        const i = entityIndex(id);
+        const i = this.#slot(id);
+        if (i < 0) return;
         this.#opacity[i] = opacity;
         this.#dirty.add(i);
     }
 
     setLayer(id: EntityId, layer: number): void {
-        const i = entityIndex(id);
+        const i = this.#slot(id);
+        if (i < 0) return;
         this.#layer[i] = layer;
         this.#dirty.add(i);
     }
 
+    // A stale handle reads the identity transform: slot -1 is past every lane, so each falls back.
     posX(id: EntityId): number {
-        return this.#posX[entityIndex(id)] ?? 0;
+        return this.#posX[this.#slot(id)] ?? 0;
     }
     posY(id: EntityId): number {
-        return this.#posY[entityIndex(id)] ?? 0;
+        return this.#posY[this.#slot(id)] ?? 0;
     }
     posZ(id: EntityId): number {
-        return this.#posZ[entityIndex(id)] ?? 0;
+        return this.#posZ[this.#slot(id)] ?? 0;
     }
     rotation(id: EntityId): number {
-        return this.#rot[entityIndex(id)] ?? 0;
+        return this.#rot[this.#slot(id)] ?? 0;
     }
     scale(id: EntityId): number {
-        return this.#scale[entityIndex(id)] ?? 1;
+        return this.#scale[this.#slot(id)] ?? 1;
     }
     opacity(id: EntityId): number {
-        return this.#opacity[entityIndex(id)] ?? 1;
+        return this.#opacity[this.#slot(id)] ?? 1;
     }
     layer(id: EntityId): number {
-        return this.#layer[entityIndex(id)] ?? 0;
+        return this.#layer[this.#slot(id)] ?? 0;
     }
 
     consumeDirty(out: number[] = []): number[] {
@@ -150,7 +168,7 @@ export class SimTransformStore implements SnapshotStore<TransformBuffer> {
     }
 
     isDirty(id: EntityId): boolean {
-        return this.#dirty.has(entityIndex(id));
+        return this.#dirty.has(this.#slot(id));
     }
 
     createBuffer(): TransformBuffer {

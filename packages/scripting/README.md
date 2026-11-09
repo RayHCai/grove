@@ -26,10 +26,10 @@ runs after it so it only ever sees lowered output. `apps/playground`'s `tsconfig
 
 ## Two entry points
 
-| Import                          | Runs where                 | Holds                                                           |
-| ------------------------------- | -------------------------- | --------------------------------------------------------------- |
-| `@platform/scripting`           | anywhere, browser included | `ScriptRegistry`, the determinism policy, the prelude, the shim |
-| `@platform/scripting/toolchain` | Node, at build time        | the analysis, the determinism pass, `tsc`, the linker           |
+| Import                          | Runs where                 | Holds                                                 |
+| ------------------------------- | -------------------------- | ----------------------------------------------------- |
+| `@platform/scripting`           | anywhere, browser included | `ScriptRegistry`, the determinism policy, the prelude |
+| `@platform/scripting/toolchain` | Node, at build time        | the analysis, the determinism pass, `tsc`, the linker |
 
 The split is the point: a browser bundle that reaches the registry must not pull a compiler and a
 bundler into its module graph. That is also why `typescript` is an optional peer: whoever imports
@@ -156,13 +156,8 @@ repo-wide `Math.*` pin), and they agree. A list that drifts is a
 The pass is lexical. A helper a synced script calls is not inside it, and neither is
 `globalThis['Da' + 'te']`.
 
-## The shim, and who it is for
-
 **Determinism here is enforced at build time and nowhere else.** The static pass above is the whole
-mechanism, so the lexical hole it names (a helper a synced script calls) is not closed downstream.
-
-`installDeterminismShim({ target })` replaces the refused globals with accessors that throw, and
-`Math` with one that keeps its exact members. It guards a whole **realm**, which is why nothing here
-installs it: a server chunk's realm also runs `ServerScript`s, which may read a clock, and a
-`SideChunk` runs in the page's realm, where a `ClientScript`'s `Date` is legal. It is exported for an
-embedder that gives synced code a realm to itself, and that embedder owns the `target` and `dispose()`.
+mechanism, so the lexical hole it names (a helper a synced script calls) is not closed downstream. No
+realm guard backs it, because every realm a chunk runs in holds code allowed to read a clock: a server
+chunk's realm also runs `ServerScript`s, and a `SideChunk` runs in the page's realm beside a
+`ClientScript`'s legal `Date`.

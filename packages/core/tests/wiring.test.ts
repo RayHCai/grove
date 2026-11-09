@@ -15,7 +15,7 @@ import {
     TickOverridingMovement,
     Viewfinder,
     Wallet,
-} from '../dist/testkit/fixtures.js';
+} from '../src/testkit/fixtures.js';
 import { LoadError } from '../src/errors.js';
 import { Loop } from '../src/loop/loop.js';
 import { joinPlayer, loadGame, startGame } from '../src/runtime/load-game.js';

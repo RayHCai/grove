@@ -1,8 +1,6 @@
-// Fixtures are compiled by the build; this file carries no decorator syntax.
-
 import { describe, expect, it } from 'vitest';
 import { displayUpdate, hud } from '@platform/core';
-import { Drift, Overlay } from '../dist/testkit/fixtures.js';
+import { Drift, Overlay } from '../src/testkit/fixtures.js';
 import { ClientHUDSink } from '../src/hud-sink.js';
 import { Mirror } from '../src/mirror.js';
 

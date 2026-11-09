@@ -1,7 +1,5 @@
-// Fixtures are compiled by the build; this file carries no decorator syntax.
-
 import { describe, it, expect } from 'vitest';
-import { Wallet } from '../dist/testkit/fixtures.js';
+import { Wallet } from '../src/testkit/fixtures.js';
 import {
     STATE_TARGET,
     authoredValue,
