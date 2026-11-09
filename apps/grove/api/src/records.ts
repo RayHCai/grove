@@ -1,5 +1,6 @@
 import type {
     Account,
+    BuildArtifact,
     FileKind,
     FleetReport,
     Game,
@@ -30,87 +31,20 @@ export type AccountCreated =
     | { outcome: 'taken' }
     | { outcome: 'unattached' };
 
-/** A game's files as they stand, and the revision that names this exact set. */
-export interface WorkspaceRecord {
-    gameId: GameId;
-    revision: number;
-    files: WorkspaceFile[];
-    updatedAt: string;
-}
-
-/** One path a save is writing, carrying the version the bucket minted for its bytes. */
-export interface FileUpsert {
-    path: WorkspacePath;
-    kind: FileKind;
-    versionId: VersionId;
-    byteLength: number;
-    contentType: MediaType;
-}
-
-/**
- * What one save changes, with the bytes already in the bucket. `freeze` runs inside the
- * transaction claiming the revision, so an unwritable manifest is a save that did not happen.
- */
-export interface SavePlan {
-    baseRevision: number;
-    /** Who asked, which is who an asset's task is billed to. */
-    accountId: PlayerId;
-    upserts: FileUpsert[];
-    deletes: WorkspacePath[];
-    freeze(revision: number, files: WorkspaceFile[]): Promise<boolean>;
-}
-
-/**
- * `stale` carries the set that was there instead, so an editor that lost the race needs no
- * second round trip. `unfrozen` is a manifest the bucket refused, which rolls the save back.
- */
-export type WorkspaceSaved =
-    | { outcome: 'saved'; workspace: WorkspaceRecord; tasks: Task[] }
-    | { outcome: 'stale'; workspace: WorkspaceRecord }
-    | { outcome: 'missing' }
-    | { outcome: 'unfrozen' };
-
-/** `existing` is the non-terminal task that was already queued for this exact manifest. */
-export type TaskQueued =
-    | { outcome: 'queued'; task: Task }
-    | { outcome: 'existing'; task: Task }
-    | { outcome: 'missing' }
-    | { outcome: 'unattached' };
-
-/**
- * `backwards` is a redelivered attempt trying to walk a settled task back, which is refused rather
- * than applied; it carries the task as it stands so the caller can stop rather than retry.
- */
-export type TaskAdvanced =
-    | { outcome: 'advanced'; task: Task }
-    | { outcome: 'backwards'; task: Task }
-    | { outcome: 'missing' };
-
-export type GameCreated = { outcome: 'created'; game: GameRecord } | { outcome: 'unattached' };
-
-export type GameUpdated =
-    { outcome: 'updated'; game: GameRecord } | { outcome: 'missing' } | { outcome: 'unattached' };
-
-export type GameDeleted =
-    { outcome: 'deleted' } | { outcome: 'missing' } | { outcome: 'unattached' };
-
 /** `wrong_password` covers a missing one: a caller who cannot re-authenticate may not proceed. */
 export type Reauthed =
     { outcome: 'ok' } | { outcome: 'wrong_password' } | { outcome: 'unattached' };
 
-/** Every write names the seam when nothing is behind it, so a deploy that forgot the database says
- * so rather than telling a creator their account is gone. */
+/** Every write names the seam when nothing is behind it, so a missing database is said outright. */
 export type AccountRenamed =
     | { outcome: 'renamed'; account: AccountRecord }
     | { outcome: 'missing' }
     | { outcome: 'unattached' };
 
-/**
- * A reset key was minted and here is the secret to mail. `no_account` never reaches the wire:
- * which addresses have accounts is what an unauthenticated caller must not be able to ask.
- */
+/** Neither `no_account` nor `throttled` reaches the wire: which addresses exist is secret. */
 export type ResetBegun =
     | { outcome: 'begun'; email: string; token: string }
+    | { outcome: 'throttled' }
     | { outcome: 'no_account' }
     | { outcome: 'unattached' };
 
@@ -125,112 +59,247 @@ export type AccountClosed =
     | { outcome: 'owns_games' }
     | { outcome: 'unattached' };
 
-/**
- * The durable answers a route needs, and every write that makes them true. Handed to `buildApp`,
- * so the store is one dependency; every failure is a union member rather than a thrown error.
- */
-export interface Records {
+/** Who holds an account, and every write a credential or a forgotten password makes. */
+export interface Accounts {
     signIn(email: string, password: string): Promise<PlayerId | undefined>;
-    ownerOf(game: GameId): Promise<PlayerId | undefined>;
-
     createAccount(email: string, password: string, displayName: string): Promise<AccountCreated>;
     accountOf(player: PlayerId): Promise<AccountRecord | undefined>;
     profileOf(player: PlayerId): Promise<Profile | undefined>;
     renameAccount(player: PlayerId, displayName: string): Promise<AccountRenamed>;
     changePassword(player: PlayerId, current: string, next: string): Promise<Reauthed>;
     closeAccount(player: PlayerId, current: string): Promise<AccountClosed>;
-
     beginPasswordReset(email: string): Promise<ResetBegun>;
     finishPasswordReset(token: string, next: string): Promise<ResetFinished>;
+}
 
+export type GameCreated = { outcome: 'created'; game: GameRecord } | { outcome: 'unattached' };
+
+export type GameUpdated =
+    { outcome: 'updated'; game: GameRecord } | { outcome: 'missing' } | { outcome: 'unattached' };
+
+export type GameDeleted =
+    { outcome: 'deleted' } | { outcome: 'missing' } | { outcome: 'unattached' };
+
+/** Where one page of a listing stopped: the newest-first order is by creation, then by id. */
+export interface GameCursor {
+    createdAt: string;
+    gameId: GameId;
+}
+
+export interface GamePage {
+    games: GameRecord[];
+    next: GameCursor | undefined;
+}
+
+/** A game as a row: who owns it, who may reach it, and what was last published of it. */
+export interface Games {
+    ownerOf(game: GameId): Promise<PlayerId | undefined>;
     createGame(owner: PlayerId, title: string): Promise<GameCreated>;
-    gamesOf(owner: PlayerId): Promise<GameRecord[]>;
-    /** One game as the allocator reads it, which is the only read there that is not the owner's. */
+    gamesOf(owner: PlayerId, limit: number, after?: GameCursor): Promise<GamePage>;
     gameOf(game: GameId): Promise<GameRecord | undefined>;
     setVisibility(game: GameId, visibility: GameVisibility): Promise<GameUpdated>;
     /** Drops the game's row, and with it (by cascade) its files and tasks. The bucket is the caller's. */
     deleteGame(game: GameId): Promise<GameDeleted>;
-
-    workspaceOf(game: GameId): Promise<WorkspaceRecord | undefined>;
-    /** One file as the rows name it, which is what a read is allowed to fetch by. */
-    fileOf(game: GameId, path: WorkspacePath): Promise<WorkspaceFile | undefined>;
-    saveWorkspace(game: GameId, plan: SavePlan): Promise<WorkspaceSaved>;
-    /**
-     * The assets of this game whose verification has not reached the bytes they hold, at most
-     * `limit` of them. Empty is the only state a build may be queued from.
-     *
-     * Named rather than counted, because a creator told a publish was refused has to be told which
-     * file to look at, and a path the editor can highlight is the difference between waiting and
-     * knowing what to re-upload.
-     */
-    unvalidatedAssets(game: GameId, limit: number): Promise<WorkspacePath[]>;
     publishedVersionOf(game: GameId): Promise<PublishedVersion | undefined>;
-    /**
-     * The newest version anybody can play: the highest revision whose build finished.
-     * Different from `publishedVersionOf`, which answers what a publish last ASKED for.
-     */
-    playableVersionOf(game: GameId): Promise<PlayableVersion | undefined>;
     markPublished(game: GameId, version: PublishedVersion): Promise<void>;
+}
 
-    /** Returns the live task for this exact manifest rather than creating a second one. */
-    queueTask(
+/** A game's files as they stand, and the revision (and the save that froze it) naming this set. */
+export interface WorkspaceRecord {
+    gameId: GameId;
+    revision: number;
+    saveId: string | undefined;
+    files: WorkspaceFile[];
+    updatedAt: string;
+}
+
+/** One file as a read needs it: an inspected asset is served from its edge copy, not its upload. */
+export interface HeldFile extends WorkspaceFile {
+    edgeVersionId: VersionId | undefined;
+}
+
+/** One path a save is writing, carrying the version the bucket minted for its bytes. */
+export interface FileUpsert {
+    path: WorkspacePath;
+    kind: FileKind;
+    versionId: VersionId;
+    byteLength: number;
+    contentType: MediaType;
+}
+
+/** A save whose bytes, manifest included, are already in the bucket under `saveId`. */
+export interface SavePlan {
+    baseRevision: number;
+    saveId: string;
+    /** Who asked, which is who an asset's task is billed to. */
+    accountId: PlayerId;
+    upserts: FileUpsert[];
+    deletes: WorkspacePath[];
+    /** The set that manifest froze, which the rows have to come to equal or the save is stale. */
+    frozen: WorkspaceFile[];
+}
+
+/** `stale` carries the set that was there instead, so a loser of the race needs no second read. */
+export type WorkspaceSaved =
+    | { outcome: 'saved'; workspace: WorkspaceRecord; tasks: Task[] }
+    | { outcome: 'stale'; workspace: WorkspaceRecord }
+    | { outcome: 'missing' };
+
+/** The files a game is authored from, and the save that moves them on. */
+export interface Workspaces {
+    workspaceOf(game: GameId): Promise<WorkspaceRecord | undefined>;
+    fileOf(game: GameId, path: WorkspacePath): Promise<HeldFile | undefined>;
+    saveWorkspace(game: GameId, plan: SavePlan): Promise<WorkspaceSaved>;
+}
+
+/** `unverified` names the assets holding a build back; `moved` is a revision saved over since. */
+export type BuildQueued =
+    | { outcome: 'queued'; task: Task }
+    | { outcome: 'existing'; task: Task }
+    | { outcome: 'unverified'; paths: WorkspacePath[] }
+    | { outcome: 'moved' }
+    | { outcome: 'missing' }
+    | { outcome: 'unattached' };
+
+/** Who is claiming, for which kind of work, and how long nobody else may. */
+export interface Claim {
+    kind: TaskKind;
+    worker: string;
+    leaseMs: number;
+}
+
+/** `held` is another worker's live lease; `settled` is work somebody already finished. */
+export type TaskClaimed =
+    | { outcome: 'claimed'; task: Task; leaseUntil: Date }
+    | { outcome: 'held'; task: Task }
+    | { outcome: 'settled'; task: Task }
+    | { outcome: 'missing' };
+
+/** The upload an asset task inspects, while the game still holds it. */
+export interface HeldUpload {
+    gameId: GameId;
+    path: WorkspacePath;
+    versionId: VersionId;
+    byteLength: number;
+    contentType: string;
+}
+
+/** `validated` is whether the asset row took the verdict, which a superseded upload does not. */
+export type TaskSettled =
+    | { outcome: 'settled'; task: Task; validated: boolean }
+    | { outcome: 'refused'; task: Task }
+    | { outcome: 'missing' };
+
+/** A build task as the routes a builder reads and writes through need it. */
+export interface BuildWork {
+    taskId: TaskId;
+    gameId: GameId;
+    revision: number;
+    saveId: string | undefined;
+    live: boolean;
+}
+
+/** The queued work of every kind, its leases, and what a build stored. */
+export interface Tasks {
+    /** Queues a build of exactly `revision`, refused while one of its assets is unverified. */
+    queueBuild(
         game: GameId,
         account: PlayerId,
-        kind: TaskKind,
-        manifestRevision: number,
-    ): Promise<TaskQueued>;
+        revision: number,
+        saveId: string | undefined,
+    ): Promise<BuildQueued>;
     taskOf(game: GameId, task: TaskId): Promise<Task | undefined>;
-    advanceTask(task: TaskId, update: TaskStatusUpdate): Promise<TaskAdvanced>;
-    /** What the sweeper reads: one kind, still unclaimed, queued before a cutoff. */
-    unclaimedTasks(kind: TaskKind, before: Date, limit: number): Promise<Task[]>;
+    claimTask(task: TaskId, claim: Claim): Promise<TaskClaimed>;
+    uploadOf(task: TaskId): Promise<HeldUpload | undefined>;
+    /** `edgeVersionId` is the inspected copy a successful upload settles with. */
+    settleTask(
+        task: TaskId,
+        kind: TaskKind,
+        update: TaskStatusUpdate,
+        edgeVersionId?: VersionId,
+    ): Promise<TaskSettled>;
+    buildOf(task: TaskId): Promise<BuildWork | undefined>;
+    recordArtifact(task: TaskId, artifact: BuildArtifact): Promise<void>;
+    artifactsOf(task: TaskId): Promise<BuildArtifact[]>;
+    /** The highest revision whose build finished, the latest finish breaking a tie. */
+    playableVersionOf(game: GameId): Promise<PlayableVersion | undefined>;
+    /** Unclaimed or lapsed work of one kind that nothing has announced since `before`. */
+    dueForAnnouncement(kind: TaskKind, before: Date, now: Date, limit: number): Promise<TaskId[]>;
+    markAnnounced(tasks: readonly TaskId[], at: Date): Promise<void>;
+    /** Fails each claim of one kind whose lease ran out before `before`: nobody came back. */
+    reapAbandoned(kind: TaskKind, before: Date, message: string): Promise<TaskId[]>;
+}
 
-    /**
-     * Records what @grove/server-manager last saw of the fleet. Hosts are a snapshot; events are
-     * append-only and keyed by the router's own id, so a retried report rewrites its own rows.
-     */
+/** What @grove/server-manager last saw: hosts as a snapshot, events keyed by its own id. */
+export interface FleetHistory {
     recordFleet(report: FleetReport): Promise<void>;
 }
 
-/** The records seam with nothing behind it: the accounts, games and tasks tables land here. */
-export const unattachedRecords: Records = {
-    // Answering nothing rather than throwing: with no store attached nobody holds an account and
-    // nobody owns a game, which the routes already turn into a 401, a 403 and an empty list.
+/** Every record seam, which `main.ts` attaches together and `buildApp` hands out one at a time. */
+export interface Stores {
+    accounts: Accounts;
+    games: Games;
+    workspaces: Workspaces;
+    tasks: Tasks;
+    fleetHistory: FleetHistory;
+}
+
+// Answering nothing rather than throwing: with no store attached nobody holds an account, which the
+// routes already turn into a 401, and every write names the seam so it becomes a 501.
+export const unattachedAccounts: Accounts = {
     signIn: async () => undefined,
-    ownerOf: async () => undefined,
     accountOf: async () => undefined,
     profileOf: async () => undefined,
-    gamesOf: async () => [],
-
-    // A write has no such answer, so it names the seam instead and the route turns that into a 501
-    // beside the one the publish route already answers with no build pipeline attached.
     createAccount: async () => ({ outcome: 'unattached' }),
     renameAccount: async () => ({ outcome: 'unattached' }),
     changePassword: async () => ({ outcome: 'unattached' }),
     closeAccount: async () => ({ outcome: 'unattached' }),
     beginPasswordReset: async () => ({ outcome: 'unattached' }),
     finishPasswordReset: async () => ({ outcome: 'unattached' }),
+};
+
+// Nobody owns a game, so `requireGameOwner` refuses every game-scoped route before a read lands.
+export const unattachedGames: Games = {
+    ownerOf: async () => undefined,
+    gamesOf: async () => ({ games: [], next: undefined }),
+    gameOf: async () => undefined,
+    publishedVersionOf: async () => undefined,
     createGame: async () => ({ outcome: 'unattached' }),
     setVisibility: async () => ({ outcome: 'unattached' }),
     deleteGame: async () => ({ outcome: 'unattached' }),
-    queueTask: async () => ({ outcome: 'unattached' }),
+    markPublished: async () => undefined,
+};
 
-    // A game-scoped read needs no seam of its own to name: `ownerOf` already answered nobody, so
-    // `requireGameOwner` refused every route below before one of these could be reached.
-    gameOf: async () => undefined,
+export const unattachedWorkspaces: Workspaces = {
     workspaceOf: async () => undefined,
     fileOf: async () => undefined,
-    publishedVersionOf: async () => undefined,
-    playableVersionOf: async () => undefined,
-    taskOf: async () => undefined,
-    // Empty is what a game with no files holds, and a game with no files is what every read above
-    // just answered: the gate this feeds is open because there is nothing behind it to verify.
-    unvalidatedAssets: async () => [],
     saveWorkspace: async () => ({ outcome: 'missing' }),
-    advanceTask: async () => ({ outcome: 'missing' }),
-    markPublished: async () => undefined,
-    unclaimedTasks: async () => [],
+};
 
-    // The fleet reporting into a service with no store behind it: the router keeps routing off its
-    // own registry, and only the history it was handing over is dropped.
-    recordFleet: async () => {},
+export const unattachedTasks: Tasks = {
+    queueBuild: async () => ({ outcome: 'unattached' }),
+    taskOf: async () => undefined,
+    claimTask: async () => ({ outcome: 'missing' }),
+    uploadOf: async () => undefined,
+    settleTask: async () => ({ outcome: 'missing' }),
+    buildOf: async () => undefined,
+    recordArtifact: async () => undefined,
+    artifactsOf: async () => [],
+    playableVersionOf: async () => undefined,
+    dueForAnnouncement: async () => [],
+    markAnnounced: async () => undefined,
+    reapAbandoned: async () => [],
+};
+
+// The router keeps routing off its own registry; only the history it was handing over is dropped.
+export const unattachedFleetHistory: FleetHistory = {
+    recordFleet: async () => undefined,
+};
+
+export const unattachedStores: Stores = {
+    accounts: unattachedAccounts,
+    games: unattachedGames,
+    workspaces: unattachedWorkspaces,
+    tasks: unattachedTasks,
+    fleetHistory: unattachedFleetHistory,
 };

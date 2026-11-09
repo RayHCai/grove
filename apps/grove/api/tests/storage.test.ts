@@ -74,3 +74,28 @@ describe('the games bucket over S3', () => {
         expect(logged).toContain('warn delete marker not written');
     });
 });
+
+describe('a presigned request', () => {
+    it('signs an upload for its type and its length, and carries no checksum of an empty body', async () => {
+        const signed = await storage.presignPut('uploads/g/art/tile.png', {
+            contentType: 'image/png',
+            byteLength: 2048,
+            expiresInS: 900,
+        });
+        if (signed.outcome !== 'signed') throw new Error(signed.outcome);
+        const query = new URL(signed.url).searchParams;
+        expect(query.get('X-Amz-SignedHeaders')).toBe('content-length;content-type;host');
+        expect([...query.keys()].filter((name) => name.toLowerCase().includes('checksum'))).toEqual(
+            [],
+        );
+        // The browser sets the length from the body it sends; the type it is told to send.
+        expect(signed.headers).toEqual({ 'content-type': 'image/png' });
+    });
+
+    it('pins a read to the version it names', async () => {
+        const signed = await storage.presignGet('uploads/g/art/tile.png', 'v1' as never, 60);
+        if (signed.outcome !== 'signed') throw new Error(signed.outcome);
+        expect(new URL(signed.url).searchParams.get('versionId')).toBe('v1');
+        expect(signed.headers).toEqual({});
+    });
+});

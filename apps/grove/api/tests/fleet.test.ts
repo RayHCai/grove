@@ -1,15 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HostId, InstanceId, PlacementRequest, REQUEST_ID_HEADER } from '@grove/api-contract';
+import {
+    DeploymentRequest,
+    HostId,
+    InstanceId,
+    PlacementRequest,
+    REQUEST_ID_HEADER,
+} from '@grove/api-contract';
 import type { PlayableVersion } from '@grove/api-contract';
 import { httpFleet, unattachedFleet } from '../src/fleet.js';
-import { CREATOR, GAME_ID, SESSION_ID, testEnv } from './fixtures.js';
+import { CREATOR, GAME_ID, SERVER_MANAGER_SECRET, SESSION_ID, testEnv } from './fixtures.js';
 
 const PLAYER = CREATOR;
-const SERVER_URL = `wss://box.example/v1/instances/${SESSION_ID}`;
-const BEARER = 'c'.repeat(32);
+const SERVER_URL = `wss://box.example/play/${SESSION_ID}`;
+const BEARER = SERVER_MANAGER_SECRET;
 const REQUEST_ID = 'a-caller-presented-id';
 
-const env = testEnv({ FLEET_SECRET: BEARER });
+const env = testEnv();
 
 const HASH = 'a'.repeat(64);
 
@@ -75,8 +81,9 @@ afterEach(() => {
 });
 
 describe('the fleet seam with nothing behind it', () => {
-    it('reports no box rather than a failure', async () => {
+    it('reports no box rather than a failure, and takes a deployment as nothing to do', async () => {
         expect(await unattachedFleet.place(GAME_ID, PLAYER, VERSION, REQUEST_ID)).toBeUndefined();
+        await expect(unattachedFleet.deploy(GAME_ID, VERSION, REQUEST_ID)).resolves.toBeUndefined();
     });
 });
 
@@ -132,5 +139,28 @@ describe('the fleet seam over http', () => {
         await expect(httpFleet(env).place(GAME_ID, PLAYER, VERSION, REQUEST_ID)).rejects.toThrow(
             /503/u,
         );
+    });
+});
+
+describe('a deployment over http', () => {
+    it("names the version and its code, under the router's secret and the join's id", async () => {
+        const sent = stubFetch(new Response(null, { status: 202 }));
+
+        await httpFleet(env).deploy(GAME_ID, VERSION, REQUEST_ID);
+
+        expect(sent[0]?.url).toBe('http://server-manager.grove.internal:4003/v1/deployments');
+        expect(new Headers(sent[0]?.init.headers).get('authorization')).toBe(`Bearer ${BEARER}`);
+        expect(new Headers(sent[0]?.init.headers).get(REQUEST_ID_HEADER)).toBe(REQUEST_ID);
+        expect(DeploymentRequest.parse(JSON.parse(String(sent[0]?.init.body)))).toEqual({
+            gameId: GAME_ID,
+            revision: VERSION.revision,
+            bundles: VERSION.bundles,
+            regions: [],
+        });
+    });
+
+    it('throws when the router did not take it, which the caller logs', async () => {
+        stubFetch(json({ code: 'internal', message: 'internal error' }, 503));
+        await expect(httpFleet(env).deploy(GAME_ID, VERSION, REQUEST_ID)).rejects.toThrow(/503/u);
     });
 });

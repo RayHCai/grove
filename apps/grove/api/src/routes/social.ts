@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { ErrorBody, type PlayerId } from '@grove/api-contract';
 import { Friend, type Social } from '../social.js';
-import { requireSession } from '../session.js';
+import { requireSignedIn } from '../session.js';
 
 /**
  * Friends, presence, and the block list. A scope because of the second hook: `blockedBy` loads
@@ -10,7 +10,8 @@ import { requireSession } from '../session.js';
  */
 export function socialRoutes(social: Social): FastifyPluginAsyncZod {
     return async (app) => {
-        app.addHook('onRequest', requireSession);
+        // The pair every signed-in scope opens with, so a write added here is CSRF-checked too.
+        requireSignedIn(app);
         app.addHook('preHandler', async (request) => {
             request.blockedBy = await social.blockedBy(request.viewer.playerId);
         });

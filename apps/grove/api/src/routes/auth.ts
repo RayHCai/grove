@@ -2,55 +2,62 @@ import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { ErrorBody, SignedIn } from '@grove/api-contract';
 import type { Env } from '../env.js';
+import type { CredentialLimits } from '../limits.js';
 import { resetLink } from '../mailer.js';
 import type { Mailer } from '../mailer.js';
-import type { Records } from '../records.js';
+import type { Accounts } from '../records.js';
 import { beginSession, requireSignedIn } from '../session.js';
-import type { ExpiringSessionStore } from '../session-store.js';
+import type { Sessions } from '../sessions.js';
 import { Email, Password } from '../values.js';
 import { unattached } from '../reply.js';
 
-/**
- * Where a session begins and ends; nothing at this level demands one, so the two routes that do
- * sit in a child scope. Its rate limit is its own: this is where credential stuffing lands.
- */
-export function authRoutes(
-    records: Records,
-    mailer: Mailer,
-    sessions: ExpiringSessionStore,
-    env: Env,
-): FastifyPluginAsyncZod {
-    return async (app) => {
-        await app.register(import('@fastify/rate-limit'), {
-            max: 10,
-            timeWindow: '1 minute',
-        });
+export interface AuthDeps {
+    accounts: Accounts;
+    mailer: Mailer;
+    sessions: Sessions;
+    credentials: CredentialLimits;
+    env: Env;
+}
 
+/** Off the general budget, since the two credential hooks below stand in for it. */
+const CREDENTIAL_ROUTE = { rateLimit: false } as const;
+
+/** Where a session begins and ends; a route taking a credential carries two limits of its own. */
+export function authRoutes({
+    accounts,
+    mailer,
+    sessions,
+    credentials,
+    env,
+}: AuthDeps): FastifyPluginAsyncZod {
+    return async (app) => {
         app.post(
             '/sessions',
             {
+                config: CREDENTIAL_ROUTE,
+                onRequest: credentials.perAddress,
+                preHandler: credentials.perAccount,
                 schema: {
                     tags: ['auth'],
-                    // Bounded on both fields: unbounded, the only ceiling is Fastify's 1 MiB body,
-                    // and an address nobody could have registered still costs a lookup.
+                    // Bounded: an address nobody could have registered still costs a lookup.
                     body: z.object({ email: Email, password: z.string().min(1).max(128) }),
                     response: {
                         200: SignedIn,
                         401: ErrorBody,
+                        429: ErrorBody,
                     },
                 },
             },
             async (request, reply) => {
-                const playerId = await records.signIn(request.body.email, request.body.password);
-                // One answer for an unknown address, a wrong password and a locked account: which
-                // of the three it was is the fact an enumeration is looking for.
+                const playerId = await accounts.signIn(request.body.email, request.body.password);
+                // One answer for an unknown address, a wrong password and a locked account.
                 if (playerId === undefined) {
                     return reply
                         .code(401)
                         .send({ code: 'unauthorized', message: 'no such account' });
                 }
 
-                const csrfToken = await beginSession(request, reply, playerId);
+                const csrfToken = await beginSession(request, reply, playerId, sessions);
                 return reply.send({ playerId, csrfToken });
             },
         );
@@ -58,6 +65,9 @@ export function authRoutes(
         app.post(
             '/password-resets',
             {
+                config: CREDENTIAL_ROUTE,
+                onRequest: credentials.perAddress,
+                preHandler: credentials.perAccount,
                 schema: {
                     tags: ['auth'],
                     body: z.object({ email: Email }),
@@ -65,9 +75,12 @@ export function authRoutes(
                 },
             },
             async (request, reply) => {
-                const begun = await records.beginPasswordReset(request.body.email);
+                const begun = await accounts.beginPasswordReset(request.body.email);
                 if (begun.outcome === 'unattached') {
                     return unattached(reply, 'account store');
+                }
+                if (begun.outcome === 'throttled') {
+                    request.log.info('password reset mail withheld: this address had its share');
                 }
 
                 if (begun.outcome === 'begun') {
@@ -78,15 +91,13 @@ export function authRoutes(
                     if (sent.outcome === 'unattached') {
                         return unattached(reply, 'mailer');
                     }
-                    // A provider that refused this one message is this service's problem, not the
-                    // caller's, and saying so would answer the question the 202 exists to refuse.
+                    // A provider refusing one message is this service's problem, not the caller's.
                     if (sent.outcome === 'failed') {
                         request.log.error('password reset mail was not delivered');
                     }
                 }
 
-                // The same answer whether or not that address has an account. This route is
-                // unauthenticated, and which addresses are registered is not its to tell.
+                // One answer whether or not the address has an account, or has been mailed lately.
                 return reply.code(202).send(null);
             },
         );
@@ -96,31 +107,28 @@ export function authRoutes(
             {
                 schema: {
                     tags: ['auth'],
-                    // The key travels in the body rather than the path: a URL reaches logs, proxies
-                    // and `Referer` headers, and this one is a password until it is spent.
+                    // In the body rather than the path: a URL reaches logs, proxies and `Referer`.
                     body: z.object({ token: z.string().min(1).max(256), newPassword: Password }),
                     response: { 204: z.null(), 400: ErrorBody, 401: ErrorBody, 501: ErrorBody },
                 },
             },
             async (request, reply) => {
-                const finished = await records.finishPasswordReset(
+                const finished = await accounts.finishPasswordReset(
                     request.body.token,
                     request.body.newPassword,
                 );
                 if (finished.outcome === 'unattached') {
                     return unattached(reply, 'account store');
                 }
-                // Wrong, already spent, and expired are one answer: a caller holding a key learns
-                // only that it does not open anything.
+                // Wrong, already spent, and expired are one answer.
                 if (finished.outcome === 'refused') {
                     return reply
                         .code(401)
                         .send({ code: 'unauthorized', message: 'that link is no longer good' });
                 }
 
-                // Whoever reset the password is not signed in by it, and every session the account
-                // was holding ends; a reset is what somebody does when they think it was stolen.
-                sessions.destroyFor(finished.player);
+                // Nobody is signed in by it, and every session the account held ends.
+                await sessions.destroyFor(finished.player);
                 return reply.code(204).send(null);
             },
         );
@@ -129,10 +137,7 @@ export function authRoutes(
     };
 }
 
-/**
- * The auth routes a session already answers for. A child scope rather than per-route hooks:
- * handing out another CSRF token is what an anonymous caller must not reach.
- */
+/** The auth routes a session answers for, in a child scope no anonymous caller reaches. */
 const signedInAuthRoutes: FastifyPluginAsyncZod = async (app) => {
     requireSignedIn(app);
 

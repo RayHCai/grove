@@ -1,11 +1,18 @@
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { Account, ErrorBody, PlayerId, Profile, SignedIn } from '@grove/api-contract';
-import type { Records } from '../records.js';
+import type { CredentialLimits } from '../limits.js';
+import type { Accounts } from '../records.js';
 import { beginSession, requireSignedIn } from '../session.js';
-import type { ExpiringSessionStore } from '../session-store.js';
+import type { Sessions } from '../sessions.js';
 import { DisplayName, Email, Password } from '../values.js';
 import { unattached } from '../reply.js';
+
+export interface PlayerDeps {
+    accounts: Accounts;
+    sessions: Sessions;
+    credentials: CredentialLimits;
+}
 
 /**
  * Accounts: signing up, and the four things the holder of one may do to it.
@@ -15,16 +22,18 @@ import { unattached } from '../reply.js';
  * cookie, and the limiter stays off that scope deliberately: a shared 10/minute budget would
  * ration reading a profile at the rate credential stuffing deserves.
  */
-export function playerRoutes(
-    records: Records,
-    sessions: ExpiringSessionStore,
-): FastifyPluginAsyncZod {
+export function playerRoutes({
+    accounts,
+    sessions,
+    credentials,
+}: PlayerDeps): FastifyPluginAsyncZod {
     return async (app) => {
         app.post(
             '/players',
             {
-                // Per route rather than per scope: this is the only credential path in the parent.
-                config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+                config: { rateLimit: false },
+                onRequest: credentials.perAddress,
+                preHandler: credentials.perAccount,
                 schema: {
                     tags: ['accounts'],
                     body: z.object({
@@ -42,7 +51,7 @@ export function playerRoutes(
                 },
             },
             async (request, reply) => {
-                const created = await records.createAccount(
+                const created = await accounts.createAccount(
                     request.body.email,
                     request.body.password,
                     request.body.displayName,
@@ -58,19 +67,21 @@ export function playerRoutes(
                         .send({ code: 'conflict', message: 'that address already has an account' });
                 }
 
-                const csrfToken = await beginSession(request, reply, created.account.playerId);
+                const csrfToken = await beginSession(
+                    request,
+                    reply,
+                    created.account.playerId,
+                    sessions,
+                );
                 return reply.code(201).send({ playerId: created.account.playerId, csrfToken });
             },
         );
 
-        await app.register(heldAccountRoutes(records, sessions));
+        await app.register(heldAccountRoutes(accounts, sessions));
     };
 }
 
-function heldAccountRoutes(
-    records: Records,
-    sessions: ExpiringSessionStore,
-): FastifyPluginAsyncZod {
+function heldAccountRoutes(accounts: Accounts, sessions: Sessions): FastifyPluginAsyncZod {
     return async (app) => {
         requireSignedIn(app);
 
@@ -83,7 +94,7 @@ function heldAccountRoutes(
                 },
             },
             async (request, reply) => {
-                const account = await records.accountOf(request.viewer.playerId);
+                const account = await accounts.accountOf(request.viewer.playerId);
                 if (account === undefined) {
                     return reply.code(404).send({ code: 'not_found', message: 'no such account' });
                 }
@@ -108,7 +119,7 @@ function heldAccountRoutes(
                 },
             },
             async (request, reply) => {
-                const renamed = await records.renameAccount(
+                const renamed = await accounts.renameAccount(
                     request.viewer.playerId,
                     request.body.displayName,
                 );
@@ -144,7 +155,7 @@ function heldAccountRoutes(
                 },
             },
             async (request, reply) => {
-                const changed = await records.changePassword(
+                const changed = await accounts.changePassword(
                     request.viewer.playerId,
                     request.body.currentPassword,
                     request.body.newPassword,
@@ -158,8 +169,13 @@ function heldAccountRoutes(
 
                 // Every other session this account holds is one a stolen password opened, which is
                 // what changing it is meant to end. The caller's own goes too, and is replaced.
-                sessions.destroyFor(request.viewer.playerId);
-                const csrfToken = await beginSession(request, reply, request.viewer.playerId);
+                await sessions.destroyFor(request.viewer.playerId);
+                const csrfToken = await beginSession(
+                    request,
+                    reply,
+                    request.viewer.playerId,
+                    sessions,
+                );
                 return reply.send({ playerId: request.viewer.playerId, csrfToken });
             },
         );
@@ -183,7 +199,7 @@ function heldAccountRoutes(
                 },
             },
             async (request, reply) => {
-                const closed = await records.closeAccount(
+                const closed = await accounts.closeAccount(
                     request.viewer.playerId,
                     request.body.currentPassword,
                 );
@@ -201,9 +217,8 @@ function heldAccountRoutes(
                         .send({ code: 'conflict', message: 'delete your games first' });
                 }
 
-                sessions.destroyFor(request.viewer.playerId);
-                // The plugin's rolling save writes a live session back on the way out, so the
-                // request's own has to be destroyed rather than only evicted from the store.
+                await sessions.destroyFor(request.viewer.playerId);
+                // Destroyed on the request too, so no cookie is sent for a session now gone.
                 await request.session.destroy();
                 return reply.code(204).send(null);
             },
@@ -219,7 +234,7 @@ function heldAccountRoutes(
                 },
             },
             async (request, reply) => {
-                const profile = await records.profileOf(request.params.playerId);
+                const profile = await accounts.profileOf(request.params.playerId);
                 if (profile === undefined) {
                     return reply.code(404).send({ code: 'not_found', message: 'no such account' });
                 }

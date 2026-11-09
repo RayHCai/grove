@@ -1,5 +1,6 @@
 import {
     Placement,
+    type DeploymentRequest,
     type GameId,
     type PlacementRequest,
     type PlayableVersion,
@@ -9,40 +10,37 @@ import {
 import { fleetCall } from '@grove/service-kit';
 import type { Env } from './env.js';
 
-/**
- * Where a joining player is sent, the one question the allocator cannot answer itself.
- * Handed to `buildApp` like `Records`, so the router is a dependency rather than a URL.
- */
+/** Where a joining player is sent and where a new version is announced: the router's answers. */
 export interface Fleet {
     place(
         game: GameId,
         player: PlayerId,
-        /**
-         * The version to join, and the code a box needs to start the session. Decided here, not in
-         * the router, which knows only what its boxes run.
-         */
+        /** The version to join, decided here, not by a router that knows only what boxes run. */
         version: PlayableVersion,
-        // Passed rather than read off a request, because this seam holds no Fastify types, and a
-        // placement the router logged under an id of its own is one no join can be traced into.
+        // Passed rather than read off a request, so the router logs the join under the player's id.
         requestId: string,
     ): Promise<{ sessionId: SessionId; serverUrl: string; revision: number } | undefined>;
+    /** Asks the fleet to drain a game's worlds on any other version; throws if it is not taken. */
+    deploy(game: GameId, version: PlayableVersion, requestId: string): Promise<void>;
 }
 
-/** The fleet seam with nothing behind it: @grove/server-manager lands here. */
+/** The fleet seam with nothing behind it: no box to put a session on, which a join makes a 409. */
 export const unattachedFleet: Fleet = {
-    // Answering nothing rather than throwing: with no router attached there is no box to put a
-    // session on, which is what the allocator already turns into a 409.
     place: async () => undefined,
+    deploy: async () => undefined,
 };
 
-/** Two seconds, because this service is one replica and every join waits behind this call. */
+/** Two seconds, because every join waits behind this call. */
 const PLACEMENT_TIMEOUT_MS = 2_000;
 
-/** The fleet router over HTTP, behind the shared bearer its `/v1` gate compares. */
+/** A deployment fans out to every box holding the game, which is slower than one placement. */
+const DEPLOYMENT_TIMEOUT_MS = 10_000;
+
+/** The fleet router over HTTP, behind the secret its api-facing routes compare. */
 export function httpFleet(env: Env): Fleet {
     const call = fleetCall({
         baseUrl: env.SERVER_MANAGER_URL,
-        secret: env.FLEET_SECRET,
+        secret: env.SERVER_MANAGER_SECRET,
         timeoutMs: PLACEMENT_TIMEOUT_MS,
     });
     return {
@@ -59,14 +57,11 @@ export function httpFleet(env: Env): Fleet {
             });
 
             if (response.status === 409) return undefined;
-            // Anything else is the fleet failing rather than being full: nothing here would hand a
-            // player "no capacity" for a router that is simply down.
+            // Anything else is the fleet failing, which no player should be told is a full fleet.
             if (!response.ok) throw new Error(`server-manager answered ${response.status}`);
 
             const placement = Placement.parse(await response.json());
-            // A session on another version is one whose code this service is about to name wrongly,
-            // and a browser handed the wrong bundle set is refused at the handshake or, declaring
-            // no hash, admitted into a world with none of its scripts. Refused as a fleet fault.
+            // Another version is a fleet fault: the joiner would claim an identity the world lacks.
             if (placement.revision !== version.revision) {
                 throw new Error(
                     `server-manager placed revision ${placement.revision} for a join asking ${version.revision}`,
@@ -75,10 +70,23 @@ export function httpFleet(env: Env): Fleet {
             return {
                 sessionId: placement.sessionId,
                 serverUrl: placement.serverUrl,
-                // The router's answer rather than the version asked for: a join that landed in a
-                // world still draining on an older build is what the browser has to fetch for.
                 revision: placement.revision,
             };
+        },
+
+        deploy: async (game, version, requestId) => {
+            const response = await call('/v1/deployments', requestId, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    gameId: game,
+                    revision: version.revision,
+                    bundles: version.bundles,
+                    regions: [],
+                } satisfies DeploymentRequest),
+                timeoutMs: DEPLOYMENT_TIMEOUT_MS,
+            });
+            if (!response.ok) throw new Error(`server-manager answered ${response.status}`);
         },
     };
 }

@@ -28,8 +28,10 @@ const REQUIRED = [
     'NODE_ENV',
     'GAMES_CDN_URL',
     'SESSION_SECRET',
-    'GAME_TOKEN_SECRET',
-    'FLEET_SECRET',
+    'TICKET_SIGNING_KEY',
+    'SERVER_MANAGER_SECRET',
+    'BUILDER_SECRET',
+    'ASSET_SERVICE_SECRET',
     'SERVER_MANAGER_URL',
     'TRUSTED_PROXIES',
     'PLATFORM_ORIGIN',
@@ -53,6 +55,24 @@ describe('.env.example', () => {
 });
 
 describe('the environment', () => {
+    it('refuses one secret standing for two callers, which would let either answer for both', () => {
+        expect(() => testEnv({ BUILDER_SECRET: 'u'.repeat(32) })).toThrow(/ASSET_SERVICE_SECRET/u);
+    });
+
+    it('refuses a ticket key that is not a 32-byte Ed25519 seed', () => {
+        expect(() => testEnv({ TICKET_SIGNING_KEY: 'too-short' })).toThrow(/TICKET_SIGNING_KEY/u);
+    });
+
+    it("leases each kind of task for less than its worker's reclaim window", () => {
+        const env = testEnv();
+        expect(env.BUILD_LEASE_MS).toBeLessThan(180_000);
+        expect(env.ASSET_UPLOAD_LEASE_MS).toBeLessThan(300_000);
+    });
+
+    it('takes no secret it no longer reads', () => {
+        expect(testEnv({ FLEET_SECRET: 'x'.repeat(32) })).not.toHaveProperty('FLEET_SECRET');
+    });
+
     it('refuses a production process with any of its seams unattached', () => {
         expect(() => testEnv({ NODE_ENV: 'production' })).toThrow(
             /DATABASE_URL[\s\S]*GAMES_BUCKET[\s\S]*REDIS_URL/u,

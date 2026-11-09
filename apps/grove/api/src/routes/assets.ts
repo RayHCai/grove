@@ -1,29 +1,24 @@
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import {
-    AssetUpload,
-    AssetUploadRequest,
-    ErrorBody,
-    GameId,
-    MAX_ASSET_BYTES,
-    objectKey,
-} from '@grove/api-contract';
-import type { Records } from '../records.js';
+import { AssetUpload, AssetUploadRequest, ErrorBody, GameId } from '@grove/api-contract';
+import type { Games } from '../records.js';
 import { requireGameOwner, requireSignedIn } from '../session.js';
 import type { Storage } from '../storage.js';
 import { unattached } from '../reply.js';
+import { requestUpload } from '../workflows/workspace.js';
 
-/**
- * Where an asset's bytes are going.
- *
- * The answer is a presigned PUT and nothing else. Nothing is recorded here: a ticket the editor
- * never uses must not leave a row behind, so what puts an asset in a game is the save that names
- * its path afterwards, and that save reads back what actually landed.
- */
-export function assetRoutes(records: Records, storage: Storage): FastifyPluginAsyncZod {
+/** Over the ceiling is a 413 the workflow says, rather than the 400 the contract's bound would. */
+const UploadAsked = AssetUploadRequest.extend({ byteLength: z.int().positive() });
+
+/** Where an asset's bytes are going: a presigned PUT into quarantine, and no row behind it. */
+export function assetRoutes(
+    games: Pick<Games, 'ownerOf'>,
+    storage: Storage,
+    ttlS: number,
+): FastifyPluginAsyncZod {
     return async (app) => {
         requireSignedIn(app);
-        app.addHook('preHandler', requireGameOwner(records));
+        app.addHook('preHandler', requireGameOwner(games));
 
         app.post(
             '/games/:gameId/assets',
@@ -31,38 +26,37 @@ export function assetRoutes(records: Records, storage: Storage): FastifyPluginAs
                 schema: {
                     tags: ['workspace'],
                     params: z.object({ gameId: GameId }),
-                    body: AssetUploadRequest,
+                    body: UploadAsked,
                     response: {
                         200: AssetUpload,
                         400: ErrorBody,
                         401: ErrorBody,
                         403: ErrorBody,
+                        413: ErrorBody,
                         501: ErrorBody,
                         502: ErrorBody,
                     },
                 },
             },
             async (request, reply) => {
-                const signed = await storage.presignPut(
-                    objectKey(request.params.gameId, 'asset', request.body.path),
-                    request.body.contentType,
+                const asked = await requestUpload(
+                    storage,
+                    ttlS,
+                    request.params.gameId,
+                    request.body,
                 );
-                if (signed.outcome === 'unattached') {
-                    return unattached(reply, 'games bucket');
+                if (asked.outcome === 'too_large') {
+                    return reply
+                        .code(413)
+                        .send({ code: 'invalid_request', message: 'larger than an asset may be' });
                 }
-                if (signed.outcome !== 'signed') {
+                if (asked.outcome === 'unattached') return unattached(reply, 'games bucket');
+                if (asked.outcome === 'unavailable') {
                     return reply
                         .code(502)
                         .send({ code: 'internal', message: 'no upload could be signed' });
                 }
-                return reply.send({
-                    path: request.body.path,
-                    url: signed.url,
-                    expiresAt: signed.expiresAt,
-                    // Stated rather than signed in: a presigned PUT carries no ceiling of its own,
-                    // and the save that follows is where an asset past this is refused.
-                    maxBytes: MAX_ASSET_BYTES,
-                });
+                return reply.send(asked.upload);
             },
         );
     };

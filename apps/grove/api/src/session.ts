@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest, onRequestHookHandler } from 'fastify';
 import type { GameId, PlayerId } from '@grove/api-contract';
-import type { Records } from './records.js';
+import type { Games } from './records.js';
+import type { Sessions } from './sessions.js';
 
 declare module 'fastify' {
     interface FastifyRequest {
@@ -61,12 +62,12 @@ export function requireSignedIn(app: FastifyInstance): void {
  * Refuses a game the viewer does not own, which holding a session says nothing about.
  * A `preHandler`, not `onRequest`: by then the id is validated, so the lookup takes a `GameId`.
  */
-export function requireGameOwner(records: Records) {
+export function requireGameOwner(games: Pick<Games, 'ownerOf'>) {
     return async function hook(
         request: FastifyRequest<{ Params: { gameId: GameId } }>,
         reply: FastifyReply,
     ): Promise<void> {
-        const owner = await records.ownerOf(request.params.gameId);
+        const owner = await games.ownerOf(request.params.gameId);
         // One answer for "not yours" and "no such game": which exist is not this route's to say.
         if (owner !== request.viewer.playerId) {
             await reply.code(403).send({ code: 'forbidden', message: 'not your game' });
@@ -82,6 +83,7 @@ export async function beginSession(
     request: FastifyRequest,
     reply: FastifyReply,
     playerId: PlayerId,
+    sessions: Sessions,
 ): Promise<string> {
     const abandoned = request.session.sessionId;
     // Rotate before writing identity into it, or a session fixed by an attacker before the login
@@ -93,7 +95,10 @@ export async function beginSession(
     request.session.playerId = playerId;
     // Minted after the rotation and never carried across it: a secret planted before the login
     // would otherwise verify a token the planter already holds.
-    return reply.generateCsrf();
+    const csrfToken = reply.generateCsrf();
+    // The store's one insert, so nothing but a sign-in can bring a session into being.
+    await sessions.open(request.session.sessionId, request.session);
+    return csrfToken;
 }
 
 /** The store is the only handle left on a session the plugin has already stopped tracking. */
