@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readEnv } from '../src/env.js';
 
 const SECRET = 'e'.repeat(32);
-const REQUIRED = { NODE_ENV: 'test', FLEET_SECRET: SECRET, API_URL: 'http://api.grove.internal' };
+const REQUIRED = { NODE_ENV: 'test', BUILDER_SECRET: SECRET, API_URL: 'http://api.grove.internal' };
 
 describe('the environment', () => {
     it('requires the bearer and the API, defaults the rest, and takes nothing besides', () => {
@@ -11,10 +11,10 @@ describe('the environment', () => {
         expect(Object.keys(env).toSorted()).toEqual([
             'API_URL',
             'BUILDER_NAME',
+            'BUILDER_SECRET',
             'BUILD_ATTEMPTS',
             'BUILD_TIMEOUT_MS',
             'COMPILE_TIMEOUT_MS',
-            'FLEET_SECRET',
             'GAME_BUILDER_HOST',
             'GAME_BUILDER_PORT',
             'NODE_ENV',
@@ -26,7 +26,7 @@ describe('the environment', () => {
     });
 
     it('refuses a bearer short enough to be guessed', () => {
-        expect(() => readEnv({ ...REQUIRED, FLEET_SECRET: 'e'.repeat(31) })).toThrow(
+        expect(() => readEnv({ ...REQUIRED, BUILDER_SECRET: 'e'.repeat(31) })).toThrow(
             /bad environment/,
         );
     });

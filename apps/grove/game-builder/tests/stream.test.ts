@@ -6,7 +6,7 @@ import { startConsumer, type BuildStream } from '../src/consumer.js';
 import { readEnv } from '../src/env.js';
 import { CLAIMED, TASK_ID, quiet, silent, writing } from './doubles.js';
 
-const env = readEnv({ FLEET_SECRET: 'c'.repeat(32), API_URL: 'http://api.grove.internal:4000' });
+const env = readEnv({ BUILDER_SECRET: 'c'.repeat(32), API_URL: 'http://api.grove.internal:4000' });
 
 type Step = () => Promise<unknown>;
 
@@ -14,7 +14,7 @@ type Step = () => Promise<unknown>;
  * A stream that answers each read from a script and then idles, so a test can say what the next
  * few round trips return and let the loop run into them.
  */
-function scripted(reads: Step[], extra: { xgroup?: Step } = {}) {
+function scripted(reads: Step[], extra: { xgroup?: Step; xautoclaim?: Step } = {}) {
     const acked: string[] = [];
     let groups = 0;
     const stream = {
@@ -22,16 +22,18 @@ function scripted(reads: Step[], extra: { xgroup?: Step } = {}) {
             groups += 1;
             return extra.xgroup === undefined ? 'OK' : extra.xgroup();
         }),
-        xautoclaim: vi.fn(async () => ['0-0', []]),
+        xautoclaim: vi.fn(async () =>
+            extra.xautoclaim === undefined ? ['0-0', []] : extra.xautoclaim(),
+        ),
         xreadgroup: vi.fn(async () => {
             const next = reads.shift();
             if (next !== undefined) return next();
             await new Promise((resolve) => setTimeout(resolve, 5));
             return null;
         }),
-        xack: vi.fn(async (_stream: string, _group: string, id: string) => {
-            acked.push(id);
-            return 1;
+        xack: vi.fn(async (_stream: string, _group: string, ...ids: string[]) => {
+            acked.push(...ids);
+            return ids.length;
         }),
     };
     return { stream: stream as unknown as BuildStream, acked, groups: () => groups };
@@ -105,6 +107,46 @@ describe('the build consumer', () => {
         await consumer.stop();
         expect(log.lines.some((line) => line.level === 'error')).toBe(true);
         expect(acked).toEqual(['3-0']);
+    });
+
+    // A trim takes an entry still pending, and the task behind it is the API's to announce again.
+    it('acknowledges a pending entry a trim took, rather than reclaiming nothing forever', async () => {
+        let passes = 0;
+        const { stream, acked } = scripted([], {
+            xautoclaim: async () => {
+                passes += 1;
+                return passes === 1 ? ['0-0', [], ['9-0']] : ['0-0', []];
+            },
+        });
+        const consumer = startConsumer(
+            stream,
+            { tasks: writing(), store: silent(), env, log: quiet() },
+            env,
+            'box',
+        );
+        await until(() => acked.length > 0);
+        await consumer.stop();
+        expect(acked).toEqual(['9-0']);
+    });
+
+    it('carries the reclaim cursor from one pass to the next', async () => {
+        const cursors: string[] = [];
+        const { stream } = scripted([]);
+        (stream.xautoclaim as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+            async (...args: unknown[]) => {
+                cursors.push(String(args[4]));
+                return [cursors.length === 1 ? '5-0' : '0-0', []];
+            },
+        );
+        const consumer = startConsumer(
+            stream,
+            { tasks: writing(), store: silent(), env, log: quiet() },
+            env,
+            'box',
+        );
+        await until(() => cursors.length >= 3);
+        await consumer.stop();
+        expect(cursors.slice(0, 3)).toEqual(['0', '5-0', '0-0']);
     });
 
     it('recreates the group when Redis says it is gone', async () => {

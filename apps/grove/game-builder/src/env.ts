@@ -9,9 +9,9 @@ const Env = z.object({
     GAME_BUILDER_HOST: z.string().min(1).default('127.0.0.1'),
     GAME_BUILDER_PORT: z.coerce.number().int().positive().default(4002),
 
-    /** The bearer this service presents settling a task. Fleet-wide, and never a browser's. */
-    FLEET_SECRET: z.string().min(32),
-    /** Where a task is settled, which is the only call this service makes to @grove/api. */
+    /** What this service presents to @grove/api, which answers it for builds and nothing else. */
+    BUILDER_SECRET: z.string().min(32),
+    /** Where a build is claimed, read, stored and settled: the only service this one calls. */
     API_URL: z.url(),
 
     /** The stream builds are claimed from. Absent, and this process has no work to do. */
