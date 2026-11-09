@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { loadGame } from '../src/runtime/load-game.js';
-import { clearRuntime } from '../src/runtime/runtime.js';
+import { clearRuntime, currentRuntime, withRuntime } from '../src/runtime/runtime.js';
 import type { Runtime } from '../src/runtime/runtime.js';
+import { setScriptRuntime } from '../src/runtime/script-runtime.js';
+import { game } from '../src/runtime/game.js';
 import { Loop } from '../src/loop/loop.js';
 import { entityKey } from '../src/runtime/hosts.js';
 import { after, every, sleep } from '../src/runtime/time.js';
@@ -24,9 +26,12 @@ const START: HandlerDecl = { event: '@start', kind: 'onStart', methodName: 'begi
 function onStart(rt: Runtime, entity: Entity, begin: () => unknown): number {
     const hostKey = entityKey(entity.entityId as number);
     const hostScopeId = rt.hosts.ensure(hostKey).scopeId;
+    const instance = { begin };
+    // What wiring does at every attach, and what a continuation finds its world through.
+    setScriptRuntime(instance, rt);
     const inst: ScriptInstance = {
         id: nextId++,
-        instance: { begin },
+        instance,
         klass: ProbeClass,
         className: 'Probe',
         location: 'server',
@@ -99,5 +104,51 @@ describe('a timer registered inside a timer callback', () => {
         owner.destroy();
         loop.step(5);
         expect(rt.timers.pendingCount).toBe(0);
+    });
+});
+
+describe('a continuation in a process holding two worlds', () => {
+    it('resumes in the world that awaited, not the one loaded last', async () => {
+        const server = loadGame();
+        const loop = new Loop(server);
+        const host = server.wired.gameInstance.spawn('crate', 0, 0);
+        onStart(server, host, async () => {
+            await sleep(1 / server.simRate);
+            game.spawn('gift', 5, 5);
+            every(1 / server.simRate, () => {});
+        });
+        // A second world in the realm, as a preview holds a mirror beside its authority.
+        const mirror = loadGame({ role: 'client' });
+
+        loop.step(1);
+        loop.step(2);
+        await drainMicrotasks();
+
+        expect(server.entities.liveIds()).toHaveLength(2);
+        expect(server.timers.pendingCount).toBe(1);
+        expect(mirror.entities.liveIds()).toHaveLength(0);
+        expect(mirror.timers.pendingCount).toBe(0);
+    });
+
+    it('yields to withRuntime, which names its world outright', async () => {
+        const server = loadGame();
+        const loop = new Loop(server);
+        const host = server.wired.gameInstance.spawn('crate', 0, 0);
+        const seen: Runtime[] = [];
+        onStart(server, host, async () => {
+            await sleep(1 / server.simRate);
+            seen.push(currentRuntime());
+            seen.push(withRuntime(mirror, () => currentRuntime()));
+            seen.push(currentRuntime());
+        });
+        const mirror = loadGame({ role: 'client' });
+
+        loop.step(1);
+        loop.step(2);
+        await drainMicrotasks();
+
+        expect(seen).toEqual([server, mirror, server]);
+        // Settled, so nothing of the server's invocation is left to outrank the slot.
+        expect(currentRuntime()).toBe(mirror);
     });
 });

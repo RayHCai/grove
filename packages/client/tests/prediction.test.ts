@@ -18,8 +18,7 @@ import { ManualFrameSource, ScriptedInputDevice } from '../src/input.js';
 import { Mirror } from '../src/mirror.js';
 import { Prediction } from '../src/prediction.js';
 import { InputRing } from '../src/ring.js';
-// Compiled by the build (src/testkit/fixtures.ts); this file carries no decorator syntax.
-import { Slider } from '../dist/testkit/fixtures.js';
+import { Slider } from '../src/testkit/fixtures.js';
 import { FakeServer, entity, transformDiff, wireTransform } from './fake-server.js';
 
 const BOUNDS = { left: -400, right: 400, top: 300, bottom: -300 };

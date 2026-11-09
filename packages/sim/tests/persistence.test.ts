@@ -8,7 +8,7 @@ import {
     playerKey,
 } from '@platform/core';
 import type { Sim } from '../src/sim.js';
-import { Accounts, Era, Squad, Wallet } from '../dist/testkit/fixtures.js';
+import { Accounts, Era, Squad, Wallet } from '../src/testkit/fixtures.js';
 import { Harness, harness, kvStore } from './harness.js';
 
 afterEach(() => clearRuntime());

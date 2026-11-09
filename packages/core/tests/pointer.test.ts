@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { Pointed } from '../dist/testkit/fixtures.js';
+import { Pointed } from '../src/testkit/fixtures.js';
 import { joinPlayer, loadGame, pointerHit } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import type { Runtime } from '../src/runtime/runtime.js';

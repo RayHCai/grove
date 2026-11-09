@@ -1,8 +1,24 @@
-// Types, plus the two values both endpoints must agree on: here and nowhere else.
+// Types, plus the values and the client-frame rules both endpoints must agree on: here and nowhere else.
 
 export type { NetId, PlayerId, ProjectId } from './ids.js';
 export { PROTOCOL_VERSION } from './version.js';
-export { MAX_REQUESTS_PER_FRAME } from './limits.js';
+export {
+    MAX_ACTIONS_PER_FRAME,
+    MAX_ACTION_NAME_LENGTH,
+    MAX_IDENTITY_LENGTH,
+    MAX_INTERACTIONS_PER_FRAME,
+    MAX_REQUESTS_PER_FRAME,
+    MAX_REQUEST_NAME_LENGTH,
+    MAX_REQUEST_PAYLOAD_NODES,
+    MAX_WIDGET_NAME_LENGTH,
+} from './limits.js';
+export {
+    asClientEnvelope,
+    isActionName,
+    isAdmissiblePayload,
+    isRequestName,
+    isWidgetName,
+} from './validate.js';
 
 export type { ClientToServer, ServerToClient } from './envelopes.js';
 

@@ -1,9 +1,7 @@
-// Fixtures are compiled by the build; this file carries no decorator syntax.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
 import { PROTOCOL_VERSION } from '@platform/protocol';
-import { Health, Rules, Spectators, Wallet } from '../dist/testkit/fixtures.js';
+import { Health, Rules, Spectators, Wallet } from '../src/testkit/fixtures.js';
 import { JOIN_DEADLINE_MS, MAX_UNJOINED_CONNECTIONS, joinDeadlineTicks } from '../src/constants.js';
 import { harness } from './harness.js';
 

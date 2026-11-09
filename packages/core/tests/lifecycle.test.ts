@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { Roll, RosterProbe, Rules, SyncedWithRequest } from '../dist/testkit/fixtures.js';
+import { Roll, RosterProbe, Rules, SyncedWithRequest } from '../src/testkit/fixtures.js';
 import { loadGame, startGame, joinPlayer, leavePlayer } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import { request } from '../src/runtime/request.js';

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { Cooldown, Aimer, Faulty, PhaseProbe } from '../dist/testkit/fixtures.js';
+import { Cooldown, Aimer, Faulty, PhaseProbe } from '../src/testkit/fixtures.js';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import { BREAKER_THRESHOLD } from '../src/config.js';

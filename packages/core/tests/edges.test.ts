@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { bounds } from '@platform/math';
-import { Edges, Session } from '../dist/testkit/fixtures.js';
+import { Edges, Session } from '../src/testkit/fixtures.js';
 import { endGame, joinPlayer, leavePlayer, loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import type { Runtime } from '../src/runtime/runtime.js';

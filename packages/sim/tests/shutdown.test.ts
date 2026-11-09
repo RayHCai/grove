@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime, playerKey } from '@platform/core';
-import { Accounts, Wallet } from '../dist/testkit/fixtures.js';
+import { Accounts, Wallet } from '../src/testkit/fixtures.js';
 import type { Sim } from '../src/sim.js';
 import { harness } from './harness.js';
 

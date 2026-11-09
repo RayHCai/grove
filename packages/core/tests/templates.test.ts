@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ScriptId, TemplateId } from '@platform/project';
-import { Target, Wallet } from '../dist/testkit/fixtures.js';
+import { Target, Wallet } from '../src/testkit/fixtures.js';
 import { LoadError } from '../src/errors.js';
 import { loadGame } from '../src/runtime/load-game.js';
 import type { GameManifest } from '../src/runtime/load-game.js';

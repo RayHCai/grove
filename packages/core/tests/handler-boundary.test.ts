@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { AsyncFaulty, Nester } from '../dist/testkit/fixtures.js';
+import { AsyncFaulty, Nester } from '../src/testkit/fixtures.js';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import { Loop } from '../src/loop/loop.js';

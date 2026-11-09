@@ -15,7 +15,7 @@ import { ScriptRegistry } from '@platform/scripting';
 import type { ScriptEntry } from '@platform/scripting';
 import type { Message, Transport } from '@platform/transport';
 import { loopbackPair } from '@platform/transport';
-import { Bank, Wallet } from '../dist/testkit/fixtures.js';
+import { Bank, Wallet } from '../src/testkit/fixtures.js';
 import { GameInstance } from '../src/server/index.js';
 
 const BANK = scriptId('bank');

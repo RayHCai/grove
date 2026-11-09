@@ -25,8 +25,5 @@ export {
     DYNAMIC_IMPORT,
 } from './policy.js';
 
-export type { ShimOptions, Shim } from './shim.js';
-export { installDeterminismShim } from './shim.js';
-
 export type { BundleErrorCode, Diagnostic } from './errors.js';
 export { DeterminismError, BundleError, formatDiagnostic } from './errors.js';

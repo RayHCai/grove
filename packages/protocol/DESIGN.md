@@ -2,8 +2,10 @@
 
 **TL;DR**: the shared wire vocabulary, and nothing else. It declares every message that crosses the wire as
 a TypeScript `type`, so `@platform/sim` and `@platform/client` narrow to one definition instead of two that
-drift. Types only: no bytes move here, no frame is validated here. It sits above `@platform/transport` and
-`@platform/project` (its two dependencies) and below both endpoints.
+drift. Beside the types it holds the per-frame limits both ends must agree on and the one narrowing of a
+client frame, which the authority applies on receipt and the client holds itself to before sending, so a
+sender cannot build a frame its receiver refuses whole. No bytes move here. It sits above
+`@platform/transport` and `@platform/project` (its two dependencies) and below both endpoints.
 
 **Authoritative for the wire** where this and the transport, sim, or client design disagree.
 
@@ -11,16 +13,30 @@ drift. Types only: no bytes move here, no frame is validated here. It sits above
 
 ## 1. Contents
 
-| File               | Holds                                                    |
-| ------------------ | -------------------------------------------------------- |
-| `src/ids.ts`       | `NetId`, `PlayerId`, `ProjectId`                         |
-| `src/version.ts`   | `PROTOCOL_VERSION = 3`                                   |
-| `src/envelopes.ts` | every message, both direction unions, every payload type |
-| `src/index.ts`     | the barrel, grouped by concern                           |
+| File               | Holds                                                                   |
+| ------------------ | ----------------------------------------------------------------------- |
+| `src/ids.ts`       | `NetId`, `PlayerId`, `ProjectId`                                        |
+| `src/version.ts`   | `PROTOCOL_VERSION = 3`                                                  |
+| `src/envelopes.ts` | every message, both direction unions, every payload type                |
+| `src/limits.ts`    | the per-frame caps a sender sizes to and a receiver refuses past        |
+| `src/validate.ts`  | `asClientEnvelope`, and the name and payload predicates a sender checks |
+| `src/index.ts`     | the barrel, grouped by concern                                          |
 
-`PROTOCOL_VERSION` is the only runtime value exported. Everything else is a type.
+The runtime values are `PROTOCOL_VERSION`, the limits and the client-frame narrowing; everything else is a
+type. Server-to-client narrowing stays with the client, since its bounds are the receiver's own.
 
-Dependencies: `@platform/transport` (`src` imports exactly one type from it, `JsonValue`) and
+| Constant                     | Value | Bounds                                           |
+| ---------------------------- | ----- | ------------------------------------------------ |
+| `MAX_ACTIONS_PER_FRAME`      | 32    | actions one input frame may carry                |
+| `MAX_ACTION_NAME_LENGTH`     | 64    | longest accepted action name                     |
+| `MAX_INTERACTIONS_PER_FRAME` | 16    | interactions one frame may carry                 |
+| `MAX_WIDGET_NAME_LENGTH`     | 64    | longest accepted widget or screen name           |
+| `MAX_REQUESTS_PER_FRAME`     | 16    | requests one frame may carry                     |
+| `MAX_REQUEST_NAME_LENGTH`    | 64    | longest accepted request name                    |
+| `MAX_REQUEST_PAYLOAD_NODES`  | 256   | values one request payload may hold, whole graph |
+| `MAX_IDENTITY_LENGTH`        | 128   | longest accepted `projectId` / hash on a join    |
+
+Dependencies: `@platform/transport` (`JsonValue`, and the `RESERVED_KEYS` the payload narrowing refuses) and
 `@platform/project`, whose authoring ids are exempt from the restatement rule below. `@platform/core` is
 a **devDependency**, reachable only from the dev-only reference, so it cannot enter the shipped module graph.
 
@@ -67,7 +83,7 @@ Every envelope must be assignable to transport's `Message` (`JsonValue`). All th
 2. **No `readonly` fields or arrays**: `readonly string[]` is not assignable to `JsonValue[]`.
 3. **Optional means absent, never `undefined`**: `exactOptionalPropertyTypes` rejects it at compile time, and
    `jsonCodec.encode` throws at runtime for the value a socket actually produces. The carriers:
-   `JoinRequest.token`, `Welcome.reconnectToken`, `StateEnvelope.earliestHeadroom`, `WireAssetRef.meta` (and
+   `StateEnvelope.earliestHeadroom`, `WireAssetRef.meta` (and
    its three members), `SpriteTemplateVisual`'s `anchorX` / `anchorY` / `tint` / `neverCull`,
    `InputAction.value`, the `press` arm's `screen`, `GameRequest.data`, `GroupTemplateVisual.children`,
    and every `TemplateChild` field but `kind` and a sprite child's `texture`.
@@ -113,8 +129,7 @@ flattened `TransformDiff` free.
 - **`WorldSnapshot.entities` is parents-before-children**, a real topological emit; core's slot order does not
   satisfy it, since parenting is a later mutation. A client rejects or roots-and-counts an out-of-order entity
   rather than silently rooting it.
-- **An interest set is parent-closed**, and leaving is bottom-up. No server emits `enter-interest` /
-  `leave-interest`; the arms are declared so interest management costs no breaking change to the union.
+- **An interest set is parent-closed**, and leaving is bottom-up.
 - **`spawn` and `enter-interest` carry a full `EntitySnapshot`** (all seven transform fields, `parent`,
   `owner`, `tags`) because transform is dropped first under backpressure and a static entity is dirty exactly
   once. The duplicate transform in the same tick's `transform` envelope is deliberate. `template` is a

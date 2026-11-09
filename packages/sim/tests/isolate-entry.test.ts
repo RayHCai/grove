@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
 import { PROTOCOL_VERSION } from '@platform/protocol';
-import { Rules } from '../dist/testkit/fixtures.js';
+import { Rules } from '../src/testkit/fixtures.js';
 import { jsonCodec } from '@platform/transport';
 import { idleBatch } from '../src/batch.js';
 import type { InputBatch } from '../src/batch.js';

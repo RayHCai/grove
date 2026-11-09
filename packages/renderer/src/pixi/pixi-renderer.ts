@@ -1,5 +1,7 @@
 // Orchestration only: no arithmetic and no store logic.
 
+// Without it pixi builds its shader syncs with `new Function`, which a strict CSP refuses.
+import 'pixi.js/unsafe-eval';
 import { Application } from 'pixi.js';
 import type { Size } from '@platform/math';
 import type {

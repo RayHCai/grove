@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { Faulty, FaultyMovement, Nester } from '../dist/testkit/fixtures.js';
+import { Faulty, FaultyMovement, Nester } from '../src/testkit/fixtures.js';
 import { joinPlayer, loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import type { Runtime } from '../src/runtime/runtime.js';

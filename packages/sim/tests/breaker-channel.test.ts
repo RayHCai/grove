@@ -1,9 +1,7 @@
-// Fixtures are compiled by the build; this file carries no decorator syntax.
-
 import { describe, expect, it } from 'vitest';
 import { BREAKER_THRESHOLD } from '@platform/core';
 import type { BreakerTrip } from '@platform/core';
-import { FaultyRules } from '../dist/testkit/fixtures.js';
+import { FaultyRules } from '../src/testkit/fixtures.js';
 import { harness } from './harness.js';
 import type { Harness } from './harness.js';
 

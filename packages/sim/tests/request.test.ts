@@ -1,8 +1,6 @@
-// Fixtures are compiled by the build.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
-import { Rules, Vault } from '../dist/testkit/fixtures.js';
+import { Rules, Vault } from '../src/testkit/fixtures.js';
 import { MAX_REQUESTS_PER_FRAME } from '@platform/protocol';
 import { MAX_REQUEST_NAME_LENGTH, MAX_REQUEST_PAYLOAD_NODES } from '../src/constants.js';
 import { harness } from './harness.js';

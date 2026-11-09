@@ -6,7 +6,7 @@ mirror is written by what the server sent and, when prediction is on, by replayi
 has not acknowledged yet, over a baseline it can rewind to.
 
 It is `@platform/sim`'s wire peer, and the two share exactly one thing: the envelopes in
-`@platform/protocol`. It never imports the server.
+`@platform/protocol`. It never imports `@platform/sim`.
 
 See [DESIGN.md](DESIGN.md) for the internals.
 
@@ -38,7 +38,7 @@ import {
 } from '@platform/client/browser';
 
 const client = new GameClient({
-    transport, // from @platform/transport's connect() or loopbackPair()
+    transport, // from @platform/transport's connectWebSocket() or loopbackPair()
     renderer, // an initialized IRenderer
     frames: createRafFrameSource(),
     device: createDomInputDevice(),
@@ -48,9 +48,8 @@ const client = new GameClient({
     // Simulates the local player's own entities ahead of the server, replaying unacked input over
     // every authoritative delta, running the scripts below, which are what it has to replay.
     predict: true,
-    // Attached by template, since the wire names a class this end cannot resolve. `SyncedScript`
-    // only: a `ServerScript` never runs on a client tick.
-    scripts: { player: [Runner] },
+    // The bundle's classes by wire id; a `ServerScript` is never attached on a client tick.
+    scripts: registry, // a ScriptRegistry from @platform/scripting
 });
 client.start();
 ```

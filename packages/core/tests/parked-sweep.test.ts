@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { Cooldown } from '../dist/testkit/fixtures.js';
+import { Cooldown } from '../src/testkit/fixtures.js';
 import { loadGame } from '../src/runtime/load-game.js';
 import { clearRuntime } from '../src/runtime/runtime.js';
 import { Loop } from '../src/loop/loop.js';

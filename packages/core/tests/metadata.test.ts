@@ -1,7 +1,5 @@
-// Fixtures compiled by the build (src/testkit/fixtures.ts).
-
 import { describe, it, expect, afterEach } from 'vitest';
-import { DoubleJump, Movement, Sibling } from '../dist/testkit/fixtures.js';
+import { DoubleJump, Movement, Sibling } from '../src/testkit/fixtures.js';
 import { getMetadata } from '../src/script/metadata.js';
 import { makeInstance } from '../src/dispatch/instances.js';
 import { clearRuntime, createRuntime } from '../src/runtime/runtime.js';

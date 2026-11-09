@@ -4,15 +4,15 @@
 arrived since the last tick as one **input batch**, advances the world by exactly one tick, and hands back one
 **output batch** naming every frame to write, every socket to close, and every persisted read and write it
 needs. It sits between `@platform/protocol` (envelope shapes) and `@platform/core` (simulation, no clock, no
-network), the seam where core's `ReplicationSink` obligation is met. `@platform/client` is its wire peer;
+network), the seam where core's replication channels are drained. `@platform/client` is its wire peer;
 they share only `@platform/protocol`, which is authoritative for every envelope shape. The sim is **policy**:
 which tick an input applies to, whether it is admissible, what each session is owed. It never opens a socket,
 never reads a clock, never touches a store for `@serverState`, and never re-implements the tick order.
 
 Two hosts drive it: `@grove/game-instance` in Rust, which runs this bundle in a V8 isolate, and `@platform/glue`'s
 `GameInstance` in process. The batch holds nothing a browser cannot supply and this package imports no
-`node:` anything, which is what a third host would need; `@platform/client` is not one; it re-produces
-the input fold in `passes.ts` rather than importing this package.
+`node:` anything, which is what a third host would need; `@platform/client` is not one: it runs
+core's `foldInputEdges` rather than importing this package.
 
 | File               | Holds                                                                                                  |
 | ------------------ | ------------------------------------------------------------------------------------------------------ |
@@ -89,8 +89,6 @@ them with.
 
 ## 3. The core surface it drives
 
-Core exports no `createWorld` / `step(tick, inputs)` / `collectChanges`; this is the real mapping.
-
 | Need                | Core's surface                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------ |
 | build the world     | `loadGame({ role: 'server', … }, { scriptIdOf })` → `Runtime`, then `startGame(rt)`              |
@@ -144,8 +142,8 @@ resync path re-checks, since a client may have loaded a bundle since it joined.
 
 A refusal is a `Reject { reason, serverProtocolVersion }` in `sends` **then** a `CloseOrder`; a bare close is
 indistinguishable from a drop, and `version` and `identity` must never be retried while `full` is not a network
-error at all. `maxPlayers` is deliberately absent from `Welcome`. Inbound frames are narrowed structurally in
-`sim.ts`, not cast (`join-request`, `input`, `interaction`, `request`, `time-sync` only), against **every**
+error at all. `maxPlayers` is deliberately absent from `Welcome`. Inbound frames are narrowed structurally by
+`@platform/protocol`'s `asClientEnvelope`, not cast (`join-request`, `input`, `interaction`, `request`, `time-sync` only), against **every**
 field the type declares rather than a `Partial` of it, so a frame missing the identity fields is malformed
 like any other, ignored, and closed by the join deadline; the `version` reject can only refuse a peer whose
 frames still parse. A **resync** re-sends `JoinRequest` on a joined session: it re-arms `pendingJoin` and
@@ -262,8 +260,8 @@ already filed may not have applied and acking it would let the client prune inpu
 up to `HORIZON_CLAMP_TICKS` past the horizon is **clamped** to the horizon, and further out is
 `too-far-future`; then the **token bucket** (`INPUT_BUCKET_FRAMES` deep, one token refilled per stepped tick:
 the wire's own one-frame-per-tick ceiling, with depth for a multi-tick catch-up's burst). Identity needs no
-check here: no frame field names a player. A refusal is reported by the ack advancing past it; there is no
-`InputNack`. `RATE_BREACH_CLOSE` cumulative rate refusals close that session alone.
+check here: no frame field names a player. A refusal is reported by the ack advancing past it.
+`RATE_BREACH_CLOSE` cumulative rate refusals close that session alone.
 
 Those three bound how **many** frames arrive; three more bound what **one** frame may contain, since none of
 the above sees a frame's shape; the host refuses a frame over `MAX_FRAME_BYTES` before parsing it, but byte
@@ -476,7 +474,7 @@ lets the same bundle load in a V8 isolate and in a browser.
 Everything this package throws is a `SimError` carrying a `SimErrorCode`, so a host branches on the code rather
 than on message text: `invalid-config` is the caller's to fix, `no-pass-table` is a wiring fault,
 `entry-order` is an isolate entry driven out of order. Engine constants live in `constants.ts`, grouped by unit, never
-on the creator surface:
+on the creator surface; the per-frame caps of the narrowing are `@platform/protocol`'s, re-exported there:
 
 | Constant                      | Value                 | Bounds                                                 |
 | ----------------------------- | --------------------- | ------------------------------------------------------ |
@@ -487,16 +485,8 @@ on the creator surface:
 | `RATE_BREACH_CLOSE`           | 64                    | cumulative rate refusals before the session closes     |
 | `CONTROL_BUCKET_FRAMES`       | 4                     | `join-request` + `time-sync` token depth               |
 | `CONTROL_REFILL_MS`           | 1 000                 | wall-clock per control token                           |
-| `MAX_ACTIONS_PER_FRAME`       | 32                    | actions one input frame may carry                      |
-| `MAX_ACTION_NAME_LENGTH`      | 64                    | longest accepted action name                           |
 | `MAX_ACTION_NAMES`            | 64                    | distinct action names one session may open             |
-| `MAX_INTERACTIONS_PER_FRAME`  | 16                    | interactions one frame may carry                       |
-| `MAX_WIDGET_NAME_LENGTH`      | 64                    | longest accepted widget or screen name                 |
-| `MAX_REQUESTS_PER_FRAME`      | 16                    | requests one frame may carry                           |
-| `MAX_REQUEST_NAME_LENGTH`     | 64                    | longest accepted request name                          |
-| `MAX_REQUEST_PAYLOAD_NODES`   | 256                   | values one request payload may hold, whole graph       |
 | `MAX_NAME_LENGTH`             | 24                    | longest accepted display name, in code points          |
-| `MAX_IDENTITY_LENGTH`         | 128                   | longest accepted `projectId` / hash on a join request  |
 | `MAX_STATE_DEPTH`             | 64                    | `@serverState` nesting past which a value is dropped   |
 | `MAX_UNJOINED_CONNECTIONS`    | 32                    | unjoined sessions held at once                         |
 | `HORIZON_CLAMP_TICKS`         | 2                     | ticks past the horizon clamped rather than refused     |
@@ -509,5 +499,5 @@ rather than naming a bound of its own. `MAX_STATE_DEPTH` is the one that is not 
 far below the codec's own 128-level cap, which the envelope's own nesting eats into, because a value the
 encoder passes and the codec refuses throws out of the fan-out.
 
-The catch-up budget and the send cadence are **not here**: they are the host's clock policy, stated in
+The sim does not own the catch-up budget or the send cadence: they are the host's clock policy, stated in
 `packages/glue/src/server/driver.ts` and in `apps/grove/game-instance/src/clock.rs`.

@@ -26,7 +26,15 @@ import type {
     TimeSyncReply,
     Welcome,
 } from '@platform/protocol';
-import { MAX_REQUESTS_PER_FRAME } from '@platform/protocol';
+import {
+    MAX_ACTIONS_PER_FRAME,
+    MAX_INTERACTIONS_PER_FRAME,
+    MAX_REQUESTS_PER_FRAME,
+    isActionName,
+    isAdmissiblePayload,
+    isRequestName,
+    isWidgetName,
+} from '@platform/protocol';
 import type { Message, Transport } from '@platform/transport';
 import { TransportError } from '@platform/transport';
 import {
@@ -123,6 +131,8 @@ export interface ClientStats {
     snapshotChunksDropped: number;
     /** Corrections too far to ease, shown at once. The nearest thing here to a desync alarm. */
     snappedCorrections: number;
+    /** Actions, presses and requests kept off the wire because the authority would refuse their frame. */
+    outboundRefused: number;
 }
 
 export class GameClient {
@@ -174,6 +184,7 @@ export class GameClient {
     #ackSeqStillAt = 0;
     #ackSeq = -1;
     #assetLoadFailed = 0;
+    #outboundRefused = 0;
     /** Set by a resync, cleared when input resumes: only a re-join needs held state re-asserted. */
     #rejoined = false;
     #torn = false;
@@ -239,6 +250,10 @@ export class GameClient {
             });
         }
         if (!this.#lifecycle.acceptsInput) return;
+        if (!isWidgetName(widget) || (screen !== undefined && !isWidgetName(screen))) {
+            this.#outboundRefused += 1;
+            return;
+        }
         this.#interactions.push({
             kind: 'press',
             widget,
@@ -306,6 +321,7 @@ export class GameClient {
             cappedReplays: predicted?.counters.cappedReplays ?? 0,
             snapshotChunksDropped: this.#chunks.dropped,
             snappedCorrections: predicted?.counters.snappedCorrections ?? 0,
+            outboundRefused: this.#outboundRefused,
         };
     }
 
@@ -733,12 +749,21 @@ export class GameClient {
         // One entry per (action, phase), coalesced, which makes the batch well-formed.
         const byAction = new Map<string, InputAction>();
         for (const edge of this.#pending) {
+            const key = `${edge.action} ${edge.on}`;
+            // Past either rule the authority refuses the whole frame, so only this edge is lost, and
+            // it is not folded locally either, or prediction would run an input the server never saw.
+            const overflow = !byAction.has(key) && byAction.size >= MAX_ACTIONS_PER_FRAME;
+            if (overflow || !isActionName(edge.action)) {
+                this.#outboundRefused += 1;
+                continue;
+            }
             const action: InputAction = { action: edge.action, on: edge.on };
             if (edge.value !== undefined) action.value = edge.value;
-            byAction.set(`${edge.action} ${edge.on}`, action);
+            byAction.set(key, action);
             this.#actions.applyEdge(edge);
         }
         this.#pending.length = 0;
+        if (byAction.size === 0) return;
 
         const frame: InputFrame = {
             kind: 'input',
@@ -758,10 +783,11 @@ export class GameClient {
             this.#interactions.length = 0;
             return;
         }
+        // Chunked like requests: the authority refuses an over-cap frame entire, clicks and all.
         const frame: InteractionFrame = {
             kind: 'interaction',
             tick: clock.localTick,
-            events: this.#interactions.splice(0),
+            events: this.#interactions.splice(0, MAX_INTERACTIONS_PER_FRAME),
         };
         this.#guard(() => send(this.#opts.transport, frame));
     }
@@ -771,6 +797,10 @@ export class GameClient {
         if (!this.#lifecycle.acceptsInput) return;
         const call: GameRequest = { name };
         if (payload !== undefined) call.data = requestFields(payload);
+        if (!isRequestName(name) || (call.data !== undefined && !isAdmissiblePayload(call.data))) {
+            this.#outboundRefused += 1;
+            return;
+        }
         this.#requests.push(call);
     }
 

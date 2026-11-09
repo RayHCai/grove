@@ -1,9 +1,7 @@
-// Fixtures are compiled by the build.
-
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime, entityKey } from '@platform/core';
 import type { NetId } from '@platform/protocol';
-import { Rules, Storekeeper, Touchable } from '../dist/testkit/fixtures.js';
+import { Rules, Storekeeper, Touchable } from '../src/testkit/fixtures.js';
 import { MAX_INTERACTIONS_PER_FRAME, MAX_WIDGET_NAME_LENGTH } from '../src/constants.js';
 import { harness } from './harness.js';
 import type { Harness } from './harness.js';

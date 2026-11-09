@@ -149,6 +149,7 @@ export class Entity {
     }
 
     glideTo(x: number, y: number, seconds: number, easing?: Easing): Promise<void> {
+        if (!this.alive) return Promise.resolve();
         const t = this.#tweenTarget();
         return resumeWith(
             Promise.all([
@@ -168,6 +169,7 @@ export class Entity {
     }
 
     fadeTo(opacity: number, seconds: number): Promise<void> {
+        if (!this.alive) return Promise.resolve();
         return this.#rt.tweens.start(
             this.#tweenTarget(),
             'opacity',
@@ -186,6 +188,7 @@ export class Entity {
     }
 
     growTo(scale: number, seconds: number): Promise<void> {
+        if (!this.alive) return Promise.resolve();
         return this.#rt.tweens.start(
             this.#tweenTarget(),
             'scale',
@@ -196,6 +199,7 @@ export class Entity {
     }
 
     spin(degrees: number, seconds: number): Promise<void> {
+        if (!this.alive) return Promise.resolve();
         return this.#rt.tweens.start(
             this.#tweenTarget(),
             'rotation',
@@ -206,6 +210,7 @@ export class Entity {
     }
 
     spinTo(degrees: number, seconds: number): Promise<void> {
+        if (!this.alive) return Promise.resolve();
         return this.#rt.tweens.start(
             this.#tweenTarget(),
             'rotation',
@@ -262,12 +267,15 @@ export class Entity {
     }
 
     tag(name: string): this {
+        // The tag index keys entities by slot, so a stale handle would tag the slot's next occupant.
+        if (!this.#held()) return this;
         this.#rt.tags.add(this.#id, name);
         this.#rt.channels.markStructural({ kind: 'tag', id: this.#id, tag: name, added: true });
         return this;
     }
 
     untag(name: string): this {
+        if (!this.#held()) return this;
         this.#rt.tags.remove(this.#id, name);
         this.#rt.channels.markStructural({ kind: 'tag', id: this.#id, tag: name, added: false });
         return this;
@@ -306,7 +314,7 @@ export class Entity {
     }
 
     play(clip: AssetRef, _opts?: { loop?: boolean }): Promise<void> {
-        this.#rt.effects.play('animation', { id: this.#id, clip });
+        if (this.#held()) this.#rt.effects.play('animation', { id: this.#id, clip });
         return Promise.resolve();
     }
 
@@ -315,13 +323,16 @@ export class Entity {
     }
 
     playEffect(name: AssetRef, _opts?: { loop?: boolean }): this {
-        this.#rt.effects.play('effect', { id: this.#id, name });
+        if (this.#held()) this.#rt.effects.play('effect', { id: this.#id, name });
         return this;
     }
 
     say(text: string): this;
     say(text: string, seconds: number): Promise<void>;
     say(text: string, seconds?: number): this | Promise<void> {
+        if (seconds === undefined ? !this.#held() : !this.alive) {
+            return seconds === undefined ? this : Promise.resolve();
+        }
         // Capped here rather than at the renderer: this string goes on the wire, so an unbounded
         // one is a per-tick broadcast of whatever a client can talk the game into.
         const tag = `say:${text.slice(0, MAX_BUBBLE_LENGTH)}`;
@@ -338,7 +349,11 @@ export class Entity {
     think(text: string): this;
     think(text: string, seconds: number): Promise<void>;
     think(text: string, seconds?: number): this | Promise<void> {
-        if (seconds !== undefined) return this.#rt.timers.sleep(seconds, this.#hostScope());
+        if (seconds !== undefined) {
+            return this.alive
+                ? this.#rt.timers.sleep(seconds, this.#hostScope())
+                : Promise.resolve();
+        }
         void text;
         return this;
     }
@@ -347,6 +362,7 @@ export class Entity {
         const tag = this.#bubble;
         if (tag === null) return this;
         this.#bubble = null;
+        if (!this.#held()) return this;
         this.#rt.channels.markStructural({ kind: 'tag', id: this.#id, tag, added: false });
         return this;
     }
@@ -360,7 +376,7 @@ export class Entity {
     }
 
     addScript(script: new (props?: ScriptProps) => BaseScript<Entity>, props?: ScriptProps): this {
-        this.#rt.wired.wiring.attachToEntity(this.#id, script as never, props);
+        if (this.alive) this.#rt.wired.wiring.attachToEntity(this.#id, script as never, props);
         return this;
     }
 
@@ -371,6 +387,11 @@ export class Entity {
 
     send(event: string, payload?: Record<string, unknown>): Promise<void> {
         return this.#rt.wired.send(this.#id, event, payload);
+    }
+
+    /** Whether this handle's slot still holds it, destroy-pending included; a released one may not. */
+    #held(): boolean {
+        return this.#rt.entities.exists(this.#id);
     }
 
     /** Unparents without marking; returns false if it had no parent. */

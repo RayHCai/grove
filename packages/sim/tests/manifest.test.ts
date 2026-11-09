@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime } from '@platform/core';
 import type { ManifestUpdate, RenderManifest } from '@platform/protocol';
 import { assetId, templateId } from '@platform/project';
-import { Rules } from '../dist/testkit/fixtures.js';
+import { Rules } from '../src/testkit/fixtures.js';
 import { ManifestStore } from '../src/manifest.js';
 import { harness } from './harness.js';
 import type { Peer } from './harness.js';
