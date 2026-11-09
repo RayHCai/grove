@@ -72,7 +72,7 @@ func TestAdoptTakesOnlyAPidStillRunningThisBinary(t *testing.T) {
 				return []byte(tc.raw), tc.err
 			}}
 
-			child, err := launcher.Adopt(os.Getpid())
+			child, err := launcher.Adopt(os.Getpid(), "7c9e6679-7425-40de-944b-e07fc1f90ae7")
 
 			if tc.adopted && err != nil {
 				t.Fatalf("Adopt: got %v, want the survivor back", err)
@@ -112,7 +112,7 @@ func TestAnAdoptedChildEndsOnlyOnAnAnswerThisAgentGot(t *testing.T) {
 				return []byte(tc.raw), tc.err
 			}}
 
-			child, err := launcher.Adopt(os.Getpid())
+			child, err := launcher.Adopt(os.Getpid(), "7c9e6679-7425-40de-944b-e07fc1f90ae7")
 			if err != nil {
 				t.Fatalf("Adopt: %v", err)
 			}

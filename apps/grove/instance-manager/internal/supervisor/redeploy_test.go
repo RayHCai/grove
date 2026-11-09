@@ -13,6 +13,9 @@ import (
 // ticker sized to a real box.
 const testDrainPoll = 5 * time.Millisecond
 
+// The version a push names, one past what every world in this file was started on.
+const pushedRevision = testRevision + 1
+
 // A second game on the same box, which a push of the first has no business ending.
 const otherGameID = "0d4f2b18-6c3a-4f5e-8b90-1a2c3d4e5f60"
 
@@ -77,7 +80,7 @@ func TestRedeployDrainsEveryWorldOfOneGameAndNamesThemInOrder(t *testing.T) {
 		t.Fatalf("Start the other game: %v", err)
 	}
 
-	marked := registry.Redeploy(request(0).GameID, time.Now())
+	marked := registry.Redeploy(request(0).GameID, pushedRevision, time.Now())
 
 	want := make([]string, 0, len(pushed))
 	for _, view := range pushed {
@@ -121,7 +124,7 @@ func TestADrainingWorldEndsOnlyOnceItsLastPlayerHasLeft(t *testing.T) {
 
 			setPlayers(child, 3)
 			registry.Poll(context.Background())
-			registry.Redeploy(request(0).GameID, time.Now())
+			registry.Redeploy(request(0).GameID, pushedRevision, time.Now())
 
 			setPlayers(child, tc.players)
 			for range 10 {
@@ -161,7 +164,7 @@ func TestAProbeRefreshesADrainingRosterWithoutCallingItHealthyAgain(t *testing.T
 
 	setPlayers(child, 4)
 	registry.Poll(context.Background())
-	registry.Redeploy(request(0).GameID, time.Now())
+	registry.Redeploy(request(0).GameID, pushedRevision, time.Now())
 
 	setPlayers(child, 2)
 	registry.Poll(context.Background())
@@ -186,7 +189,7 @@ func TestAWorldNoProbeHasAnsweredForIsNotTakenAsEmpty(t *testing.T) {
 	view := startN(t, registry, 1)[0]
 	child := launcher.child(0)
 
-	registry.Redeploy(request(0).GameID, time.Now())
+	registry.Redeploy(request(0).GameID, pushedRevision, time.Now())
 	time.Sleep(10 * testDrainPoll)
 
 	if !child.living() {
@@ -213,7 +216,7 @@ func TestADrainThatNeverEmptiesEndsOnItsDeadline(t *testing.T) {
 	registry.Poll(context.Background())
 
 	began := time.Now()
-	registry.Redeploy(request(0).GameID, began)
+	registry.Redeploy(request(0).GameID, pushedRevision, began)
 	waitFor(t, "the drain to run out", func() bool { return !child.living() })
 
 	if waited := time.Since(began); waited < deadline {
@@ -233,7 +236,7 @@ func TestAStopDuringADrainDoesNotWaitOutTheDeadline(t *testing.T) {
 
 	setPlayers(child, 3)
 	registry.Poll(context.Background())
-	registry.Redeploy(request(0).GameID, time.Now())
+	registry.Redeploy(request(0).GameID, pushedRevision, time.Now())
 
 	stopped := make(chan error, 1)
 	go func() { stopped <- registry.Stop(context.Background(), view.InstanceID) }()
@@ -272,7 +275,7 @@ func TestADrainResumesABudgetAlreadySpent(t *testing.T) {
 	setPlayers(child, 1)
 	registry.Poll(context.Background())
 
-	registry.Redeploy(request(0).GameID, time.Now().Add(-2*deadline))
+	registry.Redeploy(request(0).GameID, pushedRevision, time.Now().Add(-2*deadline))
 	waitFor(t, "a drain whose budget was already spent to end", func() bool { return !child.living() })
 }
 
@@ -312,7 +315,7 @@ func TestASecondRedeployLeavesTheFirstDrainsDeadlineAlone(t *testing.T) {
 	view := startN(t, registry, 1)[0]
 
 	began := time.Now()
-	registry.Redeploy(request(0).GameID, began)
+	registry.Redeploy(request(0).GameID, pushedRevision, began)
 
 	stamped := drainRecord(t, dir, view.InstanceID)
 	if !stamped.DrainingSince.Equal(began) {
@@ -327,7 +330,7 @@ func TestASecondRedeployLeavesTheFirstDrainsDeadlineAlone(t *testing.T) {
 
 	// A game pushed every few minutes must not hand its worlds a whole new budget each time, or one
 	// that has been ending all afternoon would never finish.
-	registry.Redeploy(request(0).GameID, began.Add(10*time.Minute))
+	registry.Redeploy(request(0).GameID, pushedRevision, began.Add(10*time.Minute))
 
 	again := drainRecord(t, dir, view.InstanceID)
 	if !again.DrainingSince.Equal(began) {

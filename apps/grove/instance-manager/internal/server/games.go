@@ -3,6 +3,8 @@
 package server
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -10,10 +12,10 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
 
-// redeployGame puts every world of one game on this box into drain and answers what it marked.
+// redeployGame drains the worlds of one game not on the pushed revision and answers what it marked.
 //
-// No body: what a box runs is decided at start, from the paths its start request carries, and a
-// bundle sent here would be state this agent has nowhere to keep and would lose on its own restart.
+// The body names only the revision: what a box runs is decided at start, from the refs its start
+// carries, and a bundle sent here would be state this agent has nowhere to keep.
 func (s *service) redeployGame(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("gameId")
 	if !contract.ValidUUID(gameID) {
@@ -21,7 +23,19 @@ func (s *service) redeployGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	marked := s.instances.Redeploy(gameID, time.Now())
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	if err != nil {
+		httpx.BadRequest(w, "body must be at most 16 KiB")
+		return
+	}
+	// An empty body is every world of the game, which is what an operator clearing one sends.
+	var push contract.RedeployRequest
+	if len(raw) > 0 && (json.Unmarshal(raw, &push) != nil || push.Revision < 0) {
+		httpx.BadRequest(w, "body must be {\"revision\": a non-negative integer}")
+		return
+	}
+
+	marked := s.instances.Redeploy(gameID, push.Revision, time.Now())
 
 	// Skipped rather than 404: a box holding no world of a game is a box with nothing to end, which
 	// is a fine outcome for a rollout and not a wrong address.

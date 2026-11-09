@@ -16,6 +16,8 @@ import (
 const (
 	maxBodyBytes    = 16 * 1024
 	logLimitDefault = 200
+	// A store bearer is a few hundred bytes, and this one lands in a child's environment.
+	maxStoreTokenBytes = 2048
 )
 
 // What the 204 gets on top of the drain: a child that ignored the signal is killed at the end of
@@ -45,6 +47,9 @@ func (s *service) startInstance(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, supervisor.ErrAtCapacity):
 		httpx.WriteError(w, http.StatusConflict, httpx.CodeConflict, "host is at its instance cap")
+		return
+	case errors.Is(err, supervisor.ErrShortLived):
+		httpx.BadRequest(w, "storeTokenExpiresAt leaves the world no lifetime")
 		return
 	case err != nil:
 		httpx.Fail(w, r, s.log, "start an instance", err)
@@ -125,6 +130,12 @@ func startProblem(b contract.InstanceStart) string {
 		return "instanceId must be a uuid"
 	case b.Revision < 1:
 		return "revision must be positive"
+	// Carried, never read: the store checks it, and this box only hands it to the child.
+	case b.StoreToken == "" || len(b.StoreToken) > maxStoreTokenBytes:
+		return "storeToken must be a bearer"
+	}
+	if _, err := contract.ParseTimestamp(b.StoreTokenExpiresAt); err != nil {
+		return "storeTokenExpiresAt must be an rfc3339 timestamp"
 	}
 	return b.Bundles.Problem()
 }

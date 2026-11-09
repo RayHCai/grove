@@ -56,7 +56,7 @@ func (stubBundles) Fetch(context.Context, contract.BundleSet) (bundles.Paths, er
 }
 
 // No test here outlives its own registry, so there is never a survivor of an earlier one to take.
-func (stubLauncher) Adopt(pid int) (supervisor.Child, error) {
+func (stubLauncher) Adopt(pid int, _ string) (supervisor.Child, error) {
 	return nil, fmt.Errorf("pid %d is not a game process", pid)
 }
 
@@ -96,7 +96,7 @@ func (stubbornLauncher) Start(
 	return &stubbornChild{exit: make(chan struct{})}, nil
 }
 
-func (stubbornLauncher) Adopt(pid int) (supervisor.Child, error) {
+func (stubbornLauncher) Adopt(pid int, _ string) (supervisor.Child, error) {
 	return nil, fmt.Errorf("pid %d is not a game process", pid)
 }
 
@@ -143,7 +143,6 @@ func newTestServiceWith(opts supervisor.Options, ready func(context.Context) err
 	opts.Prober = stubProber{}
 	opts.Ports = &stubPorts{}
 	opts.Log = log
-	opts.TokenSecret = []byte(strings.Repeat("s", 32))
 
 	return New(supervisor.New(opts), ready, []byte(fleetSecret), hostID, log)
 }
@@ -168,13 +167,24 @@ func bundlesJSON() string {
 }
 
 func startBodyFor(i int) string {
+	return startBody(i, "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70", testRevision, bearerFields(12*time.Hour))
+}
+
+// startBody is one start, of one game, on one revision, carrying the bearer fields given.
+func startBody(i int, game string, revision int, bearer string) string {
 	return fmt.Sprintf(`{
 		"instanceId": "%08d-2222-4222-8222-222222222222",
-		"gameId": "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
+		"gameId": "%s",
 		"sessionId": "%08d-1111-4111-8111-111111111111",
 		"revision": %d,
-		"bundles": %s
-	}`, i, i, testRevision, bundlesJSON())
+		"bundles": %s%s
+	}`, i, game, i, revision, bundlesJSON(), bearer)
+}
+
+// bearerFields is the store bearer a start carries, alive for life.
+func bearerFields(life time.Duration) string {
+	return fmt.Sprintf(`, "storeToken": "eyJnYW1lSWQiOiJnIn0.c2lnbmVk", "storeTokenExpiresAt": %q`,
+		contract.Timestamp(time.Now().Add(life)))
 }
 
 // The id the placement named, which is the one the player was handed.
@@ -281,10 +291,17 @@ func TestAFullBoxAnswers409(t *testing.T) {
 }
 
 func TestABadStartIsRefused(t *testing.T) {
+	game := "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70"
 	cases := []struct {
 		name string
 		body string
 	}{
+		{name: "no store bearer", body: startBody(0, game, testRevision, "")},
+		{name: "a store bearer that dies before the world could drain", body: startBody(0, game, testRevision, bearerFields(time.Minute))},
+		{
+			name: "a store bearer with no end",
+			body: startBody(0, game, testRevision, `, "storeToken": "a.b", "storeTokenExpiresAt": "later"`),
+		},
 		{name: "no body at all", body: ""},
 		{name: "not json", body: "{"},
 		{name: "no game", body: `{"sessionId":"00000000-1111-4111-8111-111111111111"}`},

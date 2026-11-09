@@ -3,6 +3,7 @@ package heartbeat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -114,6 +115,9 @@ func newBeater(t *testing.T, url string, source Source) *Beater {
 		HostID:           hostID,
 		Region:           "us-east-1",
 		AgentPort:        agentPort,
+		PublicHost:       "box.fleet.grove.example",
+		PlayerPort:       443,
+		TLS:              true,
 		Interval:         time.Hour,
 		Source:           source,
 		Box:              fakeBox{cpu: 0.25, free: 3 << 30},
@@ -198,6 +202,33 @@ func TestABeatCarriesTheBoxItself(t *testing.T) {
 	// The router dials this box back on it, rather than on a port compiled into the router.
 	if beat.body.AgentPort != agentPort {
 		t.Errorf("agentPort: got %d, want %d", beat.body.AgentPort, agentPort)
+	}
+	// The router builds every url to this box from these, never from where the beat came from.
+	if beat.body.PublicHost != "box.fleet.grove.example" || beat.body.PlayerPort != 443 || !beat.body.TLS {
+		t.Errorf("addressing: got %q:%d tls %t", beat.body.PublicHost, beat.body.PlayerPort, beat.body.TLS)
+	}
+	if !beat.body.Ready {
+		t.Error("a box with nothing wrong with it reported itself unready")
+	}
+}
+
+// A box whose binary or cache is unusable fails every start, so it says so before one is sent.
+func TestABeatCarriesWhetherTheBoxCouldStartAWorld(t *testing.T) {
+	broken := true
+	beater := newBeater(t, "http://127.0.0.1:1", fakeSource{max: 4})
+	beater.opts.Ready = func(context.Context) error {
+		if broken {
+			return errors.New("grove-game-instance: no such file")
+		}
+		return nil
+	}
+
+	if beater.Body(time.Now()).Ready {
+		t.Error("a box that cannot fork reported itself ready")
+	}
+	broken = false
+	if !beater.Body(time.Now()).Ready {
+		t.Error("a box that recovered stayed unready")
 	}
 }
 

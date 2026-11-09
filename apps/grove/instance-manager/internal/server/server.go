@@ -37,5 +37,5 @@ func New(
 	scope.HandleFunc("GET /v1/instances/{instanceId}/logs", s.readLogs)
 	scope.HandleFunc("POST /v1/games/{gameId}/redeploy", s.redeployGame)
 
-	return httpx.Service(scope, ready, l, httpx.FleetBearer(fleetSecret, l))
+	return httpx.Service(scope, ready, l, httpx.SharedSecret(l, fleetSecret))
 }
