@@ -4,7 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { ACCOUNT, fakeApi, navigation } from './doubles';
-import { click, field, mount, need, submit, type, until, untilSettled } from './helpers';
+import { mount, until, untilSettled } from '@grove/ui/testing';
+import { click, field, need, submit, type } from './helpers';
 
 const EDITOR = 'http://localhost:5176';
 const PASSWORD = 'a-long-enough-password';

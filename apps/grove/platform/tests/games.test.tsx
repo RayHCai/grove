@@ -6,7 +6,8 @@ import { decodeHandoff } from '@grove/api-contract';
 import { ApiError } from '../src/api/client';
 import { App } from '../src/App';
 import { GAME, navigation, OLDER_GAME, PLAY_SESSION, signedInApi } from './doubles';
-import { byText, click, field, mount, need, submit, type, until, untilSettled } from './helpers';
+import { mount, until, untilSettled } from '@grove/ui/testing';
+import { byText, click, field, need, submit, type } from './helpers';
 
 /** Where the editor is; the crossing goes to its origin and carries nothing else. */
 const EDITOR = 'http://localhost:5176';

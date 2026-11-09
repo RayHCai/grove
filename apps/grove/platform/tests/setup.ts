@@ -1,5 +1,5 @@
 import { afterEach } from 'vitest';
-import { unmountAll } from './helpers';
+import { unmountAll } from '@grove/ui/testing';
 
 // React refuses to run `act` without it, and says so at the first render rather than at setup.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

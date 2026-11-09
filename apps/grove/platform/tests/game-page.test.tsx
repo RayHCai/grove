@@ -8,7 +8,8 @@ import { ApiError } from '../src/api/client';
 import { App } from '../src/App';
 import { tileAt } from '../src/catalog/placeholder';
 import { ACCOUNT, GAME, navigation, OLDER_GAME, PLAY_SESSION, signedInApi } from './doubles';
-import { byText, click, mount, need, until, untilSettled } from './helpers';
+import { mount, until, untilSettled } from '@grove/ui/testing';
+import { byText, click, need } from './helpers';
 
 const PLAYER = 'http://localhost:5177';
 

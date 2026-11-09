@@ -4,7 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { ACCOUNT, navigation, signedInApi } from './doubles';
-import { click, field, mount, need, submit, type, until, untilSettled } from './helpers';
+import { mount, until, untilSettled } from '@grove/ui/testing';
+import { click, field, need, submit, type } from './helpers';
 
 const PASSWORD = 'a-long-enough-password';
 
@@ -40,7 +41,56 @@ describe('renaming', () => {
     });
 });
 
+describe('a session another tab signed in to', () => {
+    it('still saves, on the token a fresh read of the session hands back', async () => {
+        const { host, api } = await profile();
+        // A sign-in elsewhere rotates the session, so the token this tab read is stale now.
+        api.signInElsewhere();
+
+        await type(field(host, 'Display name'), 'Juniper');
+        await submit(need(host, 'button', 'Save name'));
+        await until(() => api.account.displayName === 'Juniper');
+
+        expect(host.querySelector('.card__saved')?.textContent).toBe('Saved.');
+        expect(api.requests.filter((request) => request === 'PATCH /v1/players/me')).toHaveLength(
+            2,
+        );
+    });
+
+    it('is told apart from a wrong current password, which is a field to correct', async () => {
+        const { host, api } = await profile();
+        api.signInElsewhere();
+
+        await type(field(host, 'Current password'), 'not-the-password');
+        await type(field(host, 'New password'), 'a-different-long-password');
+        await submit(need(host, 'button', 'Change password'));
+        await until(() => host.querySelector('.card__refusal') !== null);
+
+        // Both are a 403, and only the second is the answer the form puts words to.
+        expect(host.querySelector('.card__refusal')?.textContent).toBe(
+            'That is not your current password.',
+        );
+    });
+});
+
 describe('changing the password', () => {
+    it('hands this tab the new session’s token, so the next write carries it', async () => {
+        const { host, api } = await profile();
+
+        await type(field(host, 'Current password'), PASSWORD);
+        await type(field(host, 'New password'), 'a-different-long-password');
+        await submit(need(host, 'button', 'Change password'));
+        await until(() => api.credentials.password === 'a-different-long-password');
+        await type(field(host, 'Display name'), 'Juniper');
+        await submit(need(host, 'button', 'Save name'));
+        await until(() => api.account.displayName === 'Juniper');
+
+        // One rename: the token the rotation minted was the one it carried, so nothing was refused.
+        expect(api.requests.filter((request) => request === 'PATCH /v1/players/me')).toHaveLength(
+            1,
+        );
+    });
+
     it('changes it when the current one is right', async () => {
         const { host, api } = await profile();
 
