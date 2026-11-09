@@ -4,7 +4,7 @@ import { readEnv } from '../src/env.js';
 
 const env = readEnv({
     NODE_ENV: 'test',
-    FLEET_SECRET: 'e'.repeat(32),
+    BUILDER_SECRET: 'e'.repeat(32),
     API_URL: 'http://api.grove.internal',
 });
 

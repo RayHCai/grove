@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, configuredUrl } from '@grove/ui';
 import { App } from './App';
+import { serverPolicy } from './servers';
 import '@grove/ui/styles.css';
 // The app sheet follows the ui sheet: equal-specificity overrides win only by source order.
 import './styles.css';
@@ -15,11 +16,12 @@ const platformUrl = configuredUrl(
     'http://localhost:5175',
     import.meta.env.DEV,
 );
+const servers = serverPolicy(import.meta.env.VITE_GAME_HOSTS, import.meta.env.DEV);
 
 createRoot(host).render(
     <StrictMode>
         <ErrorBoundary>
-            <App platformUrl={platformUrl} />
+            <App platformUrl={platformUrl} servers={servers} />
         </ErrorBoundary>
     </StrictMode>,
 );

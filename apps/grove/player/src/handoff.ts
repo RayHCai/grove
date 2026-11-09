@@ -1,5 +1,7 @@
 import { decodeHandoff } from '@grove/api-contract';
 import type { PlayHandoff } from '@grove/api-contract';
+import { trustedServer } from './servers';
+import type { ServerPolicy } from './servers';
 
 /**
  * The join, as the platform left it in this page's url.
@@ -14,14 +16,20 @@ export type Handoff =
     /** No fragment at all: somebody opened this origin directly rather than being sent here. */
     | { outcome: 'absent' }
     /** A fragment that is not one of ours, which is a link that was edited or truncated. */
-    | { outcome: 'unreadable' };
+    | { outcome: 'unreadable' }
+    /** A well-formed join naming a server outside the fleet, which is a link somebody wrote. */
+    | { outcome: 'untrusted' };
 
 /** Reads the handoff out of a url fragment, with or without its leading `#`. */
-export function readHandoff(fragment: string): Handoff {
+export function readHandoff(fragment: string, servers: ServerPolicy): Handoff {
     const encoded = fragment.startsWith('#') ? fragment.slice(1) : fragment;
     if (encoded === '') return { outcome: 'absent' };
     const handoff = decodeHandoff(encoded);
-    return handoff === undefined ? { outcome: 'unreadable' } : { outcome: 'joined', handoff };
+    if (handoff === undefined) return { outcome: 'unreadable' };
+    // The server chooses the code this origin runs, so a join is only as good as where it points.
+    return trustedServer(handoff.session.serverUrl, servers)
+        ? { outcome: 'joined', handoff }
+        : { outcome: 'untrusted' };
 }
 
 /**

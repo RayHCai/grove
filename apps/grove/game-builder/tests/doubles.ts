@@ -6,9 +6,9 @@ import {
     Manifest,
     Task,
     TaskId,
+    TaskStatusUpdate,
     VersionId,
     type BuildArtifact,
-    type TaskStatusUpdate,
     type WorkspaceFile,
     type WorkspacePath,
 } from '@grove/api-contract';
@@ -91,10 +91,12 @@ export function projectJson(): string {
 /** What a build store was told to keep, so a test can read back what a build actually wrote. */
 export interface FakeStore extends BuildStore {
     stored: Map<string, Buffer>;
+    /** How many file reads were in flight at the busiest moment. */
+    widest: () => number;
 }
 
-/** A bucket behind @grove/api: one frozen manifest, its files, and whatever a build writes. */
-export function holding(files: Record<string, string>): FakeStore {
+/** @grove/api over one frozen manifest: the claimed task's files, and whatever a build writes. */
+export function holding(files: Record<string, string>, readMs = 0): FakeStore {
     const manifest: Manifest = Manifest.parse({
         gameId: GAME_ID,
         revision: REVISION,
@@ -109,25 +111,31 @@ export function holding(files: Record<string, string>): FakeStore {
             })),
     });
     const stored = new Map<string, Buffer>();
+    let reading = 0;
+    let widest = 0;
 
     return {
         stored,
-        manifest: async (game, revision) =>
-            game === GAME_ID && revision === REVISION
-                ? { outcome: 'found', value: manifest }
-                : { outcome: 'missing' },
-        file: async (_game, _revision, path) => {
+        widest: () => widest,
+        manifest: async (task) =>
+            task === TASK_ID ? { outcome: 'found', value: manifest } : { outcome: 'missing' },
+        file: async (_task, path) => {
+            reading += 1;
+            widest = Math.max(widest, reading);
+            await new Promise((resolve) => setTimeout(resolve, readMs));
+            reading -= 1;
             const held = files[path];
             return held === undefined
                 ? { outcome: 'missing' }
                 : { outcome: 'found', value: Buffer.from(held, 'utf8') };
         },
-        store: async (game, revision, name, body) => {
+        store: async (task, name, body) => {
             stored.set(name, body);
+            const hash = createHash('sha256').update(body).digest('hex');
             const artifact: BuildArtifact = {
                 name,
-                url: `https://cdn.grove.example/${game}/build/${String(revision)}/${name}`,
-                hash: createHash('sha256').update(body).digest('hex'),
+                url: `https://cdn.grove.example/${GAME_ID}/build/${task}/${hash}/${name}`,
+                hash,
                 byteLength: body.byteLength,
             };
             return { outcome: 'stored', artifact };
@@ -155,7 +163,7 @@ export function quiet(): Builder['log'] & { lines: { level: string; details: obj
     return { lines, info: at('info'), warn: at('warn'), error: at('error') } as never;
 }
 
-/** A task seam that records every update and answers each one from `answers`, in order. */
+/** The status route as @grove/api answers it: each body parsed off the wire by the contract. */
 export function writing(...answers: TaskWritten[]): Tasks & { wrote: TaskStatusUpdate[] } {
     const wrote: TaskStatusUpdate[] = [];
     let at = 0;
@@ -163,6 +171,9 @@ export function writing(...answers: TaskWritten[]): Tasks & { wrote: TaskStatusU
         wrote,
         advance: async (_task, update) => {
             wrote.push(update);
+            if (!TaskStatusUpdate.safeParse(JSON.parse(JSON.stringify(update))).success) {
+                return { outcome: 'invalid' };
+            }
             const answer = answers[at] ?? { outcome: 'settled', task: CLAIMED };
             at += 1;
             return answer;

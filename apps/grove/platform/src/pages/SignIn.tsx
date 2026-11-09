@@ -25,7 +25,7 @@ export function SignIn({ returnTo }: SignInProps): React.JSX.Element {
                 // same way, and saying which it was is the fact an enumeration is looking for.
                 return 'That address and password do not match an account.';
             }
-            // Somebody the editor sent goes straight back to it, carrying the key it needs.
+            // Somebody the editor sent goes straight back to it, which reads the cookie this just set.
             if (returnTo === undefined) go({ at: 'landing' });
             else openEditor(returnTo);
             return undefined;

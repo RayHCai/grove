@@ -14,7 +14,9 @@ The renderer first, then the dial: the session is handed a renderer, so one that
 one it cannot be given. Every await is guarded by an `AbortSignal` rather than a flag, because a
 dial resolves on its own schedule and StrictMode mounts twice: an abandoned dial closes its own
 socket, and a renderer torn down mid-`init` is destroyed by the init path rather than by a cleanup
-that ran before there was anything to destroy.
+that ran before there was anything to destroy. The input device listens from the moment it is
+built and a session disposes the one it took, so a mount whose session never took it (a dial that
+failed, a teardown mid-dial) disposes it itself.
 
 The ticket rides the WebSocket **subprotocol**, as `grove.ticket.<token>`. A browser cannot set a
 header on `new WebSocket(url)`, and a url reaches access logs, proxy traces and `Referer`.
@@ -37,10 +39,13 @@ widget placed against one lands somewhere else in the other.
 ## What a host is told
 
 `onReady` when the session goes live. `onRefused` with a reason and a line written for a reader:
-the wire's `version`, `full` and `identity`, plus `ticket` for a refusal that happens at the upgrade
-and never becomes an envelope, `bundle` for code that would not load, and `unreachable` for a socket
-that never opened. A reason token this build has no wording for is reported as `unreachable` rather
-than mapped to whichever case happened to be last.
+the wire's `version`, `full` and `identity`, plus `ticket` for a socket that never opened (a browser
+cannot tell an upgrade refused for its ticket from a box it could not reach, and a new join is the
+fix for both), `bundle` for code that would not load, `renderer` for a stage the browser could not
+start, and `unreachable` for a session that broke after it opened. A reason token this build has no
+wording for is reported as `unreachable` rather than mapped to whichever case happened to be last.
+A refusal from a remote world carries no cause, since its reader is a player and the cause names
+the box; one from a world in this page carries it, since its reader is the creator whose world it is.
 
 `createRenderer` and `connect` are seams a test substitutes; a host passes neither.
 

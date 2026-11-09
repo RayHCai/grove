@@ -1,17 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, leaveFor } from '@grove/ui';
 import { DESIGN_STAGE, GamePlayer } from '@grove/player';
-import type { GameAuthority, GameProject, RefusalReason } from '@grove/player';
+import type { GameAuthority, GamePlayerProps, GameProject, RefusalReason } from '@grove/player';
 import { clearFragment, readHandoff } from './handoff';
 import type { Handoff } from './handoff';
+import type { ServerPolicy } from './servers';
 
 export interface AppProps {
     /** The fragment the platform left; a test hands in its own rather than touching the url. */
     fragment?: string;
+    /** Which servers a join may name, which a build is told. */
+    servers: ServerPolicy;
     /** Where a refused join sends the person back to. */
     platformUrl: string;
     /** How the tab leaves; a test hands in its own rather than navigating. */
     navigate?: (url: string) => void;
+    /** How the stage's renderer is built; a test hands in one that needs no GPU. */
+    createRenderer?: GamePlayerProps['createRenderer'];
+    /** How the server is dialled; a test hands in one that needs no socket. */
+    connect?: GamePlayerProps['connect'];
 }
 
 type Phase =
@@ -20,12 +27,19 @@ type Phase =
     /** A join that will not happen, with the line a person is shown and where they go next. */
     | { kind: 'refused'; message: string };
 
-export function App({ fragment, platformUrl, navigate }: AppProps): React.JSX.Element {
+export function App({
+    fragment,
+    servers,
+    platformUrl,
+    navigate,
+    createRenderer,
+    connect,
+}: AppProps): React.JSX.Element {
     // Read once. A fragment that changed under a live session would be a second join in a page
     // already holding one, and the session is what owns the socket.
     const handoff = useMemo(
-        () => readHandoff(fragment ?? globalThis.location?.hash ?? ''),
-        [fragment],
+        () => readHandoff(fragment ?? globalThis.location?.hash ?? '', servers),
+        [fragment, servers],
     );
     const [phase, setPhase] = useState<Phase>(() => opening(handoff));
     // Held across renders: a ready or a refusal rerenders this, and fresh objects each time would
@@ -71,9 +85,9 @@ export function App({ fragment, platformUrl, navigate }: AppProps): React.JSX.El
                 name="Player"
                 design={DESIGN_STAGE}
                 onReady={() => setPhase({ kind: 'playing' })}
-                onRefused={(reason, message) =>
-                    setPhase({ kind: 'refused', message: textFor(reason, message) })
-                }
+                onRefused={(reason) => setPhase({ kind: 'refused', message: textFor(reason) })}
+                {...(createRenderer === undefined ? {} : { createRenderer })}
+                {...(connect === undefined ? {} : { connect })}
             />
             {phase.kind === 'loading' && <Loading />}
         </main>
@@ -114,26 +128,32 @@ function opening(handoff: Handoff): Phase {
 }
 
 function refusalFor(handoff: Handoff): string {
-    return handoff.outcome === 'absent'
-        ? 'This page is opened from a game on Grove, not on its own.'
-        : 'That link is not one this page can read. Try starting the game again.';
+    switch (handoff.outcome) {
+        case 'absent':
+            return 'This page is opened from a game on Grove, not on its own.';
+        case 'untrusted':
+            return 'That link does not lead to a Grove game. Start the game from Grove instead.';
+        default:
+            return 'That link is not one this page can read. Try starting the game again.';
+    }
 }
 
-/**
- * What a person is told, which is never the token.
- *
- * `version` is the one worth spelling out: it means the world moved on while this tab sat on the
- * link, and starting again is what fixes it, where a full game is a thing to wait out.
- */
-function textFor(reason: RefusalReason, message: string): string {
+/** What a person is told: never a token, and never the session's own line, which can name a box. */
+function textFor(reason: RefusalReason): string {
     switch (reason) {
         case 'version':
             return 'This game was updated while you were joining. Start it again to play the new version.';
         case 'full':
             return 'This game is full right now. Try again in a minute.';
+        case 'identity':
+            return 'You are already playing this game somewhere else. Close it there, then start it again from Grove.';
         case 'ticket':
-            return 'That link has expired. Start the game again from Grove.';
-        default:
-            return message;
+            return 'This link may have expired. Start the game again from Grove.';
+        case 'bundle':
+            return 'This game could not be loaded. Start it again from Grove.';
+        case 'renderer':
+            return 'This browser could not start the game. Try another browser, or update this one.';
+        case 'unreachable':
+            return 'The game stopped answering. Start it again from Grove.';
     }
 }

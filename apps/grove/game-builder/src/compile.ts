@@ -27,6 +27,18 @@ const WORK_ROOT = fileURLToPath(new URL('../.builds', import.meta.url));
 /** This service's own resolution root, so a bundler started elsewhere still finds the engine. */
 const MODULE_ROOT = fileURLToPath(new URL('../node_modules', import.meta.url));
 
+/** Where this service is unpacked, which no message a creator reads may name. */
+const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/** A summary is one line a creator reads; the diagnostics carry the detail, positioned. */
+const SUMMARY_MAX = 300;
+
+/** Past this many a creator fixes the first ones and builds again, and a settle stays small. */
+const MAX_DIAGNOSTICS = 100;
+
+/** One diagnostic's message, which tsc runs to a screenful on a deep enough type. */
+const DIAGNOSTIC_MAX = 500;
+
 /** What the editor's own compiler is set to, restated: what typechecks on screen must build here. */
 const TSCONFIG = {
     compilerOptions: {
@@ -95,7 +107,7 @@ export async function compile(
         // Anything the two passes below did not name is this box: a full disk, a killed compiler,
         // a bundler that fell over. Settling a creator's build as failed over one would tell them
         // their game is broken when it is not.
-        return { outcome: 'unavailable', message: messageOf(error) };
+        return { outcome: 'unavailable', message: summarize(messageOf(error), [work]) };
     } finally {
         rmSync(work, { recursive: true, force: true });
     }
@@ -145,7 +157,7 @@ async function run(
             lowerTimeoutMs: timeoutMs,
         });
     } catch (error) {
-        return refusal(error, gameDir);
+        return refusal(error, gameDir, work);
     }
 
     // The client first, so the id every joiner is checked against is the digest of the bytes a
@@ -228,8 +240,6 @@ function clientEntry(chunk: string): string {
 /**
  * The session's half: the world, built from the manifest the save froze.
  *
- * No determinism shim guards this realm: it also runs ServerScripts, which may read a clock.
- *
  * The manifest is embedded rather than fetched, because an isolate has no way to fetch anything.
  * What the host's own config still decides is where a joiner gets the client half and what its
  * bytes have to hash to: the one pair that cannot be known until the client half is stored.
@@ -290,17 +300,21 @@ async function link(options: LinkOptions): Promise<Buffer> {
 }
 
 /** What a refusal from the toolchain settles as, and which of the two kinds of failure it is. */
-function refusal(error: unknown, gameDir: string): Compiled {
+function refusal(error: unknown, gameDir: string, work: string): Compiled {
+    const roots = [gameDir, work];
     if (error instanceof DeterminismError) {
         return {
             outcome: 'rejected',
-            message: error.message,
-            diagnostics: error.diagnostics.map((found) => ({
+            message: summarize(error.message, roots),
+            diagnostics: error.diagnostics.slice(0, MAX_DIAGNOSTICS).map((found) => ({
                 severity: 'error',
                 file: found.file,
                 line: found.line,
                 column: found.column,
-                message: `${found.klass} reads ${found.found}. Use ${found.use}; ${found.because}.`,
+                message: clamp(
+                    `${found.klass} reads ${found.found}. Use ${found.use}; ${found.because}.`,
+                    DIAGNOSTIC_MAX,
+                ),
             })),
         };
     }
@@ -309,13 +323,22 @@ function refusal(error: unknown, gameDir: string): Compiled {
         // A compiler that could not be started or never finished is this box, not a game that
         // does not compile: the BundleErrors that must never fail a creator's build outright.
         if (error.code === 'tsc-unavailable' || error.code === 'tsc-timeout') {
-            return { outcome: 'unavailable', message: error.message };
+            return { outcome: 'unavailable', message: summarize(error.message, roots) };
         }
-        return {
-            outcome: 'rejected',
-            message: error.message,
-            diagnostics: error.code === 'tsc-failed' ? typeErrors(error.message, gameDir) : [],
-        };
+        if (error.code === 'tsc-failed') {
+            // The compiler's own log is the diagnostics, and never the summary a creator reads.
+            const found = typeErrors(error.message, gameDir, roots);
+            const errors = found.filter((diagnostic) => diagnostic.severity === 'error').length;
+            return {
+                outcome: 'rejected',
+                message:
+                    errors === 0
+                        ? 'the game does not typecheck'
+                        : `the game does not typecheck: ${String(errors)} ${errors === 1 ? 'error' : 'errors'}`,
+                diagnostics: found.slice(0, MAX_DIAGNOSTICS),
+            };
+        }
+        return { outcome: 'rejected', message: summarize(error.message, roots), diagnostics: [] };
     }
     throw error;
 }
@@ -324,7 +347,7 @@ function refusal(error: unknown, gameDir: string): Compiled {
 const TS_ERROR = /^(.+?)\((\d+),(\d+)\): (error|warning) TS\d+: (.+)$/u;
 
 /** The compiler's own lines, positioned; anything it printed in another shape is passed over. */
-function typeErrors(output: string, gameDir: string): BuildDiagnostic[] {
+function typeErrors(output: string, gameDir: string, roots: readonly string[]): BuildDiagnostic[] {
     const found: BuildDiagnostic[] = [];
     for (const line of output.split('\n')) {
         const parts = TS_ERROR.exec(line.trim());
@@ -336,7 +359,7 @@ function typeErrors(output: string, gameDir: string): BuildDiagnostic[] {
             file: path.relative(gameDir, path.resolve(parts[1] ?? '')).replaceAll('\\', '/'),
             line: Number(parts[2]),
             column: Number(parts[3]),
-            message: parts[5] ?? '',
+            message: clamp(scrub(parts[5] ?? '', roots), DIAGNOSTIC_MAX),
         });
     }
     return found;
@@ -344,4 +367,27 @@ function typeErrors(output: string, gameDir: string): BuildDiagnostic[] {
 
 function messageOf(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+/** The first line of a message, with every path into this box taken out and the length bounded. */
+function summarize(message: string, roots: readonly string[]): string {
+    const line = (message.split('\n')[0] ?? '').trim().replace(/:$/u, '');
+    return clamp(scrub(line, roots).trim(), SUMMARY_MAX);
+}
+
+/** Takes each root out of `text`, in either slash and any case, most specific first. */
+function scrub(text: string, roots: readonly string[]): string {
+    let scrubbed = text;
+    for (const root of [...roots, PACKAGE_ROOT]) {
+        const bare = root.replace(/[\\/]+$/u, '');
+        for (const spelling of new Set([bare, bare.replaceAll('\\', '/')])) {
+            const escaped = spelling.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+            scrubbed = scrubbed.replace(new RegExp(`${escaped}[\\\\/]?`, 'giu'), '');
+        }
+    }
+    return scrubbed;
+}
+
+function clamp(text: string, max: number): string {
+    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }

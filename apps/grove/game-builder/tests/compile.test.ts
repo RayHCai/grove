@@ -56,7 +56,7 @@ describe('the server half', () => {
             vm.runInContext(compiled.output.server.toString('utf8'), realm);
             const entry = vm.runInContext('globalThis.__grove', realm) as Entry;
 
-            // The realm also runs ServerScripts, which may read a clock, so it carries no shim.
+            // The realm also runs ServerScripts, which may read a clock, so nothing in it may forbid one.
             expect(() => vm.runInContext('Date.now()', realm)).not.toThrow();
             expect(() => vm.runInContext('Math.random()', realm)).not.toThrow();
 

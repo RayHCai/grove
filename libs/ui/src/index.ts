@@ -18,8 +18,6 @@ export type {
     IconButtonSize,
     IconButtonVariant,
 } from './components/IconButton.js';
-export { Select } from './components/Select.js';
-export type { SelectOption, SelectProps, SelectSize } from './components/Select.js';
 export { Menu, MenuItem, menuItemClass } from './components/Menu.js';
 export type { MenuCloseReason, MenuItemProps, MenuProps } from './components/Menu.js';
 export { Splash } from './components/Splash.js';

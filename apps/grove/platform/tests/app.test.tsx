@@ -2,7 +2,8 @@ import { act } from 'react';
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { fakeApi, navigation, signedInApi } from './doubles';
-import { byText, click, mount, need, until, untilSettled } from './helpers';
+import { mount, until, untilSettled } from '@grove/ui/testing';
+import { byText, click, need } from './helpers';
 
 const EDITOR = 'http://localhost:5176';
 

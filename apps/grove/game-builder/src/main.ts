@@ -31,13 +31,14 @@ if (redis === undefined) {
     app.log.error('no build stream is attached; nothing will be claimed');
 } else {
     const call = apiCall(env);
+    // Two boxes sharing a consumer name share their claims, so one would acknowledge work the
+    // other is still doing.
+    const name = env.BUILDER_NAME === '' ? hostname() : env.BUILDER_NAME;
     consumer = startConsumer(
         redis,
-        { tasks: httpTasks(call), store: httpStore(call), env, log: app.log },
+        { tasks: httpTasks(call, name), store: httpStore(call), env, log: app.log },
         env,
-        // Two boxes sharing a consumer name share their claims, so one would acknowledge work the
-        // other is still doing.
-        env.BUILDER_NAME === '' ? hostname() : env.BUILDER_NAME,
+        name,
     );
 }
 

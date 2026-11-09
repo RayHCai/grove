@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { App } from '../src/App';
 import { navigation, signedInApi } from './doubles';
-import { mount, untilSettled } from './helpers';
+import { mount, untilSettled } from '@grove/ui/testing';
 
 vi.mock('../src/unfinished', () => ({ UNFINISHED: false }));
 

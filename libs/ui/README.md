@@ -63,7 +63,7 @@ no data and no routing; an app composes these components inside a grid of its ow
   `{ theme, preference, setPreference }` and `ThemeToggle` flips light and dark explicitly.
 - **The tokens in TypeScript.** `fonts` holds the three font stacks, and `readThemeColors()`
   resolves the live semantic colours from the root element so no consumer repeats a hex.
-- **The components.** `Panel`, `Button`, `IconButton`, `Select`, `Menu` with `MenuItem`, `Splash`, `Badge`, `Tag`, `Eyebrow`,
+- **The components.** `Panel`, `Button`, `IconButton`, `Menu` with `MenuItem`, `Splash`, `Badge`, `Tag`, `Eyebrow`,
   `SectionTitle`, `TextInput`, `TextArea`, `Progress`, `Tilestrip`, `Wordmark`, `VisuallyHidden`,
   `ErrorBoundary`, the 16px icons, each an 8-row sprite of two-unit cells drawn on `Icon` through `SpriteIcon`, and `cx()`. Every class is prefixed
   `pg-`; the stylesheet is plain CSS with every colour drawn from a `--pg-*` token. A look an app
@@ -82,7 +82,8 @@ no data and no routing; an app composes these components inside a grid of its ow
 ## Using it
 
 Consumers resolve `@grove/ui` from its built `dist` (`pnpm --filter @grove/ui build`); the package
-exports `.` for the components and `./styles.css` for the stylesheet.
+exports `.` for the components, `./styles.css` for the stylesheet, and `./testing` for the mounting
+and waiting every app's suite does, which keeps every root it mounted for an `afterEach` to take down.
 
 The scanline wash is opt-in, because it is fixed over the whole viewport: put `class="pg-scanlines"` on `<body>`.
 

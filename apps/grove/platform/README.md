@@ -109,7 +109,9 @@ recognising handed to the provider's `lapsed`, which forgets it and sends the vi
 
 `src/api/client.ts` is every call to `@grove/api` and the only place that CSRF token lives, because a
 component that had to carry it from the sign-in to the next write is one that can drop it. The API is
-a different origin, so every call is `credentials: 'include'`.
+a different origin, so every call is `credentials: 'include'`. A write refused because a sign-in on
+another tab rotated the token is mended beneath it: the shared client reads the session once and
+sends the write again.
 
 A refusal a person can act on comes back as an **answer** rather than as something thrown past the
 form: a cookie naming nobody, a credential that opens no account, a spent reset key and a wrong

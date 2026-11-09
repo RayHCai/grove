@@ -3,19 +3,22 @@
 
 import type {
     Account,
+    ErrorBody,
     Game,
     GameId,
     PlayerId,
     PlaySession,
     SessionId,
-    SignedIn,
 } from '@grove/api-contract';
-import { ApiError } from '../src/api/client';
+import { createApi } from '../src/api/client';
 import type { Api } from '../src/api/client';
 
 export const PLAYER_ID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479' as PlayerId;
 export const GAME_ID = '9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f' as GameId;
 export const OLDER_GAME_ID = '3b7d9c1a-2e4f-4a6b-9c8d-1e2f3a4b5c6d' as GameId;
+
+/** Where the fake service answers, which nothing outside these suites dials. */
+export const API_URL = 'https://api.grove.example';
 
 export const ACCOUNT: Account = {
     playerId: PLAYER_ID,
@@ -56,6 +59,7 @@ export const PLAY_SESSION: PlaySession = {
 export interface FakeApi extends Api {
     account: Account;
     owned: Game[];
+    /** Whether the cookie the browser carries names a live session. */
     signedIn: boolean;
     /** The address and password this service would take, which is the only pair that signs in. */
     credentials: { email: string; password: string };
@@ -65,133 +69,184 @@ export interface FakeApi extends Api {
     readonly resetsAsked: string[];
     /** Games with no finished build, which the allocator refuses as a conflict. */
     readonly unplayable: Set<string>;
+    /** The token the live session verifies writes against; every sign-in mints a new one. */
+    readonly csrfToken: string;
+    /** Every request that reached the service, as `METHOD path`. */
+    readonly requests: string[];
+    /** A sign-in on another tab: a fresh session, so every token handed out before it is stale. */
+    signInElsewhere(): void;
 }
 
-/**
- * The service, out of memory.
- *
- * It refuses the way the real one does (one answer for every bad credential, a taken address is a
- * conflict, and a wrong current password is a 403) because those are the branches a form has to
- * put words to.
- */
+interface Call {
+    method: string;
+    path: string;
+    body: Record<string, string> | undefined;
+}
+
+// The service out of memory, behind the platform's own client, refusing as the real one does: one
+// answer for every bad credential, a taken address, a wrong password, no cookie, and a stale token.
 export function fakeApi(over: Partial<FakeApi> = {}): FakeApi {
-    const api: FakeApi = {
+    let sessions = 1;
+    const state = {
         account: ACCOUNT,
         owned: [GAME, OLDER_GAME],
         signedIn: false,
         credentials: { email: ACCOUNT.email, password: 'a-long-enough-password' },
-        resetKeys: new Set(),
-        resetsAsked: [],
-        unplayable: new Set(),
+        resetKeys: new Set<string>(),
+        resetsAsked: [] as string[],
+        unplayable: new Set<string>(),
+        csrfToken: 'token-1',
+        requests: [] as string[],
+        signInElsewhere: () => {
+            begin();
+        },
+    };
 
-        session: async () => (api.signedIn ? signedIn() : undefined),
+    /** A session begins the way the real one does: rotated, with a token nothing before it held. */
+    function begin(): Response {
+        sessions += 1;
+        state.signedIn = true;
+        state.csrfToken = `token-${String(sessions)}`;
+        return json({ playerId: PLAYER_ID, csrfToken: state.csrfToken });
+    }
 
-        signIn: async (email, password) => {
-            // One answer for an unknown address, a wrong password and a locked account, the way the
-            // service gives one.
-            if (email !== api.credentials.email || password !== api.credentials.password) {
-                return undefined;
+    /** The routes in front of the session gate: a credential, or a key, and no token to show. */
+    function anonymous({ method, path, body }: Call): Response | undefined {
+        const said = body ?? {};
+        if (method === 'POST' && path === '/v1/auth/sessions') {
+            const matches =
+                said['email'] === state.credentials.email &&
+                said['password'] === state.credentials.password;
+            return matches ? begin() : refuse(401, 'unauthorized', 'those do not match an account');
+        }
+        if (method === 'POST' && path === '/v1/players') {
+            if (said['email'] === state.credentials.email) {
+                return refuse(409, 'conflict', 'that address already has an account');
             }
-            api.signedIn = true;
-            return signedIn();
-        },
-
-        signUp: async (email, password, displayName) => {
-            if (email === api.credentials.email) {
-                throw new ApiError(409, 'conflict', 'that address already has an account');
+            if ((said['password'] ?? '').length < 8) {
+                return refuse(400, 'invalid_request', 'password is 8 to 128 characters');
             }
-            if (password.length < 8) {
-                throw new ApiError(400, 'invalid_request', 'password is 8 to 128 characters');
-            }
-            api.account = { ...api.account, email, displayName };
-            api.credentials = { email, password };
-            api.owned = [];
-            api.signedIn = true;
-            return signedIn();
-        },
-
-        signOut: async () => {
-            api.signedIn = false;
-        },
-
-        requestPasswordReset: async (email) => {
-            api.resetsAsked.push(email);
-        },
-
-        resetPassword: async (token, newPassword) => {
+            state.account = {
+                ...state.account,
+                email: said['email'] ?? '',
+                displayName: said['displayName'] ?? '',
+            };
+            state.credentials = { email: said['email'] ?? '', password: said['password'] ?? '' };
+            state.owned = [];
+            const minted = begin();
+            return new Response(minted.body, { status: 201, headers: minted.headers });
+        }
+        if (method === 'POST' && path === '/v1/auth/password-resets') {
+            state.resetsAsked.push(said['email'] ?? '');
+            return new Response(null, { status: 204 });
+        }
+        if (method === 'PUT' && path === '/v1/auth/password') {
             // Spent in the step that finds it, the way the real store does.
-            if (!api.resetKeys.delete(token)) return false;
-            api.credentials = { ...api.credentials, password: newPassword };
-            api.signedIn = false;
-            return true;
-        },
-
-        me: async () => guard(api, api.account),
-        games: async () => guard(api, api.owned),
-
-        rename: async (displayName) => {
-            guard(api, undefined);
-            api.account = { ...api.account, displayName };
-            return api.account;
-        },
-
-        changePassword: async (currentPassword, newPassword) => {
-            guard(api, undefined);
-            if (currentPassword !== api.credentials.password) return undefined;
-            api.credentials = { ...api.credentials, password: newPassword };
-            return signedIn();
-        },
-
-        closeAccount: async (currentPassword) => {
-            guard(api, undefined);
-            if (currentPassword !== api.credentials.password) {
-                throw new ApiError(403, 'forbidden', 'wrong password');
+            if (!state.resetKeys.delete(said['token'] ?? '')) {
+                return refuse(401, 'unauthorized', 'that key opens nothing');
             }
-            if (api.owned.length > 0) {
-                throw new ApiError(409, 'conflict', 'delete your games first');
-            }
-            api.signedIn = false;
-        },
+            state.credentials = { ...state.credentials, password: said['newPassword'] ?? '' };
+            state.signedIn = false;
+            return new Response(null, { status: 204 });
+        }
+        return undefined;
+    }
 
-        createGame: async (title) => {
-            guard(api, undefined);
+    /** The routes behind it, which a cookie naming a live session reaches. */
+    function signedIn({ method, path, body }: Call): Response {
+        const said = body ?? {};
+        if (method === 'GET' && path === '/v1/auth/session') {
+            return json({ playerId: PLAYER_ID, csrfToken: state.csrfToken });
+        }
+        if (method === 'DELETE' && path === '/v1/auth/sessions/current') {
+            state.signedIn = false;
+            return new Response(null, { status: 204 });
+        }
+        if (method === 'GET' && path === '/v1/players/me') return json(state.account);
+        if (method === 'PATCH' && path === '/v1/players/me') {
+            state.account = { ...state.account, displayName: said['displayName'] ?? '' };
+            return json(state.account);
+        }
+        if (method === 'PUT' && path === '/v1/players/me/password') {
+            if (said['currentPassword'] !== state.credentials.password) {
+                return refuse(403, 'forbidden', 'wrong password');
+            }
+            state.credentials = { ...state.credentials, password: said['newPassword'] ?? '' };
+            return begin();
+        }
+        if (method === 'DELETE' && path === '/v1/players/me') {
+            if (said['currentPassword'] !== state.credentials.password) {
+                return refuse(403, 'forbidden', 'wrong password');
+            }
+            if (state.owned.length > 0) return refuse(409, 'conflict', 'delete your games first');
+            state.signedIn = false;
+            return new Response(null, { status: 204 });
+        }
+        if (method === 'GET' && path === '/v1/games') return json(state.owned);
+        if (method === 'POST' && path === '/v1/games') {
             const made: Game = {
                 gameId: GAME_ID,
                 ownerId: PLAYER_ID,
-                title,
+                title: said['title'] ?? '',
                 visibility: 'private',
                 createdAt: '2026-09-17T09:00:00.000Z',
                 publishedAt: null,
             };
-            api.owned = [made, ...api.owned];
-            return made;
-        },
+            state.owned = [made, ...state.owned];
+            return json(made, 201);
+        }
+        const game = /^\/v1\/games\/([^/]+)(\/play)?$/u.exec(path);
+        if (game !== null && method === 'DELETE' && game[2] === undefined) {
+            state.owned = state.owned.filter((each) => each.gameId !== game[1]);
+            return new Response(null, { status: 204 });
+        }
+        if (game !== null && method === 'POST' && game[2] === '/play') {
+            return state.unplayable.has(game[1] ?? '')
+                ? refuse(409, 'conflict', 'no playable build')
+                : json(PLAY_SESSION);
+        }
+        return refuse(404, 'not_found', 'no such route');
+    }
 
-        deleteGame: async (gameId) => {
-            guard(api, undefined);
-            api.owned = api.owned.filter((game) => game.gameId !== gameId);
-        },
+    const fetch = async (
+        input: string | URL | Request,
+        init: RequestInit = {},
+    ): Promise<Response> => {
+        const url = new URL(String(input));
+        if (url.origin !== API_URL) throw new TypeError('Failed to fetch');
+        const method = init.method ?? 'GET';
+        state.requests.push(`${method} ${url.pathname}`);
+        const body =
+            typeof init.body === 'string'
+                ? (JSON.parse(init.body) as Record<string, string>)
+                : undefined;
+        const request = { method, path: url.pathname, body };
 
-        play: async (gameId) => {
-            guard(api, undefined);
-            if (api.unplayable.has(gameId)) {
-                throw new ApiError(409, 'conflict', 'no playable build');
-            }
-            return PLAY_SESSION;
-        },
-
-        ...over,
+        const open = anonymous(request);
+        if (open !== undefined) return open;
+        // Without the cookie the API is a stranger, which is what a call missing `include` is.
+        if (init.credentials !== 'include' || !state.signedIn) {
+            return refuse(401, 'unauthorized', 'sign in first');
+        }
+        if (!['GET', 'HEAD'].includes(method)) {
+            const token = new Headers(init.headers).get('x-csrf-token');
+            if (token !== state.csrfToken) return refuse(403, 'csrf_invalid', 'Invalid csrf token');
+        }
+        return signedIn(request);
     };
-    return api;
+
+    return Object.assign(state, createApi({ baseUrl: API_URL, fetch }), over) as FakeApi;
 }
 
-function signedIn(): SignedIn {
-    return { playerId: PLAYER_ID, csrfToken: 'a-token' };
+function json(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+    });
 }
 
-function guard<T>(api: FakeApi, value: T): T {
-    if (!api.signedIn) throw new ApiError(401, 'unauthorized', 'sign in first');
-    return value;
+function refuse(status: number, code: ErrorBody['code'], message: string): Response {
+    return json({ code, message }, status);
 }
 
 /** A service somebody is already signed in to, which is the ordinary state of the pages behind it. */

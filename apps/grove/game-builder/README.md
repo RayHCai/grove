@@ -3,9 +3,9 @@
 Claims a creator's build off the queue, compiles it, and settles it.
 
 Nothing calls this service. It claims its work from a Redis stream and settles it against
-`@grove/api`, presenting the shared fleet bearer; it holds no database credential and no bucket
-credential, is not publicly routable, and nothing with an origin talks to it. The one route it
-serves is the health endpoint a host agent polls.
+`@grove/api`, presenting `BUILDER_SECRET`, which the API answers for builds and nothing else; it holds
+no database credential and no bucket credential, is not publicly routable, and nothing with an origin
+talks to it. The one route it serves is the health endpoint a host agent polls.
 
 The stream sits in the database `@grove/api-contract` names for `BUILD`, which is not the one asset
 uploads use. The number is the contract's rather than the connection string's, so a box handed the
@@ -20,9 +20,11 @@ consumer name share their claims, which is why `BUILDER_NAME` falls back to the 
 to a value every box would write the same.
 
 A claimed message carries a task id and nothing else. What tells this box what to build is the
-answer to its own claim: `PATCH /v1/tasks/:taskId` hands back the task, and with it the game and the
-manifest revision it is pinned to. That is deliberate: the row is the truth, and a message that has
-been sitting in a stream for ten minutes is not.
+answer to its own claim: `PATCH /v1/tasks/:taskId`, naming this box in `x-grove-worker`, hands back
+the task, and with it the game and the manifest revision it is pinned to. That is deliberate: the
+row is the truth, and a message that has been sitting in a stream for ten minutes is not. The claim
+is a lease the API holds for a little less than the reclaim window, so a second delivery of a build
+another box is working on is a `409`, acknowledged without counting an attempt.
 
 ## What one build does
 
@@ -30,11 +32,12 @@ A build is atomic. There is no resuming a half-finished one: the work is seconds
 bookkeeping that would let a second box pick up where a dead one stopped costs more than starting
 again.
 
-Everything it reads and writes goes through `@grove/api`, which is what the missing bucket
-credential buys. It fetches the manifest that revision froze, then each **source** file at the
-version that manifest named, never what is current at the key, so an edit made after the publish
-cannot reach the compiler. Assets are passed over: their bytes are fetched by a client from the
-edge, and what a compile needs of one is the record in the project manifest.
+Everything it reads and writes goes through `@grove/api`, under routes scoped to the task it
+claimed, which is what the missing bucket credential buys. It fetches the manifest that task's save
+froze, then each **source** file at the version that manifest named, eight at a time, never what is
+current at the key, so an edit made after the publish cannot reach the compiler. Assets are passed
+over: their bytes are fetched by a client from the edge, and what a compile needs of one is the
+record in the project manifest.
 
 A creator writes no imports (the workbench declares the engine as globals), so the import is put
 back above each file from `@platform/scripting`'s own list, the same one the editor compiles
@@ -56,18 +59,20 @@ half is evaluated by an isolate with no module loader, and neither can answer a 
 second copy of `@platform/core` riding along is harmless, because every table core keeps is found
 through a registered symbol.
 
-Four files land under `build/<revision>/`, in this order and for this reason:
+Three files are stored, each under its own digest beneath the task's prefix, in this order and for
+this reason:
 
-| File             | Is                                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `client.js`      | the module a joining browser fetches and evaluates                                                                                   |
-| `simConfig.json` | the rates a host reads, and the client half's address and digest                                                                     |
-| `server.js`      | the classic script a session's isolate evaluates, which guards its own realm with the determinism shim before it publishes its entry |
-| `build.json`     | the `BuildManifest` naming all three                                                                                                 |
+| File                          | Is                                                               |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `client.js`                   | the module a joining browser fetches and evaluates               |
+| `simConfig.json`              | the rates a host reads, and the client half's address and digest |
+| `server-<128 random bits>.js` | the classic script a session's isolate evaluates                 |
 
 The client half is first because what it hashes to is what every joiner is held to at the
-handshake, and the config naming that hash cannot be written before it exists. `build.json` is last
-and is the commit marker: nothing reads the other three until one names them, so a box that died
+handshake, and the config naming that hash cannot be written before it exists. The server half is
+named so nobody who learned the client's address can derive its own: it is a creator's server code.
+The settle is the commit: it carries the `BuildManifest` naming all three, and `@grove/api` accepts
+it only if every address and digest in it names an output it stored for that task, so a box that died
 mid-build leaves chunks nobody fetches rather than a half-built version a player can be sent at.
 
 Neither the address nor the digest is this box's to invent. `@grove/api` answers both when it stores
@@ -77,7 +82,9 @@ a file, because it is the one place that knows where the edge serves that bucket
 
 Source this build refuses (a `SyncedScript` reading `Date.now()`, a type error, a manifest naming
 a class that is not there) is `FAILED`, with diagnostics positioned the way a creator's editor
-gutters them, and it is never retried. Nothing about a second attempt would go differently.
+gutters them, and it is never retried. Nothing about a second attempt would go differently. The
+settle's `message` is a one-line summary (`the game does not typecheck: 12 errors`) with no path into
+this box in it, never the compiler's log: the diagnostics carry the detail, the first hundred of them.
 
 The fleet failing (a bucket that would not answer, a compiler that could not be started or did not
 finish inside `COMPILE_TIMEOUT_MS`, this box running out of disk) leaves the message claimed for
@@ -91,13 +98,17 @@ checked as soon as a claim answers, before anything compiles, so a compile that 
 reclaimed with nothing written stops at the ceiling too.
 
 A message is acknowledged once the outcome is written down, whatever the outcome was. A claim that
-was refused is work somebody already settled: acknowledged, or it comes back forever. A claim or an
-outcome that could not be written at all is left claimed, so another box takes it back after the
-reclaim window: acknowledging there would leave a creator watching a task nothing will ever move.
+was refused is work somebody already settled or holds: acknowledged, or it comes back forever. A
+claim or an outcome that could not be written at all is left claimed, so another box takes it back
+after the reclaim window: acknowledging there would leave a creator watching a task nothing will
+ever move. A settle the API refuses as malformed (`400`) is a contract bug no retry fixes, so it is
+logged loudly, a minimal `FAILED` is written in its place, and the message is acknowledged.
 
 Nothing one message does ends the consumer loop. A build that throws is logged and left claimed for
 the reclaim; a Redis command that fails is logged and retried after a backoff doubling from one
-second to thirty; a consumer group deleted under the box is recreated.
+second to thirty; a consumer group deleted under the box is recreated. A pending entry a trim took is
+acknowledged, since `@grove/api` re-announces the task behind it once its lease runs out, and the
+reclaim cursor carries from one pass to the next.
 
 `main.ts` starts the consumer and the health endpoint. The endpoint answers `503` naming why when no
 stream is attached or the consumer loop has ended, and a box in either state still comes up: one
@@ -127,8 +138,8 @@ startup rather than at the first task that needed it.
 | `GAME_BUILDER_HOST`  | address to bind, `127.0.0.1` by default, or `0.0.0.0` where a platform assigned `PORT`                        |
 | `GAME_BUILDER_PORT`  | `4002` by default                                                                                             |
 | `PORT`               | set by a platform such as Railway; the fallback for `GAME_BUILDER_PORT`                                       |
-| `FLEET_SECRET`       | the bearer this service presents reading source, storing output and settling                                  |
-| `API_URL`            | where all three of those happen, which is the only service this one calls                                     |
+| `BUILDER_SECRET`     | what this service presents claiming, reading source, storing output and settling                              |
+| `API_URL`            | where all of those happen, which is the only service this one calls                                           |
 | `REDIS_URL`          | the stream builds are claimed from; absent, this process has no work to do and its health says so             |
 | `BUILDER_NAME`       | this box's name in the consumer group; the hostname when it is not set                                        |
 | `BUILD_TIMEOUT_MS`   | how long a claim is held before another box may reclaim it, 3 minutes by default                              |

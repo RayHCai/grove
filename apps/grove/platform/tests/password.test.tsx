@@ -4,7 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { ACCOUNT, fakeApi, navigation } from './doubles';
-import { field, mount, need, submit, type, until, untilSettled } from './helpers';
+import { mount, until, untilSettled } from '@grove/ui/testing';
+import { field, need, submit, type } from './helpers';
 
 function at(path: string): void {
     window.history.replaceState(null, '', path);

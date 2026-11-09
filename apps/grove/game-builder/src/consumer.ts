@@ -1,9 +1,10 @@
+import { randomBytes } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Redis } from 'ioredis';
 import {
     BuildManifest,
+    MAX_TASK_MESSAGE,
     TaskMessage,
-    buildManifestKey,
     streamOf,
     type BuildArtifact,
     type BundleRef,
@@ -27,10 +28,15 @@ const BLOCK_MS = 5_000;
 /** One message at a time: a build holds the box, so reading ten would be nine sitting claimed. */
 const BATCH = 1;
 
-/** The three files a build produces beside its manifest, in the order they have to be written. */
+/** Sources read at once: a large game is not a round trip per file, and the API is not flooded. */
+const READ_CONCURRENCY = 8;
+
+/** The client half and the world's config, whose addresses every joiner is handed anyway. */
 const CLIENT = 'client.js';
 const SIM_CONFIG = 'simConfig.json';
-const SERVER = 'server.js';
+
+/** What a settle says when the API refused the one this box meant to send. */
+const UNREPORTABLE = 'the build finished but could not be reported; publish again';
 
 /**
  * What one build did with its message.
@@ -62,10 +68,13 @@ export async function runBuild(taskId: TaskId, builder: Builder): Promise<Handle
     const { tasks, env, log } = builder;
 
     const claimed = await tasks.advance(taskId, { status: 'IN_PROGRESS' }, taskId);
-    // Somebody already settled it, so this is a redelivery of finished work: acknowledged rather
-    // than retried, or it comes back forever.
+    // Somebody already settled it, or holds it: acknowledged rather than retried, or it comes back.
     if (claimed.outcome === 'refused') {
-        log.info({ taskId }, 'build already settled');
+        log.info({ taskId }, 'build already settled or claimed');
+        return 'settled';
+    }
+    if (claimed.outcome === 'invalid') {
+        log.error({ taskId }, 'the API refused a claim as malformed, which is a contract bug');
         return 'settled';
     }
     if (claimed.outcome !== 'settled') {
@@ -117,10 +126,9 @@ type Produced =
 /** Reads the pinned source, compiles it, and stores what came out. */
 async function produce(task: Task, builder: Builder): Promise<Produced> {
     const { store, log } = builder;
-    const game = task.gameId;
     const revision = task.manifestRevision;
 
-    const frozen = await store.manifest(game, revision, task.taskId);
+    const frozen = await store.manifest(task.taskId);
     // A revision nothing froze is a build of a manifest that does not exist, which no box will
     // ever do better with.
     if (frozen.outcome === 'missing') {
@@ -145,20 +153,12 @@ async function produce(task: Task, builder: Builder): Promise<Produced> {
 
     // The client half first: what it hashes to is what a joining browser has to be running, and
     // the world booted below is told that hash rather than deriving one of its own.
-    const client = await store.store(
-        game,
-        revision,
-        CLIENT,
-        output.client,
-        'text/javascript',
-        task.taskId,
-    );
+    const client = await store.store(task.taskId, CLIENT, output.client, 'text/javascript');
     if (client.outcome !== 'stored')
         return { outcome: 'unavailable', message: 'the client half could not be stored' };
 
     const simConfig = await store.store(
-        game,
-        revision,
+        task.taskId,
         SIM_CONFIG,
         Buffer.from(
             JSON.stringify({
@@ -176,26 +176,25 @@ async function produce(task: Task, builder: Builder): Promise<Produced> {
             'utf8',
         ),
         'application/json',
-        task.taskId,
     );
     if (simConfig.outcome !== 'stored') {
         return { outcome: 'unavailable', message: 'the world config could not be stored' };
     }
 
+    // A name no joiner derives from the client's address, since this half is creator server code.
     const server = await store.store(
-        game,
-        revision,
-        SERVER,
+        task.taskId,
+        `server-${randomBytes(16).toString('hex')}.js`,
         output.server,
         'text/javascript',
-        task.taskId,
     );
     if (server.outcome !== 'stored') {
         return { outcome: 'unavailable', message: 'the server half could not be stored' };
     }
 
+    // The settle is the commit: the API accepts it only if it stored every output named here.
     const manifest: BuildManifest = BuildManifest.parse({
-        gameId: game,
+        gameId: task.gameId,
         revision,
         projectId: output.project.projectId,
         projectHash: output.project.contentHash,
@@ -211,31 +210,15 @@ async function produce(task: Task, builder: Builder): Promise<Produced> {
         },
     });
 
-    // Written last, and it is the commit marker: everything above is inert until a build manifest
-    // names it, so a box that died mid-build leaves chunks nothing reads rather than a half-built
-    // version somebody can be sent at.
-    const written = await store.store(
-        game,
-        revision,
-        nameOf(buildManifestKey(game, revision)),
-        Buffer.from(JSON.stringify(manifest), 'utf8'),
-        'application/json',
-        task.taskId,
-    );
-    if (written.outcome !== 'stored') {
-        return { outcome: 'unavailable', message: 'the build manifest could not be stored' };
-    }
-
     return {
         outcome: 'built',
         detail: {
             build: manifest,
-            fileCount: 4,
+            fileCount: 3,
             byteLength:
                 client.artifact.byteLength +
                 server.artifact.byteLength +
-                simConfig.artifact.byteLength +
-                written.artifact.byteLength,
+                simConfig.artifact.byteLength,
         },
     };
 }
@@ -246,46 +229,60 @@ type Read =
     | { outcome: 'unavailable'; message: string };
 
 /**
- * The text of every source the manifest names.
+ * The text of every source the manifest names, a few at a time.
  *
  * Assets are passed over: their bytes are fetched by a client from the edge, and what a compile
  * needs of one is the record in the project manifest rather than the file itself.
  */
 async function read(manifest: Manifest, task: Task, builder: Builder): Promise<Read> {
+    const sources = manifest.files.filter((file) => file.kind === 'source');
+    const outcomes: Read[] = [];
     const files: SourceFile[] = [];
-    for (const file of manifest.files) {
-        if (file.kind !== 'source') continue;
-        // oxlint-disable-next-line no-await-in-loop
-        const fetched = await builder.store.file(
-            task.gameId,
-            task.manifestRevision,
-            file.path,
-            task.taskId,
-        );
-        // A manifest naming a file the bucket does not hold is a save that lost its bytes, and no
-        // box will do better with it.
-        if (fetched.outcome === 'missing') {
-            return {
-                outcome: 'rejected',
-                message: `${file.path} is named by revision ${String(task.manifestRevision)} and is not in the bucket`,
-                diagnostics: [],
-            };
-        }
-        if (fetched.outcome !== 'found') {
-            return { outcome: 'unavailable', message: `${file.path} could not be read` };
-        }
-        files.push({ path: file.path, text: fetched.value.toString('utf8') });
-    }
-    return { outcome: 'read', files };
-}
+    let next = 0;
+    let failed = false;
 
-/** The last segment of a key, which is the only part of one this box is allowed to name. */
-function nameOf(key: string): string {
-    return key.slice(key.lastIndexOf('/') + 1);
+    const reader = async (): Promise<void> => {
+        // Nothing new is started once one read failed, which the whole build is then failing on.
+        while (!failed && next < sources.length) {
+            const at = next;
+            next += 1;
+            const file = sources[at];
+            if (file === undefined) return;
+            // oxlint-disable-next-line no-await-in-loop
+            const fetched = await builder.store.file(task.taskId, file.path);
+            if (fetched.outcome === 'found') {
+                files[at] = { path: file.path, text: fetched.value.toString('utf8') };
+                continue;
+            }
+            failed = true;
+            // A manifest naming a file the bucket does not hold is a save that lost its bytes.
+            outcomes[at] =
+                fetched.outcome === 'missing'
+                    ? {
+                          outcome: 'rejected',
+                          message: `${file.path} is named by revision ${String(task.manifestRevision)} and is not in the bucket`,
+                          diagnostics: [],
+                      }
+                    : { outcome: 'unavailable', message: `${file.path} could not be read` };
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, sources.length) }, reader));
+
+    // The first failure by path order, so which file a creator is told about does not race.
+    const failure = outcomes.find((outcome) => outcome !== undefined);
+    return failure ?? { outcome: 'read', files };
 }
 
 function bundleRef(side: BundleRef['side'], artifact: BuildArtifact): BundleRef {
     return { side, hash: artifact.hash, url: artifact.url, byteLength: artifact.byteLength };
+}
+
+/** Within the bound the API holds a settle to, so a long one is cut rather than refused. */
+function bounded(detail: TaskDetail): TaskDetail {
+    const { message } = detail;
+    return message === undefined || message.length <= MAX_TASK_MESSAGE
+        ? detail
+        : { ...detail, message: `${message.slice(0, MAX_TASK_MESSAGE - 1)}…` };
 }
 
 /** Writes the outcome down; a status route that would not answer leaves the work to come back. */
@@ -295,10 +292,25 @@ async function settle(
     detail: TaskDetail,
     builder: Builder,
 ): Promise<Handled> {
-    const settled = await builder.tasks.advance(taskId, { status, detail }, taskId);
+    const settled = await builder.tasks.advance(
+        taskId,
+        { status, detail: bounded(detail) },
+        taskId,
+    );
     // The outcome could not be written down, so the work has to come back: acknowledging here
     // would leave a creator watching a task nothing will ever move.
     if (settled.outcome === 'unavailable') return 'retry';
+    if (settled.outcome === 'invalid') {
+        // A body this box built and the API refused is a contract bug no retry fixes, so a minimal
+        // failure is written in its place and the message acknowledged.
+        builder.log.error({ taskId, status }, 'the API refused a settle as malformed; failing it');
+        const minimal = await builder.tasks.advance(
+            taskId,
+            { status: 'FAILED', detail: { message: UNREPORTABLE } },
+            taskId,
+        );
+        return minimal.outcome === 'unavailable' ? 'retry' : 'settled';
+    }
     builder.log.info({ taskId, status }, 'build settled');
     return 'settled';
 }
@@ -317,7 +329,8 @@ const BACKOFF_FIRST_MS = 1_000;
 const BACKOFF_CEILING_MS = 30_000;
 
 type Delivered = [string, [string, string[]][]][] | null;
-type Reclaimed = [string, [string, string[]][]];
+/** The next cursor, the entries claimed, and the ids whose entries a trim already took. */
+type Reclaimed = [string, [string, string[]][], string[]?];
 
 /** The deleted group Redis names in its error, which recreating the group is the answer to. */
 function isNoGroup(error: unknown): boolean {
@@ -356,6 +369,8 @@ export function startConsumer(
     // changed from outside it, which a plain boolean closed over is not.
     const stopping = new AbortController();
     let ended = false;
+    // Carried between passes, so a pending entry deep in the list is reached, not rescanned past.
+    let cursor = '0';
 
     const createGroup = async (): Promise<void> => {
         // MKSTREAM, because the group has to exist before the first publish rather than after it.
@@ -394,10 +409,17 @@ export function startConsumer(
             GROUP,
             name,
             env.BUILD_TIMEOUT_MS,
-            '0',
+            cursor,
             'COUNT',
             BATCH,
         )) as Reclaimed;
+        cursor = reclaimed[0] ?? '0';
+        // A trim took these while pending, and @grove/api re-announces their tasks.
+        const trimmed = reclaimed[2] ?? [];
+        if (trimmed.length > 0) {
+            log.warn({ ids: trimmed }, 'pending entries trimmed from the stream; acknowledged');
+            await redis.xack(stream, GROUP, ...trimmed);
+        }
         for (const [id, fields] of reclaimed[1] ?? []) {
             // oxlint-disable-next-line no-await-in-loop
             await handle(id, fields);
