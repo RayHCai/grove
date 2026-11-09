@@ -3,7 +3,7 @@
 # directory: the root `go.mod` is what resolves `libs/go-grove` from this tree rather than a proxy.
 #
 #     docker build -f apps/grove/game-manager/Dockerfile -t grove-game-manager .
-ARG GO_IMAGE=golang:1.26-bookworm
+ARG GO_IMAGE=golang:1.26.10-bookworm
 
 FROM ${GO_IMAGE} AS build
 WORKDIR /src
@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 
 # No shell, no package manager and a non-root user already: the binary is static, so nothing else in a
 # userland is reachable from here and none of it has to be patched.
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS runtime
 COPY --from=build /out/grove-healthcheck /usr/local/bin/grove-healthcheck
 COPY --from=build /out/grove-game-manager /usr/local/bin/grove-game-manager
 EXPOSE 4001

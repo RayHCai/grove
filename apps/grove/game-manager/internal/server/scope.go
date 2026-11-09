@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -23,7 +24,7 @@ const (
 // verifyGameToken is middleware rather than a call in each handler, so a route is covered by
 // where it is mounted. The claims go on the context and the URL carries neither id, which makes
 // cross-game access unrepresentable rather than merely rejected.
-func verifyGameToken(secret []byte, l *slog.Logger) httpx.Middleware {
+func verifyGameToken(keys []ed25519.PublicKey, l *slog.Logger) httpx.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			presented, ok := token.Bearer(r)
@@ -32,7 +33,7 @@ func verifyGameToken(secret []byte, l *slog.Logger) httpx.Middleware {
 				return
 			}
 
-			claims, err := token.Verify(presented, secret, token.AudGameManager, time.Now().Unix())
+			claims, err := token.Verify(presented, keys, token.AudGameManager, time.Now().Unix())
 			if err != nil {
 				l.WarnContext(r.Context(), "token refused",
 					"reason", refusal(err), "requestId", httpx.RequestIDFrom(r.Context()))

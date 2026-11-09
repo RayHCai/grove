@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/RayHCai/grove/apps/grove/game-manager/internal/store"
 	"github.com/RayHCai/grove/libs/go-grove/contract"
@@ -92,10 +93,15 @@ func (s *service) deleteState(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// The key a request names, bounded exactly as `StateKeyParams` bounds it.
+// The key a request names, bounded exactly as `StateKeyParams` bounds it: in UTF-16 code units,
+// which is what a zod max counts, and refused outright where it is not text at all.
 func stateKey(w http.ResponseWriter, r *http.Request) (string, bool) {
 	key := r.PathValue("key")
-	if key == "" || len(key) > contract.StateKeyMaxLen {
+	if !utf8.ValidString(key) {
+		httpx.BadRequest(w, "key must be utf-8")
+		return "", false
+	}
+	if key == "" || contract.UTF16Len(key) > contract.StateKeyMaxLen {
 		httpx.BadRequest(w, fmt.Sprintf("key must be 1 to %d characters", contract.StateKeyMaxLen))
 		return "", false
 	}

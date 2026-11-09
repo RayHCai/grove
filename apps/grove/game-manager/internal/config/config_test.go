@@ -8,7 +8,7 @@ import (
 )
 
 func TestRead(t *testing.T) {
-	secret := strings.Repeat("k", 32)
+	keys := "8kjXvyJlDRuF-yVsmSlpkVL2uSDZ1uQqOQpoPHBBJ_0,vZY3qLA8D_ZZUm6txr4Fx6qGZLZx7DHKODR1lKtDuVc"
 
 	cases := []struct {
 		name  string
@@ -18,13 +18,13 @@ func TestRead(t *testing.T) {
 	}{
 		{
 			name: "the defaults bind loopback",
-			vars: map[string]string{"GAME_TOKEN_SECRET": secret},
+			vars: map[string]string{"STORE_PUBLIC_KEYS": keys},
 			addr: "127.0.0.1:4001",
 		},
 		{
 			name: "a configured host and port",
 			vars: map[string]string{
-				"GAME_TOKEN_SECRET": secret,
+				"STORE_PUBLIC_KEYS": keys,
 				"GAME_MANAGER_HOST": "10.0.4.7",
 				"GAME_MANAGER_PORT": "4101",
 				"GROVE_ENV":         "production",
@@ -33,23 +33,28 @@ func TestRead(t *testing.T) {
 		},
 		{
 			name: "a platform's PORT binds every interface on it",
-			vars: map[string]string{"GAME_TOKEN_SECRET": secret, "PORT": "8080"},
+			vars: map[string]string{"STORE_PUBLIC_KEYS": keys, "PORT": "8080"},
 			addr: "0.0.0.0:8080",
 		},
 		{
 			name: "the service's own port outranks the platform's",
-			vars: map[string]string{"GAME_TOKEN_SECRET": secret, "PORT": "8080", "GAME_MANAGER_PORT": "4101"},
+			vars: map[string]string{"STORE_PUBLIC_KEYS": keys, "PORT": "8080", "GAME_MANAGER_PORT": "4101"},
 			addr: "0.0.0.0:4101",
 		},
 		{
-			name:  "a secret shorter than the signing key",
-			vars:  map[string]string{"GAME_TOKEN_SECRET": "short"},
-			wants: []string{"GAME_TOKEN_SECRET"},
+			name:  "a public key that is not 32 bytes",
+			vars:  map[string]string{"STORE_PUBLIC_KEYS": "c2hvcnQ"},
+			wants: []string{"STORE_PUBLIC_KEYS"},
+		},
+		{
+			name:  "a key list with a blank entry",
+			vars:  map[string]string{"STORE_PUBLIC_KEYS": "8kjXvyJlDRuF-yVsmSlpkVL2uSDZ1uQqOQpoPHBBJ_0,"},
+			wants: []string{"STORE_PUBLIC_KEYS"},
 		},
 		{
 			name:  "three problems, reported together",
 			vars:  map[string]string{"GROVE_ENV": "staging", "GAME_MANAGER_PORT": "http"},
-			wants: []string{"GROVE_ENV", "GAME_MANAGER_PORT", "GAME_TOKEN_SECRET"},
+			wants: []string{"GROVE_ENV", "GAME_MANAGER_PORT", "STORE_PUBLIC_KEYS"},
 		},
 	}
 
@@ -74,6 +79,10 @@ func TestRead(t *testing.T) {
 			}
 			if cfg.Addr() != c.addr {
 				t.Errorf("addr: got %s, want %s", cfg.Addr(), c.addr)
+			}
+			// Both halves of a rotation, so a bearer from either signer verifies.
+			if len(cfg.StorePublicKeys) != 2 {
+				t.Errorf("store public keys: got %d, want 2", len(cfg.StorePublicKeys))
 			}
 		})
 	}

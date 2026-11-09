@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"log/slog"
 	"net/http"
 	"time"
@@ -21,19 +22,17 @@ type service struct {
 
 // New builds the handler; ctx bounds the rate limiter's sweep. A route added to the scope is
 // authenticated because of where it is registered, not because someone remembered to check.
-func New(ctx context.Context, st store.Store, secret []byte, l *slog.Logger) http.Handler {
+func New(ctx context.Context, st store.Store, keys []ed25519.PublicKey, l *slog.Logger) http.Handler {
 	s := &service{store: st, log: l}
 
 	scope := http.NewServeMux()
 	scope.HandleFunc("GET /v1/state/{key}", s.readState)
 	scope.HandleFunc("PUT /v1/state/{key}", s.writeState)
 	scope.HandleFunc("DELETE /v1/state/{key}", s.deleteState)
-	scope.HandleFunc("GET /v1/leaderboard", s.readLeaderboard)
-	scope.HandleFunc("GET /v1/bundles", s.readBundles)
 
 	// A memory store always answers; a database-backed one does not while it is still connecting.
 	return httpx.Service(scope, st.Ping, l,
-		verifyGameToken(secret, l),
+		verifyGameToken(keys, l),
 		// Inside the gate, and keyed on the game the token was VERIFIED to name. An address key
 		// would be one bucket for the whole fleet network, and a key taken from the header ahead of
 		// the check is one a caller mints per request, which is a fresh bucket per request.
