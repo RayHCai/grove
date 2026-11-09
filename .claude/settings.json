@@ -1,0 +1,31 @@
+{
+    "$schema": "https://json.schemastore.org/claude-code-settings.json",
+    "permissions": {
+        "allow": [
+            "Bash(pnpm run lint)",
+            "Bash(pnpm run format:check)",
+            "Bash(pnpm run typecheck)",
+            "Bash(pnpm run build)",
+            "Bash(pnpm run test)",
+            "Bash(pnpm run doctor)",
+            "Bash(git status *)",
+            "Bash(git diff *)",
+            "Bash(git log *)",
+            "Bash(git show *)"
+        ]
+    },
+    "hooks": {
+        "PostToolUse": [
+            {
+                "matcher": "Edit|Write|MultiEdit",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/after-edit.mjs\"",
+                        "timeout": 60
+                    }
+                ]
+            }
+        ]
+    }
+}

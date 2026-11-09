@@ -1,5 +1,29 @@
 # Grove: agent instructions
 
+## Map
+
+| Path                | Packages                | Holds                                                                                                                                            |
+| ------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/*`        | `@platform/*`           | The engine: `core`, `sim`, `client`, `renderer`, `transport`, `protocol`, `scripting`, `project`, `math`, `glue`, and `engine`, the creator API  |
+| `apps/grove/*`      | `@grove/*`              | The product's services and browser apps; `apps/grove/AGENTS.md` holds each one's role, language and port                                         |
+| `libs/*`            | `@grove/*`              | Shared by the apps: `api-contract` (request and response shapes), `service-kit` (Node service start-up), `go-grove` (the Go one), `ui`, `player` |
+| `apps/playground`   | `@platform/playground`  | One whole game over the whole stack                                                                                                              |
+| `integration/`      | `@platform/integration` | One game world per API component                                                                                                                 |
+| `bench/`            | `@platform/bench`       | Tick cost, bytes per tick and GC pressure                                                                                                        |
+| `tools/healthcheck` | `@grove/healthcheck`    | The binary every distroless image answers its healthcheck with                                                                                   |
+| `scripts/`          |                         | The toolchain wrappers, gate scripts and `doctor.mjs` that package scripts and hooks call                                                        |
+
+Every `package.json` carries a one-line `description`, and every package a `README.md`. A `--filter`
+takes the package name, not the directory: `apps/grove/player` is `@grove/player-app` and `libs/player`
+is `@grove/player`.
+
+| A change to           | Reaches                                                                                                                                                                                                                     |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A creator API member  | `docs/api_spec.ts` and `docs/api_design.md`, its implementation in `packages/core`, its export from `packages/engine`, and both test levels; `packages/engine/tests/api-spec.test.ts` fails while spec and exports disagree |
+| A wire envelope       | `packages/protocol` first, then both endpoints: `packages/sim` (the authority) and `packages/client` (the viewer)                                                                                                           |
+| The sim/host batch    | `packages/sim/src/batch.ts` and `apps/grove/game-instance/src/protocol.rs` together: the field names are the seam, and a rename on one side alone is a silent mismatch                                                      |
+| An `@grove/api` route | its shapes in `libs/api-contract`, the handler in `src/routes/`, the logic in `src/workflows/`, records behind `src/store/`; a schema change is `prisma/schema.prisma` plus `pnpm --filter @grove/api db:migrate`           |
+
 ## Comments
 
 Default to no comment. Comment only what the code cannot say itself.
@@ -15,12 +39,13 @@ Default to no comment. Comment only what the code cannot say itself.
 
 ## Docs
 
-| Path                   | Holds                                                                                   |
-| ---------------------- | --------------------------------------------------------------------------------------- |
-| `docs/api_design.md`   | Creator-facing API and the reasoning behind it                                          |
-| `docs/api_spec.ts`     | The authoritative TS surface, a spec artifact, never shipped                            |
-| `packages/*/README.md` | What that package owns                                                                  |
-| `packages/*/DESIGN.md` | That package's technical architecture: core, renderer, transport, protocol, sim, client |
+| Path                   | Holds                                                                                         |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| `docs/api_design.md`   | Creator-facing API and the reasoning behind it                                                |
+| `docs/api_spec.ts`     | The authoritative TS surface, a spec artifact, never shipped                                  |
+| `packages/*/README.md` | What that package owns                                                                        |
+| `packages/*/DESIGN.md` | That package's technical architecture: core, renderer, transport, protocol, sim, client       |
+| `*/AGENTS.md`          | The conventions of one subtree where they differ from these: `apps/grove`, `apps/grove/infra` |
 
 Where design prose and the spec disagree, the spec wins. Change both in the same commit.
 
@@ -82,7 +107,8 @@ means both files; widening one means widening its suite in the same commit.
 - Reach the API the way a creator does: in a handler, on a host, entered through a real frame. A call made
   from the test body proves only that the method exists.
 - Assert on the **mirror** (`runtimeOf(tab)`), not only on `session.sim.runtime`.
-- Import a decorated world from `../dist/worlds/<name>.js`; only `tsc` lowers standard decorators.
+- Import a decorated world from `../src/worlds/<name>.js`; the suite's Vitest config lowers its standard
+  decorators through `scripts/vitest-decorators.mjs`, which a new suite with decorated sources adds too.
 - A member that turns out inert or unreachable is pinned **as that**, with the evidence for the claim.
   Never assert behaviour the platform does not have.
 
@@ -97,6 +123,15 @@ TypeScript suite without an engine warning. Below the floor `pnpm` prints one `[
 engine` line and carries on, so a mismatch surfaces as whatever the older runtime cannot do.
 
 `pnpm run lint | format:check | typecheck | build | test`
+
+`pnpm run doctor` names each toolchain this tree pins, the version found, and whether a gate will
+build with it or skip it.
+
+While working, check only what the change reaches: `pnpm --filter <name> test` (or `typecheck`) for
+one package, `pnpm exec turbo run test typecheck --affected` for everything downstream of the diff, as
+CI does on a pull request. A package's own `build` runs before its `typecheck` and `test`, because a
+build can generate source: `@grove/api`'s Prisma client lands in `src/generated/`, gitignored. Commit
+messages are Conventional Commits (`feat(core): …`), which the `commit-msg` hook enforces.
 
 Go and Rust ride those same gates: every native package carries a `package.json` whose scripts shell
 to `scripts/go.mjs` or `scripts/cargo.mjs`, which skip with a line where the toolchain is absent and

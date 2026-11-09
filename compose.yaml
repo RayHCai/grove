@@ -17,8 +17,8 @@
 # that behaved differently because it noticed it was local would be the one thing this cannot test.
 #
 # Secrets and the handful of values a developer might move live in `.env`; copy `.env.example` to it.
-# The three secrets are `:?`, so a missing `.env` fails here rather than as a service that refuses
-# to start. Every service that drains is given 35s to stop, past the 30s drain each one runs.
+# Every secret and key is `:?`, so a missing `.env` fails here rather than as a service that refuses
+# to start. Every service that drains is given 35s to stop, past the at most 30s drain each one runs.
 
 services:
     postgres:
@@ -61,7 +61,7 @@ services:
             GAMES_BUCKET: ${GAMES_BUCKET:-grove-games}
             DEBUG: ${LOCALSTACK_DEBUG:-0}
         ports:
-            - '4566:4566'
+            - '127.0.0.1:4566:4566'
         volumes:
             - ./docker/localstack/ready.d:/etc/localstack/init/ready.d:ro
             - grove-localstack:/var/lib/localstack
@@ -123,8 +123,10 @@ services:
             AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
             AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
             SESSION_SECRET: ${SESSION_SECRET:?copy .env.example to .env}
-            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET:?copy .env.example to .env}
-            FLEET_SECRET: ${FLEET_SECRET:?copy .env.example to .env}
+            TICKET_SIGNING_KEY: ${TICKET_SIGNING_KEY:?copy .env.example to .env}
+            SERVER_MANAGER_SECRET: ${SERVER_MANAGER_SECRET:?copy .env.example to .env}
+            BUILDER_SECRET: ${BUILDER_SECRET:?copy .env.example to .env}
+            ASSET_SERVICE_SECRET: ${ASSET_SERVICE_SECRET:?copy .env.example to .env}
             SERVER_MANAGER_URL: http://server-manager:4003
             # This network is the only peer in front of the process, so the forwarded headers believed
             # here are the ones it writes.
@@ -133,7 +135,7 @@ services:
             PLATFORM_ORIGIN: http://localhost:5175
             EDITOR_ORIGIN: http://localhost:5176
         ports:
-            - '4000:4000'
+            - '127.0.0.1:4000:4000'
         depends_on:
             api-migrate:
                 condition: service_completed_successfully
@@ -154,14 +156,14 @@ services:
             NODE_ENV: development
             GAME_BUILDER_HOST: 0.0.0.0
             GAME_BUILDER_PORT: 4002
-            FLEET_SECRET: ${FLEET_SECRET:?copy .env.example to .env}
+            BUILDER_SECRET: ${BUILDER_SECRET:?copy .env.example to .env}
             API_URL: http://api:4000
             REDIS_URL: redis://redis:6379
             # Two builders sharing a name share their claims. One box locally, but named rather than
             # left to the container id, which changes on every recreate.
             BUILDER_NAME: game-builder-local
         ports:
-            - '4002:4002'
+            - '127.0.0.1:4002:4002'
         depends_on:
             redis:
                 condition: service_healthy
@@ -175,16 +177,12 @@ services:
             dockerfile: apps/grove/asset-upload-service/Dockerfile
         environment:
             ASSET_UPLOAD_SERVICE_BIND: 0.0.0.0:4005
-            FLEET_SECRET: ${FLEET_SECRET:?copy .env.example to .env}
-            UPLOAD_ROOT: /var/lib/grove/objects
+            ASSET_SERVICE_SECRET: ${ASSET_SERVICE_SECRET:?copy .env.example to .env}
             API_URL: http://api:4000
             REDIS_URL: redis://redis:6379
             UPLOAD_WORKER_NAME: asset-upload-local
         ports:
-            - '4005:4005'
-        volumes:
-            # One filesystem, because the rename that publishes an object is atomic only inside one.
-            - grove-objects:/var/lib/grove/objects
+            - '127.0.0.1:4005:4005'
         depends_on:
             redis:
                 condition: service_healthy
@@ -202,9 +200,9 @@ services:
             # box in a real fleet, is the one thing that cannot be kept.
             GAME_MANAGER_HOST: 0.0.0.0
             GAME_MANAGER_PORT: 4001
-            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET:?copy .env.example to .env}
+            STORE_PUBLIC_KEYS: ${STORE_PUBLIC_KEYS:?copy .env.example to .env}
         ports:
-            - '4001:4001'
+            - '127.0.0.1:4001:4001'
 
     server-manager:
         image: grove-server-manager:local
@@ -218,16 +216,11 @@ services:
             SERVER_MANAGER_HOST: 0.0.0.0
             SERVER_MANAGER_PORT: 4003
             FLEET_SECRET: ${FLEET_SECRET:?copy .env.example to .env}
-            # Nothing here terminates TLS, so a placement handed out as `wss` is one no local player can
-            # dial.
-            INGRESS_SCHEME: ws
-            JOIN_QUEUE_URL: redis://redis:6379
+            SERVER_MANAGER_SECRET: ${SERVER_MANAGER_SECRET:?copy .env.example to .env}
+            STORE_SIGNING_KEY: ${STORE_SIGNING_KEY:?copy .env.example to .env}
             API_URL: http://api:4000
         ports:
-            - '4003:4003'
-        depends_on:
-            redis:
-                condition: service_healthy
+            - '127.0.0.1:4003:4003'
 
     # `fleet` is `app` and one box on top of it, which is why every service above carries both names: a
     # box with no allocator to take a ticket from and no build output to fetch can hold no session.
@@ -247,7 +240,11 @@ services:
             INSTANCE_MANAGER_HOST: 0.0.0.0
             INSTANCE_MANAGER_PORT: 4004
             FLEET_SECRET: ${FLEET_SECRET:?copy .env.example to .env}
-            GAME_TOKEN_SECRET: ${GAME_TOKEN_SECRET:?copy .env.example to .env}
+            TICKET_PUBLIC_KEYS: ${TICKET_PUBLIC_KEYS:?copy .env.example to .env}
+            # One name the router inside this network and a browser on the host both resolve, and a
+            # plain socket: nothing here terminates TLS.
+            PUBLIC_HOST: box.localhost
+            PLAYER_PORT: 4006
             SERVER_MANAGER_URL: http://server-manager:4003
             GAME_MANAGER_URL: http://game-manager:4001
             HOST_ID: ${LOCAL_HOST_ID:-6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70}
@@ -256,7 +253,11 @@ services:
             INSTANCE_STATE_DIR: /var/lib/grove
             BUNDLE_CACHE_DIR: /var/lib/grove/bundles
         ports:
-            - '4004:4004'
+            - '127.0.0.1:4004:4004'
+            - '127.0.0.1:4006:4006'
+        networks:
+            default:
+                aliases: [box.localhost]
         volumes:
             # The children this agent started, and the build output it has fetched, one file per content
             # hash. Kept across a recreate so a restart adopts rather than re-fetches.
@@ -270,5 +271,4 @@ services:
 volumes:
     grove-pgdata:
     grove-localstack:
-    grove-objects:
     grove-fleet-state:
