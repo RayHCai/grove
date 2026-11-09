@@ -71,6 +71,9 @@ export function apiBaseUrl(): string {
     return (import.meta as unknown as ViteEnv).env?.VITE_API_URL ?? 'http://localhost:4000';
 }
 
+/** Where a browser still holding the cookie is handed the token its next write has to carry. */
+const SESSION_PATH = '/v1/auth/session';
+
 /**
  * The `@grove/api` client every app holds one of.
  *
@@ -82,6 +85,8 @@ export function apiBaseUrl(): string {
  */
 export function createApiBase({ baseUrl, fetch = globalThis.fetch }: ApiClientOptions): ApiBase {
     let csrfToken: string | undefined;
+    // Shared, so a burst of writes that all found the token stale re-reads the session once.
+    let renewing: Promise<ApiError | undefined> | undefined;
 
     function csrfHeader(): Record<string, string> {
         return csrfToken === undefined ? {} : { 'x-csrf-token': csrfToken };
@@ -102,8 +107,40 @@ export function createApiBase({ baseUrl, fetch = globalThis.fetch }: ApiClientOp
         return response;
     }
 
-    async function call(path: string, init: RequestInit = {}): Promise<Response> {
+    /** Re-reads the session for a fresh token; a refusal is what the write is then failed with. */
+    async function renew(): Promise<ApiError | undefined> {
+        renewing ??= (async () => {
+            const response = await send(SESSION_PATH);
+            if (!response.ok) return refusal(response);
+            const parsed = SignedIn.safeParse(await response.json().catch(() => undefined));
+            if (!parsed.success) {
+                return new ApiError(response.status, 'internal', 'the session read was not one');
+            }
+            keep(parsed.data);
+            return undefined;
+        })()
+            .catch((failure: unknown) =>
+                failure instanceof ApiError
+                    ? failure
+                    : new ApiError(0, 'unreachable', 'the Grove API could not be reached'),
+            )
+            .finally(() => {
+                renewing = undefined;
+            });
+        return renewing;
+    }
+
+    // Another tab signing in rotates the token without lapsing the session; one re-read mends it.
+    async function exchange(path: string, init: RequestInit = {}): Promise<Response> {
         const response = await send(path, init);
+        if (response.status !== 403 || !(await isCsrfRefusal(response))) return response;
+        const failed = await renew();
+        if (failed !== undefined) throw failed;
+        return send(path, init);
+    }
+
+    async function call(path: string, init: RequestInit = {}): Promise<Response> {
+        const response = await exchange(path, init);
         if (!response.ok) throw await refusal(response);
         return response;
     }
@@ -113,7 +150,7 @@ export function createApiBase({ baseUrl, fetch = globalThis.fetch }: ApiClientOp
         init: RequestInit,
         refused: number,
     ): Promise<Response | undefined> {
-        const response = await send(path, init);
+        const response = await exchange(path, init);
         if (response.status === refused) return undefined;
         if (!response.ok) throw await refusal(response);
         return response;
@@ -156,6 +193,15 @@ export function createApiBase({ baseUrl, fetch = globalThis.fetch }: ApiClientOp
 /** A JSON body and the one header that makes the service parse it as one. */
 export function jsonBody(body: unknown): RequestInit {
     return { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
+}
+
+/** Read off a copy, so a 403 that is some other refusal still has its body for the caller. */
+async function isCsrfRefusal(response: Response): Promise<boolean> {
+    const body = await response
+        .clone()
+        .json()
+        .catch(() => undefined);
+    return ErrorBody.safeParse(body).data?.code === 'csrf_invalid';
 }
 
 /** The refusal the service wrote, or one named after the status when the body was not one. */

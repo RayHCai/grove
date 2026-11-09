@@ -153,6 +153,12 @@ func (r *Reader) OneOf(name string, fallback string, allowed ...string) string {
 	return fallback
 }
 
+// Refuse records a problem a service found in a variable it parsed itself, so it is reported with
+// every other one rather than on the restart after them.
+func (r *Reader) Refuse(name string, err error) {
+	r.fail(fmt.Errorf("%s: %w", name, err))
+}
+
 // Err reports every problem in one error, in the order the service asked for the variables.
 func (r *Reader) Err() error {
 	if len(r.probs) == 0 {

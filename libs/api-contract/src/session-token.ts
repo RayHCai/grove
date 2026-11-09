@@ -1,29 +1,17 @@
 import {
     type KeyObject,
-    createHmac,
     createPrivateKey,
     createPublicKey,
+    randomBytes,
     sign as signBytes,
-    timingSafeEqual,
     verify as verifyBytes,
 } from 'node:crypto';
 import { z } from 'zod';
 import { GameId, PlayerId, SessionId } from './ids.js';
 
-/**
- * Which service a token may be presented to. `signTicket`/`verifyTicket` below add an Ed25519
- * scheme meant for `game-instance` (a box that only verifies tickets should not be able to mint
- * them), but nothing mints or verifies under it yet: `signSessionToken`/`verifySessionToken` still
- * carry every audience, including `game-instance`, under the one shared HMAC secret, matching what
- * the allocator, `apps/grove/game-instance/src/ticket.rs` and `libs/go-grove/token/token.go` all
- * still do. Migrating `game-instance` off HMAC needs key provisioning and a rollover plan across
- * all three, not a type change here.
- */
-export const TokenAudience = z.enum(['game-instance', 'game-manager', 'game-manager-admin']);
+/** A join ticket goes to `game-instance` and a store bearer to `game-manager`; both are Ed25519. */
+export const TokenAudience = z.enum(['game-instance', 'game-manager']);
 export type TokenAudience = z.infer<typeof TokenAudience>;
-
-/** Every audience `signSessionToken`/`verifySessionToken` still carry. See the note above. */
-export type HmacAudience = TokenAudience;
 
 /**
  * What one service asserts about the bearer and another believes. `gameId` is carried here rather
@@ -41,10 +29,19 @@ export const SessionTokenClaims = z
         aud: TokenAudience,
         /** Seconds since the epoch. Short: a session outliving its token re-asks the allocator. */
         exp: z.int().positive(),
+        /** Random per ticket: two minted in one second differ, so neither is refused as reused. */
+        jti: z
+            .string()
+            .regex(/^[A-Za-z0-9_-]{22}$/u)
+            .optional(),
     })
     .refine((claims) => (claims.playerId !== undefined) === (claims.aud === 'game-instance'), {
         error: 'playerId is required on a game-instance ticket and forbidden on a store bearer',
         path: ['playerId'],
+    })
+    .refine((claims) => claims.jti === undefined || claims.aud === 'game-instance', {
+        error: 'only a join ticket carries an id of its own',
+        path: ['jti'],
     });
 
 export type SessionTokenClaims = z.infer<typeof SessionTokenClaims>;
@@ -63,12 +60,8 @@ const ED25519_SEED_BYTES = 32;
 const ED25519_SIGNATURE_BYTES = 64;
 const PKCS8_ED25519_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
 
-function hmac(payload: string, secret: string): string {
-    return b64url(createHmac('sha256', secret).update(payload).digest());
-}
-
 /**
- * The bytes the signature covers: the five members, in this order, `playerId` omitted not null.
+ * The bytes the signature covers: the members in this order, an absent one omitted, never null.
  * Spelled out, because the Go and Rust verifiers encode the same members in the same places.
  */
 function payloadOf(claims: SessionTokenClaims): string {
@@ -78,8 +71,14 @@ function payloadOf(claims: SessionTokenClaims): string {
         ...(claims.playerId === undefined ? {} : { playerId: claims.playerId }),
         aud: claims.aud,
         exp: claims.exp,
+        ...(claims.jti === undefined ? {} : { jti: claims.jti }),
     });
     return b64url(Buffer.from(json, 'utf8'));
+}
+
+/** A fresh `jti`: 16 random bytes, which no two tickets a box remembers will share. */
+export function ticketId(): string {
+    return b64url(randomBytes(16));
 }
 
 function decodeKey(text: string, what: string): Buffer {
@@ -114,16 +113,9 @@ export function ticketPublicKey(signingKey: KeyObject): string {
     return x;
 }
 
-/** Mints a credential under HMAC-SHA256, for whichever audience the caller names. */
-export function signSessionToken(claims: SessionTokenClaims, secret: string): string {
-    const payload = payloadOf(claims);
-    return `${payload}.${hmac(payload, secret)}`;
-}
-
 /** Mints a join ticket. The allocator is the only thing that should call this. */
 export function signTicket(claims: SessionTokenClaims, signingKey: KeyObject): string {
-    if (claims.aud !== 'game-instance')
-        throw new Error('only a join ticket is signed with Ed25519');
+    if (claims.aud !== 'game-instance') throw new Error('only a join ticket is signed here');
     const payload = payloadOf(claims);
     return `${payload}.${b64url(signBytes(null, Buffer.from(payload, 'ascii'), signingKey))}`;
 }
@@ -161,31 +153,14 @@ function claimsOf(payload: string, audience: TokenAudience, nowSeconds: number):
 }
 
 /**
- * Verifies an HMAC credential before it parses, so a forged payload is never handed to a schema.
- * `audience` is required: a verifier that defaulted would accept the other one by omission.
+ * Verifies a join ticket before it parses, so a forged payload is never handed to a schema.
+ * Any one of `keys` may have signed it, so a verifier can hold the next key before the signer does.
  */
-export function verifySessionToken(
+export function verifyTicket(
     token: string,
-    secret: string,
+    keys: KeyObject | readonly KeyObject[],
     nowSeconds: number,
-    audience: HmacAudience,
 ): TokenResult {
-    const segments = split(token);
-    if (!segments.ok) return segments;
-
-    const expected = Buffer.from(hmac(segments.payload, secret), 'base64url');
-    // Length must match before `timingSafeEqual`, which throws rather than returning false on a
-    // mismatch, and comparing lengths first leaks only the length, which the format already fixes.
-    if (segments.signature.length !== expected.length)
-        return { ok: false, reason: 'bad_signature' };
-    if (!timingSafeEqual(segments.signature, expected))
-        return { ok: false, reason: 'bad_signature' };
-
-    return claimsOf(segments.payload, audience, nowSeconds);
-}
-
-/** Verifies a join ticket under Ed25519; an HMAC-signed one fails on its signature length. */
-export function verifyTicket(token: string, verifyKey: KeyObject, nowSeconds: number): TokenResult {
     const segments = split(token);
     if (!segments.ok) return segments;
 
@@ -193,7 +168,8 @@ export function verifyTicket(token: string, verifyKey: KeyObject, nowSeconds: nu
         return { ok: false, reason: 'bad_signature' };
     }
     const payload = Buffer.from(segments.payload, 'ascii');
-    if (!verifyBytes(null, payload, verifyKey, segments.signature)) {
+    const candidates = Array.isArray(keys) ? keys : [keys as KeyObject];
+    if (!candidates.some((key) => verifyBytes(null, payload, key, segments.signature))) {
         return { ok: false, reason: 'bad_signature' };
     }
 

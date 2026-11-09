@@ -4,6 +4,7 @@ package httpx
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -96,47 +97,94 @@ func Service(scope *http.ServeMux, ready func(context.Context) error, l *slog.Lo
 	return Chain(root, RequestID(), RequestLog(l), Recover(l))
 }
 
-// Serve listens until ctx is done or a signal arrives, then finishes what is in flight.
+// Listener is one address a service binds: plaintext unless TLS is set, and uncapped unless
+// MaxConns is.
+type Listener struct {
+	Addr     string
+	Handler  http.Handler
+	TLS      *tls.Config
+	MaxConns int
+	// How long a request head may take to arrive, readHeaderTimeout when zero.
+	HeaderTimeout time.Duration
+}
+
+// Serve listens on one plaintext address until ctx is done or a signal arrives, then drains.
+func Serve(ctx context.Context, addr string, h http.Handler, l *slog.Logger) error {
+	return ServeAll(ctx, l, Listener{Addr: addr, Handler: h})
+}
+
+// ServeAll binds every listener before serving any, and drains them together on the way down.
 //
 // The drain is what makes a rolling deploy invisible (a request already inside a handler runs to
 // its end), and is this service's half of what the Fastify ones do with `app.close()`.
-func Serve(ctx context.Context, addr string, h http.Handler, l *slog.Logger) error {
+func ServeAll(ctx context.Context, l *slog.Logger, listeners ...Listener) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Bound here rather than by ListenAndServe, so a port already taken is an error this returns
-	// instead of a log line racing a "listening" one that was never true.
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", addr, err)
+	// All bound before any serves, so a port already taken is an error this returns instead of a
+	// service that came up half-listening.
+	bound := make([]net.Listener, 0, len(listeners))
+	defer func() {
+		for _, b := range bound {
+			_ = b.Close()
+		}
+	}()
+	for _, ln := range listeners {
+		raw, err := net.Listen("tcp", ln.Addr)
+		if err != nil {
+			return fmt.Errorf("listen on %s: %w", ln.Addr, err)
+		}
+		bound = append(bound, raw)
 	}
 
-	srv := newServer(h, l)
-
-	serving := make(chan error, 1)
-	go func() { serving <- srv.Serve(listener) }()
-	l.Info("listening", "addr", listener.Addr().String())
+	servers := make([]*http.Server, len(listeners))
+	serving := make(chan error, len(listeners))
+	for i, ln := range listeners {
+		listener := capConns(bound[i], ln.MaxConns)
+		if ln.TLS != nil {
+			if ln.TLS.GetCertificate == nil && len(ln.TLS.Certificates) == 0 {
+				return fmt.Errorf("serve on %s: %w", ln.Addr, errNoCertificate)
+			}
+			listener = tls.NewListener(listener, ln.TLS)
+		}
+		servers[i] = newServer(ln.Handler, l)
+		if ln.HeaderTimeout > 0 {
+			servers[i].ReadHeaderTimeout = ln.HeaderTimeout
+		}
+		go func() { serving <- servers[i].Serve(listener) }()
+		l.Info("listening", "addr", bound[i].Addr().String(), "tls", ln.TLS != nil)
+	}
 
 	select {
 	case err := <-serving:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+		if !errors.Is(err, http.ErrServerClosed) {
+			drainAll(ctx, servers, l)
+			return fmt.Errorf("serve: %w", err)
 		}
-		return fmt.Errorf("serve on %s: %w", addr, err)
 	case <-ctx.Done():
 	}
 
 	// The second signal goes back to the default handler, so an operator can always end a drain
 	// that a stuck handler is holding open.
 	stop()
+	return drainAll(ctx, servers, l)
+}
+
+func drainAll(ctx context.Context, servers []*http.Server, l *slog.Logger) error {
 	l.Info("draining", "timeout", drainTimeout)
 
 	drain, cancel := context.WithTimeout(context.WithoutCancel(ctx), drainTimeout)
 	defer cancel()
 
-	if err := srv.Shutdown(drain); err != nil {
-		_ = srv.Close()
-		return fmt.Errorf("drain: %w", err)
+	var failed []error
+	for _, srv := range servers {
+		if err := srv.Shutdown(drain); err != nil {
+			_ = srv.Close()
+			failed = append(failed, err)
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("drain: %w", errors.Join(failed...))
 	}
 	return nil
 }

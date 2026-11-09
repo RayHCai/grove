@@ -1,6 +1,7 @@
 package token
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -10,74 +11,232 @@ import (
 	"testing"
 )
 
-// The vector session-token.ts actually produced, read from the file the Rust verifier reads too.
-// Three codecs are one wire format written three times, and a change to any one's bytes must
-// fail here rather than at a join.
-const vectorFile = "../../api-contract/fixtures/session-token.json"
+// Minted by node:crypto rather than by this package, so a vector this codec reproduces is one an
+// independent Ed25519 signer agrees with.
+const storeVectors = "testdata/store-bearer.json"
 
-type vectorCase struct {
-	Claims  Claims `json:"claims"`
-	Payload string `json:"payload"`
-	Token   string `json:"token"`
+// The join-ticket vectors libs/api-contract signs and the Rust verifier reads, which pin this
+// codec's format to the TypeScript one byte for byte.
+const ticketVectors = "../../api-contract/fixtures/session-token.json"
+
+type vector struct {
+	Name   string `json:"name"`
+	Token  string `json:"token"`
+	Expect string `json:"expect"`
+	Claims Claims `json:"claims"`
 }
 
-// Ticket reads `hmacTicket`, not `ticket`: the latter is now the Ed25519 vector set
-// `libs/api-contract` mints game-instance tickets under too (see the note on `HmacAudience` in
-// `session-token.ts`), and this box has not been migrated off HMAC yet.
-type vectorSet struct {
-	Secret      string     `json:"secret"`
-	Ticket      vectorCase `json:"hmacTicket"`
-	StoreBearer vectorCase `json:"storeBearer"`
-	Another     vectorCase `json:"anotherTicketByTheSameSigner"`
+type storeSet struct {
+	Seed           string   `json:"seed"`
+	PublicKey      string   `json:"publicKey"`
+	OtherSeed      string   `json:"otherSeed"`
+	OtherPublicKey string   `json:"otherPublicKey"`
+	Now            int64    `json:"now"`
+	Vectors        []vector `json:"vectors"`
 }
 
-func vectors(t *testing.T) vectorSet {
+type ticketSet struct {
+	Ticket struct {
+		Seed      string   `json:"seed"`
+		PublicKey string   `json:"publicKey"`
+		Now       int64    `json:"now"`
+		Vectors   []vector `json:"vectors"`
+	} `json:"ticket"`
+}
+
+func read[T any](t *testing.T, path string) T {
 	t.Helper()
 
-	raw, err := os.ReadFile(vectorFile)
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read vector: %v", err)
+		t.Fatalf("read %s: %v", path, err)
 	}
-	var set vectorSet
+	var set T
 	if err := json.Unmarshal(raw, &set); err != nil {
-		t.Fatalf("decode vector: %v", err)
+		t.Fatalf("decode %s: %v", path, err)
 	}
 	return set
 }
 
-// Changes the LEADING base64 character, a full six bits. The trailing one carries fewer bits than
-// it spells, so two spellings of it decode to the same signature and tamper with nothing.
-func swapLead(s string) string {
-	if s[0] == 'a' {
-		return "b" + s[1:]
+func signer(t *testing.T, seed string) ed25519.PrivateKey {
+	t.Helper()
+
+	key, err := ParseSigningKey(seed)
+	if err != nil {
+		t.Fatalf("ParseSigningKey: %v", err)
 	}
-	return "a" + s[1:]
+	return key
 }
 
-func TestSignMatchesTypeScript(t *testing.T) {
-	set := vectors(t)
+func verifier(t *testing.T, list string) []ed25519.PublicKey {
+	t.Helper()
 
-	for _, tt := range []struct {
-		name string
-		vec  vectorCase
-	}{{"join ticket", set.Ticket}, {"store bearer", set.StoreBearer}} {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := Sign(tt.vec.Claims, []byte(set.Secret))
-			if err != nil {
-				t.Fatalf("Sign: %v", err)
+	keys, err := ParsePublicKeys(list)
+	if err != nil {
+		t.Fatalf("ParsePublicKeys: %v", err)
+	}
+	return keys
+}
+
+func verdictOf(err error) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, ErrMalformed):
+		return "malformed"
+	case errors.Is(err, ErrBadSignature):
+		return "bad_signature"
+	case errors.Is(err, ErrExpired):
+		return "expired"
+	case errors.Is(err, ErrWrongAudience):
+		return "wrong_audience"
+	}
+	return err.Error()
+}
+
+func TestSignMatchesAnIndependentSigner(t *testing.T) {
+	set := read[storeSet](t, storeVectors)
+	first := set.Vectors[0]
+
+	got, err := Sign(first.Claims, signer(t, set.Seed))
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if got != first.Token {
+		t.Errorf("token drifted from node:crypto's\n got: %s\nwant: %s", got, first.Token)
+	}
+}
+
+func TestVerifyReachesEveryStoreVectorsVerdict(t *testing.T) {
+	set := read[storeSet](t, storeVectors)
+	keys := verifier(t, set.PublicKey)
+
+	for _, v := range set.Vectors {
+		t.Run(v.Name, func(t *testing.T) {
+			got, err := Verify(v.Token, keys, AudGameManager, set.Now)
+			if verdict := verdictOf(err); verdict != v.Expect {
+				t.Fatalf("verdict: got %s, want %s", verdict, v.Expect)
 			}
-			if got != tt.vec.Token {
-				t.Errorf("token drifted from the TypeScript codec\n got: %s\nwant: %s", got, tt.vec.Token)
+			if v.Expect == "ok" && v.Claims.GameID != "" && got != v.Claims {
+				t.Errorf("claims: got %+v, want %+v", got, v.Claims)
 			}
 		})
 	}
 }
 
-// The rules the vector encodes, pinned one at a time so a failure says which one moved.
-func TestEncodingRules(t *testing.T) {
-	set := vectors(t)
+// The join ticket is the api's to mint, but its format is this one, so the TypeScript signer's own
+// output is what this codec must produce and accept.
+func TestTheTicketFormatIsTheTypeScriptOne(t *testing.T) {
+	set := read[ticketSet](t, ticketVectors).Ticket
+	key := signer(t, set.Seed)
+	keys := verifier(t, set.PublicKey)
 
-	tok, err := Sign(set.Ticket.Claims, []byte(set.Secret))
+	if got := EncodeKey(key.Public().(ed25519.PublicKey)); got != set.PublicKey {
+		t.Fatalf("public key: got %s, want %s", got, set.PublicKey)
+	}
+	for _, v := range set.Vectors {
+		t.Run(v.Name, func(t *testing.T) {
+			_, err := Verify(v.Token, keys, AudGameInstance, set.Now)
+			if verdict := verdictOf(err); verdict != v.Expect {
+				t.Fatalf("verdict: got %s, want %s", verdict, v.Expect)
+			}
+			if v.Expect != "ok" && v.Expect != "expired" {
+				return
+			}
+			minted, err := Sign(v.Claims, key)
+			if err != nil {
+				t.Fatalf("Sign: %v", err)
+			}
+			if minted != v.Token {
+				t.Errorf("token drifted from session-token.ts\n got: %s\nwant: %s", minted, v.Token)
+			}
+		})
+	}
+}
+
+// Rotation: a verifier holds the incoming key beside the outgoing one, and either signature passes.
+func TestVerifyAcceptsAnyConfiguredKey(t *testing.T) {
+	set := read[storeSet](t, storeVectors)
+	byOther, err := Sign(set.Vectors[0].Claims, signer(t, set.OtherSeed))
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		keys string
+		want string
+	}{
+		{"the incoming key listed first", set.OtherPublicKey + "," + set.PublicKey, "ok"},
+		{"the incoming key listed last", set.PublicKey + ", " + set.OtherPublicKey, "ok"},
+		{"only the outgoing key", set.PublicKey, "bad_signature"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Verify(byOther, verifier(t, tt.keys), AudGameManager, set.Now)
+			if verdict := verdictOf(err); verdict != tt.want {
+				t.Errorf("verdict: got %s, want %s", verdict, tt.want)
+			}
+		})
+	}
+
+	if _, err := Verify(byOther, nil, AudGameManager, set.Now); !errors.Is(err, ErrBadSignature) {
+		t.Errorf("a verifier holding no key: got %v, want %v", err, ErrBadSignature)
+	}
+}
+
+func TestKeysAreReadInOneSpelling(t *testing.T) {
+	set := read[storeSet](t, storeVectors)
+
+	seeds := []struct {
+		name string
+		seed string
+		ok   bool
+	}{
+		{"a seed", set.Seed, true},
+		{"a seed with a trailing newline, as a file holds one", set.Seed + "\n", true},
+		{"padded", set.Seed + "=", false},
+		{"standard base64", strings.NewReplacer("-", "+", "_", "/").Replace(set.Seed), !strings.ContainsAny(set.Seed, "-_")},
+		{"too short", set.Seed[:40], false},
+		{"a public key's length but not a seed", set.Seed + "AA", false},
+		{"empty", "", false},
+	}
+	for _, tt := range seeds {
+		t.Run("seed: "+tt.name, func(t *testing.T) {
+			if _, err := ParseSigningKey(tt.seed); (err == nil) != tt.ok {
+				t.Errorf("got %v, want ok %t", err, tt.ok)
+			}
+		})
+	}
+
+	lists := []struct {
+		name string
+		list string
+		keys int
+	}{
+		{"one key", set.PublicKey, 1},
+		{"two keys", set.PublicKey + "," + set.OtherPublicKey, 2},
+		{"an empty list", "", 0},
+		{"a blank entry", set.PublicKey + ",", 0},
+		{"a key with a newline inside it", set.PublicKey[:20] + "\n" + set.PublicKey[20:], 0},
+	}
+	for _, tt := range lists {
+		t.Run("list: "+tt.name, func(t *testing.T) {
+			keys, err := ParsePublicKeys(tt.list)
+			if tt.keys == 0 && err == nil {
+				t.Fatalf("got %d keys, want the list refused", len(keys))
+			}
+			if tt.keys > 0 && (err != nil || len(keys) != tt.keys) {
+				t.Fatalf("got %d keys and %v, want %d", len(keys), err, tt.keys)
+			}
+		})
+	}
+}
+
+// The rules the vectors encode, pinned one at a time so a failure says which one moved.
+func TestEncodingRules(t *testing.T) {
+	set := read[storeSet](t, storeVectors)
+	tok, err := Sign(set.Vectors[0].Claims, signer(t, set.Seed))
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -88,161 +247,54 @@ func TestEncodingRules(t *testing.T) {
 	if n := strings.Count(tok, "."); n != 1 {
 		t.Errorf("token joins two segments, got %d dots in %q", n, tok)
 	}
-
 	payload, _, _ := strings.Cut(tok, ".")
 	claims, err := base64.RawURLEncoding.DecodeString(payload)
 	if err != nil {
 		t.Fatalf("payload is not unpadded base64url: %v", err)
 	}
-	if string(claims) != set.Ticket.Payload {
-		t.Errorf("signed bytes are not the compact JSON in declaration order\n got: %s\nwant: %s",
-			claims, set.Ticket.Payload)
+	want := `{"gameId":"0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10","sessionId":"7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f","aud":"game-manager","exp":1800043200}`
+	if string(claims) != want {
+		t.Errorf("signed bytes are not the compact JSON in declaration order\n got: %s\nwant: %s", claims, want)
 	}
 }
 
-// A store bearer omits playerId rather than writing it empty, which is what keeps one signer's two
-// payloads decodable by one struct in every language.
-func TestStoreBearerOmitsThePlayer(t *testing.T) {
-	set := vectors(t)
-
-	payload, _, _ := strings.Cut(set.StoreBearer.Token, ".")
-	claims, err := base64.RawURLEncoding.DecodeString(payload)
-	if err != nil {
-		t.Fatalf("decode payload: %v", err)
-	}
-	if strings.Contains(string(claims), "playerId") {
-		t.Errorf("store bearer carries a player: %s", claims)
-	}
-}
-
-func TestVerifyAcceptsTheVector(t *testing.T) {
-	set := vectors(t)
-
-	for _, tt := range []struct {
-		name     string
-		vec      vectorCase
-		audience string
-	}{
-		{"join ticket", set.Ticket, AudGameInstance},
-		{"store bearer", set.StoreBearer, AudGameManager},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := Verify(tt.vec.Token, []byte(set.Secret), tt.audience, tt.vec.Claims.Exp-1)
-			if err != nil {
-				t.Fatalf("Verify: %v", err)
-			}
-			if got != tt.vec.Claims {
-				t.Errorf("claims round-tripped wrong\n got: %+v\nwant: %+v", got, tt.vec.Claims)
-			}
-		})
-	}
-}
-
-// The escalation the audience exists to stop: a browser's join ticket is not a store credential.
-func TestVerifyRefusesTheOtherAudience(t *testing.T) {
-	set := vectors(t)
-
-	if _, err := Verify(set.Ticket.Token, []byte(set.Secret), AudGameManager, 0); !errors.Is(err, ErrWrongAudience) {
-		t.Errorf("a join ticket reached the store: got %v", err)
-	}
-	if _, err := Verify(set.StoreBearer.Token, []byte(set.Secret), AudGameInstance, 0); !errors.Is(err, ErrWrongAudience) {
-		t.Errorf("a store bearer reached a game process: got %v", err)
-	}
-}
-
-func TestRoundTrip(t *testing.T) {
-	set := vectors(t)
-	secret := []byte("a-secret-long-enough-to-be-one")
-
-	tok, err := Sign(set.Ticket.Claims, secret)
-	if err != nil {
-		t.Fatalf("Sign: %v", err)
-	}
-	got, err := Verify(tok, secret, AudGameInstance, 0)
-	if err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-	if got != set.Ticket.Claims {
-		t.Errorf("got %+v, want %+v", got, set.Ticket.Claims)
-	}
-}
-
-// A claim added on the minting side must not take every verifier offline at the deploy that adds
-// it.
+// A claim added on the minting side must not take every verifier offline at the deploy that adds it.
 func TestVerifyIgnoresAnUnknownClaim(t *testing.T) {
-	set := vectors(t)
+	set := read[storeSet](t, storeVectors)
+	key := signer(t, set.Seed)
 
-	widened := strings.Replace(set.Ticket.Payload, "{", `{"region":"us-east-1",`, 1)
+	widened := `{"region":"us-east-1","gameId":"g","sessionId":"s","aud":"game-manager","exp":1900000000}`
 	payload := base64.RawURLEncoding.EncodeToString([]byte(widened))
-	tok := payload + "." + base64.RawURLEncoding.EncodeToString(sign(payload, []byte(set.Secret)))
+	tok := payload + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, []byte(payload)))
 
-	if _, err := Verify(tok, []byte(set.Secret), AudGameInstance, 0); err != nil {
+	if _, err := Verify(tok, verifier(t, set.PublicKey), AudGameManager, set.Now); err != nil {
 		t.Errorf("a newer claim set was refused: %v", err)
 	}
 }
 
-func TestVerifyRejects(t *testing.T) {
-	set := vectors(t)
-
-	// Signs whatever payload is given, so a malformed one still reaches the checks past the hmac.
-	mint := func(payload string) string {
-		return payload + "." + base64.RawURLEncoding.EncodeToString(sign(payload, []byte(set.Secret)))
-	}
-	b64 := func(s string) string {
-		return base64.RawURLEncoding.EncodeToString([]byte(s))
-	}
-	payload, signature, _ := strings.Cut(set.Ticket.Token, ".")
-	otherPayload, _, _ := strings.Cut(set.Another.Token, ".")
+func TestSignRefusesWhatNoVerifierWouldTake(t *testing.T) {
+	set := read[storeSet](t, storeVectors)
+	key := signer(t, set.Seed)
 
 	tests := []struct {
-		name  string
-		token string
-		now   int64
-		want  error
+		name   string
+		claims Claims
 	}{
-		{"no dot", "notatoken", 0, ErrMalformed},
-		{"empty payload", ".c2ln", 0, ErrMalformed},
-		{"empty signature", b64(set.Ticket.Payload) + ".", 0, ErrMalformed},
-		{"signature is not base64", b64(set.Ticket.Payload) + ".!!!!", 0, ErrBadSignature},
-		{"signature is another secret's", payload + "." + swapLead(signature), 0, ErrBadSignature},
-		{"payload edited after signing", otherPayload + "." + signature, 0, ErrBadSignature},
-		{"payload is not base64", mint("!!!!"), 0, ErrMalformed},
-		{"payload is not json", mint(b64("not json")), 0, ErrMalformed},
-		{"no audience", mint(b64(`{"gameId":"g","sessionId":"s","playerId":"p","exp":9}`)), 0, ErrMalformed},
-		{"an audience nothing serves", mint(b64(`{"gameId":"g","sessionId":"s","playerId":"p","aud":"editor","exp":9}`)), 0, ErrMalformed},
-		{"a ticket with no player", mint(b64(`{"gameId":"g","sessionId":"s","aud":"game-instance","exp":9}`)), 0, ErrMalformed},
-		{"a store bearer naming a player", mint(b64(`{"gameId":"g","sessionId":"s","playerId":"p","aud":"game-manager","exp":9}`)), 0, ErrMalformed},
-		{"exp is missing", mint(b64(`{"gameId":"g","sessionId":"s","playerId":"p","aud":"game-instance"}`)), 0, ErrMalformed},
-		{"exp has passed", set.Ticket.Token, set.Ticket.Claims.Exp + 1, ErrExpired},
-		{"exp is now", set.Ticket.Token, set.Ticket.Claims.Exp, ErrExpired},
+		{"a store bearer naming a player", Claims{GameID: "g", SessionID: "s", PlayerID: "p", Aud: AudGameManager, Exp: 9}},
+		{"a ticket naming nobody", Claims{GameID: "g", SessionID: "s", Aud: AudGameInstance, Exp: 9}},
+		{"an audience nothing serves", Claims{GameID: "g", SessionID: "s", Aud: "game-manager-admin", Exp: 9}},
+		{"no expiry", Claims{GameID: "g", SessionID: "s", Aud: AudGameManager}},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Verify(tt.token, []byte(set.Secret), AudGameInstance, tt.now)
-			if !errors.Is(err, tt.want) {
-				t.Errorf("got %v, want %v", err, tt.want)
+			if _, err := Sign(tt.claims, key); !errors.Is(err, ErrMalformed) {
+				t.Errorf("got %v, want %v", err, ErrMalformed)
 			}
 		})
 	}
-}
 
-func TestSignRefusesAClaimSetNoVerifierWouldTake(t *testing.T) {
-	set := vectors(t)
-
-	bad := set.Ticket.Claims
-	bad.PlayerID = ""
-	if _, err := Sign(bad, []byte(set.Secret)); !errors.Is(err, ErrMalformed) {
-		t.Errorf("signed a ticket with no player: %v", err)
-	}
-}
-
-func TestVerifyRejectsTheWrongSecret(t *testing.T) {
-	set := vectors(t)
-
-	_, err := Verify(set.Ticket.Token, []byte("not-the-secret"), AudGameInstance, 0)
-	if !errors.Is(err, ErrBadSignature) {
-		t.Errorf("got %v, want %v", err, ErrBadSignature)
+	if _, err := Sign(set.Vectors[0].Claims, nil); err == nil {
+		t.Error("signed with no key")
 	}
 }
 

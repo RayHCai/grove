@@ -4,6 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import {
     AssetUpload,
+    AssetUploadRequest,
+    MAX_ASSET_BYTES,
     MAX_WORKSPACE_FILES,
     Manifest,
     Workspace,
@@ -14,9 +16,13 @@ import {
     encodeManifest,
     manifestKey,
     objectKey,
+    uploadKey,
 } from '../src/workspace.js';
 
 const GAME_ID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+const TASK_ID = '8c2e4a60-5d17-4b93-8f0a-1e6d2c4b7a35';
+const SAVE_ID = '0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10';
+const OTHER_SAVE_ID = '7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f';
 const VERSION = '3/L4kqtJlcpXroDTDmJ+rmSpXd3dIbrHY.MTRCxf3vjVBH40Nr8X8gdRQBpUMLUo';
 const OTHER_VERSION = 'nc1Y9XTHvCvlLFtEZEoFsMWsp.LQ2cnI';
 /** Written out rather than escaped inline, so the character under test is unmistakable. */
@@ -171,7 +177,18 @@ describe('a key in the games bucket', () => {
             `${GAME_ID}/assets/art/tile.png`,
         );
         expect(manifestKey(GAME_ID as never, 7)).toBe(`${GAME_ID}/manifests/7.json`);
-        expect(buildPrefix(GAME_ID as never, 7)).toBe(`${GAME_ID}/build/7/`);
+        expect(buildPrefix(GAME_ID as never, TASK_ID as never)).toBe(
+            `${GAME_ID}/build/${TASK_ID}/`,
+        );
+    });
+
+    it('names a manifest by its save too, so two saves of one revision never share a key', () => {
+        expect(manifestKey(GAME_ID as never, 7, SAVE_ID)).toBe(
+            `${GAME_ID}/manifests/7-${SAVE_ID}.json`,
+        );
+        expect(manifestKey(GAME_ID as never, 7, SAVE_ID)).not.toBe(
+            manifestKey(GAME_ID as never, 7, OTHER_SAVE_ID),
+        );
     });
 });
 
@@ -182,7 +199,39 @@ describe('an asset upload', () => {
             url: 'https://games.example/abc?X-Amz-Signature=deadbeef',
             expiresAt: '2026-09-18T12:05:00.000Z',
             maxBytes: 32 * 1024 * 1024,
+            headers: { 'content-type': 'image/png' },
         };
         expect(AssetUpload.parse(ticket)).toEqual(ticket);
+    });
+
+    it('is asked for with its length, because the presign signs it', () => {
+        expect(
+            AssetUploadRequest.safeParse({ path: 'art/tile.png', contentType: 'image/png' })
+                .success,
+        ).toBe(false);
+        expect(
+            AssetUploadRequest.safeParse({
+                path: 'art/tile.png',
+                contentType: 'image/png',
+                byteLength: MAX_ASSET_BYTES + 1,
+            }).success,
+        ).toBe(false);
+    });
+
+    it('refuses a type the edge would serve as a page', () => {
+        expect(
+            AssetUploadRequest.safeParse({
+                path: 'art/tile.png',
+                contentType: 'text/html',
+                byteLength: 10,
+            }).success,
+        ).toBe(false);
+    });
+
+    // A lifecycle rule matches a key's front only, so the upload class leads rather than the game.
+    it('waits under a prefix of its own, outside every one the edge reads', () => {
+        expect(uploadKey(GAME_ID as never, 'art/tile.png' as never)).toBe(
+            `uploads/${GAME_ID}/art/tile.png`,
+        );
     });
 });

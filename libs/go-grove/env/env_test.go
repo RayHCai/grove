@@ -1,6 +1,7 @@
 package env
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -304,5 +305,22 @@ func TestOptionalURL(t *testing.T) {
 	r.OptionalURL("BAD")
 	if r.Err() == nil {
 		t.Error("a relative url was accepted")
+	}
+}
+
+// A variable a service parses itself is still one problem in the one report.
+func TestRefuseJoinsTheReport(t *testing.T) {
+	r := FromMap(map[string]string{"KEYS": "not keys"})
+	r.Required("MISSING")
+	r.Refuse("KEYS", errors.New("every key must be 32 bytes"))
+
+	err := r.Err()
+	if err == nil {
+		t.Fatal("got nil, want both problems")
+	}
+	for _, want := range []string{"MISSING is required", "KEYS: every key must be 32 bytes"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err %q does not mention %q", err, want)
+		}
 	}
 }

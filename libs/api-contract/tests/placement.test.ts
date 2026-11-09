@@ -85,6 +85,9 @@ describe('a heartbeat', () => {
             hostId: HOST_ID,
             region: 'us-east-1',
             agentPort: 4004,
+            playerPort: 443,
+            tls: true,
+            ready: true,
             capacity: { ...capacity, runningInstances: 0 },
             instances: [],
             incarnation: INCARNATION,
@@ -100,6 +103,9 @@ describe('a heartbeat', () => {
             hostId: HOST_ID,
             region: 'us-east-1',
             agentPort: 4004,
+            playerPort: 443,
+            tls: true,
+            ready: true,
             capacity,
             instances: [report],
             incarnation: INCARNATION,
@@ -110,11 +116,42 @@ describe('a heartbeat', () => {
         expect(HostHeartbeat.safeParse(withoutAgentPort).success).toBe(false);
     });
 
+    it('names its public host the way a url can carry it', () => {
+        const beat = {
+            hostId: HOST_ID,
+            region: 'us-east-1',
+            agentPort: 4004,
+            playerPort: 443,
+            tls: true,
+            ready: true,
+            capacity,
+            instances: [],
+            incarnation: INCARNATION,
+            reportedAt: '2026-09-05T12:00:00.000Z',
+        };
+        for (const host of [`${HOST_ID}.fleet.grove.example`, '203.0.113.7', '2001:db8::7']) {
+            expect(HostHeartbeat.safeParse({ ...beat, publicHost: host }).success).toBe(true);
+        }
+        for (const host of [
+            'fleet.grove.example.',
+            '1.2.3.999',
+            '[2001:db8::7]',
+            'box:443',
+            '-box',
+            '',
+        ]) {
+            expect(HostHeartbeat.safeParse({ ...beat, publicHost: host }).success).toBe(false);
+        }
+    });
+
     it('rejects an instance in a state the fleet has no handling for', () => {
         const beat = {
             hostId: HOST_ID,
             region: 'us-east-1',
             agentPort: 4004,
+            playerPort: 443,
+            tls: true,
+            ready: true,
             capacity,
             instances: [{ ...report, state: 'paused' }],
             incarnation: INCARNATION,

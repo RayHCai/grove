@@ -10,7 +10,8 @@ struct for and re-marshals it, comparing bytes; the vitest suite parses every on
 zod schema and compares the value, and holds `manifest.json` to the bytes `encodeManifest` writes. A member added to one copy
 and not the other fails whichever suite the fixture no longer describes.
 
-`session-token.json` holds tokens `signSessionToken` actually produced, with the payload each
-covers spelled out. The signer is re-run against them on this side and the Go and Rust verifiers
-check them on theirs, so a base64 variant, a key-order difference or a change to the signing input
-fails in all three languages at once.
+`session-token.json` holds join tickets `signTicket` actually produced under one seed, with the
+payload each covers spelled out and the verdict a verifier owes it. The signer is re-run against
+them on this side, the Go codec reproduces them byte for byte and the Rust verifier checks them, so
+a base64 variant, a key-order difference or a change to the signing input fails in all three
+languages at once.

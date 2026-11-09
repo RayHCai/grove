@@ -6,16 +6,15 @@ import { createHmac, randomBytes, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
     SessionTokenClaims,
-    signSessionToken,
+    TokenAudience,
     signTicket,
+    ticketId,
     ticketPublicKey,
     ticketSigningKey,
     ticketVerifyKey,
-    verifySessionToken,
     verifyTicket,
 } from '../src/session-token.js';
 
-const SECRET = 'a-secret-at-least-thirty-two-characters';
 const GAME_ID = '11111111-1111-4111-8111-111111111111';
 const SESSION_ID = '22222222-2222-4222-8222-222222222222';
 const PLAYER_ID = '33333333-3333-4333-8333-333333333333';
@@ -38,8 +37,6 @@ const storeBearer = SessionTokenClaims.parse({
     exp: 2000,
 });
 
-const purge = SessionTokenClaims.parse({ ...storeBearer, aud: 'game-manager-admin' });
-
 /** The two halves, typed as the pair the format fixes rather than as an open-ended split. */
 const segments = (token: string): [payload: string, signature: string] => {
     const dot = token.indexOf('.');
@@ -48,22 +45,21 @@ const segments = (token: string): [payload: string, signature: string] => {
 
 const b64url = (text: string): string => Buffer.from(text, 'utf8').toString('base64url');
 
-/** Signs any raw segment, so a payload no signer would mint reaches the checks past the hmac. */
-const mint = (payload: string): string =>
-    `${payload}.${createHmac('sha256', SECRET).update(payload).digest('base64url')}`;
-
+/** Signs any raw segment, so a payload no signer would mint reaches the checks after it. */
 const mintTicket = (payload: string): string =>
     `${payload}.${sign(null, Buffer.from(payload, 'ascii'), SIGNING_KEY).toString('base64url')}`;
 
 describe('the claim set', () => {
-    it('requires a player on a join ticket and refuses one on either store audience', () => {
+    it('requires a player on a join ticket and refuses one on a store bearer', () => {
         const { playerId: _playerId, ...noPlayer } = ticket;
         expect(SessionTokenClaims.safeParse(noPlayer).success).toBe(false);
-        for (const claims of [storeBearer, purge]) {
-            expect(SessionTokenClaims.safeParse({ ...claims, playerId: PLAYER_ID }).success).toBe(
-                false,
-            );
-        }
+        expect(SessionTokenClaims.safeParse({ ...storeBearer, playerId: PLAYER_ID }).success).toBe(
+            false,
+        );
+    });
+
+    it('names the two services a token is presented to, and nothing a verifier refuses', () => {
+        expect(TokenAudience.options).toEqual(['game-instance', 'game-manager']);
     });
 });
 
@@ -75,11 +71,33 @@ describe('signing', () => {
         );
     });
 
-    it('omits playerId on a store bearer rather than writing it null', () => {
-        const [payload] = segments(signSessionToken(storeBearer, SECRET));
+    it('writes a ticket id last, after every member a verifier already decoded', () => {
+        const jti = ticketId();
+        const [payload] = segments(signTicket({ ...ticket, jti }, SIGNING_KEY));
         expect(Buffer.from(payload, 'base64url').toString('utf8')).toBe(
-            `{"gameId":"${GAME_ID}","sessionId":"${SESSION_ID}","aud":"game-manager","exp":2000}`,
+            `{"gameId":"${GAME_ID}","sessionId":"${SESSION_ID}","playerId":"${PLAYER_ID}","aud":"game-instance","exp":2000,"jti":"${jti}"}`,
         );
+        expect(verifyTicket(signTicket({ ...ticket, jti }, SIGNING_KEY), VERIFY_KEY, 1000)).toEqual(
+            {
+                ok: true,
+                claims: { ...ticket, jti },
+            },
+        );
+    });
+
+    // Ed25519 is deterministic, so without an id of their own two tickets for one join are one.
+    it('mints two tickets for one join in one second that differ, which a box refusing reuse needs', () => {
+        const first = signTicket({ ...ticket, jti: ticketId() }, SIGNING_KEY);
+        const second = signTicket({ ...ticket, jti: ticketId() }, SIGNING_KEY);
+        expect(first).not.toBe(second);
+        expect(ticketId()).toMatch(/^[A-Za-z0-9_-]{22}$/u);
+    });
+
+    it('puts an id on a join ticket alone', () => {
+        expect(SessionTokenClaims.safeParse({ ...storeBearer, jti: ticketId() }).success).toBe(
+            false,
+        );
+        expect(SessionTokenClaims.safeParse({ ...ticket, jti: 'short' }).success).toBe(false);
     });
 
     it('signs the same bytes whatever order the caller built its claims in', () => {
@@ -93,11 +111,8 @@ describe('signing', () => {
         expect(signTicket(shuffled, SIGNING_KEY)).toBe(signTicket(ticket, SIGNING_KEY));
     });
 
-    it('refuses signTicket for a non-game-instance audience', () => {
-        // signSessionToken still mints every audience, including game-instance: see the note on
-        // HmacAudience in session-token.ts. signTicket is the one exclusive to game-instance.
+    it('refuses to sign a store bearer, which server-manager mints under its own key', () => {
         expect(() => signTicket(storeBearer, SIGNING_KEY)).toThrow();
-        expect(() => signTicket(purge, SIGNING_KEY)).toThrow();
     });
 
     it('refuses a key that is not 32 bytes of unpadded base64url', () => {
@@ -105,127 +120,6 @@ describe('signing', () => {
             expect(() => ticketSigningKey(spelling)).toThrow();
             expect(() => ticketVerifyKey(spelling)).toThrow();
         }
-    });
-});
-
-describe('verifying a store credential', () => {
-    const { exp: _exp, ...noExp } = storeBearer;
-
-    const signedButRefused: Array<[what: string, token: string]> = [
-        ['a payload that is not base64url', mint('!!!!')],
-        [
-            'a padded payload, which the decoder would otherwise forgive',
-            mint(`${b64url(JSON.stringify(storeBearer))}=`),
-        ],
-        ['a payload that is not JSON', mint(b64url('not json'))],
-        ['a bearer with no exp', mint(b64url(JSON.stringify(noExp)))],
-        [
-            'a store bearer naming a player',
-            mint(b64url(JSON.stringify({ ...storeBearer, playerId: PLAYER_ID }))),
-        ],
-    ];
-
-    it('accepts a token it minted, for the audience it named', () => {
-        const result = verifySessionToken(
-            signSessionToken(storeBearer, SECRET),
-            SECRET,
-            1000,
-            'game-manager',
-        );
-        expect(result).toEqual({ ok: true, claims: storeBearer });
-    });
-
-    // A claim a newer signer added must not take a verifier offline at the deploy that adds it.
-    it('accepts a claim it has never heard of', () => {
-        const widened = JSON.stringify({ ...storeBearer, region: 'us-east-1' });
-        expect(verifySessionToken(mint(b64url(widened)), SECRET, 1000, 'game-manager')).toEqual({
-            ok: true,
-            claims: storeBearer,
-        });
-    });
-
-    it('refuses a purge credential presented to a session route, and the reverse', () => {
-        expect(
-            verifySessionToken(signSessionToken(purge, SECRET), SECRET, 1000, 'game-manager'),
-        ).toEqual({ ok: false, reason: 'wrong_audience' });
-        expect(
-            verifySessionToken(
-                signSessionToken(storeBearer, SECRET),
-                SECRET,
-                1000,
-                'game-manager-admin',
-            ),
-        ).toEqual({ ok: false, reason: 'wrong_audience' });
-    });
-
-    it('refuses a join ticket, whichever scheme signed it', () => {
-        expect(
-            verifySessionToken(signTicket(ticket, SIGNING_KEY), SECRET, 1000, 'game-manager'),
-        ).toEqual({ ok: false, reason: 'bad_signature' });
-        expect(
-            verifySessionToken(mint(b64url(JSON.stringify(ticket))), SECRET, 1000, 'game-manager'),
-        ).toEqual({ ok: false, reason: 'wrong_audience' });
-    });
-
-    it('refuses another signer, and a payload edited after signing', () => {
-        expect(
-            verifySessionToken(
-                signSessionToken(storeBearer, 'another-secret-entirely'),
-                SECRET,
-                1000,
-                'game-manager',
-            ),
-        ).toEqual({ ok: false, reason: 'bad_signature' });
-
-        const [, signature] = segments(signSessionToken(storeBearer, SECRET));
-        const forged = b64url(JSON.stringify({ ...storeBearer, gameId: PLAYER_ID }));
-        expect(verifySessionToken(`${forged}.${signature}`, SECRET, 1000, 'game-manager')).toEqual({
-            ok: false,
-            reason: 'bad_signature',
-        });
-    });
-
-    it('expires at the second the claim names, not after it', () => {
-        const token = signSessionToken(storeBearer, SECRET);
-        expect(verifySessionToken(token, SECRET, 1999, 'game-manager').ok).toBe(true);
-        expect(verifySessionToken(token, SECRET, 2000, 'game-manager')).toEqual({
-            ok: false,
-            reason: 'expired',
-        });
-    });
-
-    it('refuses a signature that is padded or otherwise not canonical base64url', () => {
-        const [payload, signature] = segments(signSessionToken(storeBearer, SECRET));
-        for (const spelling of [`${signature}=`, `${signature}==`, `${signature.slice(0, -1)}+`]) {
-            expect(
-                verifySessionToken(`${payload}.${spelling}`, SECRET, 1000, 'game-manager'),
-            ).toEqual({ ok: false, reason: 'bad_signature' });
-        }
-    });
-
-    // Reaches the length guard that keeps `timingSafeEqual` from throwing out of a verifier.
-    it('refuses a canonical signature of the wrong length', () => {
-        const [payload] = segments(signSessionToken(storeBearer, SECRET));
-        expect(verifySessionToken(`${payload}.YWJj`, SECRET, 1000, 'game-manager')).toEqual({
-            ok: false,
-            reason: 'bad_signature',
-        });
-    });
-
-    it('refuses a token with no signature at all', () => {
-        for (const spelling of ['no-dot-here', 'payload.', '.signature']) {
-            expect(verifySessionToken(spelling, SECRET, 1000, 'game-manager')).toEqual({
-                ok: false,
-                reason: 'malformed',
-            });
-        }
-    });
-
-    it.each(signedButRefused)('refuses %s, signature and all', (_what, token) => {
-        expect(verifySessionToken(token, SECRET, 1000, 'game-manager')).toEqual({
-            ok: false,
-            reason: 'malformed',
-        });
     });
 });
 
@@ -237,8 +131,33 @@ describe('verifying a join ticket', () => {
         });
     });
 
-    it('refuses a ticket under HMAC, even one signed with the store secret', () => {
-        expect(verifyTicket(mint(b64url(JSON.stringify(ticket))), VERIFY_KEY, 1000)).toEqual({
+    // A verifier holds the next key before the signer switches to it, so both verify at once.
+    it('accepts a ticket any one of its keys signed, in whichever order they are held', () => {
+        const next = ticketSigningKey(randomBytes(32).toString('base64url'));
+        const keys = [VERIFY_KEY, ticketVerifyKey(ticketPublicKey(next))];
+        expect(verifyTicket(signTicket(ticket, SIGNING_KEY), keys, 1000).ok).toBe(true);
+        expect(verifyTicket(signTicket(ticket, next), keys, 1000).ok).toBe(true);
+        expect(verifyTicket(signTicket(ticket, next), keys.toReversed(), 1000).ok).toBe(true);
+    });
+
+    it('refuses a ticket none of its keys signed, and an empty key list outright', () => {
+        const stranger = ticketSigningKey(randomBytes(32).toString('base64url'));
+        expect(verifyTicket(signTicket(ticket, stranger), [VERIFY_KEY], 1000)).toEqual({
+            ok: false,
+            reason: 'bad_signature',
+        });
+        expect(verifyTicket(signTicket(ticket, SIGNING_KEY), [], 1000)).toEqual({
+            ok: false,
+            reason: 'bad_signature',
+        });
+    });
+
+    it('refuses a ticket under HMAC, whatever secret signed it', () => {
+        const payload = b64url(JSON.stringify(ticket));
+        const hmac = createHmac('sha256', 'a-secret-at-least-thirty-two-characters')
+            .update(payload)
+            .digest('base64url');
+        expect(verifyTicket(`${payload}.${hmac}`, VERIFY_KEY, 1000)).toEqual({
             ok: false,
             reason: 'bad_signature',
         });
@@ -247,9 +166,15 @@ describe('verifying a join ticket', () => {
     it('refuses a store audience the signing key was made to sign', () => {
         expect(
             verifyTicket(mintTicket(b64url(JSON.stringify(storeBearer))), VERIFY_KEY, 1000),
-        ).toEqual({
-            ok: false,
-            reason: 'wrong_audience',
+        ).toEqual({ ok: false, reason: 'wrong_audience' });
+    });
+
+    // A claim a newer signer added must not take a verifier offline at the deploy that adds it.
+    it('accepts a claim it has never heard of', () => {
+        const widened = b64url(JSON.stringify({ ...ticket, region: 'us-east-1' }));
+        expect(verifyTicket(mintTicket(widened), VERIFY_KEY, 1000)).toEqual({
+            ok: true,
+            claims: ticket,
         });
     });
 
@@ -281,11 +206,31 @@ describe('verifying a join ticket', () => {
         ).toEqual({ ok: false, reason: 'malformed' });
     });
 
-    it('refuses a signature that is not canonical base64url', () => {
+    it('refuses a payload that is not base64url, or not JSON, signature and all', () => {
+        for (const payload of ['!!!!', `${b64url(JSON.stringify(ticket))}=`, b64url('not json')]) {
+            expect(verifyTicket(mintTicket(payload), VERIFY_KEY, 1000)).toEqual({
+                ok: false,
+                reason: 'malformed',
+            });
+        }
+    });
+
+    it('refuses a signature that is not canonical base64url, or not 64 bytes', () => {
         const [payload, signature] = segments(signTicket(ticket, SIGNING_KEY));
-        expect(verifyTicket(`${payload}.${signature}=`, VERIFY_KEY, 1000)).toEqual({
-            ok: false,
-            reason: 'bad_signature',
-        });
+        for (const spelling of [`${signature}=`, `${signature.slice(0, -1)}+`, 'YWJj']) {
+            expect(verifyTicket(`${payload}.${spelling}`, VERIFY_KEY, 1000)).toEqual({
+                ok: false,
+                reason: 'bad_signature',
+            });
+        }
+    });
+
+    it('refuses a token with no signature at all', () => {
+        for (const spelling of ['no-dot-here', 'payload.', '.signature']) {
+            expect(verifyTicket(spelling, VERIFY_KEY, 1000)).toEqual({
+                ok: false,
+                reason: 'malformed',
+            });
+        }
     });
 });

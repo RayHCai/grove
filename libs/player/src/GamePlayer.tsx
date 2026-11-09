@@ -17,7 +17,8 @@ import type { ScriptRegistry } from '@platform/scripting';
  * upgrade, so its refusal is an HTTP status that never becomes a reject envelope, and a socket that
  * never opened produces no envelope at all.
  */
-export type RefusalReason = 'version' | 'full' | 'identity' | 'ticket' | 'bundle' | 'unreachable';
+export type RefusalReason =
+    'version' | 'full' | 'identity' | 'ticket' | 'bundle' | 'renderer' | 'unreachable';
 
 /** What this client claims to be running, which the authority compares before it admits anyone. */
 export interface GameProject {
@@ -174,7 +175,11 @@ export function GamePlayer({
         // closed through the signal rather than by a flag the dial cannot see.
         const abort = new AbortController();
         const renderer: IRenderer = current.createRenderer();
+        const local = current.authority.kind === 'local';
         let session: ClientInstance | null = null;
+        // Built before the session that takes it and listening from then on, so whichever of the
+        // two outlives the other is the one that has to let it go.
+        let device: ReturnType<typeof createCanvasInputDevice> | undefined;
         let link: LocalLink | undefined;
         // Whether `init()` has settled. Destroying before it has no-ops and init then appends its
         // canvas anyway, leaking a live WebGL context, which StrictMode hits every mount.
@@ -189,30 +194,50 @@ export function GamePlayer({
             }
         };
 
+        const refuse = (reason: RefusalReason, message: string): void => {
+            // An abandoned mount is this component going away, not a failure to show anyone.
+            if (abort.signal.aborted) return;
+            device?.dispose();
+            setState('failed');
+            refusedRef.current?.(reason, message);
+        };
+
         void (async () => {
             try {
                 await renderer.init({ container, design: current.design, background });
-                initialized = true;
-                if (abort.signal.aborted) {
-                    renderer.destroy();
-                    return;
-                }
+            } catch (cause) {
+                // A remote refusal is read by a player, who is shown no cause: it is the browser's
+                // to report, and nothing they can act on but a different browser.
+                refuse(
+                    'renderer',
+                    local
+                        ? `the stage could not start: ${causeOf(cause)}`
+                        : 'this browser could not start the game',
+                );
+                return;
+            }
+            initialized = true;
+            if (abort.signal.aborted) {
+                renderer.destroy();
+                return;
+            }
 
-                const seams = {
-                    renderer,
-                    frames: createRafFrameSource(),
-                    device: createCanvasInputDevice({ container, renderer }),
-                    clock: createPerformanceClock(),
-                    bindings: DEFAULT_MOVE_BINDINGS,
-                    project: current.project,
-                    name,
-                    // Taken as an option rather than subscribed afterwards: a session joins as it
-                    // is started, so a listener attached to what that hands back would already
-                    // have missed one that settled on its first frame.
-                    onState,
-                };
+            device = createCanvasInputDevice({ container, renderer });
+            const seams = {
+                renderer,
+                frames: createRafFrameSource(),
+                device,
+                clock: createPerformanceClock(),
+                bindings: DEFAULT_MOVE_BINDINGS,
+                project: current.project,
+                name,
+                // An option rather than a later subscription: a session can settle on its first
+                // frame, before a listener attached to what `start()` hands back exists.
+                onState,
+            };
 
-                if (current.authority.kind === 'local') {
+            if (current.authority.kind === 'local') {
+                try {
                     link = current.authority.open();
                     // Built and started here rather than dialled: there is no socket to open, and
                     // the pair only moves when `pump` turns it.
@@ -224,9 +249,17 @@ export function GamePlayer({
                         // page declares no bundle, and the classes are already loaded.
                         scripts: current.authority.scripts,
                     }).start();
-                    return;
+                } catch (cause) {
+                    // The reader is the creator whose world this is, so the cause is theirs to see.
+                    refuse(
+                        'unreachable',
+                        `the world in this page refused the join: ${causeOf(cause)}`,
+                    );
                 }
+                return;
+            }
 
+            try {
                 session = await current.connect({
                     ...seams,
                     url: current.authority.serverUrl,
@@ -237,22 +270,23 @@ export function GamePlayer({
                     // What the session fetches the creator's code with, once the welcome names it.
                     bundle: createBrowserBundleSource(),
                 });
-            } catch (cause) {
-                // An abandoned dial is this component going away, not a failure to show anyone.
-                if (abort.signal.aborted) return;
-                setState('failed');
-                refusedRef.current?.(
-                    'unreachable',
-                    cause instanceof Error ? cause.message : String(cause),
-                );
+            } catch {
+                // A browser cannot tell an upgrade refused for its ticket from a box it could not
+                // reach, and a new join from Grove is the fix for both; the cause names the box.
+                refuse('ticket', 'this link may have expired: start the game again from Grove');
+                return;
             }
+            // `close()` is idempotent, so a dial that also honoured the abort is no different.
+            if (abort.signal.aborted) session.close();
         })();
 
         return () => {
             // Abandons a dial still in flight and closes a session that resolved into this
             // teardown; `close()` is idempotent, so both running is no different from one.
             abort.abort();
-            session?.close();
+            // A session disposes the device it took; one that never took it is this mount's.
+            if (session === null) device?.dispose();
+            else session.close();
             // After the session, so the authority outlives the peer that is leaving it.
             link?.close?.();
             if (initialized) renderer.destroy();
@@ -260,6 +294,10 @@ export function GamePlayer({
     }, [serverUrl, ticket, open, scripts, projectId, projectHash, name, width, height, background]);
 
     return <div ref={stage} className="grove-stage" data-state={state} />;
+}
+
+function causeOf(cause: unknown): string {
+    return cause instanceof Error ? cause.message : String(cause);
 }
 
 /** The failure as a person can act on it: what went wrong, and a line that says so. */

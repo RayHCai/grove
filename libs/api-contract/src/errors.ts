@@ -7,6 +7,8 @@ export const ErrorBody = z.object({
         'forbidden',
         'not_found',
         'conflict',
+        // Apart from `forbidden`, because a stale token is fixed by re-reading the session.
+        'csrf_invalid',
         'rate_limited',
         'invalid_request',
         'internal',

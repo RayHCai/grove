@@ -7,7 +7,8 @@
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { beforeAll, describe, expect, it } from 'vitest';
+import type { Root } from 'react-dom/client';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ConnectOptions } from '@platform/glue/client';
 import type { IRenderer } from '@platform/renderer';
 import { GamePlayer, ticketProtocol } from '../src/GamePlayer.js';
@@ -17,6 +18,40 @@ beforeAll(() => {
     // React refuses to run `act` without it, and says so at the first render rather than at setup.
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
+
+// A root left mounted keeps its session, its device and its listeners, and answers for whichever
+// case runs next.
+const roots: Root[] = [];
+
+function rootIn(host: HTMLElement): Root {
+    const root = createRoot(host);
+    roots.push(root);
+    return root;
+}
+
+afterEach(async () => {
+    await act(async () => {
+        for (const root of roots.splice(0)) root.unmount();
+    });
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+});
+
+/** How many key listeners are on the window right now, which is what an input device holds. */
+function keyListeners(): () => number {
+    let live = 0;
+    const add = window.addEventListener.bind(window);
+    const remove = window.removeEventListener.bind(window);
+    vi.spyOn(window, 'addEventListener').mockImplementation((type, listener, options) => {
+        if (type === 'keydown') live += 1;
+        add(type, listener, options);
+    });
+    vi.spyOn(window, 'removeEventListener').mockImplementation((type, listener, options) => {
+        if (type === 'keydown') live -= 1;
+        remove(type, listener, options);
+    });
+    return () => live;
+}
 
 const PROJECT = { projectId: 'leaf-harvest', projectHash: 'a'.repeat(64) };
 const DESIGN = { width: 960, height: 540 };
@@ -52,7 +87,7 @@ function fakeConnect(script: (opts: ConnectOptions) => void = () => undefined) {
 async function mount(props: Partial<Parameters<typeof GamePlayer>[0]> = {}) {
     const host = document.createElement('div');
     document.body.append(host);
-    const root = createRoot(host);
+    const root = rootIn(host);
     const renderer = fakeRenderer();
     const dial = props.connect === undefined ? fakeConnect() : undefined;
 
@@ -150,7 +185,7 @@ describe('the game surface', () => {
         document.body.append(host);
 
         await act(async () => {
-            createRoot(host).render(
+            rootIn(host).render(
                 <GamePlayer
                     authority={{ kind: 'remote', serverUrl: 'wss://box.example/play', ticket: 't' }}
                     project={PROJECT}
@@ -193,7 +228,7 @@ describe('the game surface', () => {
         const renderer = fakeRenderer();
         const host = document.createElement('div');
         document.body.append(host);
-        const root = createRoot(host);
+        const root = rootIn(host);
         // What a host does on ready: rerender with fresh literals, which must not redial a ticket
         // the first dial already spent.
         const render = (onReady?: () => void) =>
@@ -228,7 +263,7 @@ describe('the game surface', () => {
         const dial = fakeConnect();
         const host = document.createElement('div');
         document.body.append(host);
-        const root = createRoot(host);
+        const root = rootIn(host);
         const render = (ticket: string) =>
             root.render(
                 <GamePlayer
@@ -289,16 +324,75 @@ describe('the game surface', () => {
         }
     });
 
-    it('reports a dial that never connected rather than throwing into the mount', async () => {
+    it('reports a dial that never connected as a link to start again, never as its cause', async () => {
         const seen: Array<[RefusalReason, string]> = [];
         await mount({
             onRefused: (why, text) => seen.push([why, text]),
+            connect: (async () => {
+                throw new Error('The socket for wss://box.example/play errored before it opened.');
+            }) as never,
+        });
+
+        // The browser cannot say whether the ticket was refused or the box never answered, and
+        // the cause names the box, which no player is shown.
+        expect(seen).toEqual([
+            ['ticket', 'this link may have expired: start the game again from Grove'],
+        ]);
+    });
+
+    it('lets go of the input device a dial that failed never handed to a session', async () => {
+        const live = keyListeners();
+        await mount({
             connect: (async () => {
                 throw new Error('the socket was refused');
             }) as never,
         });
 
-        expect(seen[0]).toEqual(['unreachable', 'the socket was refused']);
+        // Released at the failure, not at the unmount: the page is still up showing the refusal.
+        expect(live()).toBe(0);
+    });
+
+    it('lets go of the input device when it is torn down mid-dial', async () => {
+        const live = keyListeners();
+        const { root } = await mount({
+            connect: (() => new Promise(() => undefined)) as never,
+        });
+        expect(live()).toBe(1);
+
+        await act(async () => {
+            root.unmount();
+        });
+        expect(live()).toBe(0);
+    });
+
+    it('closes a session that a dial resolved after the mount was torn down', async () => {
+        let resolve!: (session: unknown) => void;
+        let closed = 0;
+        const { root } = await mount({
+            connect: (() => new Promise((settle) => (resolve = settle))) as never,
+        });
+
+        await act(async () => {
+            root.unmount();
+        });
+        await act(async () => {
+            resolve({ close: () => (closed += 1) });
+        });
+        expect(closed).toBe(1);
+    });
+
+    it('says a renderer that would not start is the browser, and names no cause to a player', async () => {
+        const seen: Array<[RefusalReason, string]> = [];
+        const renderer = fakeRenderer();
+        (renderer as unknown as { init: () => Promise<void> }).init = async () => {
+            throw new Error('WebGL2 is not available: GPU process crashed at 0x00ff');
+        };
+        await mount({
+            createRenderer: () => renderer,
+            onRefused: (why, text) => seen.push([why, text]),
+        });
+
+        expect(seen).toEqual([['renderer', 'this browser could not start the game']]);
     });
 
     it('closes the session and the renderer on the way out, and empties its host', async () => {
@@ -321,7 +415,7 @@ describe('the game surface', () => {
 
         const host = document.createElement('div');
         document.body.append(host);
-        const root = createRoot(host);
+        const root = rootIn(host);
 
         await act(async () => {
             root.render(
@@ -382,7 +476,7 @@ describe('a world in this page', () => {
     async function mountLocal(link = fakeLink()) {
         const host = document.createElement('div');
         document.body.append(host);
-        const root = createRoot(host);
+        const root = rootIn(host);
         const renderer = fakeRenderer();
 
         await act(async () => {
@@ -413,6 +507,41 @@ describe('a world in this page', () => {
 
         expect(renderer.inits).toHaveLength(1);
         expect(renderer.inits[0]).toMatchObject({ design: DESIGN });
+    });
+
+    it('tells the creator why the world in this page refused the join', async () => {
+        const seen: Array<[RefusalReason, string]> = [];
+        const live = keyListeners();
+        const host = document.createElement('div');
+        document.body.append(host);
+
+        await act(async () => {
+            rootIn(host).render(
+                <GamePlayer
+                    authority={{
+                        kind: 'local',
+                        open: () => {
+                            throw new Error('no script is registered as src/player#Rules');
+                        },
+                        scripts,
+                    }}
+                    project={PROJECT}
+                    name="Ray"
+                    design={DESIGN}
+                    createRenderer={fakeRenderer}
+                    onRefused={(why, text) => seen.push([why, text])}
+                />,
+            );
+        });
+
+        // The reader of a local refusal is the creator whose world it is, so the cause is theirs.
+        expect(seen).toEqual([
+            [
+                'unreachable',
+                'the world in this page refused the join: no script is registered as src/player#Rules',
+            ],
+        ]);
+        expect(live()).toBe(0);
     });
 
     it('ends the authority after the session, not before it', async () => {

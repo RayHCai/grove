@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BuildManifest, WorkspacePath } from './workspace.js';
+import { AssetMediaType, BuildManifest, MAX_ASSET_BYTES, WorkspacePath } from './workspace.js';
 import { GameId, TaskId } from './ids.js';
 
 /**
@@ -35,6 +35,9 @@ export const BuildDiagnostic = z.object({
 });
 export type BuildDiagnostic = z.infer<typeof BuildDiagnostic>;
 
+/** What a settled task's `message` may reach: a summary a creator reads, never a compiler's log. */
+export const MAX_TASK_MESSAGE = 1024;
+
 /**
  * What a worker has to say about the task it settled.
  *
@@ -47,17 +50,30 @@ export const TaskDetail = z.object({
     /**
      * Present only on a build that succeeded; nothing else produces one.
      *
-     * The same bytes the build wrote to `build/<revision>/build.json`, echoed here because the
-     * allocator reads it on the path of every join and a bucket round trip does not belong there.
-     * The file is written first, so a settled build always has one to recover from.
+     * The allocator reads it on every join, so the API refuses one naming an output it did not
+     * store for that task.
      */
     build: BuildManifest.optional(),
     fileCount: z.int().nonnegative().optional(),
     byteLength: z.int().nonnegative().optional(),
     /** A failure of the fleet rather than of the source, in words a creator can read. */
-    message: z.string().max(1024).optional(),
+    message: z.string().max(MAX_TASK_MESSAGE).optional(),
+    /** The version an inspected upload was copied to under `assets/`, on an upload that passed. */
+    versionId: z.string().min(1).max(1024).optional(),
 });
 export type TaskDetail = z.infer<typeof TaskDetail>;
+
+/** A claimed upload's work, presigned so the bucket's credentials never leave the API. */
+export const AssetInspection = z.object({
+    /** A GET of the quarantined bytes. */
+    source: z.url(),
+    /** A PUT to the edge-readable key, signed for `contentType`. */
+    destination: z.url(),
+    contentType: AssetMediaType,
+    byteLength: z.int().positive().max(MAX_ASSET_BYTES),
+    expiresAt: z.iso.datetime(),
+});
+export type AssetInspection = z.infer<typeof AssetInspection>;
 
 /**
  * One piece of queued work, as the creator who asked for it and the worker that claimed it see it.
@@ -80,9 +96,14 @@ export const Task = z
         updatedAt: z.iso.datetime(),
         startedAt: z.iso.datetime().optional(),
         finishedAt: z.iso.datetime().optional(),
+        /** On the claim of an asset upload alone: the work it was claimed for. */
+        inspection: AssetInspection.optional(),
     })
     .refine((task) => (task.assetPath === undefined) === (task.kind !== 'ASSET_UPLOAD'), {
         error: 'only an asset upload names an asset, and it always does',
+    })
+    .refine((task) => task.inspection === undefined || task.kind === 'ASSET_UPLOAD', {
+        error: 'only an asset upload is inspected',
     });
 export type Task = z.infer<typeof Task>;
 

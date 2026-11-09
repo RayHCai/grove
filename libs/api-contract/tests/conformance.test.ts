@@ -28,16 +28,13 @@ import {
     PlacementRequest,
 } from '../src/placement.js';
 import {
-    type HmacAudience,
     SessionTokenClaims,
     type TokenFailure,
     type TokenResult,
-    signSessionToken,
     signTicket,
     ticketPublicKey,
     ticketSigningKey,
     ticketVerifyKey,
-    verifySessionToken,
     verifyTicket,
 } from '../src/session-token.js';
 import { Task, TaskStatusUpdate } from '../src/tasks.js';
@@ -69,6 +66,7 @@ const shapes: Array<[string, z.ZodType]> = [
     ['deployment.json', Deployment],
     ['task.json', Task],
     ['asset-task.json', Task],
+    ['asset-inspection.json', Task],
     ['task-status-update.json', TaskStatusUpdate],
     ['asset-status-update.json', TaskStatusUpdate],
     ['manifest.json', Manifest],
@@ -116,11 +114,8 @@ interface TokenCase {
 
 type Verdict = 'ok' | TokenFailure;
 
+/** The ticket section alone: a join ticket is the only token this package signs. */
 interface TokenVector {
-    secret: string;
-    storeBearer: TokenCase;
-    admin: TokenCase;
-    hmacRefused: Array<{ name: string; audience: HmacAudience; token: string; expect: Verdict }>;
     ticket: {
         seed: string;
         publicKey: string;
@@ -135,30 +130,7 @@ const payloadOf = (token: string): string =>
 const verdict = (result: TokenResult): Verdict => (result.ok ? 'ok' : result.reason);
 
 describe('the frozen token vectors', () => {
-    const vector = fixture('session-token.json') as TokenVector;
-    const { ticket } = vector;
-
-    it.each([
-        ['storeBearer', 'game-manager'],
-        ['admin', 'game-manager-admin'],
-    ] as const)('%s is what the HMAC signer produces', (which, audience) => {
-        const { claims, payload, token } = vector[which];
-        const parsed = SessionTokenClaims.parse(claims);
-
-        expect(signSessionToken(parsed, vector.secret)).toBe(token);
-        expect(payloadOf(token)).toBe(payload);
-        expect(verifySessionToken(token, vector.secret, 0, audience)).toEqual({
-            ok: true,
-            claims: parsed,
-        });
-    });
-
-    it.each(vector.hmacRefused.map((c) => [c.name, c] as const))(
-        'the HMAC verifier refuses %s',
-        (_name, { audience, token, expect: expected }) => {
-            expect(verdict(verifySessionToken(token, vector.secret, 0, audience))).toBe(expected);
-        },
-    );
+    const { ticket } = fixture('session-token.json') as TokenVector;
 
     it('pairs the seed with the public key a verifier is configured with', () => {
         expect(ticketPublicKey(ticketSigningKey(ticket.seed))).toBe(ticket.publicKey);
