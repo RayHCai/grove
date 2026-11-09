@@ -11,7 +11,7 @@ import {
     popValue,
     spawnX,
     stepLeaf,
-} from '../dist/scripts/templates/leaf/leaf.js';
+} from '../src/scripts/templates/leaf/leaf.js';
 import {
     AVATAR_HALF,
     BADGE_BONUS,

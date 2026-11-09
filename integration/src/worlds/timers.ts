@@ -22,6 +22,7 @@ export const SCRIPT_TICKER = 'ticker';
 
 export const TEMPLATE_TICKER = 'ticker';
 export const TAG_TICKER = 'ticker';
+export const TEMPLATE_GIFT = 'gift';
 
 /** One widget per timer verb: a press names the call, and the name is what the test reads back. */
 export const W = {
@@ -30,6 +31,7 @@ export const W = {
     armEvery: 'arm-every',
     stopEvery: 'stop-every',
     nap: 'nap',
+    napGift: 'nap-gift',
     armSub: 'arm-sub',
     killTicker: 'kill-ticker',
 } as const;
@@ -124,6 +126,13 @@ export class Clock extends ServerScript<Game> {
         this.napEnded = this.napEnded + 1;
     }
 
+    /** A module const past an await, which must resolve this world while a mirror shares the realm. */
+    @onPress(W.napGift)
+    async doNapGift(): Promise<void> {
+        await sleep(NAP_SECONDS);
+        game.spawn(TEMPLATE_GIFT, 40, 40);
+    }
+
     /** Three sub-tick-or-one-tick durations armed together, so one tick fires all three or none. */
     @onPress(W.armSub)
     doArmSub(): void {
@@ -172,14 +181,12 @@ export class Clock extends ServerScript<Game> {
 export class Ticker extends ServerScript<Entity> {
     @onStart
     async begin(): Promise<void> {
-        // Resolved before the await: the ambient runtime belongs to the pass, and a continuation
-        // that resumes between ticks has none to reach `game` through.
-        const clock = game.getScript(Clock);
         every(TICKER_SECONDS, () => {
-            clock?.countTicker();
+            game.getScript(Clock)?.countTicker();
         });
         await sleep(TICKER_NAP_SECONDS);
-        clock?.wakeTicker();
+        // Past the await on purpose: the continuation resumes in this world, not the last loaded.
+        game.getScript(Clock)?.wakeTicker();
     }
 }
 
@@ -206,6 +213,7 @@ export const TIMER_WORLD: World = defineWorld({
     templates: [
         sprite(TEMPLATE_AVATAR),
         sprite(TEMPLATE_TICKER, [attach(SCRIPT_TICKER)], 0xd6b48f),
+        sprite(TEMPLATE_GIFT),
     ],
     entities: [
         {

@@ -109,7 +109,7 @@ repairs. It listens for nothing on its own, which is what leaves `host.ts` a gap
 its one capability in, and what lets the session suite drive the same boot over a loopback pair.
 
 **`listenOn` is the deployment.** `src/server/main.ts` hands the booted instance to
-`@platform/glue/node`, which owns the listener, the transport it builds per socket, the id each
+`@platform/glue/server`, which owns the listener, the transport it builds per socket, the id each
 socket is accepted under, and the order the world and the socket are closed in. What is left in this
 app is the three things that are genuinely this deployment's: where it listens, where it saves
 (`fileKVStore` over the JSON file `GAME_STATE_FILE` names), and who it believes a socket is. That
@@ -122,8 +122,8 @@ the `projectHash` the handshake compares, so a tab left open across a `dev` rest
 
 **Two trees, one compiler.** `src/scripts` and `src/server` belong to `tsconfig.server.json` and are
 excluded from the browser's. They have to be: scripts are written with TC39 standard decorators, and
-**`tsc` is the only tool in this repo that lowers them**; Vite's oxc transform emits them verbatim
-and the runtime then refuses to parse the file. The browser therefore imports
+**Vite's oxc transform emits them verbatim**, so the runtime would refuse to parse the file. The
+browser therefore imports
 `dist/scripts/templates/avatar/runner.js` and `dist/scripts/screens/lobby.js`, never those sources.
 `dist/client` is Vite's own output and `emptyOutDir` empties whatever it is aimed at, which is why
 the scripts are not emitted there.

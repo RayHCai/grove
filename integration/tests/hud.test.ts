@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { HUDWidgetState } from '@platform/core';
 import type { Session, Tab } from './harness.js';
 import { newSession, openWorld, runtimeOf, SETTLE } from './harness.js';
-import { ASSET_DISC } from '../dist/world.js';
+import { ASSET_DISC } from '../src/world.js';
 import {
     B,
     BAG_OPEN,
@@ -21,7 +21,7 @@ import {
     SCREEN_DECK,
     TIMER_SECONDS,
     V,
-} from '../dist/worlds/hud.js';
+} from '../src/worlds/hud.js';
 
 const open = (): ReturnType<typeof openWorld> => openWorld(HUD_WORLD);
 

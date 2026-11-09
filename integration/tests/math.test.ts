@@ -14,7 +14,7 @@ import {
     WIDGET_COMPUTE,
     X,
     Y,
-} from '../dist/worlds/math.js';
+} from '../src/worlds/math.js';
 
 const open = (): ReturnType<typeof openWorld> => openWorld(MATH_WORLD);
 

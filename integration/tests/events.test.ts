@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
+import { MAX_INTERACTIONS_PER_FRAME } from '@platform/protocol';
 import type { Tab } from './harness.js';
 import {
     gameField,
@@ -16,7 +17,7 @@ import {
     SETTLE,
     transformIn,
 } from './harness.js';
-import { SEND_RATE, SIM_RATE } from '../dist/world.js';
+import { SEND_RATE, SIM_RATE } from '../src/world.js';
 import {
     ACTION_PULSE,
     CODE_GATE,
@@ -32,7 +33,7 @@ import {
     TEMPLATE_BEACON,
     W,
     WIDGET_ASK,
-} from '../dist/worlds/events.js';
+} from '../src/worlds/events.js';
 
 /** Ticks between broadcasts, which bounds how stale a tab's reading of a live counter is. */
 const SEND_INTERVAL = SIM_RATE / SEND_RATE;
@@ -259,6 +260,17 @@ describe('a widget press', () => {
 
         await press(session, tab, W.mark);
         expect(reading<string>(tab, S.presser)).toBe(me);
+    });
+
+    it('arrives every time when more presses land in one frame than one frame may carry', async () => {
+        const { session, tab } = await open();
+        const taps = MAX_INTERACTIONS_PER_FRAME * 2 + 3;
+        // One display frame's worth, which the authority would refuse whole past the cap.
+        for (let i = 0; i < taps; i++) session.press(tab, W.tap);
+        await session.step(SETTLE * 2);
+
+        expect(reading<number>(tab, S.taps)).toBe(taps);
+        expect(tab.client.stats().outboundRefused).toBe(0);
     });
 });
 

@@ -34,9 +34,9 @@ depend on the other's fixtures.
 restate each other three times, and a world that declared a script in one and forgot it in another
 would fail at load with a message about the manifest rather than about the mistake.
 
-`src/` is compiled by `tsc` rather than read from source, because the scripts carry TC39 standard
-decorators and the test runner's transform emits them verbatim, so a suite imports its world from
-`dist/`, and `pnpm test` builds before it runs.
+The scripts carry TC39 standard decorators, which the test runner's own transform emits verbatim, so
+the Vitest config hands each decorated module to esbuild first (`scripts/vitest-decorators.mjs`) and a
+suite imports its world straight from `src/`.
 
 ## How a suite drives its world
 

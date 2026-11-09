@@ -26,7 +26,7 @@ import {
     STATE_STEPS,
     TELEPORT_AT,
     W,
-} from '../dist/worlds/player.js';
+} from '../src/worlds/player.js';
 
 /** Ticks that outlast the lead a client sends input at, plus the interval it is answered in. */
 const KEY_TICKS = 40;

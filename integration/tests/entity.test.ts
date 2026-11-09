@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
 import type { Tab } from './harness.js';
 import {
+    avatarIn,
     avatarOf,
     ofTemplate,
     openWorld,
@@ -13,19 +14,24 @@ import {
     reading,
     runtimeOf,
     SETTLE,
+    taggedIn,
     transformIn,
 } from './harness.js';
 import {
     AVATAR_AT,
     ENTITY_WORLD,
+    GHOST_AT,
+    HEIR_AT,
     MARK_AT,
     S,
+    TAG_GHOST,
+    TAG_HEIR,
     TAG_MARK,
     TAG_SAID,
     TEMPLATE_MARK,
     TWEEN_SECONDS,
     W,
-} from '../dist/worlds/entity.js';
+} from '../src/worlds/entity.js';
 
 /** Ticks that outlast the tweens this world starts, whatever the send rate rounds them to. */
 const TWEEN_TICKS = Math.ceil(TWEEN_SECONDS * 60) + SETTLE;
@@ -267,5 +273,30 @@ describe('a destroyed entity', () => {
         await press(session, tab, W.destroy);
         expect(reading<boolean>(tab, S.alive)).toBe(false);
         expect(avatarOf(tab)).toBeUndefined();
+    });
+
+    it('takes no write through a handle kept past it, though an heir now holds its slot', async () => {
+        const { session, tab } = await open();
+        const server = session.sim.runtime;
+        const playerId = tab.client.localPlayer?.id ?? '';
+        const gone = avatarIn(server, playerId);
+        expect(gone).toBeDefined();
+
+        await press(session, tab, W.ghost);
+        await press(session, tab, W.haunt);
+        const heir = taggedIn(server, TAG_HEIR)[0];
+        // The premise: the heir was minted into the slot the avatar freed.
+        expect(heir).toBeDefined();
+        expect(server.entities.indexOf(heir as EntityId)).toBe((gone as number) % 0x100_0000);
+
+        const mirror = runtimeOf(tab);
+        const drawnHeir = taggedIn(mirror, TAG_HEIR)[0];
+        expect(drawnHeir).toBeDefined();
+        expect(transformIn(mirror, drawnHeir as EntityId)).toMatchObject(HEIR_AT);
+        expect(taggedIn(mirror, TAG_GHOST)).toEqual([]);
+        expect(taggedIn(server, TAG_GHOST)).toEqual([]);
+        expect(
+            ofTemplate(mirror, TEMPLATE_MARK).map((id) => transformIn(mirror, id).x),
+        ).not.toContain(GHOST_AT.x);
     });
 });

@@ -38,7 +38,7 @@ import {
     WALK_SPEED,
     WALK_STEP,
     Walker,
-} from '../dist/worlds/movement.js';
+} from '../src/worlds/movement.js';
 
 /** Where the test-side floor sits, far enough under the spawn that the fall is unmistakable. */
 const FLOOR_Y = -60;

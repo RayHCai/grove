@@ -27,7 +27,7 @@ import {
     TEMPLATE_SENTINEL,
     W,
     YARD,
-} from '../dist/worlds/game.js';
+} from '../src/worlds/game.js';
 
 const open = (): ReturnType<typeof openWorld> => openWorld(GAME_WORLD);
 

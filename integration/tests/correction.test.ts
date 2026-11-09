@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Session, Tab } from './harness.js';
 import { avatarIn, openWorld, runtimeOf, SETTLE, transformIn } from './harness.js';
-import { CODE_PUSH, CORRECTION_WORLD, HURL, NUDGE, START, W } from '../dist/worlds/correction.js';
+import { CODE_PUSH, CORRECTION_WORLD, HURL, NUDGE, START, W } from '../src/worlds/correction.js';
 
 const open = (): ReturnType<typeof openWorld> => openWorld(CORRECTION_WORLD);
 
