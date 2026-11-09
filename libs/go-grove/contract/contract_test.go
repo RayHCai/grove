@@ -160,3 +160,34 @@ func TestEnumsValid(t *testing.T) {
 		t.Error("InstanceState accepted a value the zod enum does not")
 	}
 }
+
+// The same spellings libs/api-contract's PublicHost admits, since a box and the router both read one.
+func TestValidHost(t *testing.T) {
+	tests := []struct {
+		name string
+		host string
+		want bool
+	}{
+		{"a per-box name", "3f2504e0-4f89-41d3-9a0c-0305e82c3301.fleet.grove.example", true},
+		{"a single label", "localhost", true},
+		{"an ipv4 literal", "203.0.113.7", true},
+		{"an ipv6 literal", "2001:db8::7", true},
+		{"a trailing dot", "fleet.grove.example.", false},
+		{"an ipv4 address out of range", "1.2.3.999", false},
+		{"a bracketed ipv6 literal", "[2001:db8::7]", false},
+		{"a zoned ipv6 literal", "fe80::1%eth0", false},
+		{"a port", "box:443", false},
+		{"a leading hyphen", "-box.grove.example", false},
+		{"an empty label", "box..grove.example", false},
+		{"a label past 63", strings.Repeat("a", 64) + ".grove.example", false},
+		{"past 253", strings.Repeat("a.", 126) + "ab", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ValidHost(tt.host); got != tt.want {
+				t.Errorf("ValidHost(%q) = %v, want %v", tt.host, got, tt.want)
+			}
+		})
+	}
+}

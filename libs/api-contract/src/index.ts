@@ -2,7 +2,15 @@
 // browser. It is at @grove/api-contract/tokens, the way transport keeps its socket behind a
 // subpath.
 export { ContentHash, GameId, HostId, InstanceId, PlayerId, SessionId, TaskId } from './ids.js';
-export { Account, Game, GameUpdate, GameVisibility, Profile, SignedIn } from './accounts.js';
+export {
+    Account,
+    Game,
+    GameUpdate,
+    GameVisibility,
+    NEXT_CURSOR_HEADER,
+    Profile,
+    SignedIn,
+} from './accounts.js';
 export { ErrorBody } from './errors.js';
 export { PlayHandoff, PlayRequestParams, PlaySession } from './allocator.js';
 export { decodeHandoff, encodeHandoff } from './handoff.js';
@@ -36,7 +44,9 @@ export {
     PlacementRequest,
 } from './placement.js';
 export {
+    AssetInspection,
     BuildDiagnostic,
+    MAX_TASK_MESSAGE,
     Task,
     TaskDetail,
     TaskKind,
@@ -48,6 +58,8 @@ export {
     streamOf,
 } from './tasks.js';
 export {
+    ASSET_MEDIA_TYPES,
+    AssetMediaType,
     AssetUpload,
     AssetUploadRequest,
     BuildArtifact,
@@ -67,11 +79,12 @@ export {
     WorkspaceFile,
     WorkspacePath,
     WorkspaceSave,
-    buildManifestKey,
     buildPrefix,
     encodeManifest,
     manifestKey,
     objectKey,
+    uploadKey,
+    uploadPrefix,
 } from './workspace.js';
 export { REQUEST_ID_HEADER, REQUEST_ID_MAX_LENGTH, validRequestId } from './request-id.js';
 export { PASSWORD_MAX, PASSWORD_MIN } from './password.js';

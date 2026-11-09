@@ -152,3 +152,125 @@ describe('createApiBase', () => {
         expect(base.csrfHeader()).toEqual({ 'x-csrf-token': 'a-token' });
     });
 });
+
+const tokenOf = (held: number): string => `token-${String(held)}`;
+
+/** A service that pairs each token with the session's secret and rotates the secret on sign-in. */
+function service(): {
+    fetch: typeof globalThis.fetch;
+    sent: { route: string; body: unknown }[];
+    signInElsewhere: () => void;
+    lapseBeforeTheNextRead: () => void;
+    refuseEveryToken: () => void;
+} {
+    let secret = 1;
+    let lapsing = false;
+    let refusing = false;
+    const sent: { route: string; body: unknown }[] = [];
+
+    const fetch = (async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET';
+        const path = new URL(url).pathname;
+        sent.push({ route: `${method} ${path}`, body: init?.body });
+        if (path === '/v1/auth/session') {
+            return lapsing
+                ? json({ code: 'unauthorized', message: 'sign in first' }, 401)
+                : json({ playerId: PLAYER_ID, csrfToken: tokenOf(secret) });
+        }
+        const presented = (init?.headers as Record<string, string> | undefined)?.['x-csrf-token'];
+        if (method !== 'GET' && (refusing || presented !== tokenOf(secret))) {
+            return json({ code: 'csrf_invalid', message: 'Invalid csrf token' }, 403);
+        }
+        if (path === '/mine') return json({ code: 'forbidden', message: 'not your game' }, 403);
+        return json({ ok: true });
+    }) as unknown as typeof globalThis.fetch;
+
+    return {
+        fetch,
+        sent,
+        signInElsewhere: () => {
+            secret += 1;
+        },
+        lapseBeforeTheNextRead: () => {
+            lapsing = true;
+        },
+        refuseEveryToken: () => {
+            refusing = true;
+        },
+    };
+}
+
+describe('a write whose token went stale', () => {
+    it('is sent once more under the token a fresh session read hands back', async () => {
+        const api = service();
+        const base = createApiBase({ baseUrl: BASE, fetch: api.fetch });
+        base.keep({ playerId: PLAYER_ID, csrfToken: 'token-1' });
+        api.signInElsewhere();
+
+        await expect(base.write('/x', 'POST', { a: 1 }, Shape)).resolves.toEqual({ ok: true });
+        expect(api.sent.map((request) => request.route)).toEqual([
+            'POST /x',
+            'GET /v1/auth/session',
+            'POST /x',
+        ]);
+        expect(api.sent[2]?.body).toBe(api.sent[0]?.body);
+        // Kept, so the next write needs no second round trip.
+        expect(base.csrfHeader()).toEqual({ 'x-csrf-token': 'token-2' });
+    });
+
+    it('re-reads the session once for a burst of writes that all found it stale', async () => {
+        const api = service();
+        const base = createApiBase({ baseUrl: BASE, fetch: api.fetch });
+        base.keep({ playerId: PLAYER_ID, csrfToken: 'token-1' });
+        api.signInElsewhere();
+
+        await Promise.all([
+            base.write('/x', 'POST', { a: 1 }, Shape),
+            base.write('/y', 'PUT', { b: 2 }, Shape),
+        ]);
+        expect(api.sent.filter((request) => request.route === 'GET /v1/auth/session')).toHaveLength(
+            1,
+        );
+    });
+
+    it('is retried once and no more, so a service that refuses every token cannot loop it', async () => {
+        const api = service();
+        const base = createApiBase({ baseUrl: BASE, fetch: api.fetch });
+        api.refuseEveryToken();
+
+        await expect(base.write('/x', 'POST', { a: 1 }, Shape)).rejects.toMatchObject({
+            status: 403,
+            code: 'csrf_invalid',
+        });
+        expect(api.sent).toHaveLength(3);
+    });
+
+    it('reports a lapsed session when the re-read finds nobody signed in', async () => {
+        const api = service();
+        const base = createApiBase({ baseUrl: BASE, fetch: api.fetch });
+        base.keep({ playerId: PLAYER_ID, csrfToken: 'token-1' });
+        api.signInElsewhere();
+        api.lapseBeforeTheNextRead();
+
+        const failure = await base
+            .write('/x', 'POST', { a: 1 }, Shape)
+            .catch((thrown: unknown) => thrown);
+        expect(isLapsedSession(failure)).toBe(true);
+        expect(api.sent.map((request) => request.route)).toEqual([
+            'POST /x',
+            'GET /v1/auth/session',
+        ]);
+    });
+
+    it('leaves every other 403 alone, which is an account not allowed rather than a stale token', async () => {
+        const api = service();
+        const base = createApiBase({ baseUrl: BASE, fetch: api.fetch });
+        base.keep({ playerId: PLAYER_ID, csrfToken: 'token-1' });
+
+        await expect(base.write('/mine', 'POST', {}, Shape)).rejects.toMatchObject({
+            status: 403,
+            code: 'forbidden',
+        });
+        expect(api.sent.map((request) => request.route)).toEqual(['POST /mine']);
+    });
+});

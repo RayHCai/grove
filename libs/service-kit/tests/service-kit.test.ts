@@ -46,6 +46,11 @@ describe('withPlatformPort', () => {
     });
 });
 
+/** What `@fastify/csrf-protection` raises: a 403 with a code of its own and no ErrorBody. */
+function csrfRefusal(code: string): Error {
+    return Object.assign(new Error('Invalid csrf token'), { code, statusCode: 403 });
+}
+
 async function served() {
     const app = Fastify({ ...serviceOptions('test'), logger: false });
     installServiceHandlers(app);
@@ -53,6 +58,15 @@ async function served() {
         throw new Error('secret detail');
     });
     app.get('/ok', async () => ({ ok: true }));
+    app.post('/stale', async () => {
+        throw csrfRefusal('FST_CSRF_INVALID_TOKEN');
+    });
+    app.post('/unsecret', async () => {
+        throw csrfRefusal('FST_CSRF_MISSING_SECRET');
+    });
+    app.post('/denied', async () => {
+        throw Object.assign(new Error('not yours'), { statusCode: 403 });
+    });
     return app;
 }
 
@@ -75,6 +89,17 @@ describe('a service', () => {
         const missing = await app.inject({ url: '/nowhere' });
         expect(missing.statusCode).toBe(404);
         expect(missing.json()).toEqual({ code: 'not_found', message: 'no such route' });
+    });
+
+    it('names a CSRF refusal apart from a forbidden one, because re-reading the session mends it', async () => {
+        const app = await served();
+        for (const url of ['/stale', '/unsecret']) {
+            const refused = await app.inject({ method: 'POST', url });
+            expect(refused.statusCode).toBe(403);
+            expect(refused.json().code).toBe('csrf_invalid');
+        }
+        const denied = await app.inject({ method: 'POST', url: '/denied' });
+        expect(denied.json()).toEqual({ code: 'forbidden', message: 'not yours' });
     });
 });
 

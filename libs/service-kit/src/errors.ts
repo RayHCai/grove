@@ -28,6 +28,14 @@ export function installErrorHandler(app: FastifyInstance): void {
             } satisfies ErrorBody);
         }
 
+        // Its own code: a stale token is mended by re-reading the session, not by signing in.
+        if (error.code?.startsWith('FST_CSRF_') === true) {
+            return reply.code(403).send({
+                code: 'csrf_invalid',
+                message: error.message,
+            } satisfies ErrorBody);
+        }
+
         if (isResponseSerializationError(error)) {
             request.log.error({ err: error, route: error.method }, 'response did not match schema');
             return reply.code(500).send({ code: 'internal', message: 'internal error' });

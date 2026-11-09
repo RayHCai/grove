@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BundleSet } from './game-data.js';
-import { ContentHash, GameId } from './ids.js';
+import { ContentHash, GameId, type TaskId } from './ids.js';
 
 /**
  * One path in a game's workspace: POSIX, relative, and made only of segments a filesystem, a URL
@@ -70,6 +70,25 @@ export const MAX_SOURCE_BYTES = 1024 * 1024;
 
 /** What one asset may reach through its presigned PUT. */
 export const MAX_ASSET_BYTES = 32 * 1024 * 1024;
+
+/** The only types an asset may be uploaded as, since the edge serves the type it was stored as. */
+export const ASSET_MEDIA_TYPES = [
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+    'audio/mpeg',
+    'audio/ogg',
+    'audio/wav',
+    'audio/webm',
+    'font/woff2',
+    'font/woff',
+    'font/ttf',
+    'font/otf',
+    'application/json',
+] as const;
+export const AssetMediaType = z.enum(ASSET_MEDIA_TYPES);
+export type AssetMediaType = z.infer<typeof AssetMediaType>;
 
 /** No path twice: a set of paths is what a save means, and two rows for one path is not a set. */
 const distinctPaths = (files: readonly WorkspaceFile[]): boolean =>
@@ -197,29 +216,16 @@ export const PlayableVersion = z.object({
 });
 export type PlayableVersion = z.infer<typeof PlayableVersion>;
 
-/**
- * What one build produced, written once to `<gameId>/build/<revision>/build.json`.
- *
- * The output half of the pair: `manifests/<revision>.json` names the source a build compiled, this
- * names what came out of it. Sibling prefixes rather than one, because a save writes a manifest on
- * every revision and only a publish ever produces a build; most revisions have the first and no
- * second, and a rollback needs both to be findable on their own.
- *
- * Written before the task that produced it is settled, so a settled build always has one: the file
- * is the durable record, and the row a creator's editor polls is the copy on the hot path.
- */
+/** What one build produced; the API accepts one only if it stored every output it names. */
 export const BuildManifest = PlayableVersion.extend({ gameId: GameId });
 export type BuildManifest = z.infer<typeof BuildManifest>;
-
-/** Where a build says what it produced, beside the chunks it produced. */
-export function buildManifestKey(game: GameId, revision: number): string {
-    return `${buildPrefix(game, revision)}build.json`;
-}
 
 /** Where an asset's bytes are going, asked for before they are sent. */
 export const AssetUploadRequest = z.object({
     path: WorkspacePath,
-    contentType: MediaType,
+    contentType: AssetMediaType,
+    /** Declared up front, since the presign signs it: the bucket refuses any other length. */
+    byteLength: z.int().positive().max(MAX_ASSET_BYTES),
 });
 export type AssetUploadRequest = z.infer<typeof AssetUploadRequest>;
 
@@ -234,14 +240,16 @@ export const AssetUpload = z.object({
     url: z.url(),
     expiresAt: z.iso.datetime(),
     maxBytes: z.int().positive(),
+    /** Sent with the PUT exactly as given; the signature covers them. */
+    headers: z.record(z.string(), z.string()),
 });
 export type AssetUpload = z.infer<typeof AssetUpload>;
 
 /**
- * One file a build writes beside its manifest, named as a single segment.
+ * One file a build writes, named as a single segment.
  *
  * A segment rather than a path, because a build's output is flat and a name carrying a slash is how
- * a worker would write outside the revision prefix it was handed.
+ * a worker would write outside the task prefix it was handed.
  */
 export const BuildOutputName = z
     .string()
@@ -274,12 +282,22 @@ export function objectKey(game: GameId, kind: FileKind, path: WorkspacePath): st
     return `${game}/${kind === 'source' ? 'source' : 'assets'}/${path}`;
 }
 
-/** Where the snapshot of one revision sits, which is the only key a build is ever handed. */
-export function manifestKey(game: GameId, revision: number): string {
-    return `${game}/manifests/${String(revision)}.json`;
+/** Where a game's uploads wait for inspection: a prefix of their own, which one rule expires. */
+export function uploadPrefix(game: GameId): string {
+    return `uploads/${game}/`;
 }
 
-/** The prefix one build writes under, immutable because the revision naming it is. */
-export function buildPrefix(game: GameId, revision: number): string {
-    return `${game}/build/${String(revision)}/`;
+export function uploadKey(game: GameId, path: WorkspacePath): string {
+    return `${uploadPrefix(game)}${path}`;
+}
+
+/** Where one save's snapshot sits, keyed per save so the loser of a revision overwrites nothing. */
+export function manifestKey(game: GameId, revision: number, save?: string): string {
+    const suffix = save === undefined ? '' : `-${save}`;
+    return `${game}/manifests/${String(revision)}${suffix}.json`;
+}
+
+/** The prefix one build writes under: the task's, so a rebuild of a revision overwrites nothing. */
+export function buildPrefix(game: GameId, task: TaskId): string {
+    return `${game}/build/${task}/`;
 }

@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+    MAX_TASK_MESSAGE,
     Task,
     TaskStatusUpdate,
     databaseOf,
@@ -144,5 +145,51 @@ describe('the streams', () => {
 
     it('put asset uploads in zero, where a URL that names no database already lands', () => {
         expect(databaseOf('ASSET_UPLOAD')).toBe(0);
+    });
+});
+
+describe('an inspection', () => {
+    const inspection = {
+        source: 'https://games.example/uploads/g/art/tile.png?versionId=v1&X-Amz-Signature=a',
+        destination: 'https://games.example/g/assets/art/tile.png?X-Amz-Signature=b',
+        contentType: 'image/png',
+        byteLength: 2048,
+        expiresAt: '2026-11-08T12:05:00.000Z',
+    };
+    const claimed = {
+        ...queued,
+        kind: 'ASSET_UPLOAD',
+        status: 'IN_PROGRESS',
+        assetPath: 'art/tile.png',
+        attempts: 1,
+        startedAt: '2026-09-18T12:00:01.000Z',
+    };
+
+    it('rides the claim of an asset upload', () => {
+        expect(Task.parse({ ...claimed, inspection })).toEqual({ ...claimed, inspection });
+    });
+
+    it('never rides a build, which compiles a manifest rather than inspecting one file', () => {
+        expect(Task.safeParse({ ...queued, inspection }).success).toBe(false);
+    });
+
+    it('names a type the edge may serve, and no more bytes than an asset may hold', () => {
+        expect(
+            Task.safeParse({ ...claimed, inspection: { ...inspection, contentType: 'text/html' } })
+                .success,
+        ).toBe(false);
+        expect(
+            Task.safeParse({ ...claimed, inspection: { ...inspection, byteLength: 0 } }).success,
+        ).toBe(false);
+    });
+});
+
+const reports = (message: string): boolean =>
+    TaskStatusUpdate.safeParse({ status: 'FAILED', detail: { message } }).success;
+
+describe('what a worker reports', () => {
+    it('is a summary, bounded where a compiler log would not be', () => {
+        expect(reports('x'.repeat(MAX_TASK_MESSAGE))).toBe(true);
+        expect(reports('x'.repeat(MAX_TASK_MESSAGE + 1))).toBe(false);
     });
 });

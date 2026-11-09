@@ -44,6 +44,9 @@ export const Game = z.object({
 });
 export type Game = z.infer<typeof Game>;
 
+/** Where a paged listing names the cursor of its next page; absent on the last one. */
+export const NEXT_CURSOR_HEADER = 'x-next-cursor';
+
 /** What a creator may change about a game once it exists. An absent member is left as it stands. */
 export const GameUpdate = z.object({ visibility: GameVisibility.optional() });
 export type GameUpdate = z.infer<typeof GameUpdate>;

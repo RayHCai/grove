@@ -10,7 +10,8 @@ export type PlayRequestParams = z.infer<typeof PlayRequestParams>;
  */
 export const PlaySession = z.object({
     sessionId: SessionId,
-    serverUrl: z.url(),
+    /** A socket address and nothing else: the player dials it, so no other scheme may reach it. */
+    serverUrl: z.url({ protocol: /^wss?$/u }),
     ticket: z.string().min(1),
     expiresAt: z.iso.datetime(),
     /** The version the placed session is on, which is not always the newest one built. */

@@ -6,10 +6,12 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
 
 // The bounds the zod schemas carry, so a Go handler refuses exactly what a Fastify one refuses.
@@ -69,6 +71,32 @@ func NewUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// HostMaxLen is the longest name DNS carries, and the bound a beat's publicHost is held to.
+const HostMaxLen = 253
+
+var hostLabel = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+
+var numericLabel = regexp.MustCompile(`^[0-9]+$`)
+
+// ValidHost reports whether s is an RFC 1123 hostname or an IP literal, the two things a url to a
+// box may name; a bracketed, zoned or dotted-trailing spelling is refused rather than guessed at.
+func ValidHost(s string) bool {
+	if s == "" || len(s) > HostMaxLen {
+		return false
+	}
+	if net.ParseIP(s) != nil {
+		return true
+	}
+	labels := strings.Split(s, ".")
+	for _, label := range labels {
+		if !hostLabel.MatchString(label) {
+			return false
+		}
+	}
+	// An all-numeric last label is an IPv4 address ParseIP refused, not a top-level domain.
+	return !numericLabel.MatchString(labels[len(labels)-1])
+}
+
 // ValidURL reports whether s is what `z.url()` accepts, so a value this service stores and
 // re-serves cannot be one the TypeScript half fails to parse. A scheme and a host, both required.
 func ValidURL(s string) bool {
@@ -94,6 +122,16 @@ func ParseTimestamp(s string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("parse timestamp %q: %w", s, err)
 	}
 	return parsed.UTC(), nil
+}
+
+// UTF16Len is a string's length as JavaScript and zod count it, which is the unit every bound a
+// zod schema carries is in.
+func UTF16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		n += utf16.RuneLen(r)
+	}
+	return n
 }
 
 // StateValue is a `@serverState` value in flight. Raw on purpose: the store keeps the bytes a game
@@ -252,6 +290,10 @@ type InstanceStart struct {
 	SessionID  string    `json:"sessionId"`
 	Revision   int       `json:"revision"`
 	Bundles    BundleSet `json:"bundles"`
+	// The world's store bearer, minted by the router so no box holds the key that signs one.
+	StoreToken string `json:"storeToken"`
+	// When that bearer dies, which is when the world must already have ended.
+	StoreTokenExpiresAt string `json:"storeTokenExpiresAt"`
 }
 
 type HostCapacity struct {
@@ -300,8 +342,16 @@ type HostHeartbeat struct {
 	HostID string `json:"hostId"`
 	Region string `json:"region"`
 	// Where this box's agent listens, so the router reaches it without a port compiled into it.
-	AgentPort int          `json:"agentPort"`
-	Capacity  HostCapacity `json:"capacity"`
+	AgentPort int `json:"agentPort"`
+	// The name players and the router dial; absent only where the beat's own source address is it.
+	PublicHost string `json:"publicHost,omitempty"`
+	// Where the player proxy listens, which is the one port a browser reaches on this box.
+	PlayerPort int `json:"playerPort"`
+	// Whether both listeners serve TLS, which picks wss/https over ws/http for every url to this box.
+	TLS bool `json:"tls"`
+	// False while the box cannot start a world, so the router stops choosing it before a start fails.
+	Ready    bool         `json:"ready"`
+	Capacity HostCapacity `json:"capacity"`
 	// Every instance every beat rather than a delta, so a dropped beat costs nothing to recover.
 	Instances []InstanceReport `json:"instances"`
 	// Minted when the agent starts and fixed for as long as it runs: a box that died and came back
@@ -377,10 +427,18 @@ type FleetReport struct {
 
 type DeploymentRequest struct {
 	GameID string `json:"gameId"`
+	// The version that replaces the rest, so a world already on it is left running.
+	Revision int `json:"revision"`
 	// Both sides in one request, so the code a session runs is one decision rather than two.
 	Bundles BundleSet `json:"bundles"`
 	// Empty is the whole fleet; naming regions is what makes a rollout staged.
 	Regions []string `json:"regions"`
+}
+
+// RedeployRequest is what the router tells one box about a push; it crosses between the two Go
+// services only. Zero revision drains every world of the game.
+type RedeployRequest struct {
+	Revision int `json:"revision"`
 }
 
 // HostDeploymentStatus is what became of one box's worlds.

@@ -1,0 +1,95 @@
+{
+    "seed": "ySjMqBN4rl4GCxpLhREJCFa_-F57bLOhFG75Jr_5YHg",
+    "publicKey": "8kjXvyJlDRuF-yVsmSlpkVL2uSDZ1uQqOQpoPHBBJ_0",
+    "otherSeed": "xFddRYkedE0ayLSV6a9hO-0Xt7FARwvShxJ9mhyXKsA",
+    "otherPublicKey": "vZY3qLA8D_ZZUm6txr4Fx6qGZLZx7DHKODR1lKtDuVc",
+    "now": 1800000000,
+    "vectors": [
+        {
+            "name": "a store bearer",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4MDAwNDMyMDB9.EI9cGr3-oZmuqnJP32dRFhl5A5ywR15TtBDEs1OwRM94-fFJVwkUk6C5qWqW2iU7Z3XHg8nErlKN_IcGLJSMAA",
+            "expect": "ok",
+            "claims": {
+                "gameId": "0b3f8a5e-2c4d-4f7a-9b1e-6d5c4a3b2e10",
+                "sessionId": "7d2e1c9a-5b48-4c3d-8e7f-1a2b3c4d5e6f",
+                "aud": "game-manager",
+                "exp": 1800043200
+            }
+        },
+        {
+            "name": "a store bearer one second from its end",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4MDAwMDAwMDF9.LScYsjIQk-K0dWPpihsSy3m9h81bn218JM9Zw3Vw9WeDxzXir70Ub3ywyHNdo-xKpSh5iBCHV8IpbbCmF7JRDQ",
+            "expect": "ok"
+        },
+        {
+            "name": "a store bearer at its exp",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4MDAwMDAwMDB9.r3tr7xlw_6Mlzr3WLD_6vVwE6-MOHwpE7qkXgCvNMk-R8JCWfHTTqs6YlrXUIEkSZoyUKLpEwzX_u6KdIOsUDw",
+            "expect": "expired"
+        },
+        {
+            "name": "a store bearer past its exp",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE3OTk5OTk5NDB9.0WU6ga2j0LXJwl3jI9uvvE9B2m2ghBJtvROA7s4mPnBoUOAzJmi6vno8iU0FkMMX-EzzzcgXCQGIqmiZnffSBw",
+            "expect": "expired"
+        },
+        {
+            "name": "a key no verifier holds",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4MDAwNDMyMDB9.PxBaaF3u72PHfinGoYxD1xxlb5qgaWQLE7_i_clCqvIUkl2G7IrezzXZegEYiCI-we9kyatC1uLrSfquTLJgDA",
+            "expect": "bad_signature"
+        },
+        {
+            "name": "a payload edited after signing",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4MDAwODY0MDB9.EI9cGr3-oZmuqnJP32dRFhl5A5ywR15TtBDEs1OwRM94-fFJVwkUk6C5qWqW2iU7Z3XHg8nErlKN_IcGLJSMAA",
+            "expect": "bad_signature"
+        },
+        {
+            "name": "a signature spelled off its canonical bits",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4MDAwNDMyMDB9.EI9cGr3-oZmuqnJP32dRFhl5A5ywR15TtBDEs1OwRM94-fFJVwkUk6C5qWqW2iU7Z3XHg8nErlKN_IcGLJSMAB",
+            "expect": "bad_signature"
+        },
+        {
+            "name": "a signature cut short",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4MDAwNDMyMDB9.EI9cGr3-oZmuqnJP32dRFhl5A5ywR15TtBDEs1OwRM9",
+            "expect": "bad_signature"
+        },
+        {
+            "name": "a signature that is not base64url",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4MDAwNDMyMDB9.EI9cGr3-oZmuqnJP32dRFhl5A5ywR15TtBDEs1OwRM94-fFJVwkUk6C5qWqW2iU7Z3XHg8nErlKN_IcGLJSM+/",
+            "expect": "bad_signature"
+        },
+        {
+            "name": "a payload that is not base64url",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4MDAwNDMyMDB9=.EI9cGr3-oZmuqnJP32dRFhl5A5ywR15TtBDEs1OwRM94-fFJVwkUk6C5qWqW2iU7Z3XHg8nErlKN_IcGLJSMAA",
+            "expect": "malformed"
+        },
+        {
+            "name": "no dot",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4MDAwNDMyMDB9",
+            "expect": "malformed"
+        },
+        {
+            "name": "an empty signature",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXIiLCJleHAiOjE4MDAwNDMyMDB9.",
+            "expect": "malformed"
+        },
+        {
+            "name": "a join ticket under the same key",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtaW5zdGFuY2UiLCJleHAiOjE4MDAwMDAwNjB9.Z_o2eSqHcnk0qGV4ma7S_WgBYZpUG16lWcubpvm83-9f50RphE867EvBgN_eQs3Ff4igw6ScTjlXeG3-z1oEAw",
+            "expect": "wrong_audience"
+        },
+        {
+            "name": "a store bearer naming a player",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJwbGF5ZXJJZCI6ImYxZTJkM2M0LWI1YTYtNDk3OC04YTliLTBjMWQyZTNmNGE1YiIsImF1ZCI6ImdhbWUtbWFuYWdlciIsImV4cCI6MTgwMDAwMDA2MH0.Md4lsBphOtk-lKoCkFXGe0wM-9eqzMmdRdpaheVxGjVJgvkoL5Wec_0lUfgjZNdgPWoenJtgBbtLYIotmOxACg",
+            "expect": "malformed"
+        },
+        {
+            "name": "an audience nothing serves",
+            "token": "eyJnYW1lSWQiOiIwYjNmOGE1ZS0yYzRkLTRmN2EtOWIxZS02ZDVjNGEzYjJlMTAiLCJzZXNzaW9uSWQiOiI3ZDJlMWM5YS01YjQ4LTRjM2QtOGU3Zi0xYTJiM2M0ZDVlNmYiLCJhdWQiOiJnYW1lLW1hbmFnZXItYWRtaW4iLCJleHAiOjE4MDAwMDAwNjB9.fKUQJkHaAVrXtfsQg9VzVgMzNuFVKtqFtydAYK5j6r-v703VgIE_xT1rE2AoOX6F_gppW4O7r3kex5puoabsDQ",
+            "expect": "malformed"
+        },
+        {
+            "name": "a payload that is not json",
+            "token": "bm90IGpzb24.fvoH8glzvie-2UDrAfCfCXFJVE3qZ1jz8L4Eq1P7gUWvPr-9OEE7Xk-95sGUsh9rxun7DnaNGkKzJ94Vd6yKDg",
+            "expect": "malformed"
+        }
+    ]
+}

@@ -28,7 +28,8 @@ export const Placement = z.object({
     hostId: HostId,
     instanceId: InstanceId,
     sessionId: SessionId,
-    serverUrl: z.url(),
+    /** The box's player proxy, `/play/<instanceId>` on its public name: a socket, never a page. */
+    serverUrl: z.url({ protocol: /^wss?$/u }),
     /**
      * The version the session actually placed is running. Echoed rather than assumed: a rollout
      * leaves older worlds draining, and a browser on the wrong one is refused at the handshake.
@@ -47,6 +48,10 @@ export const InstanceStart = z.object({
     sessionId: SessionId,
     revision: z.int().positive(),
     bundles: BundleSet,
+    /** The world's store bearer, minted by the router so no box holds the key that signs one. */
+    storeToken: z.string().min(1),
+    /** When that bearer dies, which is when the world must already have ended. */
+    storeTokenExpiresAt: z.iso.datetime(),
 });
 export type InstanceStart = z.infer<typeof InstanceStart>;
 
@@ -78,12 +83,32 @@ export const InstanceReport = z.object({
 });
 export type InstanceReport = z.infer<typeof InstanceReport>;
 
+/** An RFC 1123 hostname with no trailing dot and a non-numeric last label, or an IP literal. */
+const PublicHost = z.union([
+    z.ipv4(),
+    z.ipv6(),
+    z
+        .string()
+        .max(253)
+        .regex(
+            /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?.)*(?=[A-Za-z0-9-]*[A-Za-z-])[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/u,
+        ),
+]);
+
 /** What one @grove/instance-manager sends upward on its interval, for the whole box at once. */
 export const HostHeartbeat = z.object({
     hostId: HostId,
     region: z.string(),
     /** Where this box's agent listens, so the router reaches it without a compiled-in port. */
     agentPort: z.int().min(1).max(65535),
+    /** The name players and the router dial; absent only where the beat's source address is it. */
+    publicHost: PublicHost.optional(),
+    /** Where the player proxy listens, the one port a browser reaches on this box. */
+    playerPort: z.int().min(1).max(65535),
+    /** Whether both listeners serve TLS, which picks wss/https over ws/http for every url here. */
+    tls: z.boolean(),
+    /** False while the box cannot start a world, so the router stops choosing it first. */
+    ready: z.boolean(),
     capacity: HostCapacity,
     /** Every instance every beat rather than a delta, so a dropped beat is free to recover. */
     instances: z.array(InstanceReport),
@@ -162,6 +187,8 @@ export type FleetReport = z.infer<typeof FleetReport>;
 
 export const DeploymentRequest = z.object({
     gameId: GameId,
+    /** The version replacing the rest, so a world already on it is left running. */
+    revision: z.int().positive(),
     /** Both sides in one request, so the code a session runs is one decision rather than two. */
     bundles: BundleSet,
     /** Empty is the whole fleet; naming regions is what makes a rollout staged. */
