@@ -27,43 +27,40 @@ func main() {
 
 	log := env.Logger(cfg.Env, os.Stdout)
 
-	queue, err := lineFor(cfg)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
 	// The map behind the mutex is the seam a datastore lands on: a second replica of this service
 	// must share one registry rather than each holding half the fleet.
 	registry := fleet.NewRegistry(cfg.StaleAfter)
 	// Both callers bound their own call; the timeout is the backstop for a redeploy and a start alike.
 	agent := fleet.HTTPAgent{Client: &http.Client{Timeout: cfg.AgentTimeout}, Secret: cfg.FleetSecret}
 	line := joins.New(joins.Options{
-		Queue: queue,
-		Placer: fleet.Router{
+		Placer: &fleet.Router{
 			Registry:     registry,
 			Balancer:     fleet.MostFree{},
-			Ingress:      fleet.DirectIngress{Scheme: cfg.IngressScheme},
+			Ingress:      fleet.ProxyIngress{},
 			Agent:        agent,
+			StoreKey:     cfg.StoreKey,
 			StartTimeout: cfg.StartTimeout,
+			SuspectFor:   cfg.SuspectFor,
 			Log:          log,
 			Now:          time.Now,
 		},
-		Log:      log,
-		Deadline: cfg.JoinDeadline,
+		Log:          log,
+		Deadline:     cfg.JoinDeadline,
+		Depth:        cfg.JoinQueueDepth,
+		StartWorkers: cfg.StartWorkers,
 	})
 
 	// The registry is rebuilt from one interval of beats, which is why it can live in memory. What
 	// no later beat carries is what the fleet did, so the transitions go where they outlive this
 	// process.
 	reporter := fleet.NewReporter(fleet.ReporterOptions{
-		APIURL:      cfg.APIURL,
-		FleetSecret: cfg.FleetSecret,
-		Fleet:       registry,
-		Interval:    cfg.ReportInterval,
-		Timeout:     cfg.AgentTimeout,
-		Log:         log,
-		Now:         time.Now,
+		APIURL:   cfg.APIURL,
+		Secret:   cfg.CallerSecret,
+		Fleet:    registry,
+		Interval: cfg.ReportInterval,
+		Timeout:  cfg.AgentTimeout,
+		Log:      log,
+		Now:      time.Now,
 	})
 	if !reporter.Attached() {
 		log.Warn("no API_URL: the fleet's history is kept in this process and nowhere else")
@@ -83,7 +80,11 @@ func main() {
 		Registry:      registry,
 		Joins:         line,
 		Agent:         agent,
-		Secret:        cfg.FleetSecret,
+		FleetSecret:   cfg.FleetSecret,
+		CallerSecret:  cfg.CallerSecret,
+		Production:    cfg.Env == "production",
+		Warmup:        cfg.PlacementWarmup,
+		SuspectFor:    cfg.SuspectFor,
 		Log:           log,
 		DeployTimeout: cfg.DeployTimeout,
 		HostTimeout:   cfg.AgentTimeout,
@@ -92,22 +93,12 @@ func main() {
 	serveErr := httpx.Serve(context.Background(), cfg.Addr(), server.Handler(), log)
 
 	// Stopped only once the listener has drained, because every handler still inside that drain is
-	// waiting on this worker, and the line is released once the worker has certainly stopped
-	// reading it, rather than out from under a pop still in flight.
+	// waiting on the line.
 	stop()
 	<-answered
-	queue.Close()
 
 	if serveErr != nil {
 		log.Error("serve", "err", serveErr)
 		os.Exit(1)
 	}
-}
-
-// lineFor holds the line in the cache this deployment named, or in this process when it named none.
-func lineFor(cfg config.Config) (joins.Queue, error) {
-	if cfg.JoinQueueURL == "" {
-		return joins.NewMemory(cfg.JoinQueueDepth), nil
-	}
-	return joins.NewRedis(cfg.JoinQueueURL, cfg.JoinQueueKey, cfg.JoinQueueDepth, cfg.JoinDeadline)
 }

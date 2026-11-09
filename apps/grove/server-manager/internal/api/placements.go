@@ -25,6 +25,11 @@ func (s *Server) place(w http.ResponseWriter, r *http.Request) {
 
 	placed, err := s.joins.Join(r.Context(), req)
 	switch {
+	// Before a round of beats every fleet looks empty, and a 409 would tell @grove/api it is full.
+	case errors.Is(err, joins.ErrNoCapacity) && s.now().Before(s.warmEnds):
+		w.Header().Set("Retry-After", "1")
+		httpx.WriteError(w, http.StatusServiceUnavailable, httpx.CodeInternal, "warming up")
+		return
 	case errors.Is(err, joins.ErrNoCapacity):
 		httpx.WriteError(w, http.StatusConflict, httpx.CodeConflict, "no capacity")
 		return

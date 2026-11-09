@@ -101,21 +101,20 @@ func (reg *Registry) Restore(events []contract.FleetEvent) {
 	}
 }
 
-// Suspect marks a box that work this service dispatched just failed against.
+// Suspect marks a box that work this service dispatched just failed against, for span.
 //
-// Evidence from the data path, which arrives before the staleness window does and never after it: a
-// redeploy that went unanswered is a box in trouble now, not in twenty seconds. Cleared by the box's
-// next beat, so a single lost packet costs one beat of placement rather than an eviction.
-func (reg *Registry) Suspect(hostID, detail string, at time.Time) {
+// Evidence from the data path, which arrives before the staleness window does: a start that failed is
+// a box in trouble now. Timed rather than cleared by the next beat, since a broken box still beats.
+func (reg *Registry) Suspect(hostID, detail string, at time.Time, span time.Duration) {
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
 
 	h, known := reg.hosts[hostID]
-	if !known || h.Suspected {
+	if !known || h.SuspectedUntil.After(at.Add(span)) {
 		return
 	}
 
-	h.Suspected = true
+	h.SuspectedUntil = at.Add(span)
 	reg.hosts[hostID] = reg.observe(h, at, detail)
 }
 

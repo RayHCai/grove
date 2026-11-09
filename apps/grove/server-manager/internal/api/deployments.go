@@ -17,10 +17,8 @@ import (
 // connection here loses the account of what drained rather than the drain.
 const deployWriteGrace = 5 * time.Second
 
-// deploy forwards the redeploy to every box running the game and answers what each one did.
-//
-// This service deploys nothing: what a box runs is decided at start, from the paths its start
-// request carries, so the whole of this is a relay with a report attached.
+// deploy forwards the redeploy to every box running the game on another revision, and answers what
+// each did. What a box runs is decided at start, from the refs its start carries, so this is a relay.
 func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 	var req contract.DeploymentRequest
 	if !httpx.DecodeJSON(w, r, &req, maxBodyBytes) {
@@ -38,7 +36,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.deployTimeout)
 	defer cancel()
 
-	rows := s.fanOut(ctx, s.registry.Targets(req, s.now()), req.GameID)
+	rows := s.fanOut(ctx, s.registry.Targets(req, s.now()), req.GameID, req.Revision)
 
 	// 200 even when every row failed: httpx.WriteError scrubs the body of any 5xx, and a 502 here
 	// would erase the report this route exists to deliver.
@@ -54,7 +52,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 //
 // One goroutine per box and no bound on how many run: each is one short-lived connection, and
 // bounding them would make the wall clock a function of fleet size while a rollout waits.
-func (s *Server) fanOut(ctx context.Context, targets []fleet.Host, gameID string) []contract.HostDeployment {
+func (s *Server) fanOut(ctx context.Context, targets []fleet.Host, gameID string, revision int) []contract.HostDeployment {
 	rows := make([]contract.HostDeployment, len(targets))
 
 	var asking sync.WaitGroup
@@ -68,7 +66,7 @@ func (s *Server) fanOut(ctx context.Context, targets []fleet.Host, gameID string
 			hostCtx, cancel := context.WithTimeout(ctx, s.hostTimeout)
 			defer cancel()
 
-			rows[i] = s.agent.Redeploy(hostCtx, host, gameID)
+			rows[i] = s.agent.Redeploy(hostCtx, host, gameID, revision)
 		}()
 	}
 	asking.Wait()
@@ -78,7 +76,7 @@ func (s *Server) fanOut(ctx context.Context, targets []fleet.Host, gameID string
 			// The one thing this fan-out learns that no beat carries: a box that did not answer.
 			// Marked here rather than waited for, because the staleness window is the slow path to
 			// the same conclusion and this box just refused work in front of us.
-			s.registry.Suspect(row.HostID, "redeploy unanswered", s.now())
+			s.registry.Suspect(row.HostID, "redeploy unanswered", s.now(), s.suspectFor)
 			continue
 		}
 		if row.Status != contract.DeployDraining {
@@ -95,6 +93,10 @@ func (s *Server) fanOut(ctx context.Context, targets []fleet.Host, gameID string
 func checkDeployment(req contract.DeploymentRequest) (string, bool) {
 	if !contract.ValidUUID(req.GameID) {
 		return "gameId must be a uuid", false
+	}
+	// The worlds already on it are the ones a push wants running, so the revision says which stay.
+	if req.Revision < 1 {
+		return "revision must be positive", false
 	}
 	if problem := req.Bundles.Problem(); problem != "" {
 		return problem, false

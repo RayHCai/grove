@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,11 +21,13 @@ import (
 	"github.com/RayHCai/grove/apps/grove/server-manager/internal/joins"
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
+	"github.com/RayHCai/grove/libs/go-grove/token"
 )
 
 const (
-	fleetSecret = "fleet-secret-of-at-least-32-characters"
-	staleAfter  = 30 * time.Second
+	fleetSecret  = "fleet-secret-of-at-least-32-characters"
+	callerSecret = "caller-secret-of-at-least-32-characters"
+	staleAfter   = 30 * time.Second
 
 	hostA = "11111111-1111-4111-8111-111111111111"
 	hostB = "22222222-2222-4222-8222-222222222222"
@@ -45,11 +48,20 @@ const (
 // httptest gives every request this address, and the ingress reads a box's address off the beat.
 const beatFrom = "192.0.2.1"
 
-// Neither is a default, so a url built from a number compiled into the router would read as wrong.
+// None is a default, so a url built from a number compiled into the router would read as wrong.
 const (
-	agentPort = 4104
-	gamePort  = 41337
+	agentPort  = 4104
+	playerPort = 4443
+	gamePort   = 41337
 )
+
+// The key every store bearer in this file is signed with.
+var storeKey = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
+
+// wantURL is the player proxy of the box a beat came from, naming the world it was placed in.
+func wantURL(instanceID string) string {
+	return fmt.Sprintf("wss://%s:%d/play/%s", beatFrom, playerPort, instanceID)
+}
 
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
@@ -86,11 +98,22 @@ type harness struct {
 	now   time.Time
 }
 
-func newHarness(t *testing.T) *harness { return newHarnessWithProbe(t, nil) }
+func newHarness(t *testing.T) *harness { return newHarnessWith(t, tuning{}) }
 
 // newHarnessWithProbe substitutes the readiness probe, since one that never fails cannot show that
 // the route runs it.
 func newHarnessWithProbe(t *testing.T, ready func(context.Context) error) *harness {
+	return newHarnessWith(t, tuning{ready: ready})
+}
+
+// tuning is what a case changes about the service it runs against.
+type tuning struct {
+	ready      func(context.Context) error
+	warmup     time.Duration
+	production bool
+}
+
+func newHarnessWith(t *testing.T, o tuning) *harness {
 	t.Helper()
 
 	h := &harness{now: epoch, agent: &stubAgent{}}
@@ -100,18 +123,21 @@ func newHarnessWithProbe(t *testing.T, ready func(context.Context) error) *harne
 	// The real line and the real ranking, wired the way main.go wires them: a fake line would only
 	// ever prove that a fake line answers joins.
 	line := joins.New(joins.Options{
-		Queue: joins.NewMemory(joinDepth),
-		Placer: fleet.Router{
+		Placer: &fleet.Router{
 			Registry:     registry,
 			Balancer:     fleet.MostFree{},
-			Ingress:      fleet.DirectIngress{},
+			Ingress:      fleet.ProxyIngress{},
 			Agent:        h.agent,
+			StoreKey:     storeKey,
 			StartTimeout: joinDeadline / 2,
+			SuspectFor:   time.Minute,
 			Log:          discard,
 			Now:          h.at,
 		},
-		Log:      discard,
-		Deadline: joinDeadline,
+		Log:          discard,
+		Deadline:     joinDeadline,
+		Depth:        joinDepth,
+		StartWorkers: 2,
 	})
 
 	answering, stop := context.WithCancel(context.Background())
@@ -122,12 +148,16 @@ func newHarnessWithProbe(t *testing.T, ready func(context.Context) error) *harne
 		Registry:      registry,
 		Joins:         line,
 		Agent:         h.agent,
-		Secret:        []byte(fleetSecret),
+		FleetSecret:   []byte(fleetSecret),
+		CallerSecret:  []byte(callerSecret),
+		Production:    o.production,
+		Warmup:        o.warmup,
+		SuspectFor:    time.Minute,
 		Log:           discard,
 		DeployTimeout: time.Second,
 		HostTimeout:   time.Second,
 		Now:           h.at,
-		Ready:         ready,
+		Ready:         o.ready,
 	})
 
 	h.handler = server.Handler()
@@ -157,12 +187,18 @@ type stubAgent struct {
 	// started is every world this fleet was asked to run, in the order it was asked.
 	started []contract.InstanceStart
 	// starts is what a box says to a start. Nil is a box that runs it and binds gamePort.
-	starts func(host fleet.Host, req contract.InstanceStart) (contract.InstanceReport, error)
+	starts func(ctx context.Context, host fleet.Host, req contract.InstanceStart) (contract.InstanceReport, error)
+
+	// pushed is the revision every redeploy carried, and stopped every world this fleet was told
+	// to end, both in the order asked.
+	pushed  []int
+	stopped []string
 }
 
-func (a *stubAgent) Redeploy(_ context.Context, host fleet.Host, gameID string) contract.HostDeployment {
+func (a *stubAgent) Redeploy(_ context.Context, host fleet.Host, gameID string, revision int) contract.HostDeployment {
 	a.mu.Lock()
 	a.asked = append(a.asked, host.ID)
+	a.pushed = append(a.pushed, revision)
 	answer := a.answer
 	a.mu.Unlock()
 
@@ -171,19 +207,19 @@ func (a *stubAgent) Redeploy(_ context.Context, host fleet.Host, gameID string) 
 	}
 	return contract.HostDeployment{
 		HostID:      host.ID,
-		InstanceIDs: host.Holds(gameID),
+		InstanceIDs: host.Superseded(gameID, revision),
 		Status:      contract.DeployDraining,
 	}
 }
 
-func (a *stubAgent) Start(_ context.Context, host fleet.Host, req contract.InstanceStart) (contract.InstanceReport, error) {
+func (a *stubAgent) Start(ctx context.Context, host fleet.Host, req contract.InstanceStart) (contract.InstanceReport, error) {
 	a.mu.Lock()
 	a.started = append(a.started, req)
 	starts := a.starts
 	a.mu.Unlock()
 
 	if starts != nil {
-		return starts(host, req)
+		return starts(ctx, host, req)
 	}
 	return contract.InstanceReport{
 		InstanceID: req.InstanceID,
@@ -195,7 +231,32 @@ func (a *stubAgent) Start(_ context.Context, host fleet.Host, req contract.Insta
 	}, nil
 }
 
-// starts is every world this fleet was asked to run, in the order it was asked.
+func (a *stubAgent) Stop(_ context.Context, _ fleet.Host, instanceID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.stopped = append(a.stopped, instanceID)
+	return nil
+}
+
+func (a *stubAgent) pushedRevisions() []int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.pushed)
+}
+
+func (a *stubAgent) stops() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.stopped)
+}
+
+func (a *stubAgent) setStarts(starts func(context.Context, fleet.Host, contract.InstanceStart) (contract.InstanceReport, error)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.starts = starts
+}
+
+// startsAsked is every world this fleet was asked to run, in the order it was asked.
 func (a *stubAgent) startsAsked() []contract.InstanceStart {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -242,6 +303,8 @@ type box struct {
 	running   int
 	age       time.Duration
 	instances []contract.InstanceReport
+	// A box whose own beat says it cannot start a world.
+	unready bool
 }
 
 func (h *harness) seed(t *testing.T, boxes []box) {
@@ -249,9 +312,12 @@ func (h *harness) seed(t *testing.T, boxes []box) {
 
 	for _, b := range boxes {
 		beat := contract.HostHeartbeat{
-			HostID:    b.id,
-			Region:    b.region,
-			AgentPort: agentPort,
+			HostID:     b.id,
+			Region:     b.region,
+			AgentPort:  agentPort,
+			PlayerPort: playerPort,
+			TLS:        true,
+			Ready:      !b.unready,
 			Capacity: contract.HostCapacity{
 				RunningInstances: b.running,
 				MaxInstances:     b.max,
@@ -274,7 +340,7 @@ func (h *harness) seed(t *testing.T, boxes []box) {
 func (h *harness) place(t *testing.T, req contract.PlacementRequest) contract.Placement {
 	t.Helper()
 
-	rec := h.send(t, http.MethodPost, "/v1/placements", req, fleetSecret)
+	rec := h.send(t, http.MethodPost, "/v1/placements", req, callerSecret)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("placement: got %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -363,7 +429,7 @@ func TestPlaceChoosesAHost(t *testing.T) {
 			h.seed(t, c.boxes)
 
 			request := join(gameID, c.region)
-			rec := h.send(t, http.MethodPost, "/v1/placements", request, fleetSecret)
+			rec := h.send(t, http.MethodPost, "/v1/placements", request, callerSecret)
 			if rec.Code != c.wantStatus {
 				t.Fatalf("status: got %d, want %d (%s)", rec.Code, c.wantStatus, rec.Body.String())
 			}
@@ -384,11 +450,9 @@ func TestPlaceChoosesAHost(t *testing.T) {
 				t.Fatalf("minted ids must be uuids: %+v", placement)
 			}
 
-			// The port comes back in the box's own answer to the start, so a fresh placement names
-			// a socket the player can dial rather than one they wait a whole heartbeat for.
-			wantURL := fmt.Sprintf("wss://%s:%d/play", beatFrom, gamePort)
-			if placement.ServerURL != wantURL {
-				t.Fatalf("serverUrl: got %q, want %q", placement.ServerURL, wantURL)
+			// The box's player proxy and the world's id, never the child's own port.
+			if want := wantURL(placement.InstanceID); placement.ServerURL != want {
+				t.Fatalf("serverUrl: got %q, want %q", placement.ServerURL, want)
 			}
 			if placement.Revision != revision {
 				t.Fatalf("revision: got %d, want the %d it asked for", placement.Revision, revision)
@@ -443,7 +507,7 @@ func TestPlaceStopsAtABoxesFreeSlots(t *testing.T) {
 	h.place(t, join(gameID, ""))
 
 	request := join(otherGameID, "")
-	rec := h.send(t, http.MethodPost, "/v1/placements", request, fleetSecret)
+	rec := h.send(t, http.MethodPost, "/v1/placements", request, callerSecret)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status: got %d, want 409 (%s)", rec.Code, rec.Body.String())
 	}
@@ -479,7 +543,7 @@ func TestABeatThatConfirmsAPlacementStopsHoldingItsSlot(t *testing.T) {
 	var live []contract.InstanceReport
 	for _, game := range []string{gameID, otherGameID, thirdGameID} {
 		request := join(game, "")
-		rec := h.send(t, http.MethodPost, "/v1/placements", request, fleetSecret)
+		rec := h.send(t, http.MethodPost, "/v1/placements", request, callerSecret)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("placement %d onto a box with 4 slots: got %d, want 200 (%s)",
 				len(live)+1, rec.Code, rec.Body.String())
@@ -579,7 +643,7 @@ func TestConcurrentJoinsAllLandWhileTheFleetHasFreeSlots(t *testing.T) {
 				defer placed.Done()
 
 				req := httptest.NewRequest(http.MethodPost, "/v1/placements", bytes.NewReader(bodies[i]))
-				req.Header.Set("Authorization", "Bearer "+fleetSecret)
+				req.Header.Set("Authorization", "Bearer "+callerSecret)
 				rec := httptest.NewRecorder()
 				<-start
 				h.handler.ServeHTTP(rec, req)
@@ -616,7 +680,7 @@ func TestPlaceJoinsASessionTheBoxAlreadyRuns(t *testing.T) {
 	}})
 
 	request := join(gameID, "")
-	rec := h.send(t, http.MethodPost, "/v1/placements", request, fleetSecret)
+	rec := h.send(t, http.MethodPost, "/v1/placements", request, callerSecret)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -625,10 +689,9 @@ func TestPlaceJoinsASessionTheBoxAlreadyRuns(t *testing.T) {
 	if placement.InstanceID != instanceID || placement.SessionID != sessionID {
 		t.Fatalf("placement: got %+v, want the running instance and session", placement)
 	}
-	// The game process, not the agent: the agent answers JSON behind the fleet bearer.
-	wantURL := fmt.Sprintf("wss://%s:%d/play", beatFrom, gamePort)
-	if placement.ServerURL != wantURL {
-		t.Fatalf("serverUrl: got %q, want %q", placement.ServerURL, wantURL)
+	// The player proxy, not the agent: the agent answers JSON behind the fleet bearer.
+	if want := wantURL(instanceID); placement.ServerURL != want {
+		t.Fatalf("serverUrl: got %q, want %q", placement.ServerURL, want)
 	}
 }
 
@@ -671,24 +734,190 @@ func TestPlaceStartsOneWorldForTwoJoins(t *testing.T) {
 	}
 }
 
-// A box that will not run the world is a placement nobody can be sent to, and the reservation it
-// took has to go back: held, every later joiner would be handed a session nothing is starting.
-func TestAStartTheBoxRefusesPlacesNothing(t *testing.T) {
+// A start the first box fails is carried to the next one in the same join, and a box that failed for
+// any reason but being full is routed around afterwards, however empty it is.
+func TestAStartTheBoxFailsTriesTheNextBox(t *testing.T) {
+	cases := []struct {
+		name     string
+		refusal  error
+		suspects bool
+	}{
+		{name: "a box that refused the connection", refusal: errors.New("dial: connection refused"), suspects: true},
+		{name: "a box that filled since the ranking", refusal: fleet.ErrHostFull},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			// hostA is the emptiest, so the ranking names it first every time.
+			h.seed(t, []box{
+				{id: hostA, region: "us-east-1", max: 8, running: 0},
+				{id: hostB, region: "us-east-1", max: 4, running: 1},
+			})
+			h.agent.setStarts(func(_ context.Context, host fleet.Host, req contract.InstanceStart) (contract.InstanceReport, error) {
+				if host.ID == hostA {
+					return contract.InstanceReport{}, c.refusal
+				}
+				return contract.InstanceReport{
+					InstanceID: req.InstanceID, GameID: req.GameID, SessionID: req.SessionID,
+					State: contract.InstanceStarting, Revision: req.Revision, Port: gamePort,
+				}, nil
+			})
+
+			if placement := h.place(t, join(gameID, "")); placement.HostID != hostB {
+				t.Fatalf("hostId: got %q, want the next box %q", placement.HostID, hostB)
+			}
+			if asked := len(h.agent.startsAsked()); asked != 2 {
+				t.Fatalf("starts: got %d, want the failed one and the one that landed", asked)
+			}
+
+			h.agent.setStarts(nil)
+			next := h.place(t, join(otherGameID, ""))
+			if suspected := next.HostID != hostA; suspected != c.suspects {
+				t.Fatalf("the next join went to %q: suspected %t, want %t", next.HostID, suspected, c.suspects)
+			}
+		})
+	}
+}
+
+// A box that says it cannot start a world is not offered one, while a box that can is.
+func TestAnUnreadyBoxIsNotChosen(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t, []box{
+		{id: hostA, region: "us-east-1", max: 8, running: 0, unready: true},
+		{id: hostB, region: "us-east-1", max: 2, running: 1},
+	})
+	if placement := h.place(t, join(gameID, "")); placement.HostID != hostB {
+		t.Fatalf("hostId: got %q, want %q, the one ready box", placement.HostID, hostB)
+	}
+}
+
+// Every world's store bearer is minted here, for that world's session, and lives its whole lifetime.
+func TestAStartCarriesAStoreBearerForItsSession(t *testing.T) {
 	h := newHarness(t)
 	h.seed(t, []box{{id: hostA, region: "us-east-1", max: 4, running: 0}})
-	h.agent.starts = func(fleet.Host, contract.InstanceStart) (contract.InstanceReport, error) {
-		return contract.InstanceReport{}, errors.New("connection refused")
-	}
+	placement := h.place(t, join(gameID, ""))
 
-	rec := h.send(t, http.MethodPost, "/v1/placements", join(gameID, ""), fleetSecret)
+	started := h.agent.startsAsked()[0]
+	claims, err := token.Verify(started.StoreToken, []ed25519.PublicKey{storeKey.Public().(ed25519.PublicKey)},
+		token.AudGameManager, epoch.Unix())
+	if err != nil {
+		t.Fatalf("the store refuses the bearer: %v", err)
+	}
+	if claims.SessionID != placement.SessionID || claims.GameID != gameID || claims.PlayerID != "" {
+		t.Errorf("claims: got %+v, want the world's session and no player", claims)
+	}
+	expires, err := contract.ParseTimestamp(started.StoreTokenExpiresAt)
+	if err != nil || !expires.Equal(epoch.Add(fleet.StoreTokenLifetime)) || expires.Unix() != claims.Exp {
+		t.Errorf("storeTokenExpiresAt: got %q (%v), want the bearer's own exp", started.StoreTokenExpiresAt, err)
+	}
+}
+
+// A join that finds a world being started waits for that start rather than racing it, so two
+// players are never sent to a session a failed start released.
+func TestJoinsBehindAStartWaitForItsOutcome(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t, []box{{id: hostA, region: "us-east-1", max: 4, running: 0}})
+	release := make(chan struct{})
+	h.agent.setStarts(func(ctx context.Context, _ fleet.Host, req contract.InstanceStart) (contract.InstanceReport, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return contract.InstanceReport{}, ctx.Err()
+		}
+		return contract.InstanceReport{
+			InstanceID: req.InstanceID, GameID: req.GameID, SessionID: req.SessionID,
+			State: contract.InstanceStarting, Revision: req.Revision, Port: gamePort,
+		}, nil
+	})
+
+	answers := make(chan contract.Placement, 2)
+	for range 2 {
+		go func() { answers <- h.place(t, join(gameID, "")) }()
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+
+	first, second := <-answers, <-answers
+	if first.SessionID != second.SessionID {
+		t.Fatalf("sessions: got %q and %q, want the one world both were waiting on", first.SessionID, second.SessionID)
+	}
+	if asked := len(h.agent.startsAsked()); asked != 1 {
+		t.Fatalf("starts: got %d, want one world", asked)
+	}
+}
+
+// A start that lands after its joiner gave up is a world nobody will be told about, so it is ended.
+func TestAStartThatLandsAfterItsJoinerLeftIsStopped(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t, []box{{id: hostA, region: "us-east-1", max: 4, running: 0}})
+	landed := make(chan string, 1)
+	h.agent.setStarts(func(ctx context.Context, _ fleet.Host, req contract.InstanceStart) (contract.InstanceReport, error) {
+		<-ctx.Done()
+		landed <- req.InstanceID
+		// The box finished the start just as the join's budget ran out.
+		return contract.InstanceReport{
+			InstanceID: req.InstanceID, GameID: req.GameID, SessionID: req.SessionID,
+			State: contract.InstanceStarting, Revision: req.Revision, Port: gamePort,
+		}, nil
+	})
+
+	ctx, giveUp := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer giveUp()
+	body, _ := json.Marshal(join(gameID, ""))
+	req := httptest.NewRequest(http.MethodPost, "/v1/placements", bytes.NewReader(body)).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+callerSecret)
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusConflict {
-		t.Fatalf("status: got %d, want 409 (%s)", rec.Code, rec.Body.String())
+		t.Fatalf("status: got %d, want 409 for a join that ran out of time", rec.Code)
 	}
 
-	// The slot is back, so the next join ranks the same box again rather than finding it spent.
-	h.agent.starts = nil
-	if placement := h.place(t, join(gameID, "")); placement.HostID != hostA {
-		t.Fatalf("after the refusal: got host %q, want %q", placement.HostID, hostA)
+	instance := <-landed
+	for deadline := time.Now().Add(2 * time.Second); !slices.Contains(h.agent.stops(), instance); {
+		if time.Now().After(deadline) {
+			t.Fatalf("stopped: got %v, want the world %s nobody waited for", h.agent.stops(), instance)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Before a round of beats every fleet looks empty, and telling @grove/api it is full would turn a
+// restart of this service into every game refusing its players.
+func TestAnEmptyAnswerDuringTheWarmupIsNotAFullFleet(t *testing.T) {
+	h := newHarnessWith(t, tuning{warmup: 10 * time.Second})
+
+	rec := h.send(t, http.MethodPost, "/v1/placements", join(gameID, ""), callerSecret)
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("during the warm-up: got %d (retry-after %q), want 503 with a retry", rec.Code, rec.Header().Get("Retry-After"))
+	}
+
+	h.setAt(epoch.Add(11 * time.Second))
+	if rec := h.send(t, http.MethodPost, "/v1/placements", join(gameID, ""), callerSecret); rec.Code != http.StatusConflict {
+		t.Fatalf("after the warm-up: got %d, want the 409 a full fleet answers", rec.Code)
+	}
+}
+
+// Behind the edge every beat arrives from the edge, so a production box that names nothing would
+// put the whole fleet on one address.
+func TestAProductionBeatMustNameItsBox(t *testing.T) {
+	h := newHarnessWith(t, tuning{production: true})
+	beat := contract.HostHeartbeat{
+		HostID: hostA, Region: "us-east-1", AgentPort: agentPort, PlayerPort: 443, TLS: true, Ready: true,
+		Capacity:    contract.HostCapacity{MaxInstances: 4},
+		Incarnation: "2b1c6f70-9d3a-4a21-8f55-0c9f7a1d4e88",
+		ReportedAt:  contract.Timestamp(epoch),
+	}
+
+	if rec := h.send(t, http.MethodPost, "/v1/hosts/"+hostA+"/heartbeat", beat, fleetSecret); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a beat naming no host: got %d, want 400", rec.Code)
+	}
+	beat.PublicHost = hostA + ".fleet.grove.example"
+	if rec := h.send(t, http.MethodPost, "/v1/hosts/"+hostA+"/heartbeat", beat, fleetSecret); rec.Code != http.StatusNoContent {
+		t.Fatalf("a beat naming its host: got %d, want 204 (%s)", rec.Code, rec.Body.String())
+	}
+	beat.TLS = false
+	if rec := h.send(t, http.MethodPost, "/v1/hosts/"+hostA+"/heartbeat", beat, fleetSecret); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a production beat in the clear: got %d, want 400", rec.Code)
 	}
 }
 
@@ -742,7 +971,9 @@ func TestPlaceKeepsAVersionsJoinersTogether(t *testing.T) {
 	}
 }
 
-func TestFleetCredentialGuardsV1(t *testing.T) {
+// Two credentials, each opening only its own pair's routes: a leaked box can neither place nor
+// deploy, and a leaked caller cannot beat as a box.
+func TestEachCredentialOpensOnlyItsOwnRoutes(t *testing.T) {
 	cases := []struct {
 		name       string
 		method     string
@@ -776,8 +1007,32 @@ func TestFleetCredentialGuardsV1(t *testing.T) {
 			path: "/v1/hosts", bearer: "fleet-secret", wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name: "the fleet credential", method: http.MethodGet,
-			path: "/v1/hosts", bearer: fleetSecret, wantStatus: http.StatusOK,
+			name: "the caller credential on the fleet listing", method: http.MethodGet,
+			path: "/v1/hosts", bearer: callerSecret, wantStatus: http.StatusOK,
+		},
+		{
+			name: "a box's credential on the fleet listing", method: http.MethodGet,
+			path: "/v1/hosts", bearer: fleetSecret, wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "a box's credential on a placement", method: http.MethodPost,
+			path: "/v1/placements", bearer: fleetSecret, wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "a box's credential on a deployment", method: http.MethodPost,
+			path: "/v1/deployments", bearer: fleetSecret, wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "a caller's credential on a heartbeat", method: http.MethodPost,
+			path: "/v1/hosts/" + hostA + "/heartbeat", bearer: callerSecret, wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "a route nobody serves, under either credential", method: http.MethodGet,
+			path: "/v1/nothing", bearer: fleetSecret, wantStatus: http.StatusNotFound,
+		},
+		{
+			name: "a route nobody serves, under none", method: http.MethodGet,
+			path: "/v1/nothing", wantStatus: http.StatusUnauthorized,
 		},
 		{
 			name: "health, which a supervisor polls holding none", method: http.MethodGet,
@@ -882,7 +1137,7 @@ func TestHostsKeepsAStaleBoxAndMarksIt(t *testing.T) {
 		{id: hostB, region: "eu-west-1", max: 4, running: 0},
 	})
 
-	rec := h.send(t, http.MethodGet, "/v1/hosts", nil, fleetSecret)
+	rec := h.send(t, http.MethodGet, "/v1/hosts", nil, callerSecret)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -917,7 +1172,7 @@ func TestHostsDropsABoxGoneFarLongerThanTheWindow(t *testing.T) {
 		{id: hostB, region: "eu-west-1", max: 4, running: 0},
 	})
 
-	rec := h.send(t, http.MethodGet, "/v1/hosts", nil, fleetSecret)
+	rec := h.send(t, http.MethodGet, "/v1/hosts", nil, callerSecret)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -942,8 +1197,8 @@ func holding(id, game, region string) box {
 func (h *harness) deploy(t *testing.T, regions []string) contract.Deployment {
 	t.Helper()
 
-	request := contract.DeploymentRequest{GameID: gameID, Bundles: bundles(), Regions: regions}
-	rec := h.send(t, http.MethodPost, "/v1/deployments", request, fleetSecret)
+	request := contract.DeploymentRequest{GameID: gameID, Revision: revision + 1, Bundles: bundles(), Regions: regions}
+	rec := h.send(t, http.MethodPost, "/v1/deployments", request, callerSecret)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -1014,7 +1269,7 @@ func TestDeployReportsABoxThatCouldNotBeReached(t *testing.T) {
 			}
 		}
 		return contract.HostDeployment{
-			HostID: host.ID, InstanceIDs: host.Holds(game), Status: contract.DeployDraining,
+			HostID: host.ID, InstanceIDs: host.Superseded(game, revision+1), Status: contract.DeployDraining,
 		}
 	}
 
@@ -1067,8 +1322,8 @@ func TestDeployReachesABoxHoldingAPlacementItHasNotReportedYet(t *testing.T) {
 func TestDeployAnswersWithAListEvenWhenItReachedNothing(t *testing.T) {
 	h := newHarness(t)
 
-	request := contract.DeploymentRequest{GameID: gameID, Bundles: bundles()}
-	rec := h.send(t, http.MethodPost, "/v1/deployments", request, fleetSecret)
+	request := contract.DeploymentRequest{GameID: gameID, Revision: revision + 1, Bundles: bundles()}
+	rec := h.send(t, http.MethodPost, "/v1/deployments", request, callerSecret)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -1159,9 +1414,23 @@ func TestRefusedRequests(t *testing.T) {
 		{
 			name: "a deployment whose halves disagree about the source", method: http.MethodPost,
 			path: "/v1/deployments",
-			body: contract.DeploymentRequest{GameID: gameID, Bundles: contract.BundleSet{
+			body: contract.DeploymentRequest{GameID: gameID, Revision: revision, Bundles: contract.BundleSet{
 				Server: bundles().Server, Client: bundles().Client, SyncedHash: "not-a-hash",
 			}},
+		},
+		{
+			name: "a deployment naming no revision", method: http.MethodPost,
+			path: "/v1/deployments",
+			body: contract.DeploymentRequest{GameID: gameID, Bundles: bundles()},
+		},
+		{
+			name: "a heartbeat naming a host no url can carry", method: http.MethodPost,
+			path: "/v1/hosts/" + hostA + "/heartbeat",
+			body: contract.HostHeartbeat{
+				HostID: hostA, Region: "us-east-1", AgentPort: agentPort, PlayerPort: playerPort,
+				PublicHost: "box.grove.example:443",
+				Capacity:   contract.HostCapacity{MaxInstances: 4}, ReportedAt: contract.Timestamp(epoch),
+			},
 		},
 	}
 
@@ -1169,7 +1438,11 @@ func TestRefusedRequests(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t)
 
-			rec := h.send(t, c.method, c.path, c.body, fleetSecret)
+			bearer := callerSecret
+			if strings.HasSuffix(c.path, "/heartbeat") {
+				bearer = fleetSecret
+			}
+			rec := h.send(t, c.method, c.path, c.body, bearer)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status: got %d, want 400 (%s)", rec.Code, rec.Body.String())
 			}
@@ -1216,7 +1489,7 @@ func TestPlaceJoinsTheRunningBoxOverAnEmptierOne(t *testing.T) {
 	})
 
 	request := join(gameID, "")
-	rec := h.send(t, http.MethodPost, "/v1/placements", request, fleetSecret)
+	rec := h.send(t, http.MethodPost, "/v1/placements", request, callerSecret)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -1243,7 +1516,7 @@ func TestAFullBoxStillTakesAJoinerForAGameItRuns(t *testing.T) {
 	}})
 
 	request := join(gameID, "")
-	rec := h.send(t, http.MethodPost, "/v1/placements", request, fleetSecret)
+	rec := h.send(t, http.MethodPost, "/v1/placements", request, callerSecret)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -1266,7 +1539,7 @@ func TestAStaleBoxRunningTheGameIsNotJoined(t *testing.T) {
 	})
 
 	request := join(gameID, "")
-	rec := h.send(t, http.MethodPost, "/v1/placements", request, fleetSecret)
+	rec := h.send(t, http.MethodPost, "/v1/placements", request, callerSecret)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200 (%s)", rec.Code, rec.Body.String())
 	}
@@ -1277,5 +1550,38 @@ func TestAStaleBoxRunningTheGameIsNotJoined(t *testing.T) {
 	}
 	if placement.SessionID == sessionID {
 		t.Error("joined a session on a box that has gone quiet")
+	}
+}
+
+// A push names its revision: the worlds already on it are what it wants, and every box it does
+// reach is told which revision to keep.
+func TestDeployLeavesTheWorldsAlreadyOnItsRevision(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t, []box{holding(hostA, gameID, "us-east-1")})
+
+	same := contract.DeploymentRequest{GameID: gameID, Revision: revision, Bundles: bundles()}
+	rec := h.send(t, http.MethodPost, "/v1/deployments", same, callerSecret)
+	if rows := decode[contract.Deployment](t, rec).Hosts; len(rows) != 0 {
+		t.Fatalf("rows: got %+v, want no box reached by a push of what it already runs", rows)
+	}
+
+	if rows := h.deploy(t, nil).Hosts; len(rows) != 1 {
+		t.Fatalf("rows: got %+v, want the box on the older revision", rows)
+	}
+	if got := h.agent.pushedRevisions(); !slices.Equal(got, []int{revision + 1}) {
+		t.Fatalf("revisions pushed: got %v, want %d", got, revision+1)
+	}
+}
+
+// A reservation on the pushed revision is the world the push wants, and reaches no box.
+func TestDeploySkipsAReservationAlreadyOnItsRevision(t *testing.T) {
+	h := newHarness(t)
+	h.seed(t, []box{{id: hostA, region: "us-east-1", max: 4, running: 0}})
+	newer := join(gameID, "")
+	newer.Revision = revision + 1
+	h.place(t, newer)
+
+	if rows := h.deploy(t, nil).Hosts; len(rows) != 0 {
+		t.Fatalf("rows: got %+v, want none for a box starting the pushed revision", rows)
 	}
 }

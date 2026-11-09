@@ -2,10 +2,13 @@
 package config
 
 import (
+	"crypto/ed25519"
+	"crypto/subtle"
 	"fmt"
 	"time"
 
 	"github.com/RayHCai/grove/libs/go-grove/env"
+	"github.com/RayHCai/grove/libs/go-grove/token"
 )
 
 // Config is everything the process needs before it binds a port.
@@ -13,25 +16,28 @@ type Config struct {
 	Host string
 	Port int
 	Env  string
-	// The shared bearer every box in the fleet presents. A different key from GAME_TOKEN_SECRET,
-	// and a different blast radius.
+	// The bearer the boxes and this service present to each other, and nothing else does.
 	FleetSecret []byte
+	// The bearer @grove/api and this service present to each other, so a leaked box opens no route
+	// a caller uses and a leaked caller opens no box.
+	CallerSecret []byte
+	// Signs each world's store bearer; @grove/game-manager holds only its public half.
+	StoreKey ed25519.PrivateKey
 	// How long a host may go unheard before it stops taking work.
 	StaleAfter time.Duration
-	// The scheme a player's placement url is handed out under. Nothing in the fleet terminates TLS,
-	// so this is a statement about whatever fronts it, and the insecure spelling has to be asked for.
-	IngressScheme string
-	// Where the line of waiting joins is held. Empty is a line in this process, which is what a
-	// development box with no cache beside it runs.
-	JoinQueueURL string
-	// The key the line is held under, so two deployments sharing one cache do not share one line.
-	JoinQueueKey string
 	// How many joins may be waiting before this service refuses to take another.
 	JoinQueueDepth int
 	// How long one join may wait to be answered.
 	JoinDeadline time.Duration
 	// How long a box may hold the start of a world before the join that reserved it gives up.
 	StartTimeout time.Duration
+	// How many starts may be calling boxes at once, beside the one worker deciding joins.
+	StartWorkers int
+	// How long a box whose start failed is routed around.
+	SuspectFor time.Duration
+	// How long after boot an empty answer is a 503 rather than a full fleet: the registry is
+	// rebuilt from beats, and before the first round of them every fleet looks empty.
+	PlacementWarmup time.Duration
 	// How long a whole fan-out may take, and how long any one box in it may hold its own answer.
 	DeployTimeout time.Duration
 	AgentTimeout  time.Duration
@@ -58,17 +64,26 @@ func Read(r *env.Reader) (Config, error) {
 
 	c.Env = r.Environment()
 	c.FleetSecret = r.Secret("FLEET_SECRET", env.SecretMinLen)
+	c.CallerSecret = r.Secret("SERVER_MANAGER_SECRET", env.SecretMinLen)
+	if seed := r.Required("STORE_SIGNING_KEY"); seed != "" {
+		key, err := token.ParseSigningKey(seed)
+		if err != nil {
+			r.Refuse("STORE_SIGNING_KEY", err)
+		}
+		c.StoreKey = key
+	}
 	// Two missed beats at the agent's default interval. A false positive costs one interval of
 	// placement on one box and ends no session, so the window is set to find a dead box quickly
 	// rather than to be sure, and the box clears it by beating.
 	c.StaleAfter = r.Duration("HOST_STALE_AFTER", 20*time.Second)
-	c.IngressScheme = r.OneOf("INGRESS_SCHEME", "wss", "wss", "ws")
 
-	c.JoinQueueURL = r.String("JOIN_QUEUE_URL", "")
-	c.JoinQueueKey = r.String("JOIN_QUEUE_KEY", "grove:joins")
 	c.JoinQueueDepth = r.Int("JOIN_QUEUE_DEPTH", 256)
 	c.JoinDeadline = r.Duration("JOIN_DEADLINE", 1500*time.Millisecond)
 	c.StartTimeout = r.Duration("START_TIMEOUT", time.Second)
+	c.StartWorkers = r.Int("START_WORKERS", 4)
+	c.SuspectFor = r.Duration("SUSPECT_FOR", 2*time.Minute)
+	// One beat at the agent's default interval, which is when every live box has been heard from.
+	c.PlacementWarmup = r.Duration("PLACEMENT_WARMUP", 10*time.Second)
 	c.DeployTimeout = r.Duration("DEPLOY_TIMEOUT", 20*time.Second)
 	c.AgentTimeout = r.Duration("AGENT_TIMEOUT", 5*time.Second)
 
@@ -89,6 +104,18 @@ func Read(r *env.Reader) (Config, error) {
 	if c.ReportInterval <= 0 || c.ReportInterval > c.StaleAfter {
 		return Config{}, fmt.Errorf("FLEET_REPORT_INTERVAL must be positive and at most HOST_STALE_AFTER, got %s and %s",
 			c.ReportInterval, c.StaleAfter)
+	}
+	// One credential for both pairs would let a box call the routes only @grove/api may.
+	if subtle.ConstantTimeCompare(c.FleetSecret, c.CallerSecret) == 1 {
+		return Config{}, fmt.Errorf("SERVER_MANAGER_SECRET must differ from FLEET_SECRET")
+	}
+	if c.StartWorkers < 1 || c.SuspectFor <= 0 {
+		return Config{}, fmt.Errorf("START_WORKERS and SUSPECT_FOR must be positive, got %d and %s",
+			c.StartWorkers, c.SuspectFor)
+	}
+	// Past the staleness window, a warm-up would outlast the evidence it waits for.
+	if c.PlacementWarmup < 0 || c.PlacementWarmup > c.StaleAfter {
+		return Config{}, fmt.Errorf("PLACEMENT_WARMUP must be between 0 and HOST_STALE_AFTER, got %s", c.PlacementWarmup)
 	}
 	// A line of nothing refuses every join, and a deadline at or past the caller's abort is one no
 	// join can ever reach; both are a fleet that answers no one, with nothing having failed.

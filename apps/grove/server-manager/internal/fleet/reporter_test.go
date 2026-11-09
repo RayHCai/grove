@@ -40,9 +40,8 @@ func TestSendCarriesTheFleetAndItsTransitions(t *testing.T) {
 	}
 }
 
-// The bearer every service-to-service call in the fleet presents, and the one the receiving end
-// gates this route on.
-func TestSendPresentsTheFleetBearer(t *testing.T) {
+// The credential @grove/api gates this route on, which is never the one the boxes hold.
+func TestSendPresentsTheCallerBearer(t *testing.T) {
 	reg := NewRegistry(staleAfter)
 	reg.Beat(living(hostA, firstLife), "192.0.2.1", epoch)
 
@@ -102,9 +101,59 @@ func TestAnUnconfiguredReporterIsNotAttached(t *testing.T) {
 
 func reporterFor(reg *Registry, apiURL string) *Reporter {
 	return NewReporter(ReporterOptions{
-		APIURL:      apiURL,
-		FleetSecret: []byte(reportSecret),
-		Fleet:       reg,
-		Now:         func() time.Time { return epoch },
+		APIURL: apiURL,
+		Secret: []byte(reportSecret),
+		Fleet:  reg,
+		Now:    func() time.Time { return epoch },
 	})
+}
+
+// Run sweeps and reports on one tick until its context ends, so a box gone quiet reaches the history.
+func TestRunSweepsAndReportsOnEveryTick(t *testing.T) {
+	reports := make(chan contract.FleetReport, 8)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got contract.FleetReport
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		reports <- got
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer api.Close()
+
+	reg := NewRegistry(staleAfter)
+	reg.Beat(living(hostA, firstLife), "192.0.2.1", epoch)
+	reporter := NewReporter(ReporterOptions{
+		APIURL: api.URL, Secret: []byte(reportSecret), Fleet: reg,
+		Interval: 10 * time.Millisecond, Now: func() time.Time { return epoch.Add(2 * staleAfter) },
+	})
+
+	ctx, stop := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	swept := make(chan time.Time, 8)
+	go func() {
+		reporter.Run(ctx, func(at time.Time) { reg.Sweep(at); swept <- at })
+		close(stopped)
+	}()
+
+	var kinds []contract.FleetEventKind
+	for len(kinds) < 2 {
+		select {
+		case report := <-reports:
+			for _, event := range report.Events {
+				kinds = append(kinds, event.Kind)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("events reported: got %v, want the registration and the failure the sweep found", kinds)
+		}
+	}
+	if kinds[0] != contract.FleetRegistered || kinds[1] != contract.FleetFailed {
+		t.Fatalf("events: got %v", kinds)
+	}
+	<-swept
+
+	stop()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run outlived its context")
+	}
 }

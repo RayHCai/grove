@@ -20,23 +20,28 @@ way: a box that is down is a fact an operator needs. One gone longer than that i
 next beat from any box, since one that returns re-registers itself.
 
 Liveness follows when a beat arrived here and never a claim a box made about itself, so a skewed
-clock on one box cannot keep it in rotation. Its address is taken from the connection the beat came
-over for the same reason: a box that named its own address could point joining players elsewhere.
+clock on one box cannot keep it in rotation. A box is dialled by the `publicHost` its beat names,
+over TLS when it reports `tls`, and by the beat's source address only where it names none; behind
+the TLS edge every beat arrives from the edge, so a production beat naming no host or serving no
+TLS is refused with a 400. A box whose beat says `ready: false` takes no new world.
 
-| Liveness    | Means                                               | Takes work |
-| ----------- | --------------------------------------------------- | ---------- |
-| `healthy`   | beat inside the window, nothing against it          | yes        |
-| `suspected` | work this service dispatched just failed against it | no         |
-| `left`      | its own last beat said it was going                 | no         |
-| `failed`    | silent past the window, having said nothing         | no         |
+| Liveness    | Means                                          | Takes work |
+| ----------- | ---------------------------------------------- | ---------- |
+| `healthy`   | beat inside the window, nothing against it     | yes        |
+| `suspected` | a start or a redeploy failed against it lately | no         |
+| `left`      | its own last beat said it was going            | no         |
+| `failed`    | silent past the window, having said nothing    | no         |
 
 `left` and `failed` are the same silence, and the difference is whether the box said goodbye first,
 which is the difference between a deploy and a page. It outranks silence permanently: a box that left
 stays left however long ago that was, or every rollout ages into an incident an hour later.
 
-`suspected` is evidence from the data path, which arrives before the staleness window and never after
-it; a redeploy that went unanswered is a box in trouble now, not in twenty seconds. The box's own
-next beat clears it, so a single lost packet costs one interval of placement rather than an eviction.
+`suspected` is evidence from the data path, which arrives before the staleness window does; a start
+that failed is a box in trouble now, not in twenty seconds. It lasts `SUSPECT_FOR` whatever the box
+beats, since a box that cannot start a world still beats, and a new incarnation clears it.
+
+None of the three takes a new world, but a running world on a box heard from inside two staleness
+windows stays joinable: a farewell or a missed beat says nothing about the worlds a box holds.
 
 A beat also carries an incarnation, minted when the agent starts. `hostId` survives a reboot on
 purpose, so without it a box that crashed and came back inside the window is a restart nothing here
@@ -54,8 +59,8 @@ one interval of beats cannot rebuild is what the fleet _did_, which is why the t
 
 Each transition is recorded once, when it happens, not once per sweep, or a box down overnight is
 thousands of identical rows. `FLEET_REPORT_INTERVAL` both sweeps for boxes gone quiet and posts what
-the sweep found to `API_URL`, under the same fleet bearer every other service-to-service call
-presents. One ticker for both, because the sweep is what produces the rows the report carries.
+the sweep found to `API_URL`, under `SERVER_MANAGER_SECRET`. One ticker for both, because the sweep
+is what produces the rows the report carries.
 
 The whole fleet goes in every report rather than a delta, for the reason a beat carries every
 instance: a dropped report costs nothing to recover, and a receiver that missed one is never left
@@ -74,23 +79,20 @@ hand: one ranking over what they report and one record of where it sent the play
 calls is the one asked to start a world nothing is running yet, below; asking the fleet anything else
 at request time would put the slowest machine in it on that path.
 
-A join waits in a line before it is ranked, and one worker empties that line. One worker, because the
-decision below it is already a single critical section: a second would buy no throughput and would
-take the ordering away, leaving arrival order to be whichever goroutine the runtime handed the mutex
-to. The line is where a burst is absorbed: past `JOIN_QUEUE_DEPTH` a join is refused with a 500 and
-nothing is added, since a line that accepted past its cap would stay above it behind entries no
-caller is waiting on, and a 409 would tell `@grove/api` the fleet is full when it is this service
-that is behind. A join still waiting at `JOIN_DEADLINE` is answered 409, which is a game a player
-cannot get into and the only shape that caller has for one; the deadline is refused at startup unless
-it sits inside the two seconds `@grove/api` aborts at, because a deadline past that is one no join
-could ever reach. `JOIN_QUEUE_URL` holds the line in a Redis list, where its depth is something an
-operator can read while players are in it, and unset it is a line in this process. Either way the
-caller waiting on a join is this process's alone: an entry popped by another process has nobody to
-answer and is dropped, which is one more reason this service is a single replica. The client speaks
-plaintext RESP2, so a `rediss://` url is refused at startup rather than dialled in the clear.
+A join waits in a line in this process, and one worker decides each in arrival order. One worker,
+because the decision is a single critical section in the registry: a second would buy no throughput
+and would leave arrival order to whichever goroutine the runtime handed the mutex to. A decision never
+leaves the process; a start it owes runs on a pool of `START_WORKERS`, bounded by what is left of
+that join's own deadline, so one cold box holds up no other join, and a join that finds its world
+being started waits on that start rather than racing it. The line is where a burst is absorbed: past
+`JOIN_QUEUE_DEPTH` a join is refused with a 500 and nothing is added, since a 409 would tell
+`@grove/api` the fleet is full when it is this service that is behind. A join still waiting at
+`JOIN_DEADLINE` is answered 409, which is a game a player cannot get into and the only shape that
+caller has for one; the deadline is refused at startup unless it sits inside the two seconds
+`@grove/api` aborts at, because a deadline past that is one no join could ever reach.
 
-A box qualifies when it is healthy, has an instance slot free of both what it reports running and
-what has been placed on it since, and sits in the requested region. A named region is a filter
+A box qualifies when it is healthy and ready, has an instance slot free of both what it reports
+running and what has been placed on it since, and sits in the requested region. A named region is a filter
 rather than a preference: a caller asks for one to bound latency, and honouring it only when
 convenient makes that latency unpredictable.
 
@@ -106,8 +108,9 @@ headroom stays pooled rather than spread a slot at a time across every box, wher
 land. Ties break on the lower `hostId`: two identical requests must land on the same box, or one
 game's players scatter across the fleet a join at a time. A join whose first box filled between that
 ranking and the placement takes the next box in the order rather than failing. Nothing qualifying is
-a 409 `conflict`, which is what a full fleet looks like from the API, and an empty one too, which
-is why holding no boxes never makes this process unready.
+a 409 `conflict`, which is what a full fleet looks like from the API, and an empty one too, except
+inside `PLACEMENT_WARMUP` of boot, before one round of beats has rebuilt the registry, where it is a
+503 with `Retry-After`; holding no boxes never makes this process unready.
 
 A placement joins the session the chosen box already runs for that world when there is one, and the
 session placed on it that the box has yet to report healthy the same way, until a beat names that
@@ -121,29 +124,28 @@ to the running count the box now keeps it in.
 
 Reaching a box nothing is running the world on is where this service makes its one call outward:
 `POST /v1/instances` on the chosen box's agent, carrying the version and the bundle refs the join
-named. Only the join that reserved the world makes it; every joiner behind that one finds the
+named, and the world's store bearer, which this service signs with `STORE_SIGNING_KEY` for that
+session alone and twelve hours, so no box holds a key that signs one. Only the join that reserved the world makes it; every joiner behind that one finds the
 reservation and waits on the one process, because a second start of one session is a second world
 half the players would be talking to. It happens outside the registry lock, since it is a call to
 another machine and the registry is what every other join in the fleet is waiting on, and inside
 `START_TIMEOUT`, which has to sit within `JOIN_DEADLINE` or it is an answer arriving after the
-player was told no. A box that refuses releases the reservation rather than leaving it: held, every
-later joiner would be handed a session whose process nothing is ever going to spawn.
+player was told no. A start that fails releases its reservation and moves to the next ranked box
+while the join's deadline lasts; any failure but a full box marks the box suspected, and a start
+the join's own clock ran out on suspects nothing. A start that lands after every join waiting on it
+has gone is stopped with `DELETE /v1/instances/{id}`, since nobody will ever be told about it.
 
-The url a placement carries dials the game process itself, at the port the box bound. That port is
-read off the box's own answer to the start rather than waited for, because a placement handed out
-with no port is an address no player can dial for the whole heartbeat it would take to learn one; a
-join into a session already running takes it from the beat instead. `INGRESS_SCHEME` spells the
-scheme, `wss` unless a deployment asks for `ws`; it describes whatever fronts the fleet, since a
-box serves the socket itself in plaintext.
+The url a placement carries is the box's player proxy, `wss://<publicHost>:<playerPort>/play/<instanceId>`
+(`ws` where the box serves no TLS), so it names no port of a game process, none of which faces out.
 
 ## Deployment
 
-`POST /v1/deployments` forwards a redeploy to every box holding a world of the game, all of them at
-once, and answers with one row per box. Naming regions is what makes a rollout staged; naming none is
-the whole fleet. A box holding nothing of that game is never dialled and has no row, so a version of
-a game nobody is playing costs a rollout no connections at all, and a box this service handed a
-placement to seconds ago is dialled anyway, because the world it is starting is one its next beat has
-yet to name and a rollout blind to it would leave that box alone on the old code.
+`POST /v1/deployments` names the revision it pushes and forwards it to every box holding a world of
+the game on another revision, all of them at once, answering with one row per box. Naming regions is
+what makes a rollout staged; naming none is the whole fleet. A box holding nothing of that game but
+the pushed revision is never dialled and has no row, so a push costs a game nobody is playing no
+connections at all, and a box handed a placement on another revision seconds ago is dialled anyway,
+because the world it is starting is one its next beat has yet to name.
 
 This service deploys nothing: what a box runs is decided at start, from the bundle refs its start
 request carries, so the whole of this is a relay. A box answers `draining` with the
@@ -161,56 +163,57 @@ a whole heartbeat away, and every joiner placed in between would be sent into a 
 
 ## Routes
 
-| Route                               | Answers                                                |
-| ----------------------------------- | ------------------------------------------------------ |
-| `GET /health`                       | that this process is listening, and nothing else       |
-| `GET /ready`                        | the same, since nothing here has to become true first  |
-| `POST /v1/hosts/{hostId}/heartbeat` | 204; upserts the box and every instance it reported    |
-| `GET /v1/hosts`                     | the fleet as this service sees it, ordered by `hostId` |
-| `POST /v1/placements`               | a `Placement`, or 409 `conflict` when no box qualifies |
-| `POST /v1/deployments`              | a `Deployment`, one row per box the version reached    |
+| Route                               | Answers                                                                      |
+| ----------------------------------- | ---------------------------------------------------------------------------- |
+| `GET /health`                       | that this process is listening, and nothing else                             |
+| `GET /ready`                        | the same, since nothing here has to become true first                        |
+| `POST /v1/hosts/{hostId}/heartbeat` | 204; upserts the box and every instance it reported                          |
+| `GET /v1/hosts`                     | the fleet as this service sees it, ordered by `hostId`                       |
+| `POST /v1/placements`               | a `Placement`, 409 `conflict` when no box qualifies, or 503 while warming up |
+| `POST /v1/deployments`              | a `Deployment`, one row per box the version reached                          |
 
-Everything under `/v1` sits behind one middleware that compares `FLEET_SECRET` in constant time.
-`GET /health` and `GET /ready` are outside it, because a supervisor polls those before this process
-holds a credential to check anything against. `FLEET_SECRET` is a different secret from
-`GAME_TOKEN_SECRET`, which signs a browser's join ticket and belongs to the two services at either
-end of one.
+The heartbeat opens to `FLEET_SECRET` alone and the other three routes to `SERVER_MANAGER_SECRET`
+alone, each compared in constant time, so a leaked box can neither place nor deploy and a leaked
+caller cannot beat as a box; a path nobody serves answers the gate first under either. `GET /health`
+and `GET /ready` are outside it, because a supervisor polls those holding no credential.
 
 Bodies and rows are `libs/go-grove/contract`'s, which mirrors the zod schemas in
 `libs/api-contract`; a timestamp crosses as the RFC 3339 string `z.iso.datetime()` reads.
 
 ## Configuration
 
-| Variable                | What                                                                 |
-| ----------------------- | -------------------------------------------------------------------- |
-| `SERVER_MANAGER_HOST`   | address to bind, `0.0.0.0` by default; every box dials this one      |
-| `SERVER_MANAGER_PORT`   | port to bind; `PORT` when a platform assigned one, else `4003`       |
-| `FLEET_SECRET`          | the shared bearer every caller under `/v1` presents, 32 bytes up     |
-| `HOST_STALE_AFTER`      | how long a box may go unheard before work stops, positive, `20s`     |
-| `INGRESS_SCHEME`        | `wss` or `ws`, the scheme a placement url is handed out under        |
-| `JOIN_QUEUE_URL`        | `redis://[[user]:password@]host[:port][/db]`; unset is in-process    |
-| `JOIN_QUEUE_KEY`        | the key the line is held under, `grove:joins` by default             |
-| `JOIN_QUEUE_DEPTH`      | joins that may be waiting before one is refused, positive, `256`     |
-| `JOIN_DEADLINE`         | how long a join may wait, positive and under 2s, `1.5s`              |
-| `START_TIMEOUT`         | how long a box may hold a start, under the above, `1s`               |
-| `DEPLOY_TIMEOUT`        | how long a whole fan-out may take, `20s`                             |
-| `AGENT_TIMEOUT`         | how long one box may hold its own answer, at most the above, `5s`    |
-| `API_URL`               | where the fleet's history is kept, a url; unset reports to nothing   |
-| `FLEET_REPORT_INTERVAL` | how often the fleet is swept and reported, at most the window, `15s` |
-| `GROVE_ENV`             | `development`, `test` or `production`; chooses the log handler       |
+| Variable                | What                                                                    |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `SERVER_MANAGER_HOST`   | address to bind, `0.0.0.0` by default; every box dials this one         |
+| `SERVER_MANAGER_PORT`   | port to bind; `PORT` when a platform assigned one, else `4003`          |
+| `FLEET_SECRET`          | the boxes' bearer, both directions, 32 bytes up                         |
+| `SERVER_MANAGER_SECRET` | `@grove/api`'s bearer, both directions, 32 bytes up, never the above    |
+| `STORE_SIGNING_KEY`     | Ed25519 seed every store bearer is signed with, unpadded base64url      |
+| `HOST_STALE_AFTER`      | how long a box may go unheard before work stops, positive, `20s`        |
+| `JOIN_QUEUE_DEPTH`      | joins that may be waiting before one is refused, positive, `256`        |
+| `START_WORKERS`         | starts that may be calling boxes at once, positive, `4`                 |
+| `SUSPECT_FOR`           | how long a box whose start failed is routed around, `2m`                |
+| `PLACEMENT_WARMUP`      | how long after boot an empty answer is a 503, at most the window, `10s` |
+| `JOIN_DEADLINE`         | how long a join may wait, positive and under 2s, `1.5s`                 |
+| `START_TIMEOUT`         | how long a box may hold a start, under the above, `1s`                  |
+| `DEPLOY_TIMEOUT`        | how long a whole fan-out may take, `20s`                                |
+| `AGENT_TIMEOUT`         | how long one box may hold its own answer, at most the above, `5s`       |
+| `API_URL`               | where the fleet's history is kept, a url; unset reports to nothing      |
+| `FLEET_REPORT_INTERVAL` | how often the fleet is swept and reported, at most the window, `15s`    |
+| `GROVE_ENV`             | `development`, `test` or `production`; chooses the log handler          |
 
 Every problem with the environment is reported at once rather than one restart at a time, which is
 what `libs/go-grove/env` is for.
 
 ## Layout
 
-| File              | Holds                                                                                         |
-| ----------------- | --------------------------------------------------------------------------------------------- |
-| `main.go`         | the composition root: the environment, the registry, the line, the listener                   |
-| `internal/config` | the variables this process is started with                                                    |
-| `internal/fleet`  | the registry, its history, the reporter, the ingress, the balancer, and the agent             |
-| `internal/joins`  | the line a join waits in, the worker that empties it, and the RESP client it may be held over |
-| `internal/api`    | the fleet-bearer gate, the four routes behind it, and the open two                            |
+| File              | Holds                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| `main.go`         | the composition root: the environment, the registry, the line, the listener          |
+| `internal/config` | the variables this process is started with                                           |
+| `internal/fleet`  | the registry, its history, the reporter, the ingress, the balancer, and the agent    |
+| `internal/joins`  | the line a join waits in, the worker that decides it, and the pool its starts run on |
+| `internal/api`    | the fleet-bearer gate, the four routes behind it, and the open two                   |
 
 `pnpm run build | test | typecheck` at the repo root reach this module through `package.json`, whose
 scripts shell to `go`, and `typecheck` on to `staticcheck`, which is its own binary and can be

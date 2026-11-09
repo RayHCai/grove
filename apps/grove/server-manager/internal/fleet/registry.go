@@ -94,19 +94,23 @@ func (reg *Registry) Beat(hb contract.HostHeartbeat, addr string, at time.Time) 
 	previous, known := reg.hosts[hb.HostID]
 
 	h := Host{
-		ID:        hb.HostID,
-		Region:    hb.Region,
-		AgentPort: hb.AgentPort,
-		Capacity:  hb.Capacity,
+		ID:         hb.HostID,
+		Region:     hb.Region,
+		AgentPort:  hb.AgentPort,
+		PublicHost: hb.PublicHost,
+		PlayerPort: hb.PlayerPort,
+		TLS:        hb.TLS,
+		Ready:      hb.Ready,
+		Capacity:   hb.Capacity,
 		// Cloned so the decoded body a handler is about to drop cannot alias registry state.
 		Instances:   slices.Clone(hb.Instances),
 		Addr:        addr,
 		LastSeenAt:  at,
 		Incarnation: hb.Incarnation,
 		Leaving:     hb.Leaving,
-		// Suspicion is deliberately absent: this beat is the box answering, which is the evidence
-		// that outranks whatever failed against it.
-		Reported: previous.Reported,
+		// Kept across beats, since a box whose starts fail still beats; a new incarnation drops it.
+		SuspectedUntil: previous.SuspectedUntil,
+		Reported:       previous.Reported,
 	}
 
 	switch {
@@ -116,6 +120,7 @@ func (reg *Registry) Beat(hb contract.HostHeartbeat, addr string, at time.Time) 
 	case previous.Incarnation != hb.Incarnation:
 		// Recorded as its own kind rather than as a return, because the worlds the previous life
 		// was running went with it; a box back inside the staleness window never looked absent.
+		h.SuspectedUntil = time.Time{}
 		h.Reported = h.Liveness(at, reg.staleAfter)
 		reg.note(h, contract.FleetRestarted, at, "")
 	default:
@@ -268,14 +273,14 @@ func (reg *Registry) Started(gameID string, revision int, sessionID string, port
 }
 
 // serving finds the box already running a healthy session of the game, which a joiner joins.
-// Deliberately not filtered on free slots the way Candidates is: joining a running world starts
-// no process, so a box at its instance cap can still take the player.
+// Filtered on Joinable rather than on free slots or Placeable: joining a running world starts no
+// process, and a box that said goodbye or missed a beat is still holding the world.
 func (reg *Registry) serving(key world, region string, now time.Time) (Placement, bool) {
 	var best Placement
 	found := false
 
 	for _, h := range reg.hosts {
-		if !h.Placeable(now, reg.staleAfter) {
+		if !h.Joinable(now, reg.staleAfter) {
 			continue
 		}
 		if region != "" && h.Region != region {
@@ -308,7 +313,7 @@ func (reg *Registry) held(key world, region string, now time.Time) (Placement, b
 		return Placement{}, false
 	}
 	h, known := reg.hosts[res.hostID]
-	if !known || !h.Placeable(now, reg.staleAfter) {
+	if !known || !h.Joinable(now, reg.staleAfter) {
 		return Placement{}, false
 	}
 	// The same hard region filter a running session is joined under, so a caller that named one is
@@ -389,17 +394,16 @@ func ailing(instances []contract.InstanceReport, sessionID string) bool {
 }
 
 // Targets is every box a version must reach: the fresh ones in the requested regions holding a
-// world of the game, ordered by hostId so two identical pushes agree. The reservation counts
-// alongside reported instances, or a box handed a placement seconds ago keeps the old code.
+// world of the game on another revision, ordered by hostId so two identical pushes agree. A
+// reservation on another revision counts too, or a box handed one seconds ago keeps the old code.
 func (reg *Registry) Targets(req contract.DeploymentRequest, at time.Time) []Host {
 	reg.mu.RLock()
 	defer reg.mu.RUnlock()
 
-	// Every version of the game, not one: a rollout ends the worlds a game has anywhere, and a
-	// reservation on an older revision is a box about to start code this push supersedes.
+	// A reservation on the pushed revision is the world the push wants, so it reaches no box.
 	reserving := make(map[string]bool, len(reg.pending))
 	for key, res := range reg.pending {
-		if key.gameID == req.GameID {
+		if key.gameID == req.GameID && key.revision != req.Revision {
 			reserving[res.hostID] = true
 		}
 	}
@@ -415,7 +419,7 @@ func (reg *Registry) Targets(req contract.DeploymentRequest, at time.Time) []Hos
 		if len(req.Regions) > 0 && !slices.Contains(req.Regions, h.Region) {
 			continue
 		}
-		if len(h.Holds(req.GameID)) == 0 && !reserving[h.ID] {
+		if len(h.Superseded(req.GameID, req.Revision)) == 0 && !reserving[h.ID] {
 			continue
 		}
 		targets = append(targets, h)

@@ -18,8 +18,7 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
 
-// The route on @grove/api that takes one report, behind the same fleet bearer every other
-// service-to-service call in the fleet presents.
+// The route on @grove/api that takes one report, behind the credential the two services share.
 const reportPath = "/v1/fleet/reports"
 
 // Drained and dropped: the answer is an acknowledgement and this service acts on nothing in it.
@@ -35,9 +34,10 @@ type Fleet interface {
 
 // ReporterOptions is everything one Reporter needs.
 type ReporterOptions struct {
-	APIURL      string
-	FleetSecret []byte
-	Fleet       Fleet
+	APIURL string
+	// SERVER_MANAGER_SECRET, which @grove/api gates this route on and the boxes never hold.
+	Secret []byte
+	Fleet  Fleet
 	// How often a report goes out with nothing to say. The snapshot is what keeps the receiver's
 	// capacity rows from ageing, and it is deliberately far slower than a beat: a row per box per
 	// beat would make every heartbeat a write in another service's database.
@@ -101,7 +101,7 @@ func (r *Reporter) Send(ctx context.Context) error {
 }
 
 func (r *Reporter) post(ctx context.Context, report contract.FleetReport) error {
-	fleet := httpx.FleetClient{Client: r.opts.Client, Secret: r.opts.FleetSecret}
+	fleet := httpx.FleetClient{Client: r.opts.Client, Secret: r.opts.Secret}
 	if _, err := fleet.PostJSON(ctx, r.url, report, nil, maxReportAnswerBytes); err != nil {
 		return fmt.Errorf("post fleet report: %w", err)
 	}
