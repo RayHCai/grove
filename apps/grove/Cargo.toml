@@ -20,18 +20,14 @@ grove-request-id = { path = "request-id", features = ["service"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
 axum = "0.8"
 tower = "0.5"
-tower-http = { version = "0.6", features = ["timeout"] }
 futures-util = { version = "0.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 
 # The asset stream this fleet queues work on, over the `rediss://` a managed cache only answers and
-# redialled when the link drops, and the one HTTP call a worker makes back to @grove/api to settle it.
+# redialled when the link drops, and the calls out to the store, the API and the bucket.
 redis = { version = "1.7", features = ["tokio-rustls-comp", "tls-rustls-webpki-roots", "connection-manager"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "webpki-roots", "http2"] }
-hmac = "0.12"
-sha2 = "0.10"
-subtle = "2.6"
 base64 = "0.22"
 anyhow = "1"
 tracing = "0.1"

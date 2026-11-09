@@ -3,11 +3,14 @@
 //! calls, which is why neither can happen inside a tick.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use serde_json::value::RawValue;
+
+use crate::saves::Records;
 
 /// What one call to the manager may take before it answers as a failure.
 ///
@@ -99,23 +102,8 @@ impl Store {
         Ok(Some(record.value))
     }
 
-    /// Writes one host's fields, against the revision this process last read. A refused
-    /// compare-and-set is re-read and retried ONCE: another session holding the record is a real
-    /// race, and one re-read is the difference between a save landing and a session silently lost.
-    pub async fn save(&self, host_key: &str, fields: &RawValue) -> Result<()> {
-        if self.put(host_key, fields).await? {
-            return Ok(());
-        }
-
-        tracing::warn!(key = %host_key, "another session moved this record; re-reading");
-        self.load(host_key).await?;
-        if self.put(host_key, fields).await? {
-            return Ok(());
-        }
-        bail!("the game manager refused two compare-and-sets for {host_key}")
-    }
-
-    /// One attempt. `false` is a 409 and nothing else; every other failure is an `Err`.
+    /// One write, against the revision this process last read. `false` is a 409 and nothing else;
+    /// every other failure is an `Err`.
     async fn put(&self, host_key: &str, fields: &RawValue) -> Result<bool> {
         let id = request_id::mint();
         let response = self
@@ -160,6 +148,16 @@ impl Store {
             .lock()
             .expect("the revision map is never held across a panic")
             .insert(host_key.to_owned(), revision);
+    }
+}
+
+impl Records for Store {
+    fn write(&self, key: &str, fields: &RawValue) -> impl Future<Output = Result<bool>> + Send {
+        self.put(key, fields)
+    }
+
+    async fn reread(&self, key: &str) -> Result<()> {
+        self.load(key).await.map(drop)
     }
 }
 
