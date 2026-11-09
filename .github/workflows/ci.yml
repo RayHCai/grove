@@ -215,6 +215,21 @@ jobs:
             - name: Reject section citations outside docs/
               run: node scripts/check-citations.mjs
 
+    # The same script the pre-commit hook runs, held to what the change adds rather than the tree.
+    comments:
+        name: comment length
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+              with:
+                  fetch-depth: 0
+
+            - name: Hold added comments to the one-line rule
+              env:
+                  BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+              run: node scripts/check-comments.mjs --base "$BASE"
+
     # Every image the repository deploys, built to its runtime stage: a Dockerfile is otherwise read
     # by nothing until a deploy, which is the worst place to learn it no longer builds.
     docker:
@@ -255,7 +270,7 @@ jobs:
     ci-ok:
         name: CI passed
         if: always()
-        needs: [ci, determinism, race, citations, docker]
+        needs: [ci, determinism, race, citations, comments, docker]
         runs-on: ubuntu-latest
         steps:
             - name: Verify every job succeeded

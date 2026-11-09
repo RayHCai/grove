@@ -36,6 +36,10 @@ pre-commit:
         - name: no-design-doc-citations
           run: node scripts/check-citations.mjs {staged_files}
 
+        # Reads the index itself: the rule binds what a commit adds, not the lines it leaves alone.
+        - name: comment-length
+          run: node scripts/check-comments.mjs --staged
+
 pre-push:
     jobs:
         - name: test

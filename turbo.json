@@ -35,16 +35,14 @@
             "outputs": ["dist/**"]
         },
         "typecheck": {
-            // Own `build`, not just `^build`: a suite imports its decorated worlds from `../dist`,
-            // because only `tsc` lowers standard decorators. Without the package's own build those
-            // specifiers resolve to nothing on a clean checkout, which is a red CI job against a
-            // tree that is fine, and a green one locally, off a `dist/` left behind by a build.
+            // Own `build`, not just `^build`: a build can generate source its own suite reads, as
+            // `@grove/api`'s generates its Prisma client.
             "dependsOn": ["^build", "build"],
             "inputs": ["src/**", "tests/**", "tsconfig*.json"],
             "outputs": []
         },
         "test": {
-            // Own `build` too, for the same `../dist` imports `typecheck` builds for.
+            // Own `build` too, for the same generated source `typecheck` builds for.
             "dependsOn": ["^build", "build"],
             "inputs": ["src/**", "tests/**", "tsconfig*.json", "vitest.config.ts"],
             "outputs": []

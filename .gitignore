@@ -35,11 +35,10 @@ logs/
 !.env.example
 
 .idea/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
 
-.claude/
-CLAUDE.md
-AGENTS.md
-
+# Per-person Claude Code permissions; the shared settings, hooks and skills beside it are tracked.
+.claude/settings.local.json
 # One build tree per task, under @grove/game-builder so the platform packages resolve from it.
 apps/grove/game-builder/.builds/

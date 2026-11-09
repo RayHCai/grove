@@ -7,9 +7,6 @@ pnpm-lock.yaml
 # Benchmark results, written by a tool and never edited by hand.
 bench/runs
 
-# Local agent/editor tooling config, not project source.
-.claude
-
 # Cargo's output, and a lockfile prettier did not write.
 target
 apps/grove/Cargo.lock

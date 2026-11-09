@@ -17,7 +17,7 @@
         "typescript/consistent-type-imports": "error",
         "typescript/no-explicit-any": "warn",
         "import/no-cycle": "error",
-        "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }],
+        "import/no-unassigned-import": ["error", { "allow": ["**/*.css", "pixi.js/unsafe-eval"] }],
         "react/react-in-jsx-scope": "off",
         "vitest/require-mock-type-parameters": "off",
         "vitest/no-conditional-expect": "off",
