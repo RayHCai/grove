@@ -24,13 +24,13 @@
         "clean": "rm -rf dist .turbo src/generated"
     },
     "dependencies": {
-        "@aws-sdk/client-s3": "^3.1136.0",
-        "@aws-sdk/s3-request-presigner": "^3.1136.0",
+        "@aws-sdk/client-s3": "^3.1163.0",
+        "@aws-sdk/s3-request-presigner": "^3.1163.0",
         "@fastify/cookie": "^11.1.2",
         "@fastify/cors": "^11.3.0",
         "@fastify/csrf-protection": "^8.0.1",
         "@fastify/rate-limit": "^11.2.0",
-        "@fastify/session": "^11.1.2",
+        "@fastify/session": "^11.1.5",
         "@fastify/swagger": "^9.8.1",
         "@fastify/swagger-ui": "^6.1.1",
         "@grove/api-contract": "workspace:*",
@@ -38,7 +38,7 @@
         "@node-rs/argon2": "^2.2.1",
         "@prisma/adapter-pg": "^7.10.0",
         "@prisma/client": "^7.10.0",
-        "fastify": "^5.12.1",
+        "fastify": "^5.12.8",
         "fastify-type-provider-zod": "^7.0.0",
         "ioredis": "^6.0.0",
         "prisma": "^7.10.0",
@@ -47,8 +47,8 @@
     "devDependencies": {
         "@electric-sql/pglite": "^0.5.8",
         "@electric-sql/pglite-socket": "^0.2.11",
-        "@types/node": "^24.12.0",
+        "@types/node": "^26.6.5",
         "typescript": "^7.0.2",
-        "vitest": "^5.0.1"
+        "vitest": "^5.0.5"
     }
 }

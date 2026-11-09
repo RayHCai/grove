@@ -34,6 +34,20 @@ allowBuilds:
 # @prisma/config pins 7.1.5 exactly and merges this repo's own config files with it.
 # mysql2: an auth-plugin downgrade that leaks the password in the clear, GHSA-3f6p-5ww8-9rcr, fixed
 # in 3.22. prisma ships every driver and the datasource here is postgresql, so nothing loads it.
+#
+# dompurify: sanitizer bypasses, GHSA-cmwh-pvxp-8882 and GHSA-55q2-fjhq-7xh7, fixed in 3.4.13, and
+# GHSA-cg2g-xh64-v4q7 and GHSA-mrv2-3pqr-j5jr, fixed in 3.4.17.
+# monaco-editor 0.56 pins 3.4.8 exactly, and the release that moves it is a 0.x minor of the editor.
+#
+# The three keyed on a range are ones whose parents already allow the fix but whose deduplicated
+# copies the lockfile holds below it; each stops matching once nothing resolves under its range.
+# fast-uri: GHSA-w74x-v6f9-j3xg, GHSA-xhq7-xmqj-769h, GHSA-wjr9-j795-jxcr, GHSA-333x-w4r6-6crp.
+# ip-address: quadratic zone-identifier match, GHSA-rxp7-6hxx-x8q5.
+# @fastify/static: 10.1.9 is the first on glob 14, for GHSA-3g3m-2fjr-6pw4 and GHSA-g3hv-75wg-m249.
 overrides:
     deepmerge-ts: ^8.0.0
     mysql2: ^3.22.0
+    dompurify: ^3.4.17
+    'fast-uri@<3.1.9': ^3.1.9
+    'ip-address@<10.7.4': ^10.7.4
+    '@fastify/static@<10.1.9': ^10.1.9
