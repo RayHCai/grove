@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { EntityId } from '@platform/core';
 import type { Session, Tab } from './harness.js';
 import { openWorld, press, reading, runtimeOf, SETTLE, taggedIn, transformIn } from './harness.js';
-import { SIM_RATE } from '../dist/world.js';
+import { SIM_RATE } from '../src/world.js';
 import {
     DIAL_FAR,
     DIAL_NEAR,
@@ -31,7 +31,7 @@ import {
     TILT_FAR,
     TWEEN_SECONDS,
     W,
-} from '../dist/worlds/motion.js';
+} from '../src/worlds/motion.js';
 
 type Point = { x: number; y: number };
 

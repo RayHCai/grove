@@ -28,8 +28,8 @@ import {
     TEMPLATE_SHADOW,
     WIDGET_SWEEP,
     WORLD,
-} from '../dist/globals.js';
-import { PROJECT } from '../dist/project.js';
+} from '../src/globals.js';
+import { PROJECT } from '../src/project.js';
 import type { Session, Tab } from './harness.js';
 import {
     avatarIn,
@@ -40,7 +40,7 @@ import {
     taggedIn,
     templatesIn,
 } from './harness.js';
-import { SOAK } from '../dist/worlds/soak.js';
+import { SOAK } from '../src/worlds/soak.js';
 
 /** This suite drives one world, so no call below has to name it. */
 const newSession = (store?: MemoryKVStore): Session => openSession(SOAK, store);

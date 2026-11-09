@@ -28,7 +28,7 @@ import {
     UNREAD,
     W,
     WRAPPERS_WORLD,
-} from '../dist/worlds/wrappers.js';
+} from '../src/worlds/wrappers.js';
 
 /** Ticks that outlast the countdown this world builds, whatever the send rate rounds it to. */
 const CLOCK_TICKS = Math.ceil(COUNTDOWN_SECONDS * 60) + SETTLE * 2;

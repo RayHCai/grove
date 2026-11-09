@@ -1,5 +1,4 @@
 // The first place the two halves meet: both are otherwise validated against a scripted peer.
-// The game's classes come from `dist/`, because they carry decorators and only `tsc` lowers them.
 
 import { describe, it, expect, afterEach } from 'vitest';
 import type { EntityId, Runtime } from '@platform/core';
@@ -12,8 +11,8 @@ import type { GameInstance } from '@platform/glue/server';
 import type { Sim } from '@platform/sim';
 import { loopbackPair } from '@platform/transport';
 import type { LoopbackPair } from '@platform/transport';
-import { createGameInstance } from '../dist/server/host.js';
-import { resetSession } from '../dist/scripts/session.js';
+import { createGameInstance } from '../src/server/host.js';
+import { resetSession } from '../src/scripts/session.js';
 import { ClockNode, openHud, pressWidget } from '../src/hud';
 import { PROJECT } from '../src/project';
 import { CLIENT_SCRIPTS } from '../src/client-registry';
@@ -48,7 +47,7 @@ import {
     encodeAim,
     markerTemplate,
 } from '../src/scripts/globals';
-import { dropBand } from '../dist/scripts/templates/leaf/leaf.js';
+import { dropBand } from '../src/scripts/templates/leaf/leaf.js';
 
 const TICK = 1 / 60;
 

@@ -10,7 +10,7 @@
         "build": "tsc -p tsconfig.server.json && vite build",
         "preview": "vite preview",
         "typecheck": "tsc -p tsconfig.server.json && tsc -p tsconfig.test.json",
-        "test": "tsc -p tsconfig.server.json && vitest run",
+        "test": "vitest run",
         "clean": "rm -rf dist .turbo"
     },
     "dependencies": {

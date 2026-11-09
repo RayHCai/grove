@@ -19,7 +19,7 @@ import {
     SOUND_VOLUME,
     TAG_SPEAKER,
     W,
-} from '../dist/worlds/assets.js';
+} from '../src/worlds/assets.js';
 
 /** One call as the sink received it; `opts` is undefined for a verb that passes no payload. */
 interface Effect {

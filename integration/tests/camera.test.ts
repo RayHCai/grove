@@ -19,7 +19,7 @@ import {
     W,
     WIDGET,
     ZOOM_TO,
-} from '../dist/worlds/camera.js';
+} from '../src/worlds/camera.js';
 
 /** Ticks that outlast the seconds every camera tween below was handed. */
 const TWEEN_TICKS = Math.ceil(TWEEN_SECONDS * 60) + SETTLE;

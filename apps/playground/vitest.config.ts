@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
+import { standardDecorators } from '../../scripts/vitest-decorators.mjs';
 
 export default defineConfig({
+    plugins: [standardDecorators()],
     test: {
         include: ['tests/**/*.test.ts'],
         // The round tests drive the real wire for 3200-odd beats apiece: 45 seconds of game clock at

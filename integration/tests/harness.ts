@@ -12,9 +12,9 @@ import { createReadyNullRenderer } from '@platform/renderer/null';
 import type { Sim } from '@platform/sim';
 import type { LoopbackPair } from '@platform/transport';
 import { loopbackPair } from '@platform/transport';
-import { TEMPLATE_AVATAR } from '../dist/world.js';
-import type { World } from '../dist/world.js';
-import { createGameInstance } from '../dist/host.js';
+import { TEMPLATE_AVATAR } from '../src/world.js';
+import type { World } from '../src/world.js';
+import { createGameInstance } from '../src/host.js';
 
 const DESIGN = { width: 800, height: 600 };
 

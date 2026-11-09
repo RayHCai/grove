@@ -73,6 +73,7 @@ export const BEACON_AT = { x: -80, y: 40 };
 /** One widget per thing a test needs the authority to do to the pressing player's avatar. */
 export const W = {
     mark: 'mark',
+    tap: 'tap',
     toPit: 'to-pit',
     toHome: 'to-home',
     toBeacon: 'to-beacon',
@@ -99,6 +100,7 @@ export const S = {
     pings: 'pings',
     pinged: 'pinged',
     sender: 'sender',
+    taps: 'taps',
 } as const;
 
 /** Player-hosted readings: an action edge dispatches at the player, so its tallies live there. */
@@ -125,6 +127,7 @@ function bodyBox(): Collider {
 
 export class Director extends ServerScript<Game> {
     @serverState starts = 0;
+    @serverState taps = 0;
     @serverState equips = 0;
     @serverState ticks = 0;
     @serverState clicks = 0;
@@ -167,6 +170,11 @@ export class Director extends ServerScript<Game> {
     @onPress(W.mark)
     mark(ctx: Ctx): void {
         this.presser = ctx.player?.id ?? '';
+    }
+
+    @onPress(W.tap)
+    tap(): void {
+        this.taps = this.taps + 1;
     }
 
     @onPress(W.toPit)

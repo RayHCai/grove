@@ -16,6 +16,7 @@
         { "path": "../packages/glue" },
         { "path": "../packages/math" },
         { "path": "../packages/project" },
+        { "path": "../packages/protocol" },
         { "path": "../packages/scripting" }
     ]
 }

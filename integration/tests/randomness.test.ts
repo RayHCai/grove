@@ -15,7 +15,7 @@ import {
     SURE_TRIALS,
     TRIALS,
     W,
-} from '../dist/worlds/randomness.js';
+} from '../src/worlds/randomness.js';
 
 const open = (): ReturnType<typeof openWorld> => openWorld(RANDOMNESS_WORLD);
 

@@ -2,16 +2,17 @@
 // state it wrote would pass a unit test and leave a HUD frozen here.
 
 import { describe, expect, it } from 'vitest';
-import { openWorld, press, reading, SETTLE } from './harness.js';
+import { ofTemplate, openWorld, press, reading, runtimeOf, SETTLE } from './harness.js';
 import {
     AFTER_TICKS,
     EVERY_TICKS,
     NAP_TICKS,
     S,
+    TEMPLATE_GIFT,
     TICKER_NAP_TICKS,
     TIMER_WORLD,
     W,
-} from '../dist/worlds/timers.js';
+} from '../src/worlds/timers.js';
 
 const PAST_AFTER = AFTER_TICKS + SETTLE * 2;
 const PAST_NAP = NAP_TICKS + SETTLE * 2;
@@ -83,6 +84,18 @@ describe('a sleeping handler', () => {
 
         await session.step(PAST_NAP);
         expect(reading<number>(tab, S.napEnded)).toBe(1);
+    });
+
+    it('spawns into its own world past the await, which the mirror is then told about', async () => {
+        const { session, tab } = await open();
+        await press(session, tab, W.napGift);
+        expect(ofTemplate(runtimeOf(tab), TEMPLATE_GIFT)).toHaveLength(0);
+
+        await session.step(PAST_NAP);
+        // On the mirror only because the authority minted it: a spawn into the mirror's own world
+        // would show here with no server entity behind it, and never reach another tab.
+        expect(ofTemplate(session.sim.runtime, TEMPLATE_GIFT)).toHaveLength(1);
+        expect(ofTemplate(runtimeOf(tab), TEMPLATE_GIFT)).toHaveLength(1);
     });
 
     it('wakes a handler an entity parked, not only one the game did', async () => {

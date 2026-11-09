@@ -61,6 +61,7 @@ collection-free, the same tick is 8.57 MB. `assertMode` requires both.
 
 | Path                     | Holds                                                                          |
 | ------------------------ | ------------------------------------------------------------------------------ |
+| `src/run.ts`             | The entry: mode guard, scenario selection, one process per scenario            |
 | `src/meter.ts`           | The three meters, the driver abstraction, and the mode guard                   |
 | `src/worlds.ts`          | Core-only worlds built to a spec: entity count, colliders, scripts, grid pitch |
 | `src/scripts.ts`         | The script fixtures a sweep multiplies                                         |

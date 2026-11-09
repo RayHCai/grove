@@ -10,6 +10,12 @@ import type { World } from '../world.js';
 export const TEMPLATE_MARK = 'mark';
 export const TAG_MARK = 'mark';
 export const TAG_SAID = 'said';
+export const TAG_HEIR = 'heir';
+export const TAG_GHOST = 'ghost';
+
+/** Where the heir of a destroyed avatar's slot is minted, and where a stale write would aim. */
+export const HEIR_AT = { x: -60, y: 40 };
+export const GHOST_AT = { x: 999, y: 999 };
 
 /** Where the placed mark sits: fixed, so an expected distance is arithmetic, not a reading. */
 export const MARK_AT = { x: 120, y: 0 };
@@ -49,6 +55,8 @@ export const W = {
     stopAnimation: 'stop-animation',
     playEffect: 'play-effect',
     destroy: 'destroy',
+    ghost: 'ghost',
+    haunt: 'haunt',
     readAll: 'read-all',
 } as const;
 
@@ -270,6 +278,20 @@ export class Director extends ServerScript<Game> {
         this.alive = avatar?.alive ?? false;
     }
 
+    /** Keeps the avatar's handle past its destroy, the way a creator keeps a bullet in a field. */
+    @onPress(W.ghost)
+    doGhost(ctx: Ctx): void {
+        this.#ghost = this.#avatar(ctx);
+        this.#ghost?.destroy();
+    }
+
+    /** Mints an heir into the freed slot, then writes through the handle that outlived it. */
+    @onPress(W.haunt)
+    doHaunt(): void {
+        game.spawn(TEMPLATE_MARK, HEIR_AT.x, HEIR_AT.y).tag(TAG_HEIR);
+        this.#ghost?.setPosition(GHOST_AT.x, GHOST_AT.y).tag(TAG_GHOST);
+    }
+
     /** Every reading at once, for a test that wants a settled picture rather than one field. */
     @onPress(W.readAll)
     doReadAll(ctx: Ctx): void {
@@ -295,6 +317,8 @@ export class Director extends ServerScript<Game> {
     }
 
     /** The pressing player's own avatar; a press with no live avatar behind it does nothing. */
+    #ghost: Entity | null = null;
+
     #avatar(ctx: Ctx): Entity | null {
         const player = ctx.player;
         if (!player || !player.hasAvatar) return null;
