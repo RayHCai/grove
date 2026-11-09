@@ -1,53 +1,23 @@
 # @grove/asset-upload-service
 
-Content-addressed object storage for the bundles a session loads, and the worker that claims every
-asset a creator uploads. Written in Rust. Not publicly routable.
+The worker that inspects every asset a creator uploads before the CDN may serve it, and the health
+probe it is watched through. Written in Rust. Not publicly routable.
 
-An object is named by the SHA-256 of its own bytes, so the name is the integrity check rather than a
-label beside one. A `PUT` whose body hashes to something else is refused and nothing is stored.
+An upload lands in quarantine, under `uploads/` in the games bucket, which the CDN never reads. This
+process claims the task the save queued, reads the quarantined bytes, holds them to the length and
+the type the creator declared, and only then copies them to `assets/`, which the CDN serves. An
+upload that fails stays where it is, and its creator is told why.
 
-## Why this one is Rust
+## The route
 
-An object is multi-megabyte and arrives and leaves as a stream, so the hot loop is a hash over bytes
-that never need to be resident. The memory cost of a concurrent upload is a buffer and a hasher
-rather than a body, which is what lets one box hold a publish burst without sizing a heap for it.
+| Route         | Answers                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------- |
+| `GET /health` | `{"ok":true}`, or 503 until the consumer has joined its group and while it is down; no bearer |
 
-## The routes
-
-| Route                       | Answers                                                               |
-| --------------------------- | --------------------------------------------------------------------- |
-| `GET /health`               | `{"ok":true}`, or 503 while the asset consumer is down; no bearer     |
-| `PUT /v1/objects/{hash}`    | 201 for a first store, 200 for bytes already held, 400 for a mismatch |
-| `HEAD /v1/objects/{hash}`   | 200 with `Content-Length` and `Content-Type`, or 404                  |
-| `GET /v1/objects/{hash}`    | the bytes, streamed, under an immutable cache header, or 404          |
-| `DELETE /v1/objects/{hash}` | 204, or 404 when nothing was there to remove                          |
-
-A read is `public, max-age=31536000, immutable`, which a content address earns: the name can never
-come to mean different bytes, so a cache that keeps it forever is never wrong.
-
-A `Content-Length` above the ceiling is 413 before a byte is read, a body that runs past it
-mid-stream is abandoned, and one that stops arriving for thirty seconds is dropped. A `PUT` that
-skipped the write because the object was already held answers 409 if that copy is gone or is no
-longer whole by the end of the body. Sixty-four object requests run at once and the rest wait,
-because an upload in flight is a descriptor and a file in `incoming/`. A `SIGTERM` drains for thirty
-seconds and then drops whatever is still open, because a peer that has stopped reading is never
-polled again. Refusals carry `ErrorBody` from `libs/api-contract`: a `code`
-a caller matches on and a `message` a human reads, on an unknown path or an unanswered method as much
-as on a bad body.
-
-## The store
-
-`objects/<ab>/<hash>` holds the bytes and a `.type` sidecar beside it holds the content type; one
-directory per two-hex prefix keeps a shard to a listing a tool will open. An upload lands in
-`incoming/` under a name of its own and is renamed into place only once its hash is its name: a
-partial object must never be readable under its final name, and a rename is the only atomic step a
-filesystem gives you. `incoming/` is a sibling of `objects/` because that atomicity holds only within
-one filesystem. Opening a root sweeps the temp files in it that have sat untouched for an hour, which
-is the only thing that ever removes a `.part` an earlier process abandoned.
-
-Everything above sits behind `ObjectStore`, a four-method trait the handlers hold as an
-`Arc<dyn ObjectStore>`. The trait speaks in byte streams rather than buffers, which is what keeps the
-per-upload cost a chunk.
+Everything else is a refusal carrying `ErrorBody` from `libs/api-contract`: a `code` a caller matches
+on and a `message` a human reads, on an unknown path as much as on an unanswered method. A `SIGTERM`
+or `SIGINT` drains the listener for at most thirty seconds and only then stops the consumer, so an
+asset claimed on the way out is settled rather than left for the reclaim window.
 
 ## The asset stream
 
@@ -55,50 +25,58 @@ A save that lands an asset writes a `Task` row in `@grove/api` and pushes its id
 `grove:tasks:asset-upload`, and this process is what reads it. A consumer group rather than a list,
 because a worker that dies mid-asset has to hand its claim back instead of taking the asset with it;
 two workers sharing a name share their claims, which is why `UPLOAD_WORKER_NAME` falls back to the
-hostname.
+hostname. A task id outside the request-id alphabet is acknowledged and dropped, because it becomes a
+path segment and a header on the settle call.
 
-A claimed asset is a pass-through: the task is moved to `IN_PROGRESS` and then to `SUCCESSFUL`, and
-this service never reads the asset's bytes, its size or its type: they are in the games bucket,
-which this crate has no client for. A task id outside the request-id alphabet is acknowledged and
-dropped, because it becomes a path segment and a header on the settle call.
+One asset, start to finish:
 
-Settling one successfully is what marks the asset verified in `@grove/api`, and a publish of a game
-holding an unverified asset is refused, so what this service says about one now decides whether the
-game holding it is ever compiled. The verdict is written against the byte-set the task named rather
-than against the path, and `@grove/api` is what keeps that honest: a worker coming back to settle an
-upload whose bytes have since been replaced vouches for nothing.
+1. The claim moves the task to `IN_PROGRESS`, and its answer carries the inspection: a presigned GET
+   of the quarantined bytes, pinned to the version the save recorded, a presigned PUT to the key the
+   CDN serves, the declared type and the declared length.
+2. The bytes are read no further than one past the declared length. They must be exactly that long
+   and begin the way their type does: PNG, JPEG, GIF and WebP by their signatures, MP3 by an ID3 tag
+   or a frame sync, Ogg, WAV and WebM by theirs, WOFF2, WOFF, TrueType and OpenType by their tags,
+   and JSON by parsing whole as UTF-8.
+3. A pass is copied to `assets/` under its declared type, and the task settles `SUCCESSFUL` with the
+   version the bucket gave the copy, which `@grove/api` checks before it marks the asset verified. A
+   failure settles `FAILED` with a reason a creator can act on, at most 200 characters, and is never
+   retried.
+
+The bucket's credentials never reach this process: a claim's presigned URLs are all it holds of the
+bucket, and they name one upload and one copy.
 
 The connection redials on its own, `rediss://` included, and a consumer that fails outright is
-started again five seconds later. A message is acknowledged once the outcome is written down. A claim that was refused is work
-somebody already settled: acknowledged, or it comes back forever. A claim or an outcome that could
-not be written at all is left claimed for another worker to take back. Settling is the one call this
-service makes out, behind the same fleet bearer its own routes compare, and the transitions are
-checked at `@grove/api`: a worker that comes back from the dead cannot overwrite an outcome another
-already wrote.
+started again five seconds later. A group the cache lost is created again, from the start of the
+stream so that what was waiting is handed out again, and three passes over the stream failing in a
+row turn `/health` to 503 until one answers.
 
-The bytes of those assets are not here. They go straight from the browser to the games bucket through
-a presigned PUT, and what reaches this service is the task naming one.
+A message is acknowledged once its outcome is written down. A claim that was refused is work somebody
+already holds or settled: acknowledged, or it comes back forever. A status update the API rejects
+outright, with a 400, 401 or 403, is acknowledged too, with an error line, since a retry would send
+the same request. A bucket or an API that could not be reached leaves the message claimed for another
+worker to take back after five minutes, and a message handed out more than five times is dropped
+with an error line as one no worker can finish. The transitions are checked at `@grove/api`: a worker
+that comes back from the dead cannot overwrite an outcome another already wrote.
 
-## The bearer
+## The credential
 
-Every `/v1` route is behind one shared fleet secret, compared in constant time. One secret rather
-than a credential per caller, because nothing outside the fleet can route here.
+`ASSET_SERVICE_SECRET` is the bearer this process presents to the status route, and `@grove/api`
+takes it for asset uploads and nothing else.
 
 ## What it does not own
 
-What an object means. A bundle set, a manifest, which build produced which hash: those are
-`@grove/game-manager`'s and `@grove/game-builder`'s. This service is told a name and given bytes, and
-its whole judgement is whether the two agree.
+What an asset means. The manifest that names it, the save that recorded its version, whether a game
+holding it may be published: those are `@grove/api`'s. This service is handed a quarantined upload
+and two presigned URLs, and its whole judgement is whether the bytes are what they were declared as.
 
 | File          | Holds                                                                           |
 | ------------- | ------------------------------------------------------------------------------- |
 | `main.rs`     | the composition root: config, the router, the listener, the consumer, the drain |
 | `config.rs`   | the environment this process is deployed with                                   |
-| `auth.rs`     | the fleet bearer layer                                                          |
-| `routes.rs`   | the handlers and the shape of a refusal                                         |
-| `store.rs`    | the object store and the seam a backing store answers                           |
+| `routes.rs`   | the health probe and the shape of a refusal                                     |
 | `consumer.rs` | the asset stream, and what one claimed task does                                |
-| `tasks.rs`    | the status route a claimed task is settled through                              |
+| `inspect.rs`  | the checks an upload must pass, and the bucket behind its presigned URLs        |
+| `tasks.rs`    | the status route a task is claimed and settled through                          |
 
 ## Running it
 
@@ -109,11 +87,9 @@ cargo run --release
 | Variable                    | What                                                                                 |
 | --------------------------- | ------------------------------------------------------------------------------------ |
 | `ASSET_UPLOAD_SERVICE_BIND` | address to bind; `0.0.0.0:$PORT` where a platform sets `PORT`, else `127.0.0.1:4005` |
-| `UPLOAD_ROOT`               | the directory objects live under                                                     |
-| `FLEET_SECRET`              | the shared bearer every `/v1` caller presents, and the one this process presents     |
-| `UPLOAD_MAX_BYTES`          | bytes one object may reach, 64 MiB by default                                        |
-| `API_URL`                   | where a claimed asset upload is settled                                              |
-| `REDIS_URL`                 | the asset stream; absent, this process serves objects and claims nothing             |
+| `ASSET_SERVICE_SECRET`      | the bearer this process presents to `@grove/api`, at least 32 characters             |
+| `API_URL`                   | where an asset upload is claimed and settled                                         |
+| `REDIS_URL`                 | the asset stream every claim comes from                                              |
 | `UPLOAD_WORKER_NAME`        | this process's name in the consumer group; the hostname when it is not set           |
 
 `pnpm run build | test | typecheck` at the repo root reach this crate through `package.json`, whose

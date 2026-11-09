@@ -4,8 +4,10 @@
 
 use std::path::PathBuf;
 
-use anyhow::Result;
-use request_id::env::{number, required, secret};
+use anyhow::{Context as _, Result};
+use request_id::env::{number, required};
+
+use crate::ticket::TicketKeys;
 
 pub struct Config {
     /// Which game this process serves. A ticket naming another is refused outright.
@@ -18,8 +20,8 @@ pub struct Config {
     pub bundle_path: PathBuf,
     /// The `SimConfig` this world boots with, already JSON, written by whoever built the bundle.
     pub sim_config_path: PathBuf,
-    /// Shared with `@grove/api`, which mints the tickets this process verifies.
-    pub token_secret: Vec<u8>,
+    /// The halves of the keys `@grove/api` signs tickets with, which verify and cannot sign.
+    pub ticket_keys: TicketKeys,
     /// The session-scoped bearer for `@grove/game-manager`, which is the only store this reaches.
     pub manager_url: String,
     pub manager_token: String,
@@ -34,10 +36,12 @@ impl Config {
         Ok(Self {
             game_id: required("GROVE_GAME_ID")?,
             session_id: required("GROVE_SESSION_ID")?,
-            bind: std::env::var("GROVE_BIND").unwrap_or_else(|_| "0.0.0.0:0".to_owned()),
+            // Loopback unless told otherwise: the agent's proxy is the one door to a world.
+            bind: std::env::var("GROVE_BIND").unwrap_or_else(|_| "127.0.0.1:0".to_owned()),
             bundle_path: PathBuf::from(required("GROVE_BUNDLE")?),
             sim_config_path: PathBuf::from(required("GROVE_SIM_CONFIG")?),
-            token_secret: secret("GAME_TOKEN_SECRET")?.into_bytes(),
+            ticket_keys: TicketKeys::parse(&required("GROVE_TICKET_PUBLIC_KEYS")?)
+                .context("GROVE_TICKET_PUBLIC_KEYS")?,
             manager_url: required("GROVE_MANAGER_URL")?,
             manager_token: required("GROVE_MANAGER_TOKEN")?,
             heap_limit_bytes: number("GROVE_HEAP_LIMIT_BYTES", 256 * 1024 * 1024)?,

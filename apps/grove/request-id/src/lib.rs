@@ -1,7 +1,7 @@
 //! The id that joins one request across the services it passes through, the same token the Go
 //! half puts on every hop, restated for the Rust crates that sit between them: a chain is only as
 //! long as its quietest link. With `service`, also the rest of what both Rust services start the
-//! same way: the middleware that carries the id, the log setup, and the environment readers.
+//! same way: the middleware that carries the id, the log setup, the environment readers and the stop.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -76,6 +76,44 @@ pub fn init_tracing() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+}
+
+/// Resolves on the first SIGINT or SIGTERM: a keyboard and the agent send the one, systemd and a
+/// platform's supervisor the other.
+#[cfg(feature = "service")]
+pub async fn stop_signal() {
+    let interrupt = async {
+        // A handler that could not be registered is a stop that never arrives, not one that already has.
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            tracing::error!(?error, "cannot listen for SIGINT");
+            std::future::pending::<()>().await;
+        }
+    };
+    tokio::select! {
+        () = interrupt => {}
+        () = terminate() => {}
+    }
+}
+
+#[cfg(all(feature = "service", unix))]
+async fn terminate() {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    match signal(SignalKind::terminate()) {
+        Ok(mut sigterm) => {
+            let _ = sigterm.recv().await;
+        }
+        Err(error) => {
+            tracing::error!(?error, "cannot listen for SIGTERM");
+            std::future::pending().await
+        }
+    }
+}
+
+/// Windows has no SIGTERM, so the stop there is the console signal alone.
+#[cfg(all(feature = "service", not(unix)))]
+async fn terminate() {
+    std::future::pending().await
 }
 
 #[cfg(test)]

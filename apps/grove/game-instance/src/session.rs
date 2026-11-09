@@ -13,12 +13,13 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::clock::Clock;
-use crate::isolate::{Death, Isolate};
+use crate::isolate::{Death, Isolate, Kill};
 use crate::net::{HangUp, Outgoing};
 use crate::protocol::{
     ConnectionId, InboundFrame, InputBatch, LoadedRecord, OpenedConnection, OutputBatch, Rates,
     SendClass, SimDiagnostics,
 };
+use crate::saves::Saves;
 use crate::store::Store;
 
 /// What the bundle and every `@onStart` in it may spend before the watchdog calls the boot a
@@ -43,12 +44,6 @@ const FLUSH_DEADLINE: Duration = Duration::from_secs(1);
 
 /// How long the runtime is held open at the end for the writes already in flight.
 const SETTLE_DEADLINE: Duration = Duration::from_secs(8);
-
-/// Attempts one save gets before the sim is left holding the record.
-const SAVE_ATTEMPTS: u32 = 3;
-
-/// Wait before the second attempt, doubled for each one after it.
-const SAVE_BACKOFF: Duration = Duration::from_millis(200);
 
 /// How many events may wait for the session thread. Bounded, so a session that falls behind costs
 /// the peers feeding it their sockets rather than costing the box its memory.
@@ -123,11 +118,11 @@ pub fn run(
     // loses every timer it asks for.
     let _entered = io.enter();
 
-    let mut isolate = Isolate::new(opts.heap_limit_bytes);
+    let mut isolate = Isolate::new(opts.heap_limit_bytes)?;
 
     // Armed once and held for the session: a span of creator code that will not return is the one
     // failure this process cannot log its way out of, and the bundle is such a span itself.
-    let watchdog = Watchdog::arm(isolate.terminator(), opts.tick_budget, &io);
+    let watchdog = Watchdog::arm(isolate.kill(), opts.tick_budget, &io);
 
     watchdog.enter(BOOT_BUDGET);
     let booted = isolate.boot(opts.bundle, opts.sim_config);
@@ -135,6 +130,7 @@ pub fn run(
     booted?;
 
     let mut clock = Clock::new(opts.sim_rate, opts.send_rate);
+    let saves = Saves::new(opts.store.clone());
     let mut peers: HashMap<ConnectionId, Peer> = HashMap::new();
     let mut pending = Pending::default();
     let mut drains: Vec<bool> = Vec::new();
@@ -258,7 +254,15 @@ pub fn run(
                         );
                         reported = out.diagnostics;
                     }
-                    apply(out, &mut peers, &opts.store, &io, &answers, &mut spawned);
+                    apply(
+                        out,
+                        &mut peers,
+                        &opts.store,
+                        &saves,
+                        &io,
+                        &answers,
+                        &mut spawned,
+                    );
                 }
                 // A tick that threw is a world that cannot be trusted to be advanced again: it
                 // mutates in place and there is no transaction, so half a step is a world no later
@@ -309,7 +313,15 @@ pub fn run(
     watchdog.leave();
     let outcome = match closed {
         Ok(out) => {
-            apply(out, &mut peers, &opts.store, &io, &answers, &mut spawned);
+            apply(
+                out,
+                &mut peers,
+                &opts.store,
+                &saves,
+                &io,
+                &answers,
+                &mut spawned,
+            );
             Ok(())
         }
         Err(error) => Err(error),
@@ -359,6 +371,7 @@ fn apply(
     out: OutputBatch,
     peers: &mut HashMap<ConnectionId, Peer>,
     store: &Store,
+    saves: &Saves<Store>,
     io: &tokio::runtime::Handle,
     events: &mpsc::Sender<HostEvent>,
     spawned: &mut Vec<JoinHandle<()>>,
@@ -439,35 +452,9 @@ fn apply(
     }
 
     for save in out.saves {
-        let store = store.clone();
-        let events = events.clone();
-        spawned.push(io.spawn(async move {
-            let mut wait = SAVE_BACKOFF;
-            for attempt in 1..=SAVE_ATTEMPTS {
-                // Safe to repeat: the write is the whole record under a compare-and-set, so an
-                // attempt either lands or is refused, never applied twice.
-                let error = match store.save(&save.host_key, &save.fields).await {
-                    Ok(()) => {
-                        let _ = events
-                            .send(HostEvent::Saved {
-                                host_key: save.host_key,
-                            })
-                            .await;
-                        return;
-                    }
-                    Err(error) => error,
-                };
-                if attempt == SAVE_ATTEMPTS {
-                    // Not acknowledged: the sim holds the record so a rejoin inside this session
-                    // still reads its own values back: the better of two wrong answers.
-                    tracing::warn!(%error, key = %save.host_key, "persisting failed");
-                    return;
-                }
-                tracing::warn!(%error, key = %save.host_key, "persisting failed; retrying");
-                tokio::time::sleep(wait).await;
-                wait *= 2;
-            }
-        }));
+        if let Some(writer) = saves.queue(save.host_key, save.fields, events.clone()) {
+            spawned.push(io.spawn(writer));
+        }
     }
 }
 
@@ -530,13 +517,13 @@ trait Terminator: Clone + Send + 'static {
     fn cancel(&self);
 }
 
-impl Terminator for deno_core::v8::IsolateHandle {
+impl Terminator for Kill {
     fn terminate(&self) {
-        self.terminate_execution();
+        Kill::terminate(self);
     }
 
     fn cancel(&self) {
-        self.cancel_terminate_execution();
+        Kill::cancel(self);
     }
 }
 
@@ -763,5 +750,27 @@ mod tests {
         // the defect: the flag it did not clear is the one the next span dies of.
         std::thread::sleep(Duration::from_millis(300));
         assert!(!killer.latched.load(Ordering::SeqCst));
+    }
+
+    /// The real watchdog over a real isolate: a tick that never returns closes every peer as a runaway.
+    #[test]
+    fn the_watchdog_names_a_tick_that_never_returns_as_its_budget() {
+        let io = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _entered = io.enter();
+        let mut isolate = Isolate::new(32 * 1024 * 1024).unwrap();
+        let spins =
+            "globalThis.__grove = { boot() {}, tick() { for (;;) {} }, close() { return '' } };";
+        isolate.boot(spins.to_owned(), "{}".to_owned()).unwrap();
+        let watchdog = Watchdog::arm(isolate.kill(), Duration::from_millis(40), io.handle());
+
+        watchdog.enter(Duration::from_millis(40));
+        let ticked = isolate.tick(&InputBatch::new(0.0, false));
+        watchdog.leave();
+
+        assert!(ticked.is_err());
+        assert_eq!(isolate.death().map(Death::token), Some("tick-budget"));
     }
 }

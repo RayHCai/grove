@@ -8,6 +8,7 @@ mod config;
 mod isolate;
 mod net;
 mod protocol;
+mod saves;
 mod session;
 mod store;
 mod ticket;
@@ -22,6 +23,7 @@ use tokio::sync::mpsc;
 
 use crate::config::Config;
 use crate::session::{HostEvent, SessionOptions, EVENT_QUEUE_DEPTH};
+use crate::ticket::Gate;
 
 /// What the bundle's own config file must name, beside whatever `SimConfig` it carries.
 /// camelCase because the file IS that `SimConfig`, and serde discards an unknown field without a
@@ -70,9 +72,7 @@ fn main() -> Result<()> {
 
     let listener = net::Listener::new(
         events.clone(),
-        config.token_secret.clone(),
-        config.game_id.clone(),
-        config.session_id.clone(),
+        Gate::new(config.ticket_keys, config.game_id, config.session_id),
         players.clone(),
         draining.clone(),
     );
@@ -89,11 +89,7 @@ fn main() -> Result<()> {
             // Reported rather than assumed: a hand-run process is given port zero, and this line is
             // the only place the port the kernel picked appears.
             tracing::info!(addr = %socket.local_addr()?, "listening");
-            axum::serve(
-                socket,
-                router.into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .await?;
+            net::listen(socket, router, net::Limits::default()).await?;
             Ok::<(), anyhow::Error>(())
         };
         // A socket nobody bound is a slot only an operator can reclaim: the session would otherwise
@@ -111,14 +107,7 @@ fn main() -> Result<()> {
     // exit, so the saves the last batch carries are actually written.
     let drain = events.clone();
     io.spawn(async move {
-        tokio::select! {
-            signalled = tokio::signal::ctrl_c() => {
-                if signalled.is_err() {
-                    return;
-                }
-            }
-            () = terminate() => {}
-        }
+        request_id::stop_signal().await;
         tracing::info!("draining");
         draining.store(true, Ordering::Relaxed);
         let _ = drain.send(HostEvent::Drain).await;
@@ -142,30 +131,6 @@ fn main() -> Result<()> {
 
     serving.abort();
     outcome
-}
-
-/// Resolves on SIGTERM, which systemd sends every process in the unit on a stop, where the agent
-/// and a keyboard send SIGINT.
-#[cfg(unix)]
-async fn terminate() {
-    use tokio::signal::unix::{signal, SignalKind};
-
-    match signal(SignalKind::terminate()) {
-        Ok(mut sigterm) => {
-            let _ = sigterm.recv().await;
-        }
-        // A handler this process could not register is not a drain it can ever start.
-        Err(err) => {
-            tracing::error!(error = ?err, "cannot listen for SIGTERM");
-            std::future::pending().await
-        }
-    }
-}
-
-/// Windows has no SIGTERM, so the drain there is the console signal alone.
-#[cfg(not(unix))]
-async fn terminate() {
-    std::future::pending().await
 }
 
 #[cfg(test)]

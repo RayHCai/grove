@@ -1,10 +1,14 @@
 //! The sockets: one listener, one task per peer, and the ticket check before either.
+//! A connection is bounded before it is a peer too: a deadline on its request head, and two caps.
 //! Nothing here knows what an entity is. The narrowing, and every bound on what one frame may
 //! contain, is the sim's; this half refuses only what it can judge: the bytes, and the bearer.
 
+use std::io;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
@@ -14,13 +18,19 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{middleware, Json, Router};
 use futures_util::{SinkExt, StreamExt};
+use hyper::body::Incoming;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use serde_json::value::RawValue;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tower::Service as _;
 
 use crate::protocol::{ConnectionId, SendClass};
 use crate::session::HostEvent;
-use crate::ticket;
+use crate::ticket::{Gate, TicketFailure};
 
 /// 4 MiB, the same ceiling `@platform/transport`'s codec refuses a frame at. Restated rather than
 /// derived, because the cap has to hold on this side BEFORE a parse: `serde_json` allocates a
@@ -46,6 +56,21 @@ const INBOUND_WINDOW: Duration = Duration::from_secs(1);
 
 /// How long the writer gets to drain its queue once the session has hung the peer up.
 const FLUSH_GRACE: Duration = Duration::from_millis(250);
+
+/// How long a request head may take to arrive, which also bounds a connection idling between two.
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Connections not yet upgraded: a handshake on its way through, or the agent's probe.
+const MAX_HANDSHAKES: usize = 64;
+
+/// Every socket this process holds at once, a peer's included, each a task and a write queue.
+const MAX_CONNECTIONS: usize = 1024;
+
+/// What hyper may buffer of one request head: a ticket and a handful of headers fit many times over.
+const MAX_HEAD_BYTES: usize = 16 * 1024;
+
+/// How long the accept loop rests after a failed accept, which is a box out of descriptors.
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 
 /// 2026-01-01, which is before this process was built and so before any ticket it can be shown.
 ///
@@ -96,9 +121,7 @@ struct Vitals {
 #[derive(Clone)]
 pub struct Listener {
     events: mpsc::Sender<HostEvent>,
-    secret: Arc<Vec<u8>>,
-    game_id: Arc<String>,
-    session_id: Arc<String>,
+    gate: Arc<Gate>,
     /// Written by the session thread after every tick and read by the health route: the agent on
     /// this box takes the roster from there, and a bare 200 reports a full box as empty.
     players: Arc<AtomicUsize>,
@@ -111,17 +134,13 @@ pub struct Listener {
 impl Listener {
     pub fn new(
         events: mpsc::Sender<HostEvent>,
-        secret: Vec<u8>,
-        game_id: String,
-        session_id: String,
+        gate: Gate,
         players: Arc<AtomicUsize>,
         draining: Arc<AtomicBool>,
     ) -> Self {
         Self {
             events,
-            secret: Arc::new(secret),
-            game_id: Arc::new(game_id),
-            session_id: Arc::new(session_id),
+            gate: Arc::new(gate),
             players,
             draining,
             next_id: Arc::new(AtomicU64::new(1)),
@@ -136,6 +155,119 @@ impl Listener {
             // Outermost, so the agent's probe and an upgrade refused before any handler ran are
             // both answered under the id their caller is tracing.
             .layer(middleware::from_fn(request_id::correlate))
+    }
+}
+
+/// What a connection may cost before it is a peer; a deploy runs the defaults.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    pub header_read: Duration,
+    pub handshakes: usize,
+    pub connections: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            header_read: HEADER_READ_TIMEOUT,
+            handshakes: MAX_HANDSHAKES,
+            connections: MAX_CONNECTIONS,
+        }
+    }
+}
+
+/// Serves `router` over HTTP/1.1 with upgrades. hyper is driven directly because `axum::serve`
+/// gives it no timer, and hyper without one silently drops the header deadline.
+pub async fn listen(socket: TcpListener, router: Router, limits: Limits) -> io::Result<()> {
+    let connections = Arc::new(Semaphore::new(limits.connections));
+    let handshakes = Arc::new(Semaphore::new(limits.handshakes));
+    loop {
+        // Taken before the accept, so past either cap the next peer waits in the kernel's backlog.
+        let (Ok(held), Ok(handshake)) = (
+            connections.clone().acquire_owned().await,
+            handshakes.clone().acquire_owned().await,
+        ) else {
+            return Err(io::Error::other("the connection caps were closed"));
+        };
+        let (stream, peer) = match socket.accept().await {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                tracing::warn!(%error, "accept failed");
+                tokio::time::sleep(ACCEPT_BACKOFF).await;
+                continue;
+            }
+        };
+        // A tick's frames are small and late is worse than many: Nagle would hold one for an ACK.
+        let _ = stream.set_nodelay(true);
+
+        let router = router.clone();
+        tokio::spawn(async move {
+            let service =
+                hyper::service::service_fn(move |mut request: hyper::Request<Incoming>| {
+                    request.extensions_mut().insert(ConnectInfo(peer));
+                    router.clone().call(request)
+                });
+            let mut http = hyper::server::conn::http1::Builder::new();
+            http.timer(TokioTimer::new())
+                .header_read_timeout(limits.header_read)
+                .max_buf_size(MAX_HEAD_BYTES);
+            let io = TokioIo::new(Held {
+                stream,
+                _held: held,
+            });
+            if let Err(error) = http.serve_connection(io, service).with_upgrades().await {
+                tracing::debug!(%peer, %error, "connection ended");
+            }
+            // An upgrade ends this future at the hand-off, which is where a handshake becomes a peer.
+            drop(handshake);
+        });
+    }
+}
+
+/// A socket holding its place under the connection cap, which it gives back only when dropped,
+/// so a peer's socket keeps its place after the upgrade carried it off.
+struct Held {
+    stream: TcpStream,
+    _held: OwnedSemaphorePermit,
+}
+
+impl AsyncRead for Held {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for Held {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().stream).poll_write(cx, buf)
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().stream).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.stream.is_write_vectored()
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_shutdown(cx)
     }
 }
 
@@ -168,13 +300,7 @@ async fn upgrade(
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
 
-    let claims = match ticket::verify(
-        raw,
-        &listener.secret,
-        &listener.game_id,
-        &listener.session_id,
-        now,
-    ) {
+    let claims = match listener.gate.admit(raw, now) {
         Ok(claims) => claims,
         Err(failure) => {
             // Logged here and answered with nothing but a status: a peer that cannot present a
@@ -188,6 +314,10 @@ async fn upgrade(
                 now,
                 "accept-refused"
             );
+            // A full set of spent tickets is this process's limit, which a peer can wait out.
+            if failure == TicketFailure::Crowded {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
             return StatusCode::UNAUTHORIZED.into_response();
         }
     };
@@ -384,21 +514,24 @@ fn unix_seconds() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ticket::tests::{claims, keys, mint, GAME, PLAYER, SEED, SESSION};
     use axum::body::Body;
     use axum::http::Request as HttpRequest;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tower::ServiceExt;
 
-    /// A listener holding nothing: every route under test answers without a world behind it.
-    fn listening() -> Listener {
-        let (events, _receiver) = mpsc::channel(1);
+    fn listener(events: mpsc::Sender<HostEvent>) -> Listener {
         Listener::new(
             events,
-            b"a-token-secret-at-least-thirty-two-ch".to_vec(),
-            "9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f".to_owned(),
-            "5d9a0c3b-7e21-4f44-9b0d-3c5e7a9f1b24".to_owned(),
+            Gate::new(keys(), GAME.to_owned(), SESSION.to_owned()),
             Arc::new(AtomicUsize::new(0)),
             Arc::new(AtomicBool::new(false)),
         )
+    }
+
+    /// A listener holding nothing: every route under test answers without a world behind it.
+    fn listening() -> Listener {
+        listener(mpsc::channel(1).0)
     }
 
     async fn probe(presented: Option<&str>) -> Response {
@@ -501,5 +634,168 @@ mod tests {
             inbound.admit(opened, 1);
         }
         assert!(inbound.admit(opened + INBOUND_WINDOW, 1));
+    }
+
+    /// The listener for real, on loopback, under `limits`.
+    async fn bound(limits: Limits) -> (SocketAddr, mpsc::Receiver<HostEvent>) {
+        let (events, opened) = mpsc::channel(16);
+        let socket = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        tokio::spawn(listen(socket, listener(events).router(), limits));
+        (addr, opened)
+    }
+
+    /// Writes `head` and reads back as far as the end of the answer's head.
+    async fn ask(stream: &mut TcpStream, head: &str) -> String {
+        stream.write_all(head.as_bytes()).await.unwrap();
+        let mut answer = Vec::new();
+        let mut chunk = [0u8; 1024];
+        while !answer.windows(4).any(|four| four == b"\r\n\r\n") {
+            match stream.read(&mut chunk).await.unwrap() {
+                0 => break,
+                read => answer.extend_from_slice(&chunk[..read]),
+            }
+        }
+        String::from_utf8_lossy(&answer).to_lowercase()
+    }
+
+    fn handshake(ticket: &str) -> String {
+        format!(
+            "GET /play HTTP/1.1\r\nHost: world\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Protocol: grove.ticket.{ticket}\r\n\r\n"
+        )
+    }
+
+    const PROBE: &str = "GET /healthz HTTP/1.1\r\nHost: world\r\n\r\n";
+
+    fn ticket() -> String {
+        mint(&claims(unix_seconds() + 60), SEED)
+    }
+
+    /// A ticket opens one socket: the bytes that upgraded one peer are refused for the next.
+    #[tokio::test]
+    async fn upgrades_a_peer_holding_a_ticket_and_spends_the_ticket() {
+        let (addr, mut opened) = bound(Limits::default()).await;
+        let ticket = ticket();
+
+        let mut first = TcpStream::connect(addr).await.unwrap();
+        let answer = ask(&mut first, &handshake(&ticket)).await;
+        assert!(answer.starts_with("http/1.1 101"), "{answer}");
+        assert!(answer
+            .contains(&format!("sec-websocket-protocol: grove.ticket.{ticket}").to_lowercase()));
+        match opened.recv().await {
+            Some(HostEvent::Opened { identity, .. }) => assert_eq!(identity, PLAYER),
+            _ => panic!("the session was not told about the peer"),
+        }
+
+        let mut second = TcpStream::connect(addr).await.unwrap();
+        let answer = ask(&mut second, &handshake(&ticket)).await;
+        assert!(answer.starts_with("http/1.1 401"), "{answer}");
+    }
+
+    #[tokio::test]
+    async fn drops_a_connection_that_never_finishes_its_request_head() {
+        let limits = Limits {
+            header_read: Duration::from_millis(200),
+            ..Limits::default()
+        };
+        let (addr, _opened) = bound(limits).await;
+
+        let mut stalled = TcpStream::connect(addr).await.unwrap();
+        stalled
+            .write_all(b"GET /healthz HTTP/1.1\r\nHost: wor")
+            .await
+            .unwrap();
+        let mut rest = Vec::new();
+        let ended =
+            tokio::time::timeout(Duration::from_secs(5), stalled.read_to_end(&mut rest)).await;
+
+        assert!(ended.is_ok(), "the half-sent head held its socket open");
+    }
+
+    /// Past the cap a peer waits in the backlog rather than being served, and a freed slot serves it.
+    #[tokio::test]
+    async fn serves_no_more_handshakes_at_once_than_its_cap() {
+        let limits = Limits {
+            handshakes: 1,
+            ..Limits::default()
+        };
+        let (addr, _opened) = bound(limits).await;
+
+        let holding = TcpStream::connect(addr).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut waiting = TcpStream::connect(addr).await.unwrap();
+        waiting.write_all(PROBE.as_bytes()).await.unwrap();
+        let mut early = [0u8; 1];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), waiting.read(&mut early))
+                .await
+                .is_err(),
+            "a probe was served while the only handshake slot was held"
+        );
+
+        drop(holding);
+        let answer = tokio::time::timeout(Duration::from_secs(5), ask(&mut waiting, ""))
+            .await
+            .expect("the freed slot never served the waiting probe");
+        assert!(answer.starts_with("http/1.1 200"), "{answer}");
+    }
+
+    #[tokio::test]
+    async fn an_upgraded_peer_gives_its_handshake_slot_back() {
+        let limits = Limits {
+            handshakes: 1,
+            ..Limits::default()
+        };
+        let (addr, mut opened) = bound(limits).await;
+
+        let mut peer = TcpStream::connect(addr).await.unwrap();
+        assert!(ask(&mut peer, &handshake(&ticket()))
+            .await
+            .starts_with("http/1.1 101"));
+        assert!(opened.recv().await.is_some());
+
+        let mut probe = TcpStream::connect(addr).await.unwrap();
+        let answer = tokio::time::timeout(Duration::from_secs(5), ask(&mut probe, PROBE))
+            .await
+            .expect("the upgraded peer still held the only handshake slot");
+        assert!(answer.starts_with("http/1.1 200"), "{answer}");
+    }
+
+    /// The upgrade carries the socket off, and its place under the cap goes with it until it closes.
+    #[tokio::test]
+    async fn an_upgraded_peer_keeps_its_place_under_the_connection_cap() {
+        let limits = Limits {
+            connections: 1,
+            ..Limits::default()
+        };
+        let (addr, mut opened) = bound(limits).await;
+
+        let mut peer = TcpStream::connect(addr).await.unwrap();
+        assert!(ask(&mut peer, &handshake(&ticket()))
+            .await
+            .starts_with("http/1.1 101"));
+        // Held as the session holds it: dropping the event's hang-up is what closes a peer.
+        let _session = opened
+            .recv()
+            .await
+            .expect("the session was told about the peer");
+
+        let mut probe = TcpStream::connect(addr).await.unwrap();
+        probe.write_all(PROBE.as_bytes()).await.unwrap();
+        let mut early = [0u8; 1];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), probe.read(&mut early))
+                .await
+                .is_err(),
+            "a probe was served while the peer held the only place"
+        );
+
+        drop(peer);
+        let answer = tokio::time::timeout(Duration::from_secs(5), ask(&mut probe, ""))
+            .await
+            .expect("the closed peer never gave its place back");
+        assert!(answer.starts_with("http/1.1 200"), "{answer}");
     }
 }

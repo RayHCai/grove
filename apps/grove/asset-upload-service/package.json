@@ -3,7 +3,7 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Content-addressed object storage: the bundles a session loads, the assets a game draws with, and the source a build compiles. Rust.",
+    "description": "The worker that inspects every asset a creator uploads before the CDN may serve it. Rust.",
     "scripts": {
         "build": "node ../../../scripts/cargo.mjs build --release",
         "typecheck": "node ../../../scripts/cargo.mjs clippy --all-targets -- -D warnings",

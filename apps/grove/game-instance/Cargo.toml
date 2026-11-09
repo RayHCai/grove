@@ -19,13 +19,16 @@ deno_core = "0.411"
 tokio = { workspace = true }
 axum = { workspace = true, features = ["ws"] }
 futures-util = { workspace = true, features = ["sink"] }
+# The listener, driven directly because `axum::serve` sets no timer and hyper then drops its header deadline.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# The ticket, whose signature `hmac` compares in constant time.
-hmac = { workspace = true }
-sha2 = { workspace = true }
+# The ticket: Ed25519 under public keys only, so this process can check a ticket and never mint one.
+ring = "0.17"
 base64 = { workspace = true }
 
 reqwest = { workspace = true }
@@ -36,7 +39,8 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+# `io-util`, so a test can speak raw HTTP to the listener the way a peer that misbehaves does.
+tokio = { workspace = true, features = ["test-util", "io-util"] }
 # `oneshot`, so a route is asserted against the layers wrapped round it rather than called direct.
 tower = { workspace = true, features = ["util"] }
 
