@@ -71,7 +71,7 @@ func (p *kernelPorts) Release(port int) {
 }
 
 func freePort() (int, error) {
-	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, fmt.Errorf("reserve a port: %w", err)
 	}

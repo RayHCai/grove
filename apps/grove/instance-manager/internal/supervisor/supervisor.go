@@ -13,7 +13,6 @@ import (
 
 	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/bundles"
 	"github.com/RayHCai/grove/libs/go-grove/contract"
-	"github.com/RayHCai/grove/libs/go-grove/token"
 )
 
 var (
@@ -22,6 +21,8 @@ var (
 	ErrAtCapacity = errors.New("host is at its instance cap")
 	// ErrUnknown is the 404.
 	ErrUnknown = errors.New("no such instance")
+	// ErrShortLived is a start whose store bearer would die before a world could finish draining.
+	ErrShortLived = errors.New("the store bearer leaves this world no lifetime")
 )
 
 // What a child is given when this agent has no narrower answer, matching the game process's own
@@ -38,12 +39,10 @@ const (
 	defaultDrainDeadline = 15 * time.Minute
 	defaultDrainPoll     = time.Second
 	defaultFetchTimeout  = 2 * time.Minute
+	defaultReapIdle      = 5 * time.Minute
+	defaultReapProbes    = 10
+	defaultReapMargin    = 30 * time.Minute
 )
-
-// How long the bearer this agent mints for a child is good for. Sized to the longest session this
-// box will hold rather than to a join ticket: a world that outlives its store credential loses
-// every save it had left, and there is no revocation behind this but the expiry.
-const storeBearerLifetime = 12 * time.Hour
 
 // Options is the whole configuration of a Registry, seams included.
 type Options struct {
@@ -77,9 +76,20 @@ type Options struct {
 	// the ones this one left running.
 	StateDir string
 
-	TokenSecret    []byte
-	HeapLimitBytes int64
-	TickBudget     time.Duration
+	// Handed to every child verbatim, which verifies a joiner's ticket with them.
+	TicketPublicKeys string
+	HeapLimitBytes   int64
+	TickBudget       time.Duration
+
+	// How long a world may sit with nobody in it, past its boot grace, before it ends.
+	ReapIdle time.Duration
+	// How many probes in a row a running world may fail before it is taken down.
+	ReapUnhealthyProbes int
+	// How long before its store bearer dies a world starts draining, so its last save still lands.
+	ReapTokenMargin time.Duration
+	// How long a drain this box began itself waits before ending an empty world, so the beat
+	// carrying the mark reaches the router before the world is gone.
+	DrainNotice time.Duration
 }
 
 type instance struct {
@@ -107,6 +117,12 @@ type instance struct {
 	probed  bool
 	exited  bool
 	endedAt time.Time
+	// When a probe last found the world empty after finding it otherwise, zero while anyone is in it.
+	emptySince time.Time
+	// Probes failed in a row, past the boot grace.
+	failures int
+	// When the store bearer the child holds dies; zero is unknown, which only drains.
+	storeExpiresAt time.Time
 }
 
 // Registry holds one entry per game process this box started.
@@ -162,6 +178,15 @@ func New(opts Options) *Registry {
 	if opts.FetchTimeout <= 0 {
 		opts.FetchTimeout = defaultFetchTimeout
 	}
+	if opts.ReapIdle <= 0 {
+		opts.ReapIdle = defaultReapIdle
+	}
+	if opts.ReapUnhealthyProbes < 1 {
+		opts.ReapUnhealthyProbes = defaultReapProbes
+	}
+	if opts.ReapTokenMargin <= 0 {
+		opts.ReapTokenMargin = defaultReapMargin
+	}
 	return &Registry{
 		opts:      opts,
 		state:     store{dir: opts.StateDir},
@@ -213,6 +238,11 @@ func (r *Registry) download(ctx context.Context, key string, set contract.Bundle
 
 // Start spawns one game process and returns what this box will report about it.
 func (r *Registry) Start(ctx context.Context, req contract.InstanceStart) (contract.InstanceReport, error) {
+	expires, err := contract.ParseTimestamp(req.StoreTokenExpiresAt)
+	if err != nil || !expires.After(time.Now().Add(r.opts.ReapTokenMargin)) {
+		return contract.InstanceReport{}, ErrShortLived
+	}
+
 	// Fetched before the lock, because it reaches the edge and every other start on this box would
 	// otherwise wait behind one download. A version already on disk costs a stat and nothing else.
 	code, err := r.code(ctx, req.Bundles)
@@ -236,19 +266,12 @@ func (r *Registry) Start(ctx context.Context, req contract.InstanceStart) (contr
 	if r.running() >= r.opts.MaxInstances {
 		return contract.InstanceReport{}, ErrAtCapacity
 	}
+	// A caller that gave up while the code came down is owed no world: nobody would ever join it.
+	if err := ctx.Err(); err != nil {
+		return contract.InstanceReport{}, err
+	}
 
 	id := req.InstanceID
-	// Minted here rather than carried in: nothing upstream holds GAME_TOKEN_SECRET on the placement
-	// path, and a credential that never crosses the fleet network cannot be read off it.
-	bearer, err := token.Sign(token.Claims{
-		GameID:    req.GameID,
-		SessionID: req.SessionID,
-		Aud:       token.AudGameManager,
-		Exp:       time.Now().Add(storeBearerLifetime).Unix(),
-	}, r.opts.TokenSecret)
-	if err != nil {
-		return contract.InstanceReport{}, fmt.Errorf("mint the store bearer: %w", err)
-	}
 
 	port, err := r.opts.Ports.Take()
 	if err != nil {
@@ -257,18 +280,18 @@ func (r *Registry) Start(ctx context.Context, req contract.InstanceStart) (contr
 
 	logs := NewRing(r.opts.LogLines)
 	child, err := r.opts.Launcher.Start(ctx, Spec{
-		GameID:    req.GameID,
-		SessionID: req.SessionID,
-		// Bound on every interface because a player dials the box directly; the probe still reaches
-		// it over loopback, which is the only path this agent uses.
-		Bind:           fmt.Sprintf("0.0.0.0:%d", port),
-		BundlePath:     code.Bundle,
-		SimConfigPath:  code.SimConfig,
-		TokenSecret:    r.opts.TokenSecret,
-		ManagerURL:     r.opts.ManagerURL,
-		ManagerToken:   bearer,
-		HeapLimitBytes: r.opts.HeapLimitBytes,
-		TickBudget:     r.opts.TickBudget,
+		InstanceID: id,
+		GameID:     req.GameID,
+		SessionID:  req.SessionID,
+		// Loopback only: players reach it through this agent's proxy, and no port of it faces out.
+		Bind:             fmt.Sprintf("127.0.0.1:%d", port),
+		BundlePath:       code.Bundle,
+		SimConfigPath:    code.SimConfig,
+		TicketPublicKeys: r.opts.TicketPublicKeys,
+		ManagerURL:       r.opts.ManagerURL,
+		ManagerToken:     req.StoreToken,
+		HeapLimitBytes:   r.opts.HeapLimitBytes,
+		TickBudget:       r.opts.TickBudget,
 	}, logs)
 	if err != nil {
 		// Nothing else will hand this one back: no process holds it, and no entry names it.
@@ -289,19 +312,22 @@ func (r *Registry) Start(ctx context.Context, req contract.InstanceStart) (contr
 		ended:     make(chan struct{}),
 		hurry:     make(chan struct{}),
 		state:     contract.InstanceStarting,
+		// The world must have ended by then, which is what the reap margin is measured against.
+		storeExpiresAt: expires,
 	}
 	r.instances[id] = inst
 
 	// Written down before anything can reap it, so the record of a child that ends at once is
 	// dropped rather than left naming a pid this box no longer has.
 	if err := r.state.put(record{
-		InstanceID: id,
-		GameID:     req.GameID,
-		SessionID:  req.SessionID,
-		Revision:   req.Revision,
-		PID:        child.Pid(),
-		Port:       port,
-		StartedAt:  inst.startedAt,
+		InstanceID:          id,
+		GameID:              req.GameID,
+		SessionID:           req.SessionID,
+		Revision:            req.Revision,
+		PID:                 child.Pid(),
+		Port:                port,
+		StartedAt:           inst.startedAt,
+		StoreTokenExpiresAt: expires,
 	}); err != nil {
 		// The session runs either way; all a box that cannot write this down loses is the process
 		// itself, on its next restart.
@@ -356,7 +382,7 @@ func (r *Registry) Adopt() error {
 	defer r.mu.Unlock()
 
 	for _, rec := range held {
-		child, err := r.opts.Launcher.Adopt(rec.PID)
+		child, err := r.opts.Launcher.Adopt(rec.PID, rec.InstanceID)
 		if err != nil && !errors.Is(err, ErrNotOurs) {
 			// A read this agent could not make says nothing about the process, so the record stays
 			// for the next boot to retry and its port stays held against whatever still holds it.
@@ -391,17 +417,19 @@ func (r *Registry) Adopt() error {
 			child:     child,
 			// Its output went to a pipe that died with the agent that forked it, so this ring holds
 			// nothing before the line saying it ended.
-			logs:  NewRing(r.opts.LogLines),
-			ended: make(chan struct{}),
-			hurry: make(chan struct{}),
-			state: contract.InstanceStarting,
+			logs:           NewRing(r.opts.LogLines),
+			ended:          make(chan struct{}),
+			hurry:          make(chan struct{}),
+			state:          contract.InstanceStarting,
+			storeExpiresAt: rec.StoreTokenExpiresAt,
 		}
 		r.instances[rec.InstanceID] = inst
 		go r.reap(inst)
 
-		// A record that names no revision is a world no joiner can be matched to, so it only drains.
+		// No joiner can be matched to a world of unknown revision, and one whose bearer has no known
+		// end may lose its saves at any moment, so either only drains.
 		drainingSince := rec.DrainingSince
-		if rec.Revision < 1 && drainingSince.IsZero() {
+		if (rec.Revision < 1 || rec.StoreTokenExpiresAt.IsZero()) && drainingSince.IsZero() {
 			drainingSince = time.Now()
 			if err := r.state.draining(rec.InstanceID, drainingSince); err != nil {
 				r.opts.Log.Warn("drain not written down", "instanceId", rec.InstanceID, "err", err)
@@ -412,7 +440,7 @@ func (r *Registry) Adopt() error {
 		// re-armed as starting, the router would offer it to a joiner the child then refuses.
 		if !drainingSince.IsZero() {
 			inst.mark(contract.InstanceDraining)
-			inst.stopOnce.Do(func() { go r.drainOnEmpty(inst, drainingSince) })
+			inst.stopOnce.Do(func() { go r.drainOnEmpty(inst, drainingSince, 0) })
 		}
 
 		r.opts.Log.Info("instance adopted",
@@ -451,7 +479,67 @@ func (r *Registry) Poll(ctx context.Context) {
 	}
 	probing.Wait()
 
-	r.sweep(time.Now())
+	now := time.Now()
+	for _, inst := range r.snapshot() {
+		r.retireIfDue(inst, now)
+	}
+	r.sweep(now)
+}
+
+// retireIfDue ends a world nobody asked to end: one that stopped answering, sat empty past its
+// welcome, or is about to outlive the bearer its saves go out under.
+func (r *Registry) retireIfDue(inst *instance, now time.Time) {
+	why := inst.due(now, r.opts)
+	switch why {
+	case "":
+		return
+	case reapUnanswered:
+		r.opts.Log.Warn("instance retired", "why", why, "instanceId", inst.id, "sessionId", inst.sessionID)
+		inst.stopOnce.Do(func() { go r.teardown(inst) })
+		inst.hurryOnce.Do(func() { close(inst.hurry) })
+		return
+	}
+
+	r.opts.Log.Info("instance retired", "why", why, "instanceId", inst.id, "sessionId", inst.sessionID)
+	inst.mark(contract.InstanceDraining)
+	inst.stopOnce.Do(func() { go r.drainOnEmpty(inst, now, r.opts.DrainNotice) })
+	if err := r.state.draining(inst.id, now); err != nil {
+		r.opts.Log.Warn("drain not written down", "instanceId", inst.id, "err", err)
+	}
+}
+
+// The reasons a world is ended unasked, as the log line names them.
+const (
+	reapUnanswered = "probes unanswered"
+	reapIdle       = "idle"
+	reapExpiring   = "store bearer expiring"
+)
+
+// due names why a world should end now, or nothing. A world already draining is left to its drain,
+// except one that has stopped answering, which no drain will ever see empty.
+func (i *instance) due(now time.Time, opts Options) string {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	switch {
+	case i.exited:
+		return ""
+	case i.failures >= opts.ReapUnhealthyProbes:
+		return reapUnanswered
+	case i.state == contract.InstanceDraining:
+		return ""
+	case !i.storeExpiresAt.After(now.Add(opts.ReapTokenMargin)):
+		return reapExpiring
+	}
+	// The idle clock starts no sooner than the boot grace ends, so a slow first player is not late.
+	idleSince := i.emptySince
+	if graceEnds := i.startedAt.Add(opts.StartGrace); idleSince.Before(graceEnds) {
+		idleSince = graceEnds
+	}
+	if !i.emptySince.IsZero() && now.Sub(idleSince) >= opts.ReapIdle {
+		return reapIdle
+	}
+	return ""
 }
 
 func (r *Registry) probe(ctx context.Context, inst *instance, now time.Time) {
@@ -470,20 +558,27 @@ func (r *Registry) probe(ctx context.Context, inst *instance, now time.Time) {
 		// and a reading frozen at the moment of the drain would never reach zero.
 		inst.players = vitals.Players
 		inst.probed = true
+		inst.failures = 0
+		switch {
+		case vitals.Players > 0:
+			inst.emptySince = time.Time{}
+		case inst.emptySince.IsZero():
+			inst.emptySince = now
+		}
 		// A drain is this agent's own decision, and no probe overrides it.
 		if inst.state != contract.InstanceDraining {
 			inst.state = contract.InstanceHealthy
 		}
 		return
 	}
-	// Nor does a failed one: a draining child that has stopped answering is still draining, and the
-	// deadline below it is what ends a drain nothing else will.
-	if inst.state == contract.InstanceDraining {
-		return
-	}
 	// A process that has not bound its port yet is starting, not failing, but only for as long as
 	// a boot takes.
 	if inst.state == contract.InstanceStarting && now.Sub(inst.startedAt) < r.opts.StartGrace {
+		return
+	}
+	inst.failures++
+	// Nor does a failed probe end a drain: the state stays, and the count is what ends a wedged one.
+	if inst.state == contract.InstanceDraining {
 		return
 	}
 	// Once per transition rather than once per poll, so a box that is down for an hour is one
@@ -565,14 +660,13 @@ func (r *Registry) teardown(inst *instance) {
 	}
 }
 
-// Redeploy puts every world of one game on this box into drain, and names the ones it marked.
-// Nothing is restarted, here or anywhere in this agent: a world ends when its last player leaves
-// and the next join starts a fresh process, so nobody is thrown out of a game.
-func (r *Registry) Redeploy(gameID string, at time.Time) []string {
+// Redeploy drains the worlds of one game not on revision (all of them for zero) and names them in
+// order. A world ends when its last player leaves, so nobody is thrown out of a game.
+func (r *Registry) Redeploy(gameID string, revision int, at time.Time) []string {
 	r.mu.Lock()
 	held := make([]*instance, 0, len(r.instances))
 	for _, inst := range r.instances {
-		if inst.gameID == gameID && !inst.done() {
+		if inst.gameID == gameID && (revision == 0 || inst.revision != revision) && !inst.done() {
 			held = append(held, inst)
 		}
 	}
@@ -583,7 +677,7 @@ func (r *Registry) Redeploy(gameID string, at time.Time) []string {
 		// Marked before the wait rather than when the process finally goes, because the mark is
 		// what the next heartbeat carries and what stops the router sending anyone else here.
 		inst.mark(contract.InstanceDraining)
-		inst.stopOnce.Do(func() { go r.drainOnEmpty(inst, at) })
+		inst.stopOnce.Do(func() { go r.drainOnEmpty(inst, at, 0) })
 		marked = append(marked, inst.id)
 
 		// Written down so an agent that restarts mid-drain takes the world back as the ending one
@@ -601,7 +695,7 @@ func (r *Registry) Redeploy(gameID string, at time.Time) []string {
 //
 // The roster is this agent's own reading from the probe, never a claim the child made: a child that
 // has stopped answering reports nothing, and the deadline is what ends that one.
-func (r *Registry) drainOnEmpty(inst *instance, since time.Time) {
+func (r *Registry) drainOnEmpty(inst *instance, since time.Time, notice time.Duration) {
 	tick := time.NewTicker(r.opts.DrainPoll)
 	defer tick.Stop()
 
@@ -613,7 +707,8 @@ func (r *Registry) drainOnEmpty(inst *instance, since time.Time) {
 			r.teardown(inst)
 			return
 		case now := <-tick.C:
-			if inst.empty() {
+			// Held for the notice, so a joiner the router placed before it heard of the drain lands.
+			if inst.empty() && now.Sub(since) >= notice {
 				r.opts.Log.Info("instance drained", "instanceId", inst.id, "sessionId", inst.sessionID)
 				r.teardown(inst)
 				return
@@ -679,6 +774,17 @@ func (r *Registry) Live() []contract.InstanceReport {
 		out = append(out, inst.view(now))
 	}
 	return out
+}
+
+// Port is where a live world's child listens on loopback, which is all the player proxy needs.
+func (r *Registry) Port(id string) (int, bool) {
+	r.mu.Lock()
+	inst, ok := r.instances[id]
+	r.mu.Unlock()
+	if !ok || inst.done() {
+		return 0, false
+	}
+	return inst.port, true
 }
 
 // Running counts the processes this box is actually holding, which is what its capacity is against.

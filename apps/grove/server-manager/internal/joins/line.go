@@ -1,12 +1,10 @@
-// What a joining player waits on, and the one worker that answers it.
-
+// Package joins is the line a joining player waits in, the one worker that decides each join in
+// arrival order, and the bounded pool that carries out the decisions a box has to answer.
 package joins
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -22,52 +20,58 @@ var (
 	ErrNoCapacity = errors.New("no capacity")
 )
 
-// A cache that refuses a connection refuses it at once, so an unpaced retry would spend this whole
-// process on a line it cannot reach.
-const retryAfterFailedPop = 250 * time.Millisecond
+// Decision is what the worker concluded about one join.
+type Decision struct {
+	// The answer, when Finish is nil.
+	Placement contract.Placement
+	Placed    bool
+	// Finish completes a decision that waits on a box, inside the joiner's own deadline.
+	Finish func(ctx context.Context) (contract.Placement, bool)
+	// Start says Finish calls a box, which the pool bounds; waiting on another join's start does not.
+	Start bool
+}
 
-// Placer is the decision the line stands in front of.
-//
-// An interface so the line holds no fleet: what it owns is the order joins are answered in, where a
-// registry, a balancer and an ingress are three things it would otherwise have to know about.
+// Placer is the decision the line stands in front of. Decide never leaves the process, so the one
+// worker that calls it is never held by a slow box.
 type Placer interface {
-	// Place answers one join, or false when nothing in the fleet qualifies.
-	Place(ctx context.Context, req contract.PlacementRequest) (contract.Placement, bool)
-	// Release hands back the slot a placement took, for a caller that had already stopped waiting.
-	Release(gameID, sessionID string)
+	Decide(ctx context.Context, req contract.PlacementRequest) Decision
 }
 
 // Options is what the composition root builds a Line from.
 type Options struct {
-	Queue  Queue
 	Placer Placer
 	Log    *slog.Logger
 	// How long a join may wait to be answered, which has to sit inside @grove/api's own abort or it
 	// is a deadline nothing can ever reach.
 	Deadline time.Duration
+	// How many joins may be waiting before the next is refused.
+	Depth int
+	// How many starts may be calling boxes at once.
+	StartWorkers int
 }
 
-// Line is the order joins are answered in.
+// Line is the order joins are decided in, and the pool their starts run on.
 //
-// One worker, deliberately: the placement decision is already one critical section in the registry,
-// so a second worker would buy no throughput and would take the ordering away: the arrival order
-// this exists to impose would become the order the runtime happened to grant a mutex in.
+// One decision worker, since a second would buy no throughput and lose the arrival order; the calls
+// to boxes are what is slow, and they run beside it, so one cold box holds up no other join.
 type Line struct {
-	queue    Queue
 	placer   Placer
 	log      *slog.Logger
 	deadline time.Duration
+	workers  int
+	jobs     chan *job
+	starts   chan task
 
-	mu      sync.Mutex
-	waiting map[string]*waiter
+	mu sync.Mutex
 }
 
-// waiter is one caller still holding its connection open.
-type waiter struct {
+// job is one caller still holding its connection open, and when it stops waiting.
+type job struct {
+	req      contract.PlacementRequest
+	deadline time.Time
 	// Buffered and written at most once, so a delivery never blocks the lock it is made under.
 	answers chan answer
-	// Set when the caller stopped waiting, under the lock a delivery takes: a placement committed
-	// for a caller that has gone holds a slot until the box that took it beats.
+	// Set when the caller stopped waiting, under the lock a delivery takes.
 	gone bool
 }
 
@@ -76,55 +80,44 @@ type answer struct {
 	placed    bool
 }
 
-// job is one join as it sits in the line.
-//
-// It carries no clock. Whether its caller is still there is the waiter's presence, which is one
-// fact in one process rather than two machines' readings of the time.
-type job struct {
-	ID      string                    `json:"id"`
-	Request contract.PlacementRequest `json:"request"`
+type task struct {
+	job      *job
+	decision Decision
 }
 
 func New(o Options) *Line {
+	workers := o.StartWorkers
+	if workers < 1 {
+		workers = 1
+	}
 	return &Line{
-		queue:    o.Queue,
 		placer:   o.Placer,
 		log:      o.Log,
 		deadline: o.Deadline,
-		waiting:  make(map[string]*waiter),
+		workers:  workers,
+		jobs:     make(chan *job, o.Depth),
+		// As deep as the line, so a decision is never held waiting for a free start worker.
+		starts: make(chan task, o.Depth),
 	}
 }
 
-// Join puts one player in the line and waits for the worker to answer it.
+// Join puts one player in the line and waits for the answer.
 func (l *Line) Join(ctx context.Context, req contract.PlacementRequest) (contract.Placement, error) {
 	ctx, cancel := context.WithTimeout(ctx, l.deadline)
 	defer cancel()
 
-	id := contract.NewUUID()
-	w := &waiter{answers: make(chan answer, 1)}
-
-	// Registered before the push, so a worker quick enough to pop this job before Push has returned
-	// still finds someone to answer.
-	l.mu.Lock()
-	l.waiting[id] = w
-	l.mu.Unlock()
-	defer l.abandon(id, w)
-
-	encoded, err := json.Marshal(job{ID: id, Request: req})
-	if err != nil {
-		return contract.Placement{}, fmt.Errorf("encode the join: %w", err)
-	}
-
-	accepted, err := l.queue.Push(ctx, encoded)
-	if err != nil {
-		return contract.Placement{}, fmt.Errorf("push the join: %w", err)
-	}
-	if !accepted {
+	deadline, _ := ctx.Deadline()
+	j := &job{req: req, deadline: deadline, answers: make(chan answer, 1)}
+	select {
+	case l.jobs <- j:
+	default:
+		// Refused without adding, so a full line falls as the worker drains it.
 		return contract.Placement{}, ErrBusy
 	}
+	defer l.abandon(j)
 
 	select {
-	case a := <-w.answers:
+	case a := <-j.answers:
 		if !a.placed {
 			return contract.Placement{}, ErrNoCapacity
 		}
@@ -136,95 +129,94 @@ func (l *Line) Join(ctx context.Context, req contract.PlacementRequest) (contrac
 	}
 }
 
-// Run answers the line until ctx ends.
+// Run decides the line until ctx ends, and runs the start pool beside it.
 //
 // Started before the listener and cancelled after it has drained: the drain waits on handlers, and
 // every handler still in it is waiting on this.
 func (l *Line) Run(ctx context.Context) {
+	var pool sync.WaitGroup
+	for range l.workers {
+		pool.Add(1)
+		go func() {
+			defer pool.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case t := <-l.starts:
+					l.finish(ctx, t)
+				}
+			}
+		}()
+	}
+	defer pool.Wait()
+
 	for {
-		if ctx.Err() != nil {
+		select {
+		case <-ctx.Done():
 			return
+		case j := <-l.jobs:
+			l.decide(ctx, j)
 		}
-
-		encoded, err := l.queue.Pop(ctx)
-		switch {
-		case errors.Is(err, ErrEmpty):
-			continue
-		case err != nil:
-			if ctx.Err() != nil {
-				return
-			}
-			l.log.Warn("the join line could not be read", "err", err)
-			select {
-			case <-time.After(retryAfterFailedPop):
-			case <-ctx.Done():
-				return
-			}
-			continue
-		}
-
-		l.serve(ctx, encoded)
 	}
 }
 
-func (l *Line) serve(ctx context.Context, encoded []byte) {
-	var j job
-	if err := json.Unmarshal(encoded, &j); err != nil {
-		l.log.Warn("a join in the line could not be read", "err", err)
+func (l *Line) decide(ctx context.Context, j *job) {
+	// Checked before the fleet is ranked: a join whose caller has gone reserves no slot for nobody.
+	if l.isGone(j) {
 		return
 	}
+	jobCtx, cancel := context.WithDeadline(ctx, j.deadline)
+	d := l.placer.Decide(jobCtx, j.req)
+	cancel()
 
-	// Taken before the fleet is ranked rather than after: a join whose caller has already gone
-	// costs no ranking and, more to the point, reserves no slot for nobody.
-	w := l.take(j.ID)
-	if w == nil {
-		return
-	}
-
-	placement, placed := l.placer.Place(ctx, j.Request)
-	if !placed {
-		l.settle(w, answer{})
-		return
-	}
-	if !l.settle(w, answer{placement: placement, placed: true}) {
-		// The caller gave up while this was ranking, so the slot it just took is one no player is
-		// going to arrive on.
-		l.placer.Release(j.Request.GameID, placement.SessionID)
+	switch {
+	case d.Finish == nil:
+		l.settle(j, answer{placement: d.Placement, placed: d.Placed})
+	case d.Start:
+		l.starts <- task{job: j, decision: d}
+	default:
+		go l.finish(ctx, task{job: j, decision: d})
 	}
 }
 
-// take claims the caller waiting on one job, or nothing when it is already gone.
-func (l *Line) take(id string) *waiter {
+// finish carries one decision out inside its joiner's remaining time, so a box is never waited on
+// for a player who has already been told no.
+func (l *Line) finish(ctx context.Context, t task) {
+	ctx, cancel := context.WithDeadline(ctx, t.job.deadline)
+	defer cancel()
+
+	placement, placed := t.decision.Finish(ctx)
+	l.settle(t.job, answer{placement: placement, placed: placed})
+}
+
+func (l *Line) isGone(j *job) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return j.gone
+}
+
+// settle hands the answer over, or reports the caller gone. Both this and abandon take the one
+// lock, so a caller that gives up is either answered or counted as gone, and never both.
+func (l *Line) settle(j *job, a answer) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	w, ok := l.waiting[id]
-	if !ok {
-		return nil
-	}
-	delete(l.waiting, id)
-	return w
-}
-
-// settle hands the answer over, or reports the caller gone so its slot can go back.
-//
-// Both this and abandon take the one lock, so a caller that gives up while its join is being ranked
-// is either answered or counted as gone, and never both.
-func (l *Line) settle(w *waiter, a answer) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if w.gone {
+	if j.gone {
 		return false
 	}
-	w.answers <- a
+	j.answers <- a
+	j.gone = true
 	return true
 }
 
-func (l *Line) abandon(id string, w *waiter) {
+func (l *Line) abandon(j *job) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	j.gone = true
+}
 
-	delete(l.waiting, id)
-	w.gone = true
+// Waiting is how many joins sit in the line, for a test and for an operator's metric alike.
+func (l *Line) Waiting() int {
+	return len(l.jobs)
 }

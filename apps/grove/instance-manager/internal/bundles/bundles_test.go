@@ -196,3 +196,62 @@ func TestFetchRefusesAnObjectPastTheCeiling(t *testing.T) {
 		t.Fatal("Fetch: got nil, want a refusal past the ceiling")
 	}
 }
+
+// A spawn runs whatever the cache holds, so a file that stopped matching its name is fetched again.
+func TestACachedFileThatNoLongerMatchesItsNameIsFetchedAgain(t *testing.T) {
+	const sim, config = "export const sim = 1;", `{"tickRate":20}`
+	e := newEdge(t, map[string]string{"sim.js": sim, "sim.json": config})
+	d := Disk{Dir: t.TempDir()}
+	set := e.set(t, hashOf(sim), hashOf(config))
+
+	paths, err := d.Fetch(context.Background(), set)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	info, err := os.Stat(paths.Bundle)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	// Read-only, so a child running as another user cannot rewrite what the next spawn runs.
+	if info.Mode().Perm()&0o222 != 0 {
+		t.Errorf("mode: got %s, want no write bit", info.Mode().Perm())
+	}
+
+	if err := os.Chmod(paths.Bundle, 0o644); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if err := os.WriteFile(paths.Bundle, []byte("export const sim = 'tampered';"), 0o644); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+	asked := e.hits.Load()
+
+	again, err := d.Fetch(context.Background(), set)
+	if err != nil {
+		t.Fatalf("second Fetch: %v", err)
+	}
+	held, err := os.ReadFile(again.Bundle)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(held) != sim {
+		t.Errorf("bundle: got %q, want the bytes its name hashes", held)
+	}
+	if e.hits.Load() != asked+1 {
+		t.Errorf("edge asked %d more times, want once for the file that no longer matched", e.hits.Load()-asked)
+	}
+}
+
+// A box whose cache cannot take a file is one every cold start fails on, so it says so upward.
+func TestReadyAnswersWhetherAVersionCouldLandHere(t *testing.T) {
+	if err := (Disk{Dir: filepath.Join(t.TempDir(), "bundles")}).Ready(context.Background()); err != nil {
+		t.Errorf("a usable directory: %v", err)
+	}
+
+	blocked := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocked, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := (Disk{Dir: blocked}).Ready(context.Background()); err == nil {
+		t.Error("a file where the cache belongs read as ready")
+	}
+}

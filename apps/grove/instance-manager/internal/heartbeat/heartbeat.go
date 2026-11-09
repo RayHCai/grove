@@ -24,6 +24,9 @@ func beatPath(hostID string) string {
 // Drained but never kept: the answer is an acknowledgement, and this box acts on nothing in it.
 const maxAnswerBytes = 4 * 1024
 
+// Short, because a readiness check that hangs would hold the beat that reports it.
+const readyTimeout = time.Second
+
 // Source is the half of the supervisor a beat reads. Narrow so a beat can be built for a box that
 // never started a process.
 type Source interface {
@@ -40,11 +43,17 @@ type Options struct {
 	Region           string
 	// Where this agent listens, so the router reaches this box without a port compiled into it.
 	AgentPort int
-	Interval  time.Duration
-	Source    Source
-	Box       box.Sampler
-	Client    *http.Client
-	Log       *slog.Logger
+	// The name and port players dial, and whether both listeners speak TLS.
+	PublicHost string
+	PlayerPort int
+	TLS        bool
+	// Whether a start could succeed now; nil is a box with nothing to check.
+	Ready    func(context.Context) error
+	Interval time.Duration
+	Source   Source
+	Box      box.Sampler
+	Client   *http.Client
+	Log      *slog.Logger
 	// Fixed for the life of this agent, and minted per Beater when unset. HostID survives a reboot
 	// by design, so without this a box that crashed and came back inside the staleness window is a
 	// restart nothing upward can see.
@@ -82,9 +91,13 @@ func (b *Beater) Body(now time.Time) contract.HostHeartbeat {
 	cpu, memory := b.opts.Box.Sample()
 
 	return contract.HostHeartbeat{
-		HostID:    b.opts.HostID,
-		Region:    b.opts.Region,
-		AgentPort: b.opts.AgentPort,
+		HostID:     b.opts.HostID,
+		Region:     b.opts.Region,
+		AgentPort:  b.opts.AgentPort,
+		PublicHost: b.opts.PublicHost,
+		PlayerPort: b.opts.PlayerPort,
+		TLS:        b.opts.TLS,
+		Ready:      b.ready(),
 		Capacity: contract.HostCapacity{
 			RunningInstances: b.opts.Source.Running(),
 			MaxInstances:     b.opts.Source.Max(),
@@ -95,6 +108,20 @@ func (b *Beater) Body(now time.Time) contract.HostHeartbeat {
 		Incarnation: b.opts.Incarnation,
 		ReportedAt:  contract.Timestamp(now),
 	}
+}
+
+// ready asks the check afresh every beat, so a box that recovers is placeable again a beat later.
+func (b *Beater) ready() bool {
+	if b.opts.Ready == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), readyTimeout)
+	defer cancel()
+	if err := b.opts.Ready(ctx); err != nil {
+		b.opts.Log.Warn("not ready", "err", err, "hostId", b.opts.HostID)
+		return false
+	}
+	return true
 }
 
 // Send posts one beat and reports the id it went out under along with whether it landed.

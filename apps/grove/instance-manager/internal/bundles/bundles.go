@@ -75,12 +75,20 @@ func (d Disk) file(ctx context.Context, hash, url, ext string) (string, error) {
 	}
 
 	path := filepath.Join(d.Dir, hash+ext)
-	// Held already, and the name is the hash of the bytes, so there is nothing to re-check.
-	if _, err := os.Stat(path); err == nil {
-		return path, nil
+	// Re-hashed rather than trusted on a stat, because a spawn is about to run whatever is there;
+	// a file that no longer matches its name is dropped and fetched again.
+	if held, err := digestOf(path); err == nil {
+		if held == hash {
+			return path, nil
+		}
+		if err := os.Remove(path); err != nil {
+			return "", fmt.Errorf("drop %s, which no longer matches its name: %w", path, err)
+		}
 	}
 
-	if err := os.MkdirAll(d.Dir, 0o750); err != nil {
+	// World-readable and writable by this agent alone: a child running as another user can read a
+	// bundle and never rewrite one another game is about to run.
+	if err := os.MkdirAll(d.Dir, 0o755); err != nil {
 		return "", fmt.Errorf("make %s: %w", d.Dir, err)
 	}
 
@@ -129,10 +137,49 @@ func (d Disk) file(ctx context.Context, hash, url, ext string) (string, error) {
 	if hex.EncodeToString(digest.Sum(nil)) != hash {
 		return "", fmt.Errorf("%w: %s", ErrCorrupt, hash)
 	}
+	if err := os.Chmod(tmp.Name(), 0o444); err != nil {
+		return "", fmt.Errorf("seal %s: %w", hash, err)
+	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
+		// Two versions sharing an object can land it at once, and the second rename meets the first's.
+		if held, digestErr := digestOf(path); digestErr == nil && held == hash {
+			return path, nil
+		}
 		return "", fmt.Errorf("keep %s: %w", hash, err)
 	}
 	return path, nil
+}
+
+// Ready reports whether a version could land here now, which a full or read-only disk says it cannot.
+func (d Disk) Ready(context.Context) error {
+	if err := os.MkdirAll(d.Dir, 0o755); err != nil {
+		return fmt.Errorf("make %s: %w", d.Dir, err)
+	}
+	probe, err := os.CreateTemp(d.Dir, "ready.*.probe")
+	if err != nil {
+		return fmt.Errorf("write to %s: %w", d.Dir, err)
+	}
+	name := probe.Name()
+	err = probe.Close()
+	if removeErr := os.Remove(name); err == nil {
+		err = removeErr
+	}
+	return err
+}
+
+// digestOf is the sha-256 of one file, as the lowercase hex a content hash is spelled in.
+func digestOf(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	digest := sha256.New()
+	if _, err := io.Copy(digest, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 func (d Disk) maxBytes() int64 {

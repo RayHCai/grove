@@ -21,7 +21,7 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &beat, maxBodyBytes) {
 		return
 	}
-	if problem, ok := checkHeartbeat(beat, hostID); !ok {
+	if problem, ok := checkHeartbeat(beat, hostID, s.production); !ok {
 		httpx.BadRequest(w, problem)
 		return
 	}
@@ -36,7 +36,7 @@ func (s *Server) listHosts(w http.ResponseWriter, _ *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, s.registry.Views(s.now()))
 }
 
-func checkHeartbeat(beat contract.HostHeartbeat, hostID string) (string, bool) {
+func checkHeartbeat(beat contract.HostHeartbeat, hostID string, production bool) (string, bool) {
 	if beat.HostID != hostID {
 		return "hostId in the path and the body must match", false
 	}
@@ -55,8 +55,15 @@ func checkHeartbeat(beat contract.HostHeartbeat, hostID string) (string, bool) {
 	if beat.Capacity.MemoryFreeBytes < 0 {
 		return "memoryFreeBytes must not be negative", false
 	}
-	if !validPort(beat.AgentPort) {
-		return "agentPort must be a port", false
+	if !validPort(beat.AgentPort) || !validPort(beat.PlayerPort) {
+		return "agentPort and playerPort must be ports", false
+	}
+	if beat.PublicHost != "" && !contract.ValidHost(beat.PublicHost) {
+		return "publicHost must be a hostname or an ip literal", false
+	}
+	// Behind the edge every beat arrives from the edge, so a production box must name itself.
+	if production && (beat.PublicHost == "" || !beat.TLS) {
+		return "a production box must name its publicHost and serve tls", false
 	}
 	// Parsed but not kept: a box with a skewed clock must not be able to claim it is fresh, so
 	// `lastSeenAt` is when this service heard the beat.

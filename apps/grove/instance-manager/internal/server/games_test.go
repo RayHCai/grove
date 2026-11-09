@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
@@ -27,13 +28,7 @@ func redeployPath(gameID string) string {
 func startOneOfOtherGame(t *testing.T, handler http.Handler, i int) contract.InstanceReport {
 	t.Helper()
 
-	res := call(handler, http.MethodPost, "/v1/instances", fmt.Sprintf(`{
-		"instanceId": "%08d-2222-4222-8222-222222222222",
-		"gameId": "%s",
-		"sessionId": "%08d-1111-4111-8111-111111111111",
-		"revision": %d,
-		"bundles": %s
-	}`, i, otherGame, i, testRevision, bundlesJSON()))
+	res := call(handler, http.MethodPost, "/v1/instances", startBody(i, otherGame, testRevision, bearerFields(12*time.Hour)))
 	if res.Code != http.StatusCreated {
 		t.Fatalf("start %d of another game: got %d, body %s", i, res.Code, res.Body.String())
 	}
@@ -180,6 +175,27 @@ func TestABoxHoldingNoWorldOfTheGameSkips(t *testing.T) {
 				t.Errorf("body: got %s, want an empty instanceIds array", res.Body.String())
 			}
 		})
+	}
+}
+
+// A push names its revision, and a world already on it is the one the push wants running.
+func TestARedeployLeavesTheWorldsAlreadyOnItsRevision(t *testing.T) {
+	handler := newTestService(3)
+	older := startOne(t, handler, 0)
+	res := call(handler, http.MethodPost, "/v1/instances", startBody(1, older.GameID, testRevision+1, bearerFields(12*time.Hour)))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("start on the new revision: got %d (%s)", res.Code, res.Body.String())
+	}
+
+	row := deployment(t, call(handler, http.MethodPost, redeployPath(older.GameID), fmt.Sprintf(`{"revision":%d}`, testRevision+1)))
+	if !slices.Equal(row.InstanceIDs, []string{older.InstanceID}) {
+		t.Fatalf("instanceIds: got %v, want only the world on the older revision", row.InstanceIDs)
+	}
+
+	for _, body := range []string{`{"revision":-1}`, `{"revision":"7"}`, `not json`} {
+		if res := call(handler, http.MethodPost, redeployPath(older.GameID), body); res.Code != http.StatusBadRequest {
+			t.Errorf("%s: got %d, want 400", body, res.Code)
+		}
 	}
 }
 

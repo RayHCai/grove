@@ -1,14 +1,16 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -19,10 +21,22 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/token"
 )
 
-const (
-	secret      = "a-thirty-two-byte-signing-secret"
-	otherSecret = "a-different-thirty-two-byte-secret"
+// The signer this service trusts, the one it is rotating to, and one it has never heard of.
+var (
+	signer   = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, ed25519.SeedSize))
+	incoming = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{2}, ed25519.SeedSize))
+	stranger = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{3}, ed25519.SeedSize))
+)
 
+func trusting(keys ...ed25519.PrivateKey) []ed25519.PublicKey {
+	public := make([]ed25519.PublicKey, 0, len(keys))
+	for _, key := range keys {
+		public = append(public, key.Public().(ed25519.PublicKey))
+	}
+	return public
+}
+
+const (
 	gameA = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
 	gameB = "9c858901-8a57-4791-81fe-4c455b099bc9"
 	gameC = "6ba7b810-9dad-41d1-80b4-00c04fd430c8"
@@ -55,7 +69,7 @@ func TestReadyAnswersWithoutAToken(t *testing.T) {
 }
 
 func TestReadyRefusesWhileTheStoreDoesNotAnswer(t *testing.T) {
-	handler := New(t.Context(), unreachableStore{store.NewMemory()}, []byte(secret), slog.New(slog.DiscardHandler))
+	handler := New(t.Context(), unreachableStore{store.NewMemory()}, trusting(signer), slog.New(slog.DiscardHandler))
 
 	res := request(t, handler, http.MethodGet, "/ready", "", "")
 
@@ -132,13 +146,13 @@ func TestScopeAdmitsOnlyAVerifiedToken(t *testing.T) {
 		},
 		{
 			name:   "a token this service did not sign",
-			bearer: signWith(t, gameA, otherSecret, time.Hour),
+			bearer: signWith(t, gameA, stranger, time.Hour),
 			status: http.StatusUnauthorized,
 			code:   httpx.CodeUnauthorized,
 		},
 		{
 			name:   "a token past its exp",
-			bearer: signWith(t, gameA, secret, -time.Minute),
+			bearer: signWith(t, gameA, signer, -time.Minute),
 			status: http.StatusUnauthorized,
 			code:   httpx.CodeUnauthorized,
 		},
@@ -164,6 +178,50 @@ func TestScopeAdmitsOnlyAVerifiedToken(t *testing.T) {
 			}
 			if c.status != http.StatusOK {
 				expectCode(t, res, c.code)
+			}
+		})
+	}
+}
+
+// A rotation lists the incoming signer beside the outgoing one, and a world on either is served.
+func TestABearerFromEitherSignerOfARotationIsServed(t *testing.T) {
+	memory := store.NewMemory()
+	handler := New(t.Context(), memory, trusting(signer, incoming), slog.New(slog.DiscardHandler))
+	seedState(t, memory, gameA, "score", `{"points":7}`)
+
+	for name, key := range map[string]ed25519.PrivateKey{"outgoing": signer, "incoming": incoming} {
+		res := request(t, handler, http.MethodGet, "/v1/state/score", signWith(t, gameA, key, time.Hour), "")
+		if res.Code != http.StatusOK {
+			t.Errorf("%s signer: got %d, want 200", name, res.Code)
+		}
+	}
+	res := request(t, handler, http.MethodGet, "/v1/state/score", signWith(t, gameA, stranger, time.Hour), "")
+	if res.Code != http.StatusUnauthorized {
+		t.Errorf("a signer outside the list: got %d, want 401", res.Code)
+	}
+}
+
+// zod counts a key's length in UTF-16 code units, so a key the TypeScript half accepts is one this
+// service accepts too, however many bytes UTF-8 spends on it.
+func TestAKeyIsBoundedInTheUnitsZodCounts(t *testing.T) {
+	_, handler := newServer(t)
+
+	cases := []struct {
+		name   string
+		key    string
+		status int
+	}{
+		{"256 two-byte characters", strings.Repeat("é", 256), http.StatusOK},
+		{"257 two-byte characters", strings.Repeat("é", 257), http.StatusBadRequest},
+		{"128 astral characters, two units each", strings.Repeat("😀", 128), http.StatusOK},
+		{"129 astral characters", strings.Repeat("😀", 129), http.StatusBadRequest},
+		{"a byte that is not utf-8", "\xff", http.StatusBadRequest},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res := request(t, handler, http.MethodPut, "/v1/state/"+url.PathEscape(c.key), ticket(t, gameA), `{"value":1}`)
+			if res.Code != c.status {
+				t.Fatalf("status: got %d, want %d (%s)", res.Code, c.status, res.Body.String())
 			}
 		})
 	}
@@ -351,7 +409,7 @@ func TestAGameAtItsBoundIsToldWhichOneItHit(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			handler := New(t.Context(), boundedStore{store.NewMemory(), c.refusal}, []byte(secret), slog.New(slog.DiscardHandler))
+			handler := New(t.Context(), boundedStore{store.NewMemory(), c.refusal}, trusting(signer), slog.New(slog.DiscardHandler))
 
 			res := request(t, handler, http.MethodPut, "/v1/state/score", ticket(t, gameA), `{"value":1}`)
 
@@ -368,230 +426,9 @@ func TestAGameAtItsBoundIsToldWhichOneItHit(t *testing.T) {
 	}
 }
 
-func TestLeaderboardClampsItsLimit(t *testing.T) {
-	const players = 150
-
-	memory, handler := newServer(t)
-	for i := range players {
-		memory.PutScore(gameA, "high", contract.LeaderboardEntry{
-			PlayerID:    fmt.Sprintf("00000000-0000-4000-8000-%012d", i),
-			DisplayName: fmt.Sprintf("player %d", i),
-			Score:       float64(i),
-		})
-	}
-
-	cases := []struct {
-		name    string
-		query   string
-		status  int
-		code    httpx.ErrorCode
-		entries int
-	}{
-		{
-			name:    "no limit takes the default",
-			query:   "board=high",
-			status:  http.StatusOK,
-			entries: contract.LeaderboardLimitDefault,
-		},
-		{
-			name:    "a limit inside the range is honoured",
-			query:   "board=high&limit=10",
-			status:  http.StatusOK,
-			entries: 10,
-		},
-		{
-			name:    "a limit past the page cap",
-			query:   "board=high&limit=500",
-			status:  http.StatusOK,
-			entries: contract.LeaderboardLimitMax,
-		},
-		{
-			name:    "a limit below one row",
-			query:   "board=high&limit=0",
-			status:  http.StatusOK,
-			entries: 1,
-		},
-		{
-			name:    "a negative limit",
-			query:   "board=high&limit=-5",
-			status:  http.StatusOK,
-			entries: 1,
-		},
-		{
-			name:    "a board nobody has played",
-			query:   "board=quiet",
-			status:  http.StatusOK,
-			entries: 0,
-		},
-		{
-			name:   "a limit that is not a number",
-			query:  "board=high&limit=lots",
-			status: http.StatusBadRequest,
-			code:   httpx.CodeInvalidRequest,
-		},
-		{
-			name:   "a cursor this board never issued",
-			query:  "board=high&cursor=later",
-			status: http.StatusBadRequest,
-			code:   httpx.CodeInvalidRequest,
-		},
-		{
-			name:   "a cursor past the end of the board",
-			query:  "board=high&cursor=99999",
-			status: http.StatusBadRequest,
-			code:   httpx.CodeInvalidRequest,
-		},
-		{
-			name:   "no board named",
-			query:  "",
-			status: http.StatusBadRequest,
-			code:   httpx.CodeInvalidRequest,
-		},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			res := request(t, handler, http.MethodGet, "/v1/leaderboard?"+c.query, ticket(t, gameA), "")
-
-			if res.Code != c.status {
-				t.Fatalf("status: got %d, want %d", res.Code, c.status)
-			}
-			if c.status != http.StatusOK {
-				expectCode(t, res, c.code)
-				return
-			}
-
-			page := decodeAs[contract.LeaderboardPage](t, res)
-			if len(page.Entries) != c.entries {
-				t.Fatalf("entries: got %d, want %d", len(page.Entries), c.entries)
-			}
-			if c.entries == 0 {
-				if page.NextCursor != nil {
-					t.Fatalf("nextCursor: got %q, want null at the end of a board", *page.NextCursor)
-				}
-				return
-			}
-
-			// The highest score is rank one, and a page short of the board carries the cursor that
-			// reaches the rest of it.
-			if page.Entries[0].Rank != 1 || page.Entries[0].Score != players-1 {
-				t.Fatalf("first row: rank %d, score %v", page.Entries[0].Rank, page.Entries[0].Score)
-			}
-			if page.NextCursor == nil {
-				t.Fatal("nextCursor: got null, want the offset of the next page")
-			}
-		})
-	}
-}
-
-func TestBundlesAnswerOnceAGameHasPublished(t *testing.T) {
-	memory, handler := newServer(t)
-	published := contract.BundleSet{
-		Server: contract.BundleRef{
-			Side:       contract.SideServer,
-			Hash:       strings.Repeat("a", 64),
-			URL:        "https://objects.grove.test/a",
-			ByteLength: 2048,
-		},
-		Client: contract.BundleRef{
-			Side:       contract.SideClient,
-			Hash:       strings.Repeat("b", 64),
-			URL:        "https://objects.grove.test/b",
-			ByteLength: 4096,
-		},
-		SyncedHash: strings.Repeat("c", 64),
-	}
-	memory.PutBundles(gameA, published)
-
-	never := request(t, handler, http.MethodGet, "/v1/bundles", ticket(t, gameB), "")
-	if never.Code != http.StatusNotFound {
-		t.Fatalf("status: got %d, want %d", never.Code, http.StatusNotFound)
-	}
-	expectCode(t, never, httpx.CodeNotFound)
-
-	got := decodeAs[contract.BundleSet](
-		t, request(t, handler, http.MethodGet, "/v1/bundles", ticket(t, gameA), ""),
-	)
-	if got != published {
-		t.Fatalf("bundles: got %+v, want %+v", got, published)
-	}
-}
-
-// The contract carries a `LeaderboardWrite` and a bundle set is a value this store holds, but
-// neither has a verb here: state is the only thing a caller writes.
-func TestABoardAndABundleSetTakeNoWriteFromACaller(t *testing.T) {
-	_, handler := newServer(t)
-	bearer := ticket(t, gameA)
-
-	standing := encode(t, contract.LeaderboardWrite{
-		Board:       "high",
-		PlayerID:    "7f8e9d0c-1b2a-4c3d-8e5f-6a7b8c9d0e1f",
-		DisplayName: "one",
-		Score:       1,
-	})
-	set := encode(t, contract.BundleSet{
-		Server: contract.BundleRef{
-			Side:       contract.SideServer,
-			Hash:       strings.Repeat("a", 64),
-			URL:        "https://objects.grove.test/a",
-			ByteLength: 2048,
-		},
-		Client: contract.BundleRef{
-			Side:       contract.SideClient,
-			Hash:       strings.Repeat("b", 64),
-			URL:        "https://objects.grove.test/b",
-			ByteLength: 4096,
-		},
-		SyncedHash: strings.Repeat("c", 64),
-	})
-
-	cases := []struct {
-		name   string
-		method string
-		target string
-		body   string
-	}{
-		{
-			name:   "a standing submitted to the board that would rank it",
-			method: http.MethodPost,
-			target: "/v1/leaderboard?board=high",
-			body:   standing,
-		},
-		{
-			name:   "a set published where a game's sessions read one",
-			method: http.MethodPut,
-			target: "/v1/bundles",
-			body:   set,
-		},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			res := request(t, handler, c.method, c.target, bearer, c.body)
-
-			if res.Code != http.StatusNotFound {
-				t.Fatalf("status: got %d, want %d", res.Code, http.StatusNotFound)
-			}
-			expectCode(t, res, httpx.CodeNotFound)
-		})
-	}
-
-	page := decodeAs[contract.LeaderboardPage](
-		t, request(t, handler, http.MethodGet, "/v1/leaderboard?board=high", bearer, ""),
-	)
-	if len(page.Entries) != 0 {
-		t.Fatalf("board: got %d entries, want the board a caller cannot write to", len(page.Entries))
-	}
-
-	never := request(t, handler, http.MethodGet, "/v1/bundles", bearer, "")
-	if never.Code != http.StatusNotFound {
-		t.Fatalf("bundles: got %d, want %d", never.Code, http.StatusNotFound)
-	}
-}
-
 func newServer(t *testing.T) (*store.Memory, http.Handler) {
 	memory := store.NewMemory()
-	return memory, New(t.Context(), memory, []byte(secret), slog.New(slog.DiscardHandler))
+	return memory, New(t.Context(), memory, trusting(signer), slog.New(slog.DiscardHandler))
 }
 
 // What a database-backed store is while it is still connecting.
@@ -644,10 +481,10 @@ func request(t *testing.T, h http.Handler, method, target, bearer, body string) 
 
 func ticket(t *testing.T, game string) string {
 	t.Helper()
-	return signWith(t, game, secret, time.Hour)
+	return signWith(t, game, signer, time.Hour)
 }
 
-func signWith(t *testing.T, game, key string, life time.Duration) string {
+func signWith(t *testing.T, game string, key ed25519.PrivateKey, life time.Duration) string {
 	t.Helper()
 
 	signed, err := token.Sign(token.Claims{
@@ -655,14 +492,14 @@ func signWith(t *testing.T, game, key string, life time.Duration) string {
 		SessionID: "1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d",
 		Aud:       token.AudGameManager,
 		Exp:       time.Now().Add(life).Unix(),
-	}, []byte(key))
+	}, key)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
 	return signed
 }
 
-// What @grove/api hands a browser: the same secret signs it, so only the audience keeps it out.
+// A join ticket under the very key this service trusts, so only the audience keeps it out.
 func joinTicket(t *testing.T, game string) string {
 	t.Helper()
 
@@ -672,7 +509,7 @@ func joinTicket(t *testing.T, game string) string {
 		PlayerID:  "7f8e9d0c-1b2a-4c3d-8e5f-6a7b8c9d0e1f",
 		Aud:       token.AudGameInstance,
 		Exp:       time.Now().Add(time.Hour).Unix(),
-	}, []byte(secret))
+	}, signer)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -686,16 +523,6 @@ func seedState(t *testing.T, memory *store.Memory, game, key, value string) {
 	if _, err := memory.Write(context.Background(), game, key, write); err != nil {
 		t.Fatalf("seed %s: %v", key, err)
 	}
-}
-
-func encode(t *testing.T, value any) string {
-	t.Helper()
-
-	body, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("encode: %v", err)
-	}
-	return string(body)
 }
 
 func decodeAs[T any](t *testing.T, res *httptest.ResponseRecorder) T {

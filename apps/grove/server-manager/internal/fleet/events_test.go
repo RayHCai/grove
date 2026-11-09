@@ -90,14 +90,14 @@ func TestANewIncarnationIsARestart(t *testing.T) {
 	}
 }
 
-// Evidence from the data path arrives before the staleness window does, and the box's own next beat
-// is what outranks it: a single lost packet must cost one interval of placement, not an eviction.
-func TestSuspicionHoldsUntilTheBoxBeatsAgain(t *testing.T) {
+// Evidence from the data path arrives before the staleness window does, and lasts its span whatever
+// the box beats, since a box that cannot start a world still beats; a restart of its agent clears it.
+func TestSuspicionLastsItsSpanWhateverTheBoxBeats(t *testing.T) {
 	reg := NewRegistry(staleAfter)
 	reg.Beat(living(hostA, firstLife), "192.0.2.1", epoch)
 	reg.Drain()
 
-	reg.Suspect(hostA, "redeploy unanswered", epoch.Add(time.Second))
+	reg.Suspect(hostA, "redeploy unanswered", epoch.Add(time.Second), time.Minute)
 
 	if got := len(reg.Candidates("", epoch.Add(time.Second))); got != 0 {
 		t.Fatalf("candidates while suspected: got %d, want none", got)
@@ -111,13 +111,24 @@ func TestSuspicionHoldsUntilTheBoxBeatsAgain(t *testing.T) {
 	}
 
 	reg.Beat(living(hostA, firstLife), "192.0.2.1", epoch.Add(2*time.Second))
+	if got := len(reg.Candidates("", epoch.Add(2*time.Second))); got != 0 {
+		t.Fatalf("candidates after a beat inside the span: got %d, want none", got)
+	}
 
-	if got := len(reg.Candidates("", epoch.Add(2*time.Second))); got != 1 {
-		t.Fatalf("candidates after the box answered: got %d, want the box back", got)
+	past := epoch.Add(time.Minute + 2*time.Second)
+	reg.Beat(living(hostA, firstLife), "192.0.2.1", past)
+	if got := len(reg.Candidates("", past)); got != 1 {
+		t.Fatalf("candidates once the span ran out: got %d, want the box back", got)
 	}
 	back := reg.Drain()
 	if len(back) != 1 || back[0].Kind != contract.FleetReturned {
 		t.Fatalf("events: got %+v, want one %q", back, contract.FleetReturned)
+	}
+
+	reg.Suspect(hostA, "start failed", past, time.Hour)
+	reg.Beat(living(hostA, secondLife), "192.0.2.1", past.Add(time.Second))
+	if got := len(reg.Candidates("", past.Add(time.Second))); got != 1 {
+		t.Fatalf("candidates after the agent restarted: got %d, want the box back", got)
 	}
 }
 

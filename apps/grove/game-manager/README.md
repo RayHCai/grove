@@ -1,7 +1,6 @@
 # @grove/game-manager
 
-Game data for running sessions: `@serverState`, leaderboards, and the bundles a session loads.
-Written in Go.
+Game data for running sessions: `@serverState`. Written in Go.
 
 The only thing between a game process and its data. It holds the credential a game process does
 not: a game presents a session-scoped token and reaches its own game's rows through here, and there
@@ -13,24 +12,23 @@ Every route under `/v1` sits behind one token-verifying middleware, and `gameId`
 verified claims onto the request context. No handler reads it from a URL, because there is no URL to
 read it from: a request cannot name a game its token was not issued for, so cross-game access is
 unrepresentable rather than merely rejected. A route added to the scope is authenticated because of
-where it is registered, not because someone remembered to check. The credential is the one minted
-for this service: a browser's join ticket is signed by the same secret and refused here on the
-audience its claims name.
+where it is registered, not because someone remembered to check. The credential is the store bearer
+`@grove/server-manager` signs for each world with Ed25519; this service holds only the public keys,
+`STORE_PUBLIC_KEYS`, so a breach of it mints nothing, and a join ticket is refused on its audience.
 
 `/health` and `/ready` sit outside that scope, for whatever supervises this process: a container
 healthcheck or a platform probe, neither of which holds a token.
 
-| Route                                       | Answers                                               |
-| ------------------------------------------- | ----------------------------------------------------- |
-| `GET /health`                               | `{"ok":true}`                                         |
-| `GET /ready`                                | `{"ok":true}` once the store answers, or 503          |
-| `GET /v1/state/{key}`                       | the record, or 404                                    |
-| `PUT /v1/state/{key}`                       | the revision, 409 if stale, 413 past a bound          |
-| `DELETE /v1/state/{key}`                    | 204 once the key is released, or 404                  |
-| `GET /v1/leaderboard?board=&limit=&cursor=` | one page, `limit` defaulting to 25 and clamped to 100 |
-| `GET /v1/bundles`                           | the set this game's sessions load, or 404             |
+| Route                    | Answers                                      |
+| ------------------------ | -------------------------------------------- |
+| `GET /health`            | `{"ok":true}`                                |
+| `GET /ready`             | `{"ok":true}` once the store answers, or 503 |
+| `GET /v1/state/{key}`    | the record, or 404                           |
+| `PUT /v1/state/{key}`    | the revision, 409 if stale, 413 past a bound |
+| `DELETE /v1/state/{key}` | 204 once the key is released, or 404         |
 
-A write carrying `ifRevision` is a compare-and-set, and a stale one is a 409 that leaves the value
+A key is 1 to 256 UTF-16 code units, counted the way the zod bound counts them, and a key that is
+not UTF-8 is refused. A write carrying `ifRevision` is a compare-and-set, and a stale one is a 409 that leaves the value
 where it was: two ticks racing on one key is a bug the caller has to see, not one to paper over. A
 key never written is at revision zero, which is what makes the first compare-and-set of a key
 expressible as `ifRevision: 0` rather than a special case a caller has to know about. A game holds
@@ -40,17 +38,11 @@ eviction or the 409 a caller retries: which row a game no longer needs is the ga
 
 ## The store
 
-`internal/store` is one interface (`Ping`, `Read`, `Write`, `Delete`, `Leaderboard`, `Bundles`)
+`internal/store` is one interface (`Ping`, `Read`, `Write`, `Delete`)
 and every method that reaches a row takes the game as its first argument rather than reading one
 from a request. `main.go` chooses the implementation, and what it chooses is `store.NewMemory()`:
-one process's maps. **Every game's state and boards are lost when the process ends**, and two
-replicas answer from two different sets; the service logs a warning saying so at every start.
-
-State is the only thing a caller writes here. A board's rows and a game's bundle set are read-only
-to every token this service accepts.
-
-The bundles themselves are fetched from the urls `GET /v1/bundles` returns, never through here: a
-service that proxied multi-megabyte chunks would be on the join path for every player of every game.
+one process's maps. **Every game's state is lost when the process ends**, and two replicas answer
+from two different sets; the service logs a warning saying so at every start.
 
 ## The rate limit
 
@@ -72,12 +64,12 @@ pnpm --filter @grove/game-manager run build
 ./dist/game-manager
 ```
 
-| Variable            | What                                                                       |
-| ------------------- | -------------------------------------------------------------------------- |
-| `GAME_MANAGER_HOST` | address to bind; `127.0.0.1`, or `0.0.0.0` when a platform assigned `PORT` |
-| `GAME_MANAGER_PORT` | port to bind; `PORT` when a platform assigned one, else `4001`             |
-| `GAME_TOKEN_SECRET` | shared with `@grove/api`, which mints the tokens this service verifies     |
-| `GROVE_ENV`         | `development`, `test` or `production`; the log level follows it            |
+| Variable            | What                                                                          |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `GAME_MANAGER_HOST` | address to bind; `127.0.0.1`, or `0.0.0.0` when a platform assigned `PORT`    |
+| `GAME_MANAGER_PORT` | port to bind; `PORT` when a platform assigned one, else `4001`                |
+| `STORE_PUBLIC_KEYS` | the store-bearer public keys, comma-separated, unpadded base64url of 32 bytes |
+| `GROVE_ENV`         | `development`, `test` or `production`; the log level follows it               |
 
 Loopback by default because this service is reachable from the fleet's own network and from nowhere
 else, and a default of `0.0.0.0` is how that stops being true by accident; a platform that assigns

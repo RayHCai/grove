@@ -1,4 +1,4 @@
-// Package api is the routing table: the fleet-bearer gate, the four routes behind it, and the two
+// Package api is the routing table: two credentials, the four routes each one opens, and the two
 // open ones.
 package api
 
@@ -24,9 +24,18 @@ type Options struct {
 	// The line every join waits in, which holds the placement decision behind it.
 	Joins *joins.Line
 	// How a redeploy reaches each box; a join's start goes through the line's Router instead.
-	Agent  fleet.Agent
-	Secret []byte
-	Log    *slog.Logger
+	Agent fleet.Agent
+	// The boxes' bearer, which opens the heartbeat and nothing a caller uses.
+	FleetSecret []byte
+	// @grove/api's bearer, which opens placements, deployments and the fleet listing.
+	CallerSecret []byte
+	// Whether a beat must name its box, which behind a proxy its source address never does.
+	Production bool
+	// How long after boot an empty answer is a 503 rather than a full fleet.
+	Warmup time.Duration
+	// How long a box that left a redeploy unanswered is routed around.
+	SuspectFor time.Duration
+	Log        *slog.Logger
 	// How long a whole fan-out may take, and how long any one box in it may hold its own answer.
 	DeployTimeout time.Duration
 	HostTimeout   time.Duration
@@ -42,7 +51,11 @@ type Server struct {
 	registry      *fleet.Registry
 	joins         *joins.Line
 	agent         fleet.Agent
-	secret        []byte
+	fleetSecret   []byte
+	callerSecret  []byte
+	production    bool
+	warmEnds      time.Time
+	suspectFor    time.Duration
 	log           *slog.Logger
 	deployTimeout time.Duration
 	hostTimeout   time.Duration
@@ -61,7 +74,11 @@ func New(o Options) *Server {
 		registry:      o.Registry,
 		joins:         o.Joins,
 		agent:         o.Agent,
-		secret:        o.Secret,
+		fleetSecret:   o.FleetSecret,
+		callerSecret:  o.CallerSecret,
+		production:    o.Production,
+		warmEnds:      o.Now().Add(o.Warmup),
+		suspectFor:    o.SuspectFor,
 		log:           o.Log,
 		deployTimeout: o.DeployTimeout,
 		hostTimeout:   o.HostTimeout,
@@ -72,19 +89,21 @@ func New(o Options) *Server {
 
 // Handler is the whole service: health and readiness outside the gate, everything else behind it.
 func (s *Server) Handler() http.Handler {
-	v1 := http.NewServeMux()
-	v1.HandleFunc("POST /v1/hosts/{hostId}/heartbeat", s.heartbeat)
-	v1.HandleFunc("GET /v1/hosts", s.listHosts)
-	v1.HandleFunc("POST /v1/placements", s.place)
-	v1.HandleFunc("POST /v1/deployments", s.deploy)
+	box := httpx.SharedSecret(s.log, s.fleetSecret)
+	caller := httpx.SharedSecret(s.log, s.callerSecret)
 
-	// A different secret from GAME_TOKEN_SECRET, which signs a browser's ticket this service never sees.
-	return httpx.Service(v1, s.ready, s.log, httpx.FleetBearer(s.secret, s.log))
+	v1 := http.NewServeMux()
+	v1.Handle("POST /v1/hosts/{hostId}/heartbeat", box(http.HandlerFunc(s.heartbeat)))
+	v1.Handle("GET /v1/hosts", caller(http.HandlerFunc(s.listHosts)))
+	v1.Handle("POST /v1/placements", caller(http.HandlerFunc(s.place)))
+	v1.Handle("POST /v1/deployments", caller(http.HandlerFunc(s.deploy)))
+
+	// Either credential opens the scope, so a caller holding neither cannot map it by its 404s.
+	return httpx.Service(v1, s.ready, s.log, httpx.SharedSecret(s.log, s.fleetSecret, s.callerSecret))
 }
 
-// nothingToWaitFor is this service's readiness probe, and it never fails. An empty registry
-// answers a placement with the same 409 a full fleet does, and a caller that pulled this process
-// from rotation would cut off the beats that are the only way the registry fills.
+// nothingToWaitFor is this service's readiness probe, and it never fails: a caller that pulled
+// this process from rotation would cut off the beats that are the only way the registry fills.
 func nothingToWaitFor(context.Context) error { return nil }
 
 // remoteIP is where a beat came from, without the connection's ephemeral source port.

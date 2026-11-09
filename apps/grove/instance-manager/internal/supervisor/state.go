@@ -29,6 +29,8 @@ type record struct {
 	// When a redeploy put this world into drain, so the next run of this agent resumes a budget
 	// already spent rather than granting a whole new one. Absent on a world nobody has ended.
 	DrainingSince time.Time `json:"drainingSince,omitzero"`
+	// When the child's store bearer dies, so the next run of this agent drains the world in time.
+	StoreTokenExpiresAt time.Time `json:"storeTokenExpiresAt,omitzero"`
 }
 
 // store is the registry's memory across its own restart, one file per instance so a write cut short

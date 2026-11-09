@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -108,59 +107,15 @@ func TestDeleteLeavesAKeyNeverWritten(t *testing.T) {
 	}
 }
 
-func TestACursorPastTheBoardIsOneItNeverMinted(t *testing.T) {
-	const players = 3
-
-	memory := NewMemory()
-	for i := range players {
-		memory.PutScore(gameA, "high", contract.LeaderboardEntry{
-			PlayerID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i),
-			Score:    float64(i),
-		})
-	}
-
-	query := contract.LeaderboardQuery{Board: "high", Limit: 1, Cursor: strconv.Itoa(players)}
-	if _, err := memory.Leaderboard(context.Background(), gameA, query); !errors.Is(err, ErrBadCursor) {
-		t.Fatalf("err: got %v, want %v", err, ErrBadCursor)
-	}
-
-	// The last row a board holds is still a row, so the offset that names it pages as it always did.
-	query.Cursor = strconv.Itoa(players - 1)
-	page, err := memory.Leaderboard(context.Background(), gameA, query)
-	if err != nil {
-		t.Fatalf("last page: %v", err)
-	}
-	if len(page.Entries) != 1 || page.NextCursor != nil {
-		t.Fatalf("last page: %d entries, cursor %v", len(page.Entries), page.NextCursor)
-	}
-}
-
 func TestRowsLiveOnlyInTheProcessHoldingThem(t *testing.T) {
 	memory := NewMemory()
 	write(t, memory, gameA, "score", `{"points":1}`)
-	memory.PutScore(gameA, "high", contract.LeaderboardEntry{
-		PlayerID: "00000000-0000-4000-8000-000000000000",
-		Score:    1,
-	})
-	memory.PutBundles(gameA, contract.BundleSet{})
 
 	// A second set of maps reaches nothing the first one holds, which is what storing a fleet's game
 	// data for the life of one process costs a fleet running more than one.
 	restarted := NewMemory()
 	if _, err := restarted.Read(context.Background(), gameA, "score"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("state: got %v, want %v", err, ErrNotFound)
-	}
-	if _, err := restarted.Bundles(context.Background(), gameA); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("bundles: got %v, want %v", err, ErrNotFound)
-	}
-
-	query := contract.LeaderboardQuery{Board: "high", Limit: contract.LeaderboardLimitDefault}
-	page, err := restarted.Leaderboard(context.Background(), gameA, query)
-	if err != nil {
-		t.Fatalf("leaderboard: %v", err)
-	}
-	if len(page.Entries) != 0 {
-		t.Fatalf("leaderboard: got %d entries, want none", len(page.Entries))
 	}
 }
 

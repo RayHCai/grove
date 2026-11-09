@@ -24,16 +24,18 @@ const adoptedPoll = time.Second
 // Nothing here is discovered by the child: its own config fails on a missing variable rather than
 // defaulting one quietly, because every value below is a decision this agent already made.
 type Spec struct {
-	GameID         string
-	SessionID      string
-	Bind           string
-	BundlePath     string
-	SimConfigPath  string
-	TokenSecret    []byte
-	ManagerURL     string
-	ManagerToken   string
-	HeapLimitBytes int64
-	TickBudget     time.Duration
+	// Names the child's cgroup leaf; the child itself is never told it.
+	InstanceID       string
+	GameID           string
+	SessionID        string
+	Bind             string
+	BundlePath       string
+	SimConfigPath    string
+	TicketPublicKeys string
+	ManagerURL       string
+	ManagerToken     string
+	HeapLimitBytes   int64
+	TickBudget       time.Duration
 }
 
 // Env is the child's whole configuration, under the names apps/grove/game-instance reads.
@@ -44,7 +46,7 @@ func (s Spec) Env() []string {
 		"GROVE_BIND=" + s.Bind,
 		"GROVE_BUNDLE=" + s.BundlePath,
 		"GROVE_SIM_CONFIG=" + s.SimConfigPath,
-		"GAME_TOKEN_SECRET=" + string(s.TokenSecret),
+		"GROVE_TICKET_PUBLIC_KEYS=" + s.TicketPublicKeys,
 		"GROVE_MANAGER_URL=" + s.ManagerURL,
 		"GROVE_MANAGER_TOKEN=" + s.ManagerToken,
 		"GROVE_HEAP_LIMIT_BYTES=" + strconv.FormatInt(s.HeapLimitBytes, 10),
@@ -75,19 +77,20 @@ type Launcher interface {
 	Start(ctx context.Context, spec Spec, logs io.Writer) (Child, error)
 	// Adopt takes a process an earlier run of this agent left running back under this one, and
 	// wraps ErrNotOurs only where it read that the pid holds no child of this agent's.
-	Adopt(pid int) (Child, error)
+	Adopt(pid int, instanceID string) (Child, error)
 }
 
 type execLauncher struct {
-	bin string
+	bin     string
+	sandbox Sandbox
 	// What the kernel says is running under a pid, a seam because no suite can arrange a /proc
 	// that is there but unreadable, which is the case a survivor's life depends on.
 	cmdline func(pid int) ([]byte, error)
 }
 
-// NewExecLauncher runs the real grove-game-instance binary at bin.
-func NewExecLauncher(bin string) Launcher {
-	return execLauncher{bin: bin, cmdline: procCmdline}
+// NewExecLauncher runs the real grove-game-instance binary at bin, each child inside sandbox.
+func NewExecLauncher(bin string, sandbox Sandbox) Launcher {
+	return execLauncher{bin: bin, sandbox: sandbox, cmdline: procCmdline}
 }
 
 // ExecReady reports whether bin is something this box can fork at all, which a box whose last
@@ -111,13 +114,21 @@ func (l execLauncher) Start(_ context.Context, spec Spec, logs io.Writer) (Child
 	cmd.Stdout = logs
 	cmd.Stderr = logs
 
-	if err := cmd.Start(); err != nil {
+	opened, err := l.sandbox.confine(cmd, spec.InstanceID)
+	if err != nil {
+		return nil, fmt.Errorf("confine %s: %w", spec.InstanceID, err)
+	}
+	err = cmd.Start()
+	opened()
+	if err != nil {
+		_ = l.sandbox.release(spec.InstanceID)
 		return nil, fmt.Errorf("start %s: %w", l.bin, err)
 	}
-	return &execChild{cmd: cmd}, nil
+	release := func() { _ = l.sandbox.release(spec.InstanceID) }
+	return &execChild{cmd: cmd, release: release}, nil
 }
 
-func (l execLauncher) Adopt(pid int) (Child, error) {
+func (l execLauncher) Adopt(pid int, instanceID string) (Child, error) {
 	ours, err := l.owns(pid)
 	// Only a pid the kernel has nothing under has ended; every other read failure is this agent
 	// going blind for a moment, and its caller keeps the record rather than forgetting a survivor.
@@ -135,7 +146,12 @@ func (l execLauncher) Adopt(pid int) (Child, error) {
 	if err != nil {
 		return nil, fmt.Errorf("find pid %d: %w", pid, err)
 	}
-	return &adoptedChild{proc: proc, gone: func() bool { return l.gone(pid) }}, nil
+	// Re-applied because a restart of this agent may have dropped the controllers the bounds hang off.
+	if err := l.sandbox.reclaim(instanceID); err != nil {
+		return nil, fmt.Errorf("bound pid %d again: %w", pid, err)
+	}
+	release := func() { _ = l.sandbox.release(instanceID) }
+	return &adoptedChild{proc: proc, gone: func() bool { return l.gone(pid) }, release: release}, nil
 }
 
 // A pid outlives the process that held it, so what the kernel says is running under that number is
@@ -164,7 +180,10 @@ func procCmdline(pid int) ([]byte, error) {
 	return os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 }
 
-type execChild struct{ cmd *exec.Cmd }
+type execChild struct {
+	cmd     *exec.Cmd
+	release func()
+}
 
 func (c *execChild) Pid() int { return c.cmd.Process.Pid }
 
@@ -178,14 +197,17 @@ func (c *execChild) Kill() error {
 }
 
 func (c *execChild) Wait() error {
-	return c.cmd.Wait()
+	err := c.cmd.Wait()
+	c.release()
+	return err
 }
 
 // adoptedChild is a process this agent took over rather than forked, so the pid is its whole hold
 // on one: no pipe to its output, and no exit status coming back.
 type adoptedChild struct {
-	proc *os.Process
-	gone func() bool
+	proc    *os.Process
+	gone    func() bool
+	release func()
 }
 
 func (c *adoptedChild) Pid() int { return c.proc.Pid }
@@ -198,5 +220,6 @@ func (c *adoptedChild) Wait() error {
 	for !c.gone() {
 		time.Sleep(adoptedPoll)
 	}
+	c.release()
 	return errors.New("the adopted process is gone, and its ending went to the agent that forked it")
 }

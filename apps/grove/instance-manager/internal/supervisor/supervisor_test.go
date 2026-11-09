@@ -15,7 +15,6 @@ import (
 
 	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/bundles"
 	"github.com/RayHCai/grove/libs/go-grove/contract"
-	"github.com/RayHCai/grove/libs/go-grove/token"
 )
 
 // A fake child is a process that was never forked: it is alive until something ends it, and the
@@ -28,6 +27,8 @@ type fakeChild struct {
 	players int
 	drained bool
 	killed  bool
+	// Alive but no longer answering, which is what a wedged process looks like to a probe.
+	deaf bool
 
 	exit chan struct{}
 	once sync.Once
@@ -100,7 +101,7 @@ func (l *fakeLauncher) Start(_ context.Context, spec Spec, logs io.Writer) (Chil
 
 // The same box under a later agent: the process is still running under that pid, and the one that
 // forked it is not there to say so.
-func (l *fakeLauncher) Adopt(pid int) (Child, error) {
+func (l *fakeLauncher) Adopt(pid int, _ string) (Child, error) {
 	l.mu.Lock()
 	child, held := l.byPid[pid]
 	l.mu.Unlock()
@@ -117,7 +118,7 @@ type refusingLauncher struct {
 	err error
 }
 
-func (l refusingLauncher) Adopt(int) (Child, error) { return nil, l.err }
+func (l refusingLauncher) Adopt(int, string) (Child, error) { return nil, l.err }
 
 func (l *fakeLauncher) at(addr string) *fakeChild {
 	l.mu.Lock()
@@ -168,6 +169,9 @@ func (p fakeProber) Probe(_ context.Context, addr string) (Vitals, string, error
 
 	child.mu.Lock()
 	defer child.mu.Unlock()
+	if child.deaf {
+		return Vitals{}, "probe-id", errors.New("probe timed out")
+	}
 	return Vitals{Players: child.players}, "probe-id", nil
 }
 
@@ -226,7 +230,7 @@ func (brokenLauncher) Start(context.Context, Spec, io.Writer) (Child, error) {
 	return nil, errors.New("start grove-game-instance: no such file or directory")
 }
 
-func (brokenLauncher) Adopt(pid int) (Child, error) {
+func (brokenLauncher) Adopt(pid int, _ string) (Child, error) {
 	return nil, fmt.Errorf("pid %d is not a game process: %w", pid, ErrNotOurs)
 }
 
@@ -244,10 +248,10 @@ func testOptions(max int) Options {
 		LogLines:     4,
 		// The shortest grace that is still a grace: a probe that fails here has failed for good,
 		// and nothing in a test is waiting on a real boot.
-		StartGrace:  time.Nanosecond,
-		StopTimeout: time.Second,
-		Retention:   time.Hour,
-		TokenSecret: []byte(strings.Repeat("s", 32)),
+		StartGrace:       time.Nanosecond,
+		StopTimeout:      time.Second,
+		Retention:        time.Hour,
+		TicketPublicKeys: ticketKeys,
 	}
 }
 
@@ -286,6 +290,12 @@ func (refusingBundles) Fetch(context.Context, contract.BundleSet) (bundles.Paths
 
 const testRevision = 7
 
+// The ticket keys every child is handed, verbatim, as a box holds them mid-rotation.
+const ticketKeys = "8kjXvyJlDRuF-yVsmSlpkVL2uSDZ1uQqOQpoPHBBJ_0,vZY3qLA8D_ZZUm6txr4Fx6qGZLZx7DHKODR1lKtDuVc"
+
+// A store bearer as the router hands one over; the agent passes it on and never reads it.
+const storeToken = "eyJnYW1lSWQiOiJnIn0.c2lnbmVk"
+
 func request(i int) contract.InstanceStart {
 	return contract.InstanceStart{
 		InstanceID: fmt.Sprintf("%08d-2222-4222-8222-222222222222", i),
@@ -307,6 +317,8 @@ func request(i int) contract.InstanceStart {
 			},
 			SyncedHash: strings.Repeat("d", 64),
 		},
+		StoreToken:          storeToken,
+		StoreTokenExpiresAt: contract.Timestamp(time.Now().Add(12 * time.Hour)),
 	}
 }
 
@@ -535,7 +547,7 @@ func TestTheChildIsToldEverything(t *testing.T) {
 	// apps/grove/game-instance discovers none of these: a missing one is a session that never boots.
 	wanted := []string{
 		"GROVE_GAME_ID", "GROVE_SESSION_ID", "GROVE_BIND", "GROVE_BUNDLE", "GROVE_SIM_CONFIG",
-		"GAME_TOKEN_SECRET", "GROVE_MANAGER_URL", "GROVE_MANAGER_TOKEN", "GROVE_HEAP_LIMIT_BYTES",
+		"GROVE_TICKET_PUBLIC_KEYS", "GROVE_MANAGER_URL", "GROVE_MANAGER_TOKEN", "GROVE_HEAP_LIMIT_BYTES",
 		"GROVE_TICK_BUDGET_MS",
 	}
 	for _, name := range wanted {
@@ -546,8 +558,12 @@ func TestTheChildIsToldEverything(t *testing.T) {
 	if len(spec.Env()) != len(wanted) {
 		t.Errorf("the child was given %d variables, want %d", len(spec.Env()), len(wanted))
 	}
-	if _, _, err := net.SplitHostPort(environment["GROVE_BIND"]); err != nil {
-		t.Errorf("GROVE_BIND %q is not an address: %v", environment["GROVE_BIND"], err)
+	// Loopback, since the player proxy is the one way in and no child port faces out.
+	if host, _, err := net.SplitHostPort(environment["GROVE_BIND"]); err != nil || host != "127.0.0.1" {
+		t.Errorf("GROVE_BIND %q is not a loopback address: %v", environment["GROVE_BIND"], err)
+	}
+	if environment["GROVE_TICKET_PUBLIC_KEYS"] != ticketKeys {
+		t.Errorf("GROVE_TICKET_PUBLIC_KEYS: got %q, want the list this box was given", environment["GROVE_TICKET_PUBLIC_KEYS"])
 	}
 	// A value that is merely set is a session the child refuses every ticket for.
 	if environment["GROVE_SESSION_ID"] != request(0).SessionID {
@@ -885,34 +901,13 @@ func TestTheInstanceKeepsTheIdItWasPlacedUnder(t *testing.T) {
 	}
 }
 
-// Nothing upstream holds GAME_TOKEN_SECRET on the placement path, so the bearer the child presents
-// to @grove/game-manager is one this agent signs, and it has to outlast a join ticket.
-func TestTheChildIsGivenAStoreBearerThisAgentMinted(t *testing.T) {
+// The bearer is minted by the router and carried in the start, so this box holds no key that signs one.
+func TestTheChildIsHandedTheBearerItsStartCarried(t *testing.T) {
 	registry, launcher := newTestRegistry(1)
 	startN(t, registry, 1)
 
-	environment := map[string]string{}
-	for _, entry := range launcher.spec(0).Env() {
-		name, value, _ := strings.Cut(entry, "=")
-		environment[name] = value
-	}
-
-	secret := []byte(strings.Repeat("s", 32))
-	claims, err := token.Verify(environment["GROVE_MANAGER_TOKEN"], secret, token.AudGameManager, time.Now().Unix())
-	if err != nil {
-		t.Fatalf("@grove/game-manager refuses the bearer: %v", err)
-	}
-	if claims.SessionID != request(0).SessionID || claims.GameID != request(0).GameID {
-		t.Errorf("the bearer names %s/%s", claims.GameID, claims.SessionID)
-	}
-	// A store bearer belongs to the process, not to anyone in it.
-	if claims.PlayerID != "" {
-		t.Errorf("the bearer names a player: %q", claims.PlayerID)
-	}
-	// A world outlives the 60 seconds a join ticket is good for, and its saves go through this.
-	if _, err := token.Verify(environment["GROVE_MANAGER_TOKEN"], secret, token.AudGameManager,
-		time.Now().Add(time.Hour).Unix()); err != nil {
-		t.Errorf("the bearer is spent an hour into the session: %v", err)
+	if got := launcher.spec(0).ManagerToken; got != storeToken {
+		t.Errorf("GROVE_MANAGER_TOKEN: got %q, want the %q the start carried", got, storeToken)
 	}
 }
 

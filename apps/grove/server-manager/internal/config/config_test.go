@@ -8,8 +8,15 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/env"
 )
 
+// The seed node:crypto signs the token package's vectors with, so the key is one a verifier pairs.
+const storeSeed = "ySjMqBN4rl4GCxpLhREJCFa_-F57bLOhFG75Jr_5YHg"
+
 func complete() map[string]string {
-	return map[string]string{"FLEET_SECRET": strings.Repeat("f", 32)}
+	return map[string]string{
+		"FLEET_SECRET":          strings.Repeat("f", 32),
+		"SERVER_MANAGER_SECRET": strings.Repeat("c", 32),
+		"STORE_SIGNING_KEY":     storeSeed,
+	}
 }
 
 func TestReadFillsTheDefaults(t *testing.T) {
@@ -25,17 +32,14 @@ func TestReadFillsTheDefaults(t *testing.T) {
 	if cfg.StaleAfter != 20*time.Second {
 		t.Errorf("stale after: got %s, want 20s", cfg.StaleAfter)
 	}
-	// The secure spelling by default, so a fleet handing out cleartext urls was asked to.
-	if cfg.IngressScheme != "wss" {
-		t.Errorf("ingress scheme: got %q, want wss", cfg.IngressScheme)
+	if cfg.JoinQueueDepth != 256 || cfg.StartWorkers != 4 {
+		t.Errorf("join line: got depth %d and %d start workers, want 256 and 4", cfg.JoinQueueDepth, cfg.StartWorkers)
 	}
-	// Unset is a line in this process, so a box running the whole fleet locally needs no cache.
-	if cfg.JoinQueueURL != "" {
-		t.Errorf("join queue url: got %q, want none", cfg.JoinQueueURL)
+	if cfg.SuspectFor != 2*time.Minute || cfg.PlacementWarmup != 10*time.Second {
+		t.Errorf("suspicion and warm-up: got %s and %s, want 2m and 10s", cfg.SuspectFor, cfg.PlacementWarmup)
 	}
-	if cfg.JoinQueueKey != "grove:joins" || cfg.JoinQueueDepth != 256 {
-		t.Errorf("join line: got %q at depth %d, want grove:joins at 256",
-			cfg.JoinQueueKey, cfg.JoinQueueDepth)
+	if len(cfg.StoreKey) == 0 || len(cfg.CallerSecret) != 32 {
+		t.Error("the store key or the caller secret was not read")
 	}
 	if cfg.JoinDeadline != 1500*time.Millisecond {
 		t.Errorf("join deadline: got %s, want 1.5s", cfg.JoinDeadline)
@@ -73,6 +77,42 @@ func TestReadRefusesAnEnvironmentItCannotRouteOn(t *testing.T) {
 			mention: "GROVE_ENV",
 		},
 		{
+			name:    "no caller secret",
+			change:  func(m map[string]string) { delete(m, "SERVER_MANAGER_SECRET") },
+			mention: "SERVER_MANAGER_SECRET",
+		},
+		{
+			// One credential for both pairs would let a box call the routes only @grove/api may.
+			name:    "the caller secret and the fleet secret one value",
+			change:  func(m map[string]string) { m["SERVER_MANAGER_SECRET"] = m["FLEET_SECRET"] },
+			mention: "SERVER_MANAGER_SECRET",
+		},
+		{
+			name:    "no key to sign a store bearer with",
+			change:  func(m map[string]string) { delete(m, "STORE_SIGNING_KEY") },
+			mention: "STORE_SIGNING_KEY",
+		},
+		{
+			name:    "a signing key that is not a seed",
+			change:  func(m map[string]string) { m["STORE_SIGNING_KEY"] = "c2hvcnQ" },
+			mention: "STORE_SIGNING_KEY",
+		},
+		{
+			name:    "a pool with nobody in it",
+			change:  func(m map[string]string) { m["START_WORKERS"] = "0" },
+			mention: "START_WORKERS",
+		},
+		{
+			name:    "a suspicion that lasts no time",
+			change:  func(m map[string]string) { m["SUSPECT_FOR"] = "0s" },
+			mention: "SUSPECT_FOR",
+		},
+		{
+			name:    "a warm-up past the staleness window",
+			change:  func(m map[string]string) { m["PLACEMENT_WARMUP"] = "1m" },
+			mention: "PLACEMENT_WARMUP",
+		},
+		{
 			name:    "a staleness window that is not a duration",
 			change:  func(m map[string]string) { m["HOST_STALE_AFTER"] = "a while" },
 			mention: "HOST_STALE_AFTER",
@@ -81,11 +121,6 @@ func TestReadRefusesAnEnvironmentItCannotRouteOn(t *testing.T) {
 			name:    "a staleness window no box can be fresh inside",
 			change:  func(m map[string]string) { m["HOST_STALE_AFTER"] = "0s" },
 			mention: "HOST_STALE_AFTER",
-		},
-		{
-			name:    "an ingress scheme no browser opens a socket over",
-			change:  func(m map[string]string) { m["INGRESS_SCHEME"] = "https" },
-			mention: "INGRESS_SCHEME",
 		},
 		{
 			name:    "a staleness window that runs backwards",
@@ -154,21 +189,6 @@ func TestReadRefusesAnEnvironmentItCannotRouteOn(t *testing.T) {
 				t.Errorf("the error never names %s: %v", tc.mention, err)
 			}
 		})
-	}
-}
-
-// A deployment that has no terminator in front of it says so, rather than handing out a url the
-// browser refuses.
-func TestReadTakesTheInsecureSchemeOnlyWhenAsked(t *testing.T) {
-	vars := complete()
-	vars["INGRESS_SCHEME"] = "ws"
-
-	cfg, err := Read(env.FromMap(vars))
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if cfg.IngressScheme != "ws" {
-		t.Errorf("ingress scheme: got %q, want ws", cfg.IngressScheme)
 	}
 }
 

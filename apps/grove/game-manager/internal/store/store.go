@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	// A key never written, or a game never published. The 404 either way.
+	// A key never written. The 404.
 	ErrNotFound = errors.New("not found")
 	// A write whose ifRevision is not where the key is. Refused, never applied.
 	ErrStale = errors.New("revision moved")
@@ -19,9 +19,6 @@ var (
 	// A game already holding as many bytes as it may, so one game's writes cannot spend the room
 	// every other game is stored in.
 	ErrGameFull = errors.New("game holds as many bytes as it may")
-	// A cursor shaped wrong, or one past the end of the board it pages. Refused rather than
-	// restarted from the top, which would hand a paging caller the first page forever.
-	ErrBadCursor = errors.New("cursor is not one this store minted")
 )
 
 // Store is every question this service asks its datastore.
@@ -35,6 +32,4 @@ type Store interface {
 	Write(ctx context.Context, game, key string, write contract.StateWrite) (int64, error)
 	// A key released here is a key never written: the next write to it lands on revision one.
 	Delete(ctx context.Context, game, key string) error
-	Leaderboard(ctx context.Context, game string, query contract.LeaderboardQuery) (contract.LeaderboardPage, error)
-	Bundles(ctx context.Context, game string) (contract.BundleSet, error)
 }

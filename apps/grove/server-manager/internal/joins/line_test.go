@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,116 +16,89 @@ import (
 
 const (
 	gameID   = "44444444-4444-4444-8444-444444444444"
-	playerID = "55555555-5555-4555-8555-555555555555"
 	hostA    = "11111111-1111-4111-8111-111111111111"
-
-	serverURL = "wss://192.0.2.1:41337/play"
+	playerID = "55555555-5555-4555-8555-555555555555"
 )
 
-// The deadline is long enough that nothing here is answered by it rather than by the worker, and
+// The deadline is long enough that nothing here is answered by it unless a case means it to be, and
 // every wait is bounded well inside it, so a line that stops answering fails naming what it owed.
 const (
 	joinDeadline = 5 * time.Second
 	answerWithin = 2 * time.Second
 )
 
-// reservation is one slot handed back, which is the whole of what Release is told.
-type reservation struct{ game, session string }
-
-// placer is the fleet as the line reaches it: it records the order it was asked in, and a test that
-// needs a join held mid-placement decides when that answer lands.
+// placer is the fleet as the line reaches it. Each player's decision is scripted: answered now,
+// refused, or a start that runs until the test releases it.
 type placer struct {
-	mu      sync.Mutex
-	seen    []string
-	granted map[string]contract.Placement
-	refuse  bool
+	mu   sync.Mutex
+	seen []string
+	// Players whose decision is a start, which blocks until release closes.
+	starting map[string]bool
+	refuse   bool
+	// Closed to let every decision through; open, Decide holds the worker.
+	decide  chan struct{}
+	release chan struct{}
 
-	// Buffered past anything a test in this file asks of it, so the worker never waits on a signal
-	// nobody is watching for.
-	entered  chan string
-	released chan reservation
-
-	held chan struct{}
-	open bool
+	// Decisions begun, which is how a test knows the worker holds a join.
+	entered atomic.Int32
+	running atomic.Int32
+	most    atomic.Int32
+	budgets chan time.Duration
 }
 
 func newPlacer() *placer {
 	p := &placer{
-		granted:  make(map[string]contract.Placement),
-		entered:  make(chan string, 16),
-		released: make(chan reservation, 16),
-		held:     make(chan struct{}),
+		starting: map[string]bool{},
+		decide:   make(chan struct{}),
+		release:  make(chan struct{}),
+		budgets:  make(chan time.Duration, 16),
 	}
-	p.resume()
+	close(p.decide)
 	return p
 }
 
-// holds keeps every Place waiting for resume, which is the only way a test reaches the window where
-// a caller gives up on a join the fleet is already ranking.
-func (p *placer) holds() *placer {
-	p.held = make(chan struct{})
-	p.open = false
-	return p
+func placementFor(player string) contract.Placement {
+	return contract.Placement{HostID: hostA, InstanceID: player, SessionID: player, ServerURL: "wss://box:443/play/" + player}
 }
 
-func (p *placer) refuses() *placer {
-	p.refuse = true
-	return p
-}
-
-// Idempotent, because the cleanup resumes a placer whose test has already released it.
-func (p *placer) resume() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.open {
-		return
-	}
-	p.open = true
-	close(p.held)
-}
-
-func (p *placer) Place(_ context.Context, req contract.PlacementRequest) (contract.Placement, bool) {
-	placement := contract.Placement{
-		HostID:     hostA,
-		InstanceID: contract.NewUUID(),
-		SessionID:  contract.NewUUID(),
-		ServerURL:  serverURL,
-	}
-
+func (p *placer) Decide(_ context.Context, req contract.PlacementRequest) Decision {
+	p.entered.Add(1)
+	<-p.decide
 	p.mu.Lock()
 	p.seen = append(p.seen, req.PlayerID)
-	refuse := p.refuse
-	if !refuse {
-		p.granted[req.PlayerID] = placement
-	}
+	starts, refuse := p.starting[req.PlayerID], p.refuse
 	p.mu.Unlock()
 
-	p.entered <- req.PlayerID
-	<-p.held
-
-	if refuse {
-		return contract.Placement{}, false
+	switch {
+	case refuse:
+		return Decision{}
+	case starts:
+		return Decision{Start: true, Finish: func(ctx context.Context) (contract.Placement, bool) {
+			deadline, _ := ctx.Deadline()
+			p.budgets <- time.Until(deadline)
+			now := p.running.Add(1)
+			for {
+				most := p.most.Load()
+				if now <= most || p.most.CompareAndSwap(most, now) {
+					break
+				}
+			}
+			defer p.running.Add(-1)
+			select {
+			case <-p.release:
+				return placementFor(req.PlayerID), true
+			case <-ctx.Done():
+				return contract.Placement{}, false
+			}
+		}}
 	}
-	return placement, true
-}
-
-func (p *placer) Release(game, session string) {
-	p.released <- reservation{game: game, session: session}
+	return Decision{Placement: placementFor(req.PlayerID), Placed: true}
 }
 
 func (p *placer) order() []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
 	return slices.Clone(p.seen)
-}
-
-func (p *placer) grantedTo(player string) contract.Placement {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	return p.granted[player]
 }
 
 type answered struct {
@@ -132,69 +106,25 @@ type answered struct {
 	err       error
 }
 
-// harness is the line with the queue it was built on, because how many joins are sitting in that
-// queue is the one thing a test has to know before it lets the worker touch them.
-type harness struct {
-	*Line
-	queue  *Memory
-	placer *placer
-}
-
-func newHarness(t *testing.T, lineDepth int, p *placer) *harness {
+func newLine(t *testing.T, p *placer, depth, workers int) *Line {
 	t.Helper()
 
-	// However a test leaves it, so a placer still holding a join leaves no worker wedged behind it.
-	t.Cleanup(p.resume)
-
-	q := NewMemory(lineDepth)
-	return &harness{
-		Line: New(Options{
-			Queue:    q,
-			Placer:   p,
-			Log:      slog.New(slog.DiscardHandler),
-			Deadline: joinDeadline,
-		}),
-		queue:  q,
-		placer: p,
-	}
-}
-
-func (h *harness) answering(t *testing.T) {
-	t.Helper()
-
+	l := New(Options{Placer: p, Log: slog.New(slog.DiscardHandler), Deadline: joinDeadline, Depth: depth, StartWorkers: workers})
 	ctx, stop := context.WithCancel(context.Background())
 	t.Cleanup(stop)
-	go h.Run(ctx)
+	go l.Run(ctx)
+	return l
 }
 
-func (h *harness) joining(ctx context.Context, player string) chan answered {
+func joining(ctx context.Context, l *Line, player string) chan answered {
 	answers := make(chan answered, 1)
 	go func() {
-		placement, err := h.Join(ctx, request(player))
+		placement, err := l.Join(ctx, contract.PlacementRequest{GameID: gameID, PlayerID: player})
 		answers <- answered{placement: placement, err: err}
 	}()
 	return answers
 }
 
-// waitForDepth is what makes arrival order a fact here rather than the order goroutines were run.
-func (h *harness) waitForDepth(t *testing.T, want int) {
-	t.Helper()
-
-	for deadline := time.Now().Add(answerWithin); time.Now().Before(deadline); {
-		if len(h.queue.jobs) == want {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("joins in the line: got %d, want %d", len(h.queue.jobs), want)
-}
-
-func request(player string) contract.PlacementRequest {
-	return contract.PlacementRequest{GameID: gameID, PlayerID: player}
-}
-
-// waitFor takes the one value a test is waiting on, so a line that never answers fails here naming
-// what it owed rather than as the suite's own timeout.
 func waitFor[T any](t *testing.T, ch chan T, what string) T {
 	t.Helper()
 
@@ -208,141 +138,163 @@ func waitFor[T any](t *testing.T, ch chan T, what string) T {
 	}
 }
 
-// Arrival order is the whole of what the line owns, and each answer goes back to the caller that
-// waited for it and to no other.
-func TestJoinsArePlacedInTheOrderTheyArrived(t *testing.T) {
+func eventually(t *testing.T, what string, holds func() bool) {
+	t.Helper()
+
+	for deadline := time.Now().Add(answerWithin); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		if holds() {
+			return
+		}
+	}
+	t.Fatalf("%s: never held", what)
+}
+
+// Arrival order is the whole of what the line owns, and each answer reaches the caller it is for.
+func TestJoinsAreDecidedInTheOrderTheyArrived(t *testing.T) {
 	const joins = 8
+	p := newPlacer()
+	p.decide = make(chan struct{})
+	l := newLine(t, p, joins, 1)
 
-	h := newHarness(t, joins, newPlacer())
-
-	// Every join is in the line before the worker starts, so nothing here races to be first.
 	answers := make([]chan answered, joins)
 	want := make([]string, joins)
 	for i := range joins {
 		want[i] = fmt.Sprintf("player-%d", i)
-		answers[i] = h.joining(context.Background(), want[i])
-		h.waitForDepth(t, i+1)
+		answers[i] = joining(context.Background(), l, want[i])
+		// One at a time into the line, so arrival is a fact and not goroutine scheduling: the first is
+		// held by the worker, and each after it waits behind.
+		eventually(t, "the join to queue", func() bool { return p.entered.Load() == 1 && l.Waiting() == i })
 	}
-
-	h.answering(t)
+	close(p.decide)
 
 	for i, ch := range answers {
-		got := waitFor(t, ch, fmt.Sprintf("the answer for %s", want[i]))
-		if got.err != nil {
-			t.Fatalf("%s: got %v, want a placement", want[i], got.err)
-		}
-		if placed := h.placer.grantedTo(want[i]); got.placement != placed {
-			t.Fatalf("%s: got %+v, want the placement made for it %+v", want[i], got.placement, placed)
+		got := waitFor(t, ch, "the answer for "+want[i])
+		if got.err != nil || got.placement != placementFor(want[i]) {
+			t.Fatalf("%s: got %+v %v, want its own placement", want[i], got.placement, got.err)
 		}
 	}
-
-	if got := h.placer.order(); !slices.Equal(got, want) {
-		t.Fatalf("placed: got %v, want %v", got, want)
+	if got := p.order(); !slices.Equal(got, want) {
+		t.Fatalf("decided: got %v, want %v", got, want)
 	}
 }
 
-// A refused join must leave nothing behind it: a line that took one past its cap and answered nobody
-// would stay above that cap and refuse every join after it for as long as the process lived.
+// A refused join leaves nothing behind it, and the line takes joins again once it drains.
 func TestAFullLineRefusesAndTakesJoinsAgainOnceItDrains(t *testing.T) {
-	const full = 2
+	p := newPlacer()
+	p.decide = make(chan struct{})
+	l := newLine(t, p, 2, 1)
 
-	h := newHarness(t, full, newPlacer().holds())
-	h.answering(t)
+	held := []chan answered{joining(context.Background(), l, "player-0")}
+	eventually(t, "the worker to take the first join", func() bool { return p.entered.Load() == 1 })
+	held = append(held, joining(context.Background(), l, "player-1"), joining(context.Background(), l, "player-2"))
+	eventually(t, "the line to fill", func() bool { return l.Waiting() == 2 })
 
-	held := h.joining(context.Background(), "player-0")
-	waitFor(t, h.placer.entered, "the first join reaching the placer")
-
-	behind := []chan answered{
-		h.joining(context.Background(), "player-1"),
-		h.joining(context.Background(), "player-2"),
-	}
-	h.waitForDepth(t, full)
-
-	if _, err := h.Join(context.Background(), request("player-3")); !errors.Is(err, ErrBusy) {
+	if _, err := l.Join(context.Background(), contract.PlacementRequest{PlayerID: "player-3"}); !errors.Is(err, ErrBusy) {
 		t.Fatalf("a join past the depth: got %v, want %v", err, ErrBusy)
 	}
-	if got := len(h.queue.jobs); got != full {
-		t.Fatalf("joins in the line after the refusal: got %d, want %d", got, full)
-	}
 
-	h.placer.resume()
-	for i, answers := range append([]chan answered{held}, behind...) {
-		if got := waitFor(t, answers, fmt.Sprintf("the answer for player-%d", i)); got.err != nil {
-			t.Fatalf("player-%d: got %v, want a placement", i, got.err)
+	close(p.decide)
+	for i, ch := range held {
+		if got := waitFor(t, ch, fmt.Sprintf("player-%d", i)); got.err != nil {
+			t.Fatalf("player-%d: %v", i, got.err)
 		}
 	}
-
-	if _, err := h.Join(context.Background(), request("player-4")); err != nil {
-		t.Fatalf("a join once the line drained: got %v, want a placement", err)
+	if _, err := l.Join(context.Background(), contract.PlacementRequest{PlayerID: "player-4"}); err != nil {
+		t.Fatalf("a join once the line drained: %v", err)
 	}
-	if got := h.placer.order(); slices.Contains(got, "player-3") {
-		t.Fatalf("placed: got %v, want nothing for the join the line refused", got)
+	if slices.Contains(p.order(), "player-3") {
+		t.Fatal("the refused join was decided anyway")
 	}
 }
 
-// The fleet's own refusal is the only answer a player is shown as a full game.
-// A join that waited out its own deadline is answered this too, so a test that reads only the error
-// would pass against a line that never reached the fleet at all.
 func TestAJoinTheFleetDeclinesIsAnsweredNoCapacity(t *testing.T) {
-	p := newPlacer().refuses()
-	h := newHarness(t, 4, p)
-	h.answering(t)
+	p := newPlacer()
+	p.refuse = true
+	l := newLine(t, p, 4, 1)
 
 	asked := time.Now()
-	if _, err := h.Join(context.Background(), request(playerID)); !errors.Is(err, ErrNoCapacity) {
-		t.Fatalf("a declined join: got %v, want %v", err, ErrNoCapacity)
+	if _, err := l.Join(context.Background(), contract.PlacementRequest{PlayerID: playerID}); !errors.Is(err, ErrNoCapacity) {
+		t.Fatalf("got %v, want %v", err, ErrNoCapacity)
 	}
 	if took := time.Since(asked); took >= answerWithin {
-		t.Errorf("took %s, want the fleet's own answer well inside the %s deadline", took, joinDeadline)
+		t.Errorf("took %s, want the fleet's own answer, not the deadline", took)
+	}
+}
+
+// A cold box answering slowly holds up only the join waiting on it, never the worker deciding.
+func TestAStartRunsBesideTheWorkerAndInsideTheJoinersDeadline(t *testing.T) {
+	p := newPlacer()
+	p.starting["slow"] = true
+	l := newLine(t, p, 4, 2)
+
+	slow := joining(context.Background(), l, "slow")
+	if budget := waitFor(t, p.budgets, "the start to run"); budget <= 0 || budget > joinDeadline {
+		t.Errorf("the start's budget: got %s, want what is left of the joiner's %s", budget, joinDeadline)
 	}
 
-	select {
-	case player := <-p.entered:
-		if player != playerID {
-			t.Errorf("the fleet was asked about %q, want %q", player, playerID)
+	quick := waitFor(t, joining(context.Background(), l, "quick"), "the join behind a start")
+	if quick.err != nil {
+		t.Fatalf("the join behind a slow start: %v", quick.err)
+	}
+
+	close(p.release)
+	if got := waitFor(t, slow, "the slow start"); got.err != nil || got.placement != placementFor("slow") {
+		t.Fatalf("the slow start: got %+v %v", got.placement, got.err)
+	}
+}
+
+// The pool is the bound on how many boxes are being called at once.
+func TestNoMoreStartsRunAtOnceThanThePoolHolds(t *testing.T) {
+	const workers = 2
+	p := newPlacer()
+	for i := range 5 {
+		p.starting[fmt.Sprintf("player-%d", i)] = true
+	}
+	l := newLine(t, p, 8, workers)
+
+	var all []chan answered
+	for i := range 5 {
+		all = append(all, joining(context.Background(), l, fmt.Sprintf("player-%d", i)))
+	}
+	for range workers {
+		waitFor(t, p.budgets, "a start to run")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if most := p.most.Load(); most != workers {
+		t.Fatalf("starts at once: got %d, want %d", most, workers)
+	}
+
+	close(p.release)
+	for i, ch := range all {
+		if got := waitFor(t, ch, fmt.Sprintf("player-%d", i)); got.err != nil {
+			t.Fatalf("player-%d: %v", i, got.err)
 		}
-	default:
-		t.Error("the fleet was never asked")
 	}
 }
 
-// A placement committed for a caller that has already gone holds a slot no player will ever arrive
-// on, so the line hands that slot straight back.
-func TestAPlacementForACallerThatStoppedWaitingGoesBack(t *testing.T) {
-	h := newHarness(t, 4, newPlacer().holds())
-	h.answering(t)
+// A start whose joiner has gone is answered to nobody, and its context says so to the start.
+func TestAStartWhoseJoinerLeftIsCancelled(t *testing.T) {
+	p := newPlacer()
+	p.starting[playerID] = true
+	l := newLine(t, p, 4, 1)
 
-	ctx, giveUp := context.WithCancel(context.Background())
-	answers := h.joining(ctx, playerID)
-	waitFor(t, h.placer.entered, "the join reaching the placer")
-
-	// Cancelled while the fleet is mid-ranking, which is the window the slot is reserved in.
-	giveUp()
-	if got := waitFor(t, answers, "the abandoned join"); !errors.Is(got.err, ErrNoCapacity) {
-		t.Fatalf("an abandoned join: got %v, want %v", got.err, ErrNoCapacity)
+	ctx, giveUp := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer giveUp()
+	if got := waitFor(t, joining(ctx, l, playerID), "the impatient join"); !errors.Is(got.err, ErrNoCapacity) {
+		t.Fatalf("got %v, want %v", got.err, ErrNoCapacity)
 	}
-
-	h.placer.resume()
-
-	got := waitFor(t, h.placer.released, "the slot going back")
-	want := reservation{game: gameID, session: h.placer.grantedTo(playerID).SessionID}
-	if got != want {
-		t.Fatalf("released: got %+v, want %+v", got, want)
-	}
+	eventually(t, "the start to see its joiner gone", func() bool { return p.running.Load() == 0 })
 }
 
-// The worker is cancelled after the listener has drained, and every handler still in that drain is
-// waiting on this one goroutine to return.
 func TestRunReturnsWhenItsContextEnds(t *testing.T) {
-	h := newHarness(t, 4, newPlacer())
+	l := New(Options{Placer: newPlacer(), Log: slog.New(slog.DiscardHandler), Deadline: joinDeadline, Depth: 4, StartWorkers: 2})
 
 	ctx, stop := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	go func() {
-		h.Run(ctx)
+		l.Run(ctx)
 		close(stopped)
 	}()
-
 	stop()
-	waitFor(t, stopped, "the worker returning")
+	waitFor(t, stopped, "Run returning")
 }
