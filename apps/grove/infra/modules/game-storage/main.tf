@@ -1,7 +1,7 @@
 # The one bucket every game lives in, game first: `<game-id>/source/`, `<game-id>/assets/`,
-# `<game-id>/manifests/` and `<game-id>/build/`. The policy is what tells those classes apart, and
-# it matches them mid-key rather than at the front, because the game owns the prefix. `source/` and
-# `manifests/` match no pattern and so are reachable from no principal this module grants.
+# `<game-id>/manifests/` and `<game-id>/build/`, beside `uploads/<game-id>/`, where an asset waits to
+# be inspected. The policy is what tells those classes apart: it matches the class right after a
+# game id, so `source/`, `manifests/` and `uploads/` are reachable from no principal it grants.
 
 resource "aws_s3_bucket" "games" {
   bucket        = var.bucket_name
@@ -51,6 +51,11 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "games" {
   }
 }
 
+locals {
+  # A game id is a uuid, so this matches exactly one game segment and nothing that merely contains one.
+  game_segment = "????????-????-????-????-????????????"
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "games" {
   bucket = aws_s3_bucket.games.id
 
@@ -64,6 +69,42 @@ resource "aws_s3_bucket_lifecycle_configuration" "games" {
     # parts that are billed and unreachable.
     abort_incomplete_multipart_upload {
       days_after_initiation = 7
+    }
+  }
+
+  # An upload is read once, by its inspection, and a copy past quarantine is what a game keeps; one
+  # nobody saved, or that failed, is bytes no row names.
+  rule {
+    id     = "expire-uploads"
+    status = "Enabled"
+
+    filter {
+      prefix = "uploads/"
+    }
+
+    expiration {
+      days = var.upload_retention_days
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = var.upload_retention_days
+    }
+  }
+
+  # Every save is a version of each key it wrote, so without this the history grows with every keystroke
+  # the editor saves; a manifest older than the window may name versions that are gone.
+  rule {
+    id     = "expire-noncurrent-versions"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = var.noncurrent_version_retention_days
+    }
+
+    expiration {
+      expired_object_delete_marker = true
     }
   }
 
@@ -86,14 +127,13 @@ resource "aws_s3_bucket_cors_configuration" "games" {
 
 data "aws_iam_policy_document" "games" {
   # The distribution reads through an origin access control, and only the classes meant for the
-  # edge. The wildcard is mid-key because the game comes first, so one pattern covers every game's
-  # build output without naming one: `source/` and `manifests/` match none of them, which is what
-  # keeps a creator's code inside the fleet.
+  # edge. Each pattern names the class right after a game id, never anywhere in the key, so a source
+  # file a creator put under a folder named `build/` is not edge-readable for being there.
   statement {
     sid     = "AllowCloudFrontRead"
     actions = ["s3:GetObject"]
     resources = [
-      for pattern in var.cdn_prefixes : "${aws_s3_bucket.games.arn}/*/${pattern}*"
+      for pattern in var.cdn_prefixes : "${aws_s3_bucket.games.arn}/${local.game_segment}/${pattern}*"
     ]
 
     principals {

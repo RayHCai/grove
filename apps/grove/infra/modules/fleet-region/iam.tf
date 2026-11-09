@@ -27,15 +27,21 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+locals {
+  # One game id, character for character: a `*` here would span slashes and match
+  # `<game>/source/build/...`, and an upload is quarantined under `uploads/`, which this never matches.
+  game_segment = "????????-????-????-????-????????????"
+}
+
 data "aws_iam_policy_document" "fleet" {
-  # Build output and assets only, matched mid-key because the game comes first: a box pulls what a
-  # session loads and never a creator's source or the manifests that name it.
+  # Build output and assets only, anchored to the game id that begins every key: a box pulls what a
+  # session loads and never a creator's source, the manifests that name it, or an unchecked upload.
   statement {
     sid     = "ReadBuilds"
     actions = ["s3:GetObject"]
     resources = [
-      "${var.artifact_bucket_arn}/*/build/*",
-      "${var.artifact_bucket_arn}/*/assets/*",
+      "${var.artifact_bucket_arn}/${local.game_segment}/build/*",
+      "${var.artifact_bucket_arn}/${local.game_segment}/assets/*",
     ]
   }
 
@@ -47,11 +53,11 @@ data "aws_iam_policy_document" "fleet" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["*/build/*", "*/assets/*"]
+      values   = ["${local.game_segment}/build/*", "${local.game_segment}/assets/*"]
     }
   }
 
-  # The two secrets a box needs, read before every agent start and never written from here.
+  # What a box is configured with, read before every agent start and never written from here.
   statement {
     sid     = "ReadFleetSecrets"
     actions = ["ssm:GetParameter", "ssm:GetParameters"]
@@ -69,6 +75,32 @@ data "aws_iam_policy_document" "fleet" {
       test     = "StringEquals"
       variable = "kms:ViaService"
       values   = ["ssm.${var.region}.amazonaws.com"]
+    }
+  }
+
+  # Each box names itself at boot, so the grant is an A record under the fleet's own domain and
+  # nothing else in the zone.
+  statement {
+    sid       = "NameThisBox"
+    actions   = ["route53:ChangeResourceRecordSets"]
+    resources = ["arn:${data.aws_partition.current.partition}:route53:::hostedzone/${var.fleet_zone_id}"]
+
+    condition {
+      test     = "ForAllValues:StringLike"
+      variable = "route53:ChangeResourceRecordSetsNormalizedRecordNames"
+      values   = ["*.${var.fleet_domain}"]
+    }
+
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "route53:ChangeResourceRecordSetsRecordTypes"
+      values   = ["A"]
+    }
+
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "route53:ChangeResourceRecordSetsActions"
+      values   = ["UPSERT"]
     }
   }
 }
@@ -90,7 +122,7 @@ locals {
   secret_path = "/grove/${var.environment}/fleet"
 }
 
-# Parameter Store is regional, so each region holds its own copy of the two shared secrets. Terraform
+# Parameter Store is regional, so each region holds its own copy of what a box reads. Terraform
 # creates the parameter and never the value: a secret in a variable file is a secret in state and in
 # every plan output, so the placeholder is rotated in out of band and ignored here forever after.
 resource "aws_ssm_parameter" "fleet_secret" {
@@ -106,9 +138,37 @@ resource "aws_ssm_parameter" "fleet_secret" {
   tags = merge(var.tags, { Name = "${local.name}-fleet-secret" })
 }
 
-resource "aws_ssm_parameter" "game_token_secret" {
-  name        = "${local.secret_path}/GAME_TOKEN_SECRET"
-  description = "Signs the join tickets a game process verifies; minted by @grove/api"
+resource "aws_ssm_parameter" "ticket_public_keys" {
+  name        = "${local.secret_path}/TICKET_PUBLIC_KEYS"
+  description = "The api's join-ticket public keys, comma-separated; no box holds a key that signs one"
+  type        = "String"
+  value       = "replace-me"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = merge(var.tags, { Name = "${local.name}-ticket-public-keys" })
+}
+
+# Advanced, because a certificate chain in PEM outgrows the standard tier's 4 KB.
+resource "aws_ssm_parameter" "tls_cert" {
+  name        = "${local.secret_path}/TLS_CERT"
+  description = "PEM chain covering *.${var.fleet_domain}, served on both of every box's listeners"
+  type        = "String"
+  tier        = "Advanced"
+  value       = "replace-me"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = merge(var.tags, { Name = "${local.name}-tls-cert" })
+}
+
+resource "aws_ssm_parameter" "tls_key" {
+  name        = "${local.secret_path}/TLS_KEY"
+  description = "PEM private key of TLS_CERT"
   type        = "SecureString"
   value       = "replace-me"
 
@@ -116,5 +176,5 @@ resource "aws_ssm_parameter" "game_token_secret" {
     ignore_changes = [value]
   }
 
-  tags = merge(var.tags, { Name = "${local.name}-game-token-secret" })
+  tags = merge(var.tags, { Name = "${local.name}-tls-key" })
 }
