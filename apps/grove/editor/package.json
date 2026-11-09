@@ -24,11 +24,11 @@
         "@platform/transport": "workspace:*",
         "monaco-editor": "^0.56.0",
         "react": "^19.3.1",
-        "react-dom": "^19.2.8"
+        "react-dom": "^19.3.1"
     },
     "devDependencies": {
         "@types/react": "^19.3.0",
-        "@types/react-dom": "^19.2.4",
+        "@types/react-dom": "^19.3.0",
         "@vitejs/plugin-react": "^6.0.5",
         "jsdom": "^30.1.3",
         "typescript": "^7.0.2",
