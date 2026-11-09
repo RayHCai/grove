@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { GameId, WorkspacePath } from '@grove/api-contract';
-import { ApiError, createApi } from '../src/api/client';
+import { ApiError, KEEPALIVE_BYTES, createApi } from '../src/api/client';
 
 const BASE = 'http://localhost:4000';
 const GAME = '9f1c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f' as GameId;
@@ -121,29 +121,35 @@ describe('an asset', () => {
         url: 'https://games.example/upload?X-Amz-Signature=fake',
         expiresAt: '2026-09-16T10:15:00.000Z',
         maxBytes: 32 * 1024 * 1024,
+        headers: { 'content-type': 'image/png' },
     };
 
-    it('asks the API where its bytes go, and nothing more', async () => {
+    it('asks the API where its bytes go, declaring the type and length the presign signs', async () => {
         const { sent, fetch } = stub(json(TICKET));
-        const upload = await createApi({ baseUrl: BASE, fetch }).assetUpload(
-            GAME,
-            TILE,
-            'image/png',
-        );
+        const upload = await createApi({ baseUrl: BASE, fetch }).assetUpload(GAME, TILE, {
+            contentType: 'image/png',
+            byteLength: 4,
+        });
 
         expect(sent[0]?.url).toBe(`${BASE}/v1/games/${GAME}/assets`);
         expect(sent[0]?.init?.method).toBe('POST');
+        expect(JSON.parse(String(sent[0]?.init?.body))).toEqual({
+            path: TILE,
+            contentType: 'image/png',
+            byteLength: 4,
+        });
         expect(upload.url).toBe(TICKET.url);
     });
 
-    it('goes straight to the bucket, carrying no session with it', async () => {
+    it('goes straight to the bucket with exactly the signed headers, and no session', async () => {
         const { sent, fetch } = stub(new Response(null, { status: 200 }));
         const bytes = new Uint8Array([137, 80, 78, 71]);
-        await createApi({ baseUrl: BASE, fetch }).putAsset(TICKET, bytes, 'image/png');
+        await createApi({ baseUrl: BASE, fetch }).putAsset(TICKET, bytes);
 
         expect(sent[0]?.url).toBe(TICKET.url);
         expect(sent[0]?.init?.method).toBe('PUT');
-        expect(headerOf(sent[0], 'content-type')).toBe('image/png');
+        // The signature covers these, so one header more or less is a PUT the bucket refuses.
+        expect(sent[0]?.init?.headers).toEqual(TICKET.headers);
         // A cookie sent here would be a credential handed to a third party.
         expect(sent[0]?.init?.credentials).toBeUndefined();
     });
@@ -151,23 +157,66 @@ describe('an asset', () => {
     it('fails outright when the bucket refused, so no save names bytes that never landed', async () => {
         const { fetch } = stub(new Response(null, { status: 403 }));
         await expect(
-            createApi({ baseUrl: BASE, fetch }).putAsset(TICKET, new Uint8Array([1]), 'image/png'),
+            createApi({ baseUrl: BASE, fetch }).putAsset(TICKET, new Uint8Array([1])),
         ).rejects.toBeInstanceOf(ApiError);
     });
 });
 
+const WORKSPACE = {
+    gameId: GAME,
+    revision: 4,
+    files: [],
+    updatedAt: '2026-09-16T09:00:00.000Z',
+};
+
+function exitSave(text = ''): Parameters<ReturnType<typeof createApi>['saveOnExit']>[1] {
+    return {
+        baseRevision: 3,
+        sources: text === '' ? [] : [{ path: 'src/main.ts', contentType: 'text/typescript', text }],
+        assets: [],
+        deletes: [],
+    };
+}
+
 describe('a save on the way out', () => {
     it('is keepalive, which is the whole of what makes it leave a closing tab', async () => {
-        const { sent, fetch } = stub(new Response(null, { status: 200 }));
-        await createApi({ baseUrl: BASE, fetch }).saveOnExit(GAME, {
-            baseRevision: 3,
-            sources: [],
-            assets: [],
-            deletes: [],
-        });
+        const { sent, fetch } = stub(json(WORKSPACE));
+        await createApi({ baseUrl: BASE, fetch }).saveOnExit(GAME, exitSave());
 
         expect(sent[0]?.url).toBe(`${BASE}/v1/games/${GAME}/workspace`);
         expect(sent[0]?.init?.keepalive).toBe(true);
+    });
+
+    it('answers with what it landed as, for a tab that was only hidden', async () => {
+        const { fetch } = stub(json(WORKSPACE));
+        expect(await createApi({ baseUrl: BASE, fetch }).saveOnExit(GAME, exitSave())).toEqual(
+            WORKSPACE,
+        );
+    });
+
+    it('goes as an ordinary request when its body is past what a keepalive may carry', async () => {
+        const { sent, fetch } = stub(json(WORKSPACE));
+        await createApi({ baseUrl: BASE, fetch }).saveOnExit(
+            GAME,
+            exitSave('x'.repeat(KEEPALIVE_BYTES)),
+        );
+
+        expect(sent).toHaveLength(1);
+        expect(sent[0]?.init?.keepalive).toBe(false);
+    });
+
+    it('goes again as an ordinary request when the browser refused to keep it alive', async () => {
+        const sent: Sent[] = [];
+        const fetch = (async (url: string, init?: RequestInit) => {
+            sent.push({ url, init });
+            if (init?.keepalive === true) throw new TypeError('keepalive quota exceeded');
+            return json(WORKSPACE);
+        }) as unknown as typeof globalThis.fetch;
+
+        expect(await createApi({ baseUrl: BASE, fetch }).saveOnExit(GAME, exitSave())).toEqual(
+            WORKSPACE,
+        );
+        expect(sent.map((each) => each.init?.keepalive)).toEqual([true, false]);
     });
 
     it('reports nothing, because there is nobody left to report it to', async () => {
@@ -175,12 +224,14 @@ describe('a save on the way out', () => {
             throw new TypeError('failed to fetch');
         }) as unknown as typeof globalThis.fetch;
         await expect(
-            createApi({ baseUrl: BASE, fetch }).saveOnExit(GAME, {
-                baseRevision: 3,
-                sources: [],
-                assets: [],
-                deletes: [],
-            }),
+            createApi({ baseUrl: BASE, fetch }).saveOnExit(GAME, exitSave()),
         ).resolves.toBeUndefined();
+    });
+
+    it('answers nothing for a save the service refused', async () => {
+        const { fetch } = stub(json({ code: 'conflict', message: 'moved on' }, 409));
+        expect(await createApi({ baseUrl: BASE, fetch }).saveOnExit(GAME, exitSave())).toBe(
+            undefined,
+        );
     });
 });

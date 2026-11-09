@@ -5,45 +5,57 @@ import { ThemeProvider } from '@grove/ui';
 import { mountEditor } from '../src/editor/monaco';
 import { EditorShell } from '../src/shell/EditorShell';
 import { PROJECT_PATH } from '../src/project/manifest';
+import { CHANNEL } from '../src/run/protocol';
+import type { Game } from '../src/run/protocol';
 import { draftFromText } from '../src/workspace/files';
 import { fakeApi, opened, PLAIN_PROJECT, PROJECT, TEMPLATE_PATH } from './doubles';
 import type { OpenGame } from '../src/workspace/session';
-import { mount, until, untilSettled } from './helpers';
+import { mount, until, untilSettled } from '@grove/ui/testing';
 
 /** A compile hashes and checks a whole project, which is slower than the waits around it. */
 const COMPILE_MS = 10_000;
 
-/**
- * What the stage was asked to run, and what the transport bar turned on it.
- *
- * The real stage evaluates a module graph through the browser's loader and stands a world up over
- * a GPU, neither of which jsdom has. What the shell owes is this boundary: the game it hands over,
- * and the three buttons reaching it rather than the sandbox beside it.
- */
-const stage = vi.hoisted(() => ({
-    versions: [] as { project: { scriptModules: { path: string }[] } }[],
-    turned: [] as string[],
-}));
+function frameOf(host: HTMLElement): HTMLIFrameElement | null {
+    return host.querySelector<HTMLIFrameElement>('.play-frame');
+}
 
-vi.mock('../src/run/LocalStage', async () => {
-    const { createElement } = await import('react');
-    return {
-        default: (props: {
-            version: (typeof stage.versions)[number];
-            onControls: (controls: { pause: () => void; resume: () => void } | null) => void;
-        }) => {
-            stage.versions.push(props.version);
-            props.onControls({
-                pause: () => stage.turned.push('pause'),
-                resume: () => stage.turned.push('resume'),
-            });
-            return createElement('div', { className: 'local-stage' });
+/** The run the stage's document was opened for, or nothing while the frame is blank. */
+function runOn(host: HTMLElement): string | undefined {
+    const src = frameOf(host)?.getAttribute('src') ?? '';
+    if (src === '' || src === 'about:blank') return undefined;
+    return new URL(src, window.location.href).searchParams.get('run') ?? undefined;
+}
+
+/** What the shell posts to the document its frame holds now, which a new run replaces. */
+function posts(host: HTMLElement): { type: string; game?: Game }[] {
+    const posted: { type: string; game?: Game }[] = [];
+    vi.spyOn(frameOf(host)?.contentWindow as Window, 'postMessage').mockImplementation(
+        (message) => {
+            posted.push(message as { type: string; game?: Game });
         },
-    };
-});
+    );
+    return posted;
+}
 
-function localStage(host: HTMLElement): HTMLElement | null {
-    return host.querySelector<HTMLElement>('.local-stage');
+/** A message from the run's document, as its sandbox would send one. */
+async function fromStage(host: HTMLElement, data: Record<string, unknown>): Promise<void> {
+    await act(async () => {
+        window.dispatchEvent(
+            new MessageEvent('message', {
+                source: frameOf(host)?.contentWindow as Window,
+                data: { channel: CHANNEL, run: runOn(host), ...data },
+            }),
+        );
+    });
+}
+
+/** Presses Play and waits for the stage's document to be opened, and to say it is listening. */
+async function played(host: HTMLElement): Promise<{ type: string; game?: Game }[]> {
+    await click(play(host));
+    await until(() => runOn(host) !== undefined, COMPILE_MS);
+    const posted = posts(host);
+    await fromStage(host, { type: 'ready' });
+    return posted;
 }
 
 const mounted = vi.mocked(mountEditor);
@@ -127,8 +139,7 @@ function stubMatchMedia(...matching: string[]): void {
 
 afterEach(() => {
     vi.unstubAllGlobals();
-    stage.versions.length = 0;
-    stage.turned.length = 0;
+    vi.restoreAllMocks();
 });
 
 describe('EditorShell', () => {
@@ -325,45 +336,83 @@ describe('EditorShell', () => {
         );
     });
 
-    it('stands a world up in this page for a game the engine drives', async () => {
+    it('plays a game the engine drives in a sandboxed document, handed the compile over', async () => {
         const host = await mountShell();
-        await click(play(host));
-        await until(() => localStage(host) !== null, COMPILE_MS);
+        const created = vi.spyOn(URL, 'createObjectURL');
+        const posted = await played(host);
 
         expect(playStatus(host)).toBe('Running');
+        await until(() => printed(host).length > 0);
         expect(printed(host)[0]).toBe(
             'Build succeeded: 2 scripts in 1 file: 30 Hz, up to 4 players',
         );
-        // The frame is the sandbox's stage; a world in this page takes its place rather than
-        // sitting over a document that is still loaded behind it.
-        expect(host.querySelector('.play-frame')).toBeNull();
+        expect(frameOf(host)?.getAttribute('sandbox')).toBe('allow-scripts');
+        expect(new URL(frameOf(host)?.src ?? '').pathname).toBe('/preview-world.html');
         // Built from the compile, not from what is on screen: a world is the code as it was when
-        // the button was pressed.
-        expect(stage.versions).toHaveLength(1);
-        expect(stage.versions[0]?.project.scriptModules[0]?.path).toBe(TEMPLATE_PATH);
+        // the button was pressed, and it is evaluated over there, never in this page.
+        const game = posted.find((message) => message.type === 'run')?.game;
+        expect(game?.mode).toBe('world');
+        expect(game?.mode === 'world' && game.project.scriptModules[0]?.path).toBe(TEMPLATE_PATH);
+        expect(game?.mode === 'world' && game.name).toBe('Rowan');
+        expect(created).not.toHaveBeenCalled();
     });
 
-    it('ends the world and gives the frame back when the run is stopped', async () => {
+    it('says the world is starting until its document says it is running', async () => {
         const host = await mountShell();
-        await click(play(host));
-        await until(() => localStage(host) !== null, COMPILE_MS);
+        await played(host);
+
+        await fromStage(host, { type: 'status', status: 'starting' });
+        expect(host.querySelector('.play-stage [role="status"]')?.textContent).toBe(
+            'Starting the game…',
+        );
+        expect(host.querySelector('.play-stage')?.getAttribute('aria-busy')).toBe('true');
+
+        await fromStage(host, { type: 'status', status: 'running' });
+        expect(host.querySelector('.play-stage [role="status"]')).toBeNull();
+    });
+
+    it('prints what the run’s document writes, and believes no other window', async () => {
+        const host = await mountShell();
+        await played(host);
+
+        await fromStage(host, { type: 'line', level: 'warn', text: 'from the world' });
+        await act(async () => {
+            window.dispatchEvent(
+                new MessageEvent('message', {
+                    source: window,
+                    data: {
+                        channel: CHANNEL,
+                        run: runOn(host),
+                        type: 'line',
+                        level: 'error',
+                        text: 'from this page',
+                    },
+                }),
+            );
+        });
+        await until(() => printed(host).includes('from the world'));
+        expect(printed(host)).not.toContain('from this page');
+    });
+
+    it('drops the run’s document when the run is stopped', async () => {
+        const host = await mountShell();
+        await played(host);
 
         await click(stop(host));
-        expect(localStage(host)).toBeNull();
-        expect(host.querySelector('.play-frame')).not.toBeNull();
+        expect(frameOf(host)?.getAttribute('src')).toBe('about:blank');
         expect(playStatus(host)).toBe('Idle');
     });
 
-    it('sends a pause to the world rather than to a sandbox that is not running', async () => {
+    it('sends pause and resume to the run’s document', async () => {
         const host = await mountShell();
-        await click(play(host));
-        await until(() => localStage(host) !== null, COMPILE_MS);
+        await played(host);
+        const posted = posts(host);
 
         await click(play(host));
         expect(playStatus(host)).toBe('Paused');
         await click(play(host));
 
-        expect(stage.turned).toEqual(['pause', 'resume']);
+        expect(posted.map((message) => message.type)).toEqual(['pause', 'resume']);
     });
 
     it('stamps what the code declares back into the manifest it compiled', async () => {
@@ -376,7 +425,7 @@ describe('EditorShell', () => {
         expect(settingsNote(host)).toContain('0 scripts in 0 files');
 
         await click(play(host));
-        await until(() => localStage(host) !== null, COMPILE_MS);
+        await until(() => runOn(host) !== undefined, COMPILE_MS);
         expect(settingsNote(host)).toContain('2 scripts in 1 file');
     });
 
@@ -396,12 +445,30 @@ describe('EditorShell', () => {
             ],
         });
         await click(play(host));
+        await until(() => printed(host).length === 2);
 
         expect(playStatus(host)).toBe('Idle');
+        expect(runOn(host)).toBeUndefined();
         expect(printed(host)).toEqual([
             "src/main.ts:4:9: ')' expected",
             'that did not compile, so there is nothing to run',
         ]);
+    });
+
+    it('runs plain TypeScript in its own document, started at its entry', async () => {
+        const host = await mountShell(plainGame());
+        workbench().emit.mockResolvedValue({
+            modules: { 'src/main.js': 'console.log("hello");' },
+            problems: [],
+        });
+
+        const posted = await played(host);
+        expect(new URL(frameOf(host)?.src ?? '').pathname).toBe('/preview-plain.html');
+        expect(posted.find((message) => message.type === 'run')?.game).toMatchObject({
+            mode: 'plain',
+            entry: 'src/main.js',
+            modules: { 'src/main.js': 'console.log("hello");' },
+        });
     });
 
     it('drives the play pane status once a run has something to start', async () => {

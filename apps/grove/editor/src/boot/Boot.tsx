@@ -4,7 +4,6 @@ import { ProjectFormatError } from '@platform/project';
 import { ApiError, isLapsedSession } from '../api/client';
 import type { Api } from '../api/client';
 import { EditorShell } from '../shell/EditorShell';
-import type { EditorShellProps } from '../shell/EditorShell';
 import { openGame } from '../workspace/session';
 import type { OpenGame } from '../workspace/session';
 import { LoadingScreen } from './LoadingScreen';
@@ -36,8 +35,6 @@ export interface BootProps {
     openTab?: ((url: string) => boolean) | undefined;
     /** How the creator is told something they have to act on; a test hands in its own. */
     notify?: ((message: string) => void) | undefined;
-    /** How a local world's renderer is built; a test hands in one that needs no GPU. */
-    createRenderer?: EditorShellProps['createRenderer'];
 }
 
 function openFailure(failure: unknown): string {
@@ -61,6 +58,14 @@ function remember(key: string, value: string | undefined): string | undefined {
     }
 }
 
+/** A second tab, cut loose from this one; `noopener` would answer `null` whether or not it opened. */
+function openBeside(url: string): boolean {
+    const tab = window.open(url, '_blank');
+    if (tab === null) return false;
+    tab.opener = null;
+    return true;
+}
+
 function forget(key: string): void {
     try {
         window.sessionStorage.removeItem(key);
@@ -80,13 +85,7 @@ function forget(key: string): void {
  * There is no signing in here: a password is the platform's business, and somebody the service does
  * not recognise is sent there rather than asked for one.
  */
-export function Boot({
-    api,
-    navigate,
-    openTab,
-    notify,
-    createRenderer,
-}: BootProps): React.JSX.Element {
+export function Boot({ api, navigate, openTab, notify }: BootProps): React.JSX.Element {
     const [phase, setPhase] = useState<Phase>({ at: 'loading', step: 'session' });
     // StrictMode runs the effect below twice, and the second run would make a second game for a
     // creator who had none.
@@ -117,14 +116,14 @@ export function Boot({
     function signInBeside(): void {
         const url = signInUrl(new URL(window.location.href));
         const tell = notify ?? ((message: string) => window.alert(message));
-        const opened = openTab ?? ((at: string) => window.open(at, '_blank', 'noopener') !== null);
+        const opened = openTab ?? openBeside;
 
         // Said before the tab opens: an alert is the one thing here a blocked popup cannot swallow.
         tell(
-            'Your Grove session has ended. Sign in on the new tab, then save again: nothing on this screen is lost.',
+            'Your Grove session has ended. Sign in on the new tab and come back: nothing on this screen is lost, and it saves when you return.',
         );
         if (!opened(url)) {
-            tell(`The sign-in tab could not be opened. Sign in at ${url}, then save again.`);
+            tell(`The sign-in tab could not be opened. Sign in at ${url}, then come back here.`);
         }
     }
 
@@ -195,12 +194,5 @@ export function Boot({
         );
     }
 
-    return (
-        <EditorShell
-            api={api}
-            opened={phase.opened}
-            onSessionLapsed={signInBeside}
-            createRenderer={createRenderer}
-        />
-    );
+    return <EditorShell api={api} opened={phase.opened} onSessionLapsed={signInBeside} />;
 }

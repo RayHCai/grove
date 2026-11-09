@@ -2,7 +2,7 @@ import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { FileTree } from '../src/explorer/FileTree';
 import { projectTree } from './doubles';
-import { mount } from './helpers';
+import { mount } from '@grove/ui/testing';
 
 function tree(onOpen = vi.fn(), activePath: string | null = 'src/main.ts'): Promise<HTMLElement> {
     return mount(<FileTree nodes={projectTree()} activePath={activePath} onOpen={onOpen} />);

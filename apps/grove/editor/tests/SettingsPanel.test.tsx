@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProjectSettings } from '@platform/project';
 import { SettingsPanel } from '../src/settings/SettingsPanel';
 import { PROJECT } from './doubles';
-import { mount } from './helpers';
+import { mount } from '@grove/ui/testing';
 
 async function panel(
     onChange: (settings: ProjectSettings) => void = vi.fn(),

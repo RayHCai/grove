@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { until } from './helpers';
+import { until } from '@grove/ui/testing';
 
 afterEach(() => {
     // The entry point runs on import, so each case needs it evaluated again.

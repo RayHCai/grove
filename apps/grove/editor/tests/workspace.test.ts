@@ -2,17 +2,21 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../src/api/client';
-import { treeOf } from '../src/project/files';
+import { asProjectFile, treeOf } from '../src/project/files';
+import { MAX_ASSET_BYTES, MAX_SOURCE_BYTES } from '@grove/api-contract';
 import {
     NOTHING_PENDING,
     bytesOf,
     draftFromBytes,
     draftFromText,
     dropped,
+    importRefusal,
+    importTypeOf,
     isPending,
     isText,
     languageOf,
     mediaTypeOf,
+    storedAsset,
     touched,
 } from '../src/workspace/files';
 import { openGame, reloadGame, saveGame, saveOf } from '../src/workspace/session';
@@ -146,6 +150,22 @@ describe('opening a game', () => {
         expect(open.files[0]?.text).toBe(SOURCE);
     });
 
+    it('leaves an asset’s bytes in the bucket, and knows its size from the saved set', async () => {
+        const api = fakeApi();
+        await stored(api, [
+            draftFromText('src/main.ts', SOURCE),
+            draftFromBytes('art/tile.png', new Uint8Array(2048)),
+        ]);
+
+        const open = await openGame(api, vi.fn());
+        const tile = open.files.find((file) => file.path === 'art/tile.png');
+        expect(tile?.bytes).toBeUndefined();
+        expect(tile?.byteLength).toBe(2048);
+        const reads = api.requests.filter((request) => request.includes('/files/'));
+        expect(reads).toHaveLength(1);
+        expect(reads[0]).toContain('/files/src/main.ts');
+    });
+
     it('makes one game and opens it when the creator owns none', async () => {
         const api = fakeApi({ owned: [] });
         const open = await openGame(api, vi.fn());
@@ -166,7 +186,7 @@ describe('saving a game', () => {
         const files = [draftFromText('src/main.ts', SOURCE), draftFromText('src/old.ts', 'x')];
 
         const saved = await saveGame(api, GAME_ID, 0, files, pendingOver('src/main.ts'));
-        expect(saved.revision).toBe(1);
+        expect(saved.workspace?.revision).toBe(1);
         expect(api.saves).toHaveLength(1);
         expect(api.saves[0]?.sources.map((source) => source.path)).toEqual(['src/main.ts']);
         expect(api.saves[0]?.assets).toEqual([]);
@@ -179,6 +199,75 @@ describe('saving a game', () => {
         await saveGame(api, GAME_ID, 0, [art], pendingOver('art/tile.png'));
         expect(api.signed).toEqual(['art/tile.png']);
         expect(api.bucket.get('art/tile.png')?.type).toBe('image/png');
+        expect(api.saves[0]?.assets).toEqual(['art/tile.png']);
+    });
+
+    it('commits the text beside an asset that would not upload, and says which held back', async () => {
+        const api = fakeApi();
+        vi.spyOn(api, 'putAsset').mockRejectedValue(
+            new ApiError(503, 'internal', 'art/tile.png could not be uploaded'),
+        );
+        const files = [
+            draftFromText('src/main.ts', SOURCE),
+            draftFromBytes('art/tile.png', new Uint8Array([1, 2, 3])),
+        ];
+
+        const outcome = await saveGame(
+            api,
+            GAME_ID,
+            0,
+            files,
+            pendingOver('src/main.ts', 'art/tile.png'),
+        );
+        expect(api.saves[0]?.sources.map((source) => source.path)).toEqual(['src/main.ts']);
+        expect(api.saves[0]?.assets).toEqual([]);
+        expect([...outcome.sent.upserted]).toEqual(['src/main.ts']);
+        expect([...outcome.held.keys()]).toEqual(['art/tile.png']);
+    });
+
+    it('sends nothing at all when everything it owed was held back', async () => {
+        const api = fakeApi();
+        vi.spyOn(api, 'putAsset').mockRejectedValue(new ApiError(503, 'internal', 'down'));
+        const art = draftFromBytes('art/tile.png', new Uint8Array([1, 2, 3]));
+
+        const outcome = await saveGame(api, GAME_ID, 0, [art], pendingOver('art/tile.png'));
+        expect(outcome.workspace).toBeUndefined();
+        expect(api.saves).toEqual([]);
+    });
+
+    it('holds back a source too long for the service rather than failing the save', async () => {
+        const api = fakeApi();
+        const files = [
+            draftFromText('src/main.ts', SOURCE),
+            draftFromText('src/huge.ts', 'x'.repeat(MAX_SOURCE_BYTES + 1)),
+        ];
+
+        const outcome = await saveGame(
+            api,
+            GAME_ID,
+            0,
+            files,
+            pendingOver('src/main.ts', 'src/huge.ts'),
+        );
+        expect(api.saves[0]?.sources.map((source) => source.path)).toEqual(['src/main.ts']);
+        expect(outcome.held.get('src/huge.ts')).toMatch(/too long/u);
+    });
+
+    it('does not upload an asset again for a save retried after it landed', async () => {
+        const api = fakeApi();
+        const art = draftFromBytes('art/tile.png', new Uint8Array([1, 2, 3]));
+        const landed = new Map();
+        const save = vi
+            .spyOn(api, 'save')
+            .mockRejectedValueOnce(new ApiError(503, 'internal', 'busy'));
+
+        await expect(
+            saveGame(api, GAME_ID, 0, [art], pendingOver('art/tile.png'), landed),
+        ).rejects.toBeInstanceOf(ApiError);
+        await saveGame(api, GAME_ID, 0, [art], pendingOver('art/tile.png'), landed);
+
+        expect(api.signed).toEqual(['art/tile.png']);
+        expect(save).toHaveBeenCalledTimes(2);
         expect(api.saves[0]?.assets).toEqual(['art/tile.png']);
     });
 
@@ -200,11 +289,11 @@ describe('saving a game', () => {
         const after = await saveGame(
             api,
             GAME_ID,
-            first.revision,
+            first.workspace?.revision ?? 0,
             [both[0]!],
             dropped(NOTHING_PENDING, 'b.ts', true),
         );
-        expect(after.files.map((file) => file.path)).toEqual(['a.ts']);
+        expect(after.workspace?.files.map((file) => file.path)).toEqual(['a.ts']);
     });
 
     it('lets the conflict through rather than overwriting what somebody else saved', async () => {
@@ -224,6 +313,53 @@ describe('saving a game', () => {
         const current = await reloadGame(api, GAME_ID);
         expect(current.revision).toBe(5);
         expect(current.files[0]?.text).toBe(SOURCE);
+    });
+});
+
+describe('importing a file', () => {
+    it('takes the extension over what the browser reported, and the browser for the rest', () => {
+        expect(importTypeOf('enemy.ts', 'video/mp2t')).toBe('text/typescript');
+        expect(importTypeOf('jump.ogg', 'video/ogg')).toBe('audio/ogg');
+        expect(importTypeOf('pip.jfif', 'image/JPEG')).toBe('image/jpeg');
+        expect(importTypeOf('save.dat', '')).toBe('application/octet-stream');
+    });
+
+    it('turns away what the service could never store, before it becomes a file', () => {
+        expect(importRefusal('logo.svg', 10, 'image/svg+xml')).toMatch(/not a kind of file/u);
+        expect(importRefusal('save.dat', 10, 'application/octet-stream')).toMatch(/not a kind/u);
+        expect(importRefusal('song.mp3', MAX_ASSET_BYTES + 1, 'audio/mpeg')).toMatch(/32 MB/u);
+        expect(importRefusal('blank.png', 0, 'image/png')).toMatch(/empty/u);
+        expect(importRefusal('notes.md', MAX_SOURCE_BYTES + 1, 'text/markdown')).toMatch(/1 MB/u);
+    });
+
+    it('lets in art, sound, fonts, data and code the service takes', () => {
+        for (const [name, type] of [
+            ['tile.png', 'image/png'],
+            ['jump.ogg', 'audio/ogg'],
+            ['pixel.woff2', 'font/woff2'],
+            ['level.json', 'application/json'],
+            ['enemy.ts', 'text/typescript'],
+        ] as const) {
+            expect(importRefusal(name, 1024, type)).toBeUndefined();
+        }
+    });
+});
+
+describe('a tab open on an asset', () => {
+    it('describes it by the size the saved set gave, with no bytes in hand', () => {
+        const tile = asProjectFile(
+            storedAsset({
+                path: 'art/tile.png' as never,
+                kind: 'asset',
+                versionId: 'v1' as never,
+                byteLength: 2048,
+                contentType: 'image/png',
+            }),
+        );
+        expect(tile.value).toContain('2048 bytes of image/png');
+        // Nothing typed there is a change, so nobody may type there at all.
+        expect(tile.readOnly).toBe(true);
+        expect(asProjectFile(draftFromText('src/main.ts', SOURCE)).readOnly).toBe(false);
     });
 });
 

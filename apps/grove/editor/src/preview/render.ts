@@ -1,8 +1,5 @@
-// What a value looks like in the console pane.
-//
-// `harness.js` carries its own copy of this, and has to: it is inlined into a sandboxed document as
-// text and imports nothing. The two are kept alike so one game's logging does not read differently
-// depending on which stage it ran on.
+// What a value looks like in the console pane, rendered inside the run's document, since only text
+// crosses the channel to the editor.
 
 /** How far into an object the pane goes before it says there is more. */
 const DEPTH = 3;

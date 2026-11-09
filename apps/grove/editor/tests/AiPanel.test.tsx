@@ -2,7 +2,7 @@ import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { SparkIcon } from '@grove/ui';
 import { AiPanel } from '../src/shell/AiPanel';
-import { mount } from './helpers';
+import { mount } from '@grove/ui/testing';
 
 function escape(target: Element | null | undefined, prevented = false): void {
     const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });

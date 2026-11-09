@@ -14,7 +14,7 @@ import {
     withSettings,
     writeProject,
 } from '../src/project/manifest';
-import { DEFAULT_TEMPLATE, TEMPLATES, seedFrom, templateById } from '../src/workspace/templates';
+import { DEFAULT_TEMPLATE, seedFrom } from '../src/workspace/templates';
 import { draftFromText } from '../src/workspace/files';
 import { PLAIN_PROJECT, PROJECT, TEMPLATE_PATH, templateDrafts } from './doubles';
 
@@ -52,6 +52,16 @@ describe('the manifest as a file', () => {
         expect(next.scriptModules).toEqual(PROJECT.scriptModules);
     });
 
+    it('gives a stamped manifest the stamp it already has, rather than one over its old hash', async () => {
+        const sources = new Map([['src/player.ts', 'export const a = 1;']]);
+        const once = await stamp(PROJECT, PROJECT.scriptModules, sources);
+        const again = await stamp(once, once.scriptModules, sources);
+
+        // Otherwise every Play of unchanged code writes a new manifest, and saves the game for it.
+        expect(again.contentHash).toBe(once.contentHash);
+        expect(sameStamp(once, again)).toBe(true);
+    });
+
     it('digests what was authored, so the same game twice is the same stamp', async () => {
         const sources = new Map([['src/player.ts', 'export const a = 1;']]);
         const once = await stamp(PROJECT, PROJECT.scriptModules, sources);
@@ -69,13 +79,6 @@ describe('the manifest as a file', () => {
 });
 
 describe('the templates a new game opens as', () => {
-    it('is a list, and an id this build does not know still opens something', () => {
-        expect(TEMPLATES).toContain(DEFAULT_TEMPLATE);
-        expect(templateById(DEFAULT_TEMPLATE.id)).toBe(DEFAULT_TEMPLATE);
-        expect(templateById('a-template-from-another-build')).toBe(DEFAULT_TEMPLATE);
-        expect(templateById(undefined)).toBe(DEFAULT_TEMPLATE);
-    });
-
     it('seeds the sources and the manifest that describes them', async () => {
         const seed = await seedFrom(DEFAULT_TEMPLATE, 'a-game-id');
         expect(seed.files.map((file) => file.path)).toEqual([TEMPLATE_PATH, PROJECT_PATH]);

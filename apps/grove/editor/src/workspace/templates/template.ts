@@ -13,11 +13,6 @@ export type TemplateProject = Omit<
 >;
 
 export interface GameTemplate {
-    /** Stable across renames; what a picker keys on. */
-    id: string;
-    name: string;
-    /** One line, as a picker lists it. */
-    description: string;
     /** The file the workbench opens on, which is the one the creator reads first. */
     openPath: string;
     /** The game's files, at the paths the game stores them under. */

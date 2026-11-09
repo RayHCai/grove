@@ -1,7 +1,7 @@
 import { act, useReducer } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { Transport, transportReducer } from '../src/shell/Transport';
-import { mount } from './helpers';
+import { mount } from '@grove/ui/testing';
 
 function Harness(): React.JSX.Element {
     const [state, dispatch] = useReducer(transportReducer, 'idle');

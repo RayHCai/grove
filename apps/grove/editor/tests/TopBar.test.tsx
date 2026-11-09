@@ -2,7 +2,7 @@ import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { SAVED_FADE_MS, TopBar } from '../src/shell/TopBar';
 import type { SaveState, TopBarProps } from '../src/shell/TopBar';
-import { mount } from './helpers';
+import { mount } from '@grove/ui/testing';
 
 function bar(over: Partial<TopBarProps> = {}): Promise<HTMLElement> {
     return mount(

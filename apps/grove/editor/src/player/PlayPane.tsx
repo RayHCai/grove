@@ -1,21 +1,17 @@
 import { useRef, useSyncExternalStore } from 'react';
 import type { Ref } from 'react';
 import { IconButton, MaximizeIcon, MinimizeIcon, Panel, VisuallyHidden, cx } from '@grove/ui';
+import type { StageStatus } from '../run/protocol';
 import { Transport } from '../shell/Transport';
 import type { TransportAction, TransportState } from '../shell/Transport';
 
 export interface PlayPaneProps {
     status: TransportState;
     dispatch: (action: TransportAction) => void;
-    /** Reaches the frame a local run is written into; the run host owns what goes in it. */
+    /** Reaches the frame a run is played in; the run host owns what goes in it. */
     frameRef?: Ref<HTMLIFrameElement> | undefined;
-    /**
-     * A stage of the caller's own, shown instead of the frame.
-     *
-     * A game the engine drives runs in this page rather than in a sandbox, because the world and
-     * the session are both here, so the stage it plays on is a React tree, not a document.
-     */
-    children?: React.ReactNode;
+    /** Where the frame's document has got to, or `null` while nothing is on the stage. */
+    stageStatus?: StageStatus | null | undefined;
     className?: string | undefined;
 }
 
@@ -39,7 +35,7 @@ export function PlayPane({
     status,
     dispatch,
     frameRef,
-    children,
+    stageStatus = null,
     className,
 }: PlayPaneProps): React.JSX.Element {
     const stageRef = useRef<HTMLDivElement>(null);
@@ -78,18 +74,24 @@ export function PlayPane({
                     {statusText[status]}
                 </span>
             </div>
-            <div ref={stageRef} className="play-stage">
-                {/* One or the other, never both: the frame is a whole document, and leaving it
-                    mounted under a live world would keep the last run's page alive behind it. */}
-                {children ?? (
-                    // A frame with no src is still a tab stop; a loaded game restores its own focusability.
-                    <iframe
-                        ref={frameRef}
-                        className="play-frame"
-                        title="Game preview"
-                        sandbox="allow-scripts"
-                        tabIndex={-1}
-                    />
+            <div
+                ref={stageRef}
+                className="play-stage"
+                aria-busy={stageStatus === 'starting' || undefined}
+            >
+                {/* Never `allow-same-origin`: the run's origin is its own, so nothing a creator
+                    wrote reaches this page, its storage, or the session it holds. */}
+                <iframe
+                    ref={frameRef}
+                    className="play-frame"
+                    title="Game preview"
+                    sandbox="allow-scripts"
+                    tabIndex={-1}
+                />
+                {stageStatus === 'starting' && (
+                    <div className="play-booting" role="status">
+                        Starting the game…
+                    </div>
                 )}
                 <div className="play-tools">
                     <IconButton

@@ -23,6 +23,7 @@ export function profileUrl(): string {
  * credential.
  */
 export function signInUrl(here: URL): string {
-    const back = new URL(here.toString());
-    return `${platformUrl()}/sign-in?return=${encodeURIComponent(back.toString())}`;
+    const url = new URL('/sign-in', platformUrl());
+    url.searchParams.set('return', here.toString());
+    return url.toString();
 }

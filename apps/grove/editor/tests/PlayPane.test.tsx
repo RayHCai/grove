@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import { MaximizeIcon, MinimizeIcon } from '@grove/ui';
 import { PlayPane } from '../src/player/PlayPane';
-import { mount } from './helpers';
+import { mount } from '@grove/ui/testing';
 
 const restores: Array<() => void> = [];
 

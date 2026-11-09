@@ -26,6 +26,8 @@ export interface EditorFile {
     name: string;
     language: string;
     value: string;
+    /** Shown and never typed into: a keystroke there would be a change to a file nobody edits. */
+    readOnly?: boolean | undefined;
 }
 
 export interface MountOptions {
@@ -220,7 +222,7 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
     // Set while a reset writes into the models, so a replacement never reads as a keystroke.
     let resetting = false;
 
-    function modelFor({ path, language, value }: EditorFile): monaco.editor.ITextModel {
+    function modelFor({ path, language, value, readOnly }: EditorFile): monaco.editor.ITextModel {
         const held = models.get(path);
         if (held !== undefined) return held;
 
@@ -230,12 +232,14 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
             monaco.Uri.parse(`${WORKSPACE}${path}`),
         );
         models.set(path, model);
-        watchers.set(
-            path,
-            model.onDidChangeContent(() => {
-                if (!resetting) listener?.(path, model.getValue());
-            }),
-        );
+        if (readOnly !== true) {
+            watchers.set(
+                path,
+                model.onDidChangeContent(() => {
+                    if (!resetting) listener?.(path, model.getValue());
+                }),
+            );
+        }
         return model;
     }
 
@@ -253,6 +257,7 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
     const editor = monaco.editor.create(host, {
         theme: THEME_NAME,
         ariaLabel: file?.name ?? 'Code',
+        readOnly: file?.readOnly === true,
         fontFamily: fonts.mono,
         fontSize: 11,
         // VS Code's macOS ratio, taken as the one value on every platform.
@@ -302,6 +307,18 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
             // Only creates; a model already open holds what is typed in it, which the caller's
             // copy of the text is downstream of rather than an authority over.
             for (const each of files) modelFor(each);
+            // Nobody types into a read-only one, so there the caller's copy is the authority.
+            resetting = true;
+            try {
+                for (const each of files) {
+                    const model = models.get(each.path);
+                    if (each.readOnly === true && model?.getValue() !== each.value) {
+                        model?.setValue(each.value);
+                    }
+                }
+            } finally {
+                resetting = false;
+            }
         },
 
         resetFiles(files) {
@@ -327,7 +344,7 @@ export function mountEditor(host: HTMLElement, { file, theme }: MountOptions): E
                 editor.setModel(null);
                 return;
             }
-            editor.updateOptions({ ariaLabel: next.name });
+            editor.updateOptions({ ariaLabel: next.name, readOnly: next.readOnly === true });
             editor.setModel(modelFor(next));
         },
 

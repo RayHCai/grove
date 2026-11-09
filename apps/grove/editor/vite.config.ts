@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { previewRuntime } from './preview.plugin';
 
 export default defineConfig({
-    plugins: [react()],
+    plugins: [react(), previewRuntime()],
     server: {
         port: 5176,
         // Fail loudly rather than silently picking another port: the other apps dial this one.

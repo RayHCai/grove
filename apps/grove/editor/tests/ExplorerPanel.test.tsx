@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ExplorerPanel } from '../src/explorer/ExplorerPanel';
 import type { ProjectFile } from '../src/project/files';
 import { projectTree } from './doubles';
-import { mount } from './helpers';
+import { mount } from '@grove/ui/testing';
 
 interface PanelParts {
     onClose?: () => void;
@@ -236,5 +236,43 @@ describe('ExplorerPanel', () => {
 
         expect(onImportFile).not.toHaveBeenCalled();
         expect(host.querySelector('[role="alert"]')?.textContent).toContain('my sprite (1).png');
+    });
+
+    it('refuses a kind of file a game cannot carry, before it becomes a file', async () => {
+        const onImportFile = vi.fn();
+        const host = await panel(true, { onImportFile });
+        const picker = host.querySelector<HTMLInputElement>('input[type="file"]');
+        // A browser reports SVG as an image, and the edge would serve its scripts as one.
+        const picked = new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' });
+
+        await act(async () => {
+            Object.defineProperty(picker, 'files', { value: [picked], configurable: true });
+            picker?.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        expect(onImportFile).not.toHaveBeenCalled();
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+            'logo.svg is not a kind of file a game can carry',
+        );
+    });
+
+    it('refuses a file over what an asset may be, and keeps the rest of a drop', async () => {
+        const onImportFile = vi.fn();
+        const host = await panel(true, { onImportFile });
+        const body = host.querySelector('.explorer-panel__body');
+        const huge = new File(['x'], 'song.mp3', { type: 'audio/mpeg' });
+        Object.defineProperty(huge, 'size', { value: 33 * 1024 * 1024 });
+        const fine = new File(['x'], 'jump.ogg', { type: 'audio/ogg' });
+        const transfer = { types: ['Files'], files: [huge, fine], dropEffect: 'none' };
+
+        await act(async () => {
+            const drop = new Event('drop', { bubbles: true, cancelable: true });
+            Object.defineProperty(drop, 'dataTransfer', { value: transfer });
+            body?.dispatchEvent(drop);
+        });
+
+        // The file that fits goes in; the one that does not is said, and a later one cannot hide it.
+        expect(onImportFile.mock.calls.map(([file]) => (file as File).name)).toEqual(['jump.ogg']);
+        expect(host.querySelector('[role="alert"]')?.textContent).toContain('song.mp3 is 33 MB');
     });
 });

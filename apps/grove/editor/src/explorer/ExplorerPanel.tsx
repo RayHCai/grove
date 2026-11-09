@@ -3,6 +3,7 @@ import type { DragEvent, FormEvent, Ref } from 'react';
 import { IconButton, Menu, MenuItem, NewFileIcon, TextInput, UploadIcon } from '@grove/ui';
 import { WorkspacePath } from '@grove/api-contract';
 import { filesUnder, sourcePath } from '../project/files';
+import { importRefusal, importTypeOf } from '../workspace/files';
 import { SidePanel } from '../shell/SidePanel';
 import type { ProjectFile, ProjectNode } from '../project/files';
 import { FileTree } from './FileTree';
@@ -93,10 +94,19 @@ export function ExplorerPanel({
         setNaming(false);
     }
 
-    function importFile(picked: File): void {
-        const refused = problemWith(picked.name);
-        setProblem(refused);
-        if (refused === undefined) onImportFile(picked);
+    /** Imports the files that can be, and says why the first that cannot was turned away. */
+    function importFiles(picked: Iterable<File>): void {
+        let refusal: string | undefined;
+        for (const each of picked) {
+            // Said here rather than at the save: a file the service will never take would be owed
+            // forever, and re-sent by every save after it.
+            const refused =
+                problemWith(each.name) ??
+                importRefusal(each.name, each.size, importTypeOf(each.name, each.type));
+            if (refused === undefined) onImportFile(each);
+            else refusal ??= refused;
+        }
+        setProblem(refusal);
     }
 
     function remove(node: ProjectNode): void {
@@ -108,7 +118,7 @@ export function ExplorerPanel({
         if (!carriesFiles(event)) return;
         event.preventDefault();
         setDropping(false);
-        for (const picked of event.dataTransfer.files) importFile(picked);
+        importFiles(event.dataTransfer.files);
     }
 
     return (
@@ -188,7 +198,7 @@ export function ExplorerPanel({
                     tabIndex={-1}
                     onChange={(event) => {
                         const picked = event.target.files?.[0];
-                        if (picked !== undefined) importFile(picked);
+                        if (picked !== undefined) importFiles([picked]);
                         // Cleared, or picking the same file twice raises no second change event.
                         event.target.value = '';
                     }}

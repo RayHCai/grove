@@ -16,8 +16,8 @@ A creator signs in on the platform and clicks through to the editor. Nothing is 
 way: the API set the session cookie on **its own** origin, and the platform and this editor are two
 subdomains of one site, so the browser carries it here by itself. Reading it is one round trip,
 `GET /v1/auth/session`, because the cookie is `HttpOnly` and no script on this origin can touch it.
-That keeps the token itself out of reach of the code this app compiles and runs, but not its authority:
-a world runs on this origin, so it can make any credentialed, CSRF-bearing API call the creator could.
+Nothing a creator writes runs on this origin either (every run plays in a document with an origin of
+its own, below), so neither the token nor the authority it carries is in reach of their code.
 
 Somebody the service does not recognise is sent to the platform: `VITE_PLATFORM_URL`
 (`http://localhost:5175` in a dev server) at `/sign-in?return=`, carrying this page's own address so
@@ -36,11 +36,13 @@ leaves nothing worth rendering a workbench around:
 1. **Who is signed in.** The cookie, as above.
 2. **Which game.** The newest of `GET /v1/games`, or one made with `POST /v1/games` for a creator
    who owns none.
-3. **What is in it.** `GET /v1/games/:gameId/workspace` names each path the game holds, and each is
-   fetched from `GET /v1/games/:gameId/files/<path>`. A game with nothing saved is seeded from a
+3. **What is in it.** `GET /v1/games/:gameId/workspace` names each path the game holds, and each
+   source is fetched from `GET /v1/games/:gameId/files/<path>`; an asset's bytes stay in the bucket,
+   since the saved set already says how big it is. A game with nothing saved is seeded from a
    template **in memory** and left unsaved: opening an editor is not a reason to write to somebody's
-   game, so the first save is the creator's. A game that was saved before it had a manifest is given
-   one, from the default template's settings and the classes its own code declares.
+   game, so the template is owed only once the creator edits it or presses Save, and then whole. A
+   game that was saved before it had a manifest is given one, from the default template's settings
+   and the classes its own code declares.
 
 `Boot` starts this once; a ref guards it, because StrictMode's paired effects would otherwise make
 a second game for a creator who had none. A session that lapsed between step 1 and step 2 is the
@@ -57,7 +59,11 @@ platform's sign-in again; anything else is a message and a Try again.
 | `src/workspace/autosave.ts`     | the three triggers that save without being asked                         |
 | `src/workspace/state.ts`        | the game as one reducer: drafts, saved set, revision, manifest, owed     |
 | `src/workspace/useWorkspace.ts` | the save queue, the conflict reload and the lapsed session               |
-| `src/run/useRun.ts`             | Play and its two stages, and the console they write to                   |
+| `src/run/useRun.ts`             | Play, and the run it hands the stage's sandboxed document                |
+| `src/run/host.ts`               | that document, opened fresh per run, and this page's end of the channel  |
+| `src/run/assets.ts`             | the bytes of every manifest file, which the run's document cannot fetch  |
+| `src/run/protocol.ts`           | what crosses the channel, read the same way on both ends                 |
+| `src/console/lines.ts`          | what a run wrote, outside React, flushed to the pane once a frame        |
 | `src/unfinished.ts`             | whether what is drawn but not wired to anything yet is shown             |
 | `src/workspace/templates/`      | what a game with nothing in it opens as                                  |
 | `src/creator/`                  | the globals a creator writes against, and each template's own sources    |
@@ -66,8 +72,8 @@ platform's sign-in again; anything else is a message and a Try again.
 | `src/project/scripts.ts`        | which classes the code declares, where each runs and what it attaches to |
 | `src/project/manifest.ts`       | the manifest as a file in the game, and the digest that stamps it        |
 | `src/project/compile.ts`        | one local version: emit, stamp, and check the way a build would          |
-| `src/project/link.ts`           | those modules evaluated here, as the classes a world attaches            |
-| `src/run/LocalStage.tsx`        | a world booted in this tab, and the session mounted against it           |
+| `src/preview/`                  | the code a run's sandboxed document is built from, and nothing else      |
+| `preview.plugin.ts`             | those documents and their scripts, built and served, and this page's CSP |
 
 A **draft** is what this origin owns; what the service holds is a key in a bucket, overwritten in
 place. Text and bytes are exclusive: the code editor opens the first, and an asset is carried rather
@@ -89,12 +95,12 @@ every file, and a name typed into the explorer lands under it.
 creator's to type, so the explorer does not list it, no tab opens on it and the compiler is not
 given it. The settings gear is what writes it.
 
-A **template** is a record under `src/workspace/templates/`: an id, a name, the files it seeds and
-the manifest that describes them. A second one is a file beside `top-down.ts` and a line in the
-list, and nothing downstream branches on which a game came from: seeding reads the manifest's
-`scriptModules` off the template's own sources, so a template cannot declare a class it does not
-have. The one there now is a player who walks in four directions, drawn as a black square on a white
-stage: `public/avatar-square.svg`, which the client fetches from this app at a relative url.
+A **template** is a record under `src/workspace/templates/`: the files it seeds, the one the
+workbench opens on, and the manifest that describes them. Nothing downstream branches on which one
+a game came from: seeding reads the manifest's `scriptModules` off the template's own sources, so a
+template cannot declare a class it does not have. The one there is a player who walks in four
+directions, drawn as a black square on a white stage: `public/avatar-square.svg`, at a relative url
+this app serves and hands a run's document, which cannot fetch it from here itself.
 
 ## What a creator writes
 
@@ -124,15 +130,27 @@ illegal attachment and it cannot do that without knowing what the script attache
 
 A save carries the text of every source written to, the path of every asset uploaded beside it, and
 the paths removed. An asset's bytes go straight to the bucket through a presigned PUT and never pass
-through `@grove/api` at all: the ticket is asked for, the bytes are sent with no cookie on the
-request, and only then does the save name the path, because the service refuses a save naming an
-asset that never landed, an upload that failed has to fail before the save rather than as one that
-half-committed.
+through `@grove/api` at all: the ticket is asked for with the type and length the presign signs, the
+bytes are sent with exactly the headers it names and no cookie, and only then does the save name the
+path, because the service refuses a save naming an asset that never landed. An asset whose upload
+failed is **held back**: the text beside it commits anyway, the top bar names the file, and only a
+press of Save tries it again, so a save nobody asked for never re-sends its bytes. One that landed
+and whose save did not is not uploaded twice while its ticket lasts. A source too long for the
+service is held back the same way rather than refusing the save around it. An import the service
+would never take (a kind outside the asset media types, an asset over 32 MB, code over 1 MB) is
+refused inline by the explorer before it becomes a file.
 
 A save names the revision it started from, so a second editor that claimed it first is a `409`. The
 answer to that is to reload and say so, not to retry: there is no set here to merge into, and saving
 over it would be one creator silently overwriting the other. The reload replaces what the code
-editor's models hold as well as the drafts, unreported as typing, so the screen shows what won.
+editor's models hold as well as the drafts, unreported as typing, so the screen shows what won. A
+`409` on a revision this tab's own exit save moved is no conflict: once the exit saves still out
+have settled, the owed save simply goes again on top.
+
+A session that lapses with work on screen sends the sign-in to a second tab rather than navigating
+away, and coming back to this one reads the session again, which keeps the new token and sends
+what is owed. A write refused because another tab's sign-in rotated the token is mended by the
+shared client, which reads the session once and sends the write again.
 
 One save is in flight at a time. A save asked for while another is out waits for it to land and
 then goes once, with what is held by then, because a second sent alongside would name the revision
@@ -143,11 +161,13 @@ Nothing has to be pressed. A save goes a second and a half after the last keystr
 second ceiling for somebody who never pauses, and on `visibilitychange` when the tab goes away,
 that last one through `fetch(keepalive)`, which is the whole of what makes a request leave a closing
 tab. That exit save carries text and deletes but no asset, since there is no time left to upload
-one and a save naming an asset that never landed is refused whole. The root error boundary fires the
-same exit save before its recovery view replaces a workbench that threw. `beforeunload` is cancelled
-while anything is unsaved, which shows the browser's own dialog and
-ignores any wording set with it. The autosave is what actually protects work; the dialog is the
-backstop.
+one and a save naming an asset that never landed is refused whole. A tab that was only hidden adopts
+the revision its exit save landed as, or the next save would name the one before it; a body over the
+browser's 64 KiB keepalive ceiling goes as an ordinary request, which still lands for a tab that
+stayed. The root error boundary fires the same exit save before its recovery view replaces a
+workbench that threw. `beforeunload` is cancelled while anything is unsaved, held-back files
+included, which shows the browser's own dialog and ignores any wording set with it. The autosave is
+what actually protects work; the dialog is the backstop.
 
 ## The compile, and what it builds
 
@@ -165,73 +185,72 @@ no longer has.
 
 `src/project/compile.ts` makes one **local version** out of that: the modules with their imports put
 back, and the manifest the gear wrote with the two parts a build derives stamped onto it: the
-classes the code declares, and a SHA-256 over the manifest and every source beside it. It is then
-checked with `@platform/project`'s own `validate`, so a game whose attachment names a script a
-rename took away is refused here in the same words a build would use. What changed is written back
-into `project.json`, because a publish builds what the last save froze.
+classes the code declares, and a SHA-256 over the manifest (less that hash) and every source beside
+it, so unchanged code always stamps the hash it already has. It is then checked with
+`@platform/project`'s own `validate`, so a game whose attachment names a script a rename took away
+is refused here in the same words a build would use. What changed is written back into
+`project.json`, because a publish builds what the last save froze.
 
-A version that declares scripts is a **world**, and a world plays on the stage described below. A
-game of plain TypeScript (no script class, no engine name) is not a world and runs in the sandbox
-instead, from `src/main.ts`. Which of the two a game is is the whole of what Play branches on.
+A version that declares scripts is a **world**; a game of plain TypeScript (no script class, no
+engine name) is not, and starts from `src/main.ts`. Which of the two a game is is the whole of what
+Play branches on, and each has a document of its own to run in.
 
-### A world, in this page
+### A run, in a document of its own
 
-`src/run/LocalStage.tsx` stands one up. It is reached through `React.lazy`, and is the only module
-here that imports the engine, the sim or the renderer at run time, several megabytes a creator
-writing their first line has no use for, in a chunk nobody who never presses Play downloads.
+Nothing a creator wrote is evaluated in this page. Every run plays in the stage's frame, sandboxed
+`allow-scripts` and **never** `allow-same-origin`, so its origin is opaque: it reaches no cookie, no
+storage and no DOM of the editor's, and the API's credentialed grant to this origin is not its. The
+frame is pointed at a document this app serves for that kind of run, under a query naming the run (a
+fresh document every time, since a module graph that has evaluated cannot be re-entered), and
+`src/run/host.ts` posts it the game once it says it is listening: the modules, and for a world the
+manifest, the creator's name and the bytes of every file of this origin the manifest names, which a
+document of its own cannot fetch. A message is believed only from that frame's window and for that
+run, because `event.origin` is "null" for every one. Stop drops the document, which is what ends a
+run.
 
-`src/project/link.ts` is what turns a compile into classes. The emitted modules are text and a world
-instantiates constructors, so each module is given a URL of its own and handed to the browser's own
-loader, dependency-first: a blob's contents are fixed when it is made, so a module's URL has to
-exist before the one importing it can name it, and a cycle is refused rather than half-linked. The
-hidden `@platform/engine` import is pointed at a generated module that reads the engine **this page
-already holds** off a one-shot global: a module fetched by URL cannot resolve through this app's
-bundle, and a second engine would be a second set of base classes, of which a world would recognise
-one. `console` is exported from that same module and injected into any file that reaches the name,
-which is what makes the declarations a creator writes against true: their logging lands in the
-console pane rather than the devtools drawer.
+Each document loads one **classic** script holding that kind of run's whole runtime: a module script
+from an origin of its own would need a CORS grant from this one, and a classic one needs none, on a
+dev server and a static host alike. `preview.plugin.ts` builds both with Vite's own `build` as
+single-chunk IIFEs (`src/preview/plain.ts`, a few kilobytes, and `src/preview/world.ts`, the engine
+and everything a session needs) and emits each beside its `preview-<kind>-<hash>.html`, naming the
+documents to the app through `virtual:grove-preview`. A dev server builds each on its first request,
+serves it from `/@grove-preview/`, and builds it again when a file in it changes.
 
-`bootPreview` from `@grove/player/preview` does the rest: a real `GameInstance` over a real `Sim`,
-the same one `@grove/game-instance` runs in Rust, with the classes filtered per side, and a
-loopback pair standing in for the socket. `GamePlayer` mounts against that exactly as it mounts
-against a deployed box; the authority union is the only thing that differs, which is the point of it
-being a union. Nothing is fetched and nothing is deployed: there is no bundle to name, because the
-classes are already here.
+`src/preview/link.ts` turns a compile into something the browser's own loader evaluates: each module
+becomes a blob url, and an **import map** names them all, with every relative specifier rewritten to
+the map's name for its target, since a blob url has no path to resolve one against. The loader links
+the graph the way a bundle does, cycles included. `@platform/engine` and `grove:host` map to one
+generated module exporting the runtime's own engine and a `console` that is injected into any file
+reaching the name: one engine, so every class a creator extended is the class a world checks
+against, and logging that lands in the console pane rather than in a devtools drawer nobody opens.
 
-One page holds one world, because the engine keeps its runtime in a single module-level slot. Every
-boot and teardown is queued through one chain, which is also what makes StrictMode's
-mount-teardown-mount safe: the abandoned boot finishes and is disposed before the next begins.
-Pause stops the world's clock without closing it: the session stays up, its pair stays open, and
-resuming carries on from the tick it stopped at.
+A world: `bootPreview` from `@grove/player/preview` stands a real `GameInstance` over a real `Sim`
+(the same one `@grove/game-instance` runs in Rust) with the classes filtered per side, and
+`GamePlayer` mounts against its loopback pair exactly as it mounts against a deployed box; the
+authority union is the only thing that differs. Pause stops the world's clock without closing it,
+and resuming carries on from the tick it stopped at. The server half runs every handler, and the
+client half draws what it mirrors and takes WASD and the arrow keys onto `moveX`/`moveY` once the
+stage has focus. A plain run imports its entry with `requestAnimationFrame` and the timers gated: a
+page cannot be suspended, but its clock can, so Pause holds every frame the run asked for and Resume
+hands them over. Either kind forwards every uncaught error, and reports `starting`, `running` or
+`failed`, which the play pane shows while a run comes up.
 
-In a preview the server half runs every handler: a join handler fires, an avatar spawns, a movement
-attaches, and `@onStart` and `@onUpdate` fire on its synced scripts. The client half joins, goes
-`live` and takes WASD and the arrow keys onto `moveX`/`moveY`, but runs no handler of its own and
-mirrors nothing for the renderer to draw, so the stage shows its white ground.
+A run's document holds its own Content-Security-Policy: `default-src 'none'`, scripts from this
+origin and the game's blobs (inline too, for the import map; nothing evaluated from a string, since the
+renderer loads pixi's no-eval shader syncs), the layout's one style by hash, and `connect-src blob: data:`, which is no
+network at all, the API least of all. A built editor page carries a policy of its own as a `<meta>`,
+since a static host is told nothing but the files: its own scripts and the theme script's hash,
+Monaco's styles, `https:` for the API and for a presigned upload to a bucket the build is never told,
+and frames from itself. A dev server's page carries none, because its React refresh preamble is an
+inline script.
 
-### A sandbox, for plain TypeScript
-
-`src/run/document.ts` puts that output into one self-contained document and `src/run/host.ts` hands
-it to a frame as `srcdoc`. Nothing in there is fetched: the frame is sandboxed **without**
-`allow-same-origin`, so it has an origin of its own and can reach no storage, no cookie and no DOM
-of the editor's, which is also why the harness is inlined as text (`?raw`) rather than bundled as a
-module the frame would have to fetch under CORS.
-
-`src/run/harness.js` is the only code in there that is not the creator's. It links the modules into
-blob URLs the same way `link.ts` does, and carries its own copy of both that and the console
-rendering rather than importing either: it is inlined as text, so it can import nothing at all. It
-forwards `console` and every uncaught error to the console pane, and it gates
-`requestAnimationFrame` and the timers: a page cannot be suspended, but its clock can, so Pause
-holds every frame the game asked for and Resume hands them over. Stop drops the document, which is
-what ends a run.
-
-A sandboxed run shows in the play pane's stage, full screen from the button in its corner.
+A run shows in the play pane's stage, full screen from the button in its corner.
 
 ## The shell
 
 - **The shell.** `src/shell/EditorShell.tsx` holds the frame: which side panel is open, and the
-  open files and which is in front. The game and its saving are `useWorkspace`'s, and the run and
-  its console `useRun`'s. The top bar is the
+  open files and which is in front. The game and its saving are `useWorkspace`'s, the run
+  `useRun`'s, and the console's lines a store it holds and never reads. The top bar is the
   `<header>` (the wordmark, the game in the wordmark's own face, what a save last did, Save, and
   who is signed in, a link to the platform's profile where the account is signed out of), the rail
   is `<nav aria-label="Editor">`, the panels are `<aside>`s kept mounted and hidden while closed,
@@ -245,7 +264,7 @@ A sandboxed run shows in the play pane's stage, full screen from the button in i
   or imported is checked against the contract's `WorkspacePath` before it becomes a file, and one
   that fails is said inline, because a save naming one bad path is refused whole. An import's media
   type comes from its extension where this editor knows it, since a browser reports a `.ts` file
-  as `video/mp2t`.
+  as `video/mp2t`, and an import the service would never take is said inline the same way.
 - **The settings panel.** `src/settings/SettingsPanel.tsx` is the manifest a creator sets: how many
   may play, the two rates, and the world's extent. It sits at the foot of the rail because it is the
   project's own dialog rather than another view of the game's files. A field commits only while it
@@ -258,17 +277,19 @@ A sandboxed run shows in the play pane's stage, full screen from the button in i
   `src/editor/CodeEditor.tsx`, which hosts Monaco. `monaco-editor` is reached through
   `src/editor/monaco.ts` alone; no other module imports it. `src/editor/tabs.ts` is the strip's own
   reducer: opening a file already on it selects it, and closing the active one falls to its
-  neighbour. The strip scrolls sideways and never down, and a name longer than a tab is cut with an
+  neighbour. An asset's tab is a read-only description of it, since a keystroke there would be a
+  change to a file nobody edits. The strip scrolls sideways and never down, and a name longer than a tab is cut with an
   ellipsis: the strip is as wide as the editor pane and no wider.
 - **The play pane.** `src/player/PlayPane.tsx` is the run controls and a status word over a 16:9
-  stage holding either the sandboxed frame or a stage the shell hands it: one or the other, never
-  both, since leaving the frame mounted under a live world would keep the last run's document alive
-  behind it. What is done to the stage rather than to the game sits in its corner: full screen.
+  stage holding the run's sandboxed frame, and a line saying the game is starting while its
+  document says so. What is done to the stage rather than to the game sits in its corner: full
+  screen.
   What a compile built is reported in the console pane beside it: one
   line for the version, and the problems that stopped it.
 - **The console pane.** `src/console/ConsolePane.tsx` prints what a run wrote, oldest first, each
   line marked with its level, and keeps the last 500: a game in a loop writes faster than anyone
-  reads.
+  reads. The lines live outside React in `src/console/lines.ts`, flushed once an animation frame,
+  and the pane is their one subscriber, so a game logging every tick redraws nothing else.
 - **The layout.** `src/styles/editor.css` is the viewport-height frame: the 40px top bar, the 40px rail, the panel and the workspace, with 1px `--pg-border` dividers on a `--pg-bg`
   field and every pane a `Panel` with a 36px header, padded 8px on both sides because a pane holds
   a control in each of its top corners. It also opens by restating the kit's control
