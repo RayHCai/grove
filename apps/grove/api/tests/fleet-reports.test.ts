@@ -3,15 +3,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HostId, type FleetReport } from '@grove/api-contract';
 import { buildApp } from '../src/app.js';
-import { testEnv } from './fixtures.js';
-import { unattachedRecords, type Records } from '../src/records.js';
+import { BUILDER_SECRET, SERVER_MANAGER_SECRET, testEnv } from './fixtures.js';
+import type { Stores } from '../src/records.js';
+import { stores } from './doubles.js';
 
-const BEARER = 'c'.repeat(32);
+const BEARER = SERVER_MANAGER_SECRET;
 const HOST_ID = HostId.parse('3f2504e0-4f89-41d3-9a0c-0305e82c3301');
 const INCARNATION = '2b1c6f70-9d3a-4a21-8f55-0c9f7a1d4e88';
 const EVENT_ID = 'c5a1f0e2-7b34-4d89-9a6c-1e2f3a4b5c6d';
 
-const env = testEnv({ FLEET_SECRET: BEARER });
+const env = testEnv();
 
 const report: FleetReport = {
     hosts: [
@@ -42,9 +43,9 @@ const report: FleetReport = {
     reportedAt: '2026-09-05T12:00:30.000Z',
 };
 
-function recording(): { records: Records; recordFleet: ReturnType<typeof vi.fn> } {
+function recording(): { records: Stores; recordFleet: ReturnType<typeof vi.fn> } {
     const recordFleet = vi.fn(async () => {});
-    return { records: { ...unattachedRecords, recordFleet }, recordFleet };
+    return { records: stores({ fleetHistory: { recordFleet } }), recordFleet };
 }
 
 describe('POST /v1/fleet/reports', () => {
@@ -67,19 +68,20 @@ describe('POST /v1/fleet/reports', () => {
         });
     });
 
-    // The router is the only caller, and it presents the same bearer every service-to-service call
-    // in the fleet does. Anything else is a stranger writing the fleet's history.
-    it('refuses a caller without the fleet bearer', async () => {
+    // The router is the only caller, by the secret it alone shares with this service.
+    it("refuses a caller without the router's secret, a builder's included", async () => {
         const { records, recordFleet } = recording();
         const app = await buildApp(env, records);
 
-        const response = await app.inject({
-            method: 'POST',
-            url: '/v1/fleet/reports',
-            payload: report,
-        });
-
-        expect(response.statusCode).toBe(401);
+        for (const headers of [{}, { authorization: `Bearer ${BUILDER_SECRET}` }]) {
+            const response = await app.inject({
+                method: 'POST',
+                url: '/v1/fleet/reports',
+                headers,
+                payload: report,
+            });
+            expect(response.statusCode).toBe(401);
+        }
         expect(recordFleet).not.toHaveBeenCalled();
     });
 

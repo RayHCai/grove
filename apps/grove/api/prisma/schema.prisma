@@ -26,6 +26,7 @@ model Account {
   resets   PasswordReset[]
   games    Game[]
   tasks    Task[]
+  sessions Session[]
 }
 
 /// A row of its own, so reading an account cannot carry the hash into a response.
@@ -77,6 +78,9 @@ model Game {
   /// it edited from and claims the next one in the same statement, so two editors cannot both land.
   draftRevision Int @default(0)
 
+  /// The save whose manifest froze `draftRevision`, which names its key; null is the bare key.
+  draftSaveId String? @db.Uuid
+
   /// The manifest revision the last publish asked for a build of. Null together with the date: a
   /// game is either published or has never been.
   publishedRevision Int?
@@ -119,6 +123,9 @@ model Task {
   /// nothing ever looked at.
   assetVersionId String? @db.VarChar(1024)
 
+  /// The save whose manifest a build compiles; null for an upload, and the bare key for a build.
+  manifestSaveId String? @db.Uuid
+
   attempts   Int       @default(0)
   detail     Json?
   createdAt  DateTime  @default(now()) @db.Timestamptz(3)
@@ -126,15 +133,23 @@ model Task {
   startedAt  DateTime? @db.Timestamptz(3)
   finishedAt DateTime? @db.Timestamptz(3)
 
-  game    Game    @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  /// Which worker holds the claim, and until when nobody else may take it.
+  claimedBy   String?   @db.VarChar(128)
+  leaseUntil  DateTime? @db.Timestamptz(3)
+  /// When a stream was last told about this task, which is what the sweeper re-announces by.
+  announcedAt DateTime  @default(now()) @db.Timestamptz(3)
+
+  game      Game            @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  account   Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  artifacts BuildArtifact[]
 
   @@index([gameId, createdAt])
   // Postgres indexes no foreign key on its own, and without this the cascade from a deleted account
   // is a sequential scan of every task ever queued.
   @@index([accountId])
-  // The sweeper's read: everything of one kind still sitting in NOT_STARTED, oldest first.
-  @@index([kind, status, createdAt])
+  // The sweeper's reads: what nothing was told about lately, and claims whose lease ran out.
+  @@index([kind, status, announcedAt])
+  @@index([status, leaseUntil])
   // The allocator's read, on the path of every player who ever joins: the newest build of one game
   // that finished. Ordered by the revision rather than the date, because what makes one version
   // newer than another is the manifest it compiled and not when a box got round to it.
@@ -187,6 +202,9 @@ model GameFile {
   /// `versionId` and at no other time: a save that replaces the bytes leaves the old verdict
   /// behind, naming a version the row no longer holds, which is what makes it stop counting.
   validatedVersionId String? @db.VarChar(1024)
+
+  /// The version of `<gameId>/assets/<path>` holding the inspected copy, which the edge serves.
+  edgeVersionId String? @db.VarChar(1024)
 
   // Cascade drops the row naming the file, never the object: bucket versioning keeps every prior
   // byte-set addressable, and the manifests are what still name them.
@@ -269,4 +287,37 @@ model FleetHostEvent {
   @@index([hostId, at(sort: Desc)])
   /// The reaper's read: everything past the retention window, whichever box it belongs to.
   @@index([at])
+}
+
+/// One output a build stored through the API, which a success has to name exactly.
+model BuildArtifact {
+  taskId     String   @db.Uuid
+  /// Content-addressed, so the bytes behind it never change once a success names it.
+  url        String   @db.VarChar(2048)
+  name       String   @db.VarChar(128)
+  hash       String   @db.Char(64)
+  byteLength Int
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, url])
+}
+
+/// One signed-in browser, found by the digest of its id so a read of this table opens nothing.
+///
+/// Inserted by a sign-in alone and updated by every request after it, so a request still in flight
+/// when a session is revoked has no row left to write back into.
+model Session {
+  idHash    Bytes    @id
+  playerId  String   @db.Uuid
+  data      Json
+  expiresAt DateTime @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  account Account @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([playerId])
+  @@index([expiresAt])
 }

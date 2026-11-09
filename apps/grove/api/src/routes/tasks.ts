@@ -1,21 +1,28 @@
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { ErrorBody, GameId, Task, TaskId, TaskStatusUpdate } from '@grove/api-contract';
+import {
+    ErrorBody,
+    GameId,
+    Task,
+    TaskId,
+    TaskStatusUpdate,
+    validRequestId,
+} from '@grove/api-contract';
 import type { Env } from '../env.js';
-import type { Records } from '../records.js';
-import { UNLIMITED, verifyFleetSecret } from '../service-scope.js';
+import type { Games, Tasks } from '../records.js';
+import { KIND_OF, UNLIMITED, admit } from '../service-scope.js';
 import { requireGameOwner, requireSignedIn } from '../session.js';
+import { unattached } from '../reply.js';
+import { advanceTask, type AdvanceDeps } from '../workflows/tasks.js';
 
-/**
- * What a creator's editor is watching.
- *
- * Scoped to the game as every other creator-facing route is, so reading a task is reading one of
- * your own: a task id alone says nothing about who queued it.
- */
-export function taskRoutes(records: Records): FastifyPluginAsyncZod {
+/** Where a worker may name itself, which is what a claim records as its holder. */
+export const WORKER_HEADER = 'x-grove-worker';
+
+/** What a creator's editor is watching, scoped to the game as every creator-facing route is. */
+export function taskRoutes(games: Pick<Games, 'ownerOf'>, tasks: Tasks): FastifyPluginAsyncZod {
     return async (app) => {
         requireSignedIn(app);
-        app.addHook('preHandler', requireGameOwner(records));
+        app.addHook('preHandler', requireGameOwner(games));
 
         app.get(
             '/games/:gameId/tasks/:taskId',
@@ -27,7 +34,7 @@ export function taskRoutes(records: Records): FastifyPluginAsyncZod {
                 },
             },
             async (request, reply) => {
-                const task = await records.taskOf(request.params.gameId, request.params.taskId);
+                const task = await tasks.taskOf(request.params.gameId, request.params.taskId);
                 if (task === undefined) {
                     return reply.code(404).send({ code: 'not_found', message: 'no such task' });
                 }
@@ -37,18 +44,10 @@ export function taskRoutes(records: Records): FastifyPluginAsyncZod {
     };
 }
 
-/**
- * Where a worker says what it did.
- *
- * One route for every kind: @grove/game-builder and @grove/asset-upload-service claim from
- * different streams and settle through the same statement, which keeps one set of transition rules.
- *
- * The transitions are monotonic: NOT_STARTED to IN_PROGRESS to a terminal state, never backwards,
- * so a message redelivered after a worker already settled it is refused rather than applied.
- */
-export function fleetTaskRoutes(records: Records, env: Env): FastifyPluginAsyncZod {
+/** Where a worker claims and settles, each by its own secret and for its own kind of task only. */
+export function fleetTaskRoutes(deps: Omit<AdvanceDeps, 'log'>, env: Env): FastifyPluginAsyncZod {
     return async (app) => {
-        app.addHook('onRequest', verifyFleetSecret(env));
+        app.addHook('onRequest', admit(env, 'builder', 'asset-service'));
 
         app.patch(
             '/tasks/:taskId',
@@ -64,27 +63,45 @@ export function fleetTaskRoutes(records: Records, env: Env): FastifyPluginAsyncZ
                         401: ErrorBody,
                         404: ErrorBody,
                         409: ErrorBody,
+                        501: ErrorBody,
                     },
                 },
             },
             async (request, reply) => {
-                const advanced = await records.advanceTask(request.params.taskId, request.body);
-                if (advanced.outcome === 'missing') {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such task' });
-                }
-                // 409 rather than a quiet success: a worker told its attempt was refused stops
-                // retrying, where one told it succeeded would go on writing build output.
-                if (advanced.outcome === 'backwards') {
-                    return reply.code(409).send({
-                        code: 'conflict',
-                        message: `the task is already ${advanced.task.status}`,
-                    });
-                }
-                request.log.info(
-                    { taskId: advanced.task.taskId, status: advanced.task.status },
-                    'task advanced',
+                const caller = request.caller as keyof typeof KIND_OF;
+                const named = request.headers[WORKER_HEADER];
+                const advanced = await advanceTask(
+                    { ...deps, log: request.log },
+                    {
+                        taskId: request.params.taskId,
+                        // A credential answers for one kind; another kind's id is no task of its.
+                        kind: KIND_OF[caller],
+                        worker: typeof named === 'string' && validRequestId(named) ? named : caller,
+                        update: request.body,
+                        requestId: request.id,
+                    },
                 );
-                return reply.send(advanced.task);
+                switch (advanced.outcome) {
+                    case 'advanced':
+                        request.log.info(
+                            { taskId: advanced.task.taskId, status: advanced.task.status },
+                            'task advanced',
+                        );
+                        return reply.send(advanced.task);
+                    case 'missing':
+                        return reply.code(404).send({ code: 'not_found', message: 'no such task' });
+                    // A 409 rather than a quiet success, so a worker told it lost stops retrying.
+                    case 'refused':
+                        return reply
+                            .code(409)
+                            .send({ code: 'conflict', message: advanced.message });
+                    case 'invalid':
+                        return reply
+                            .code(400)
+                            .send({ code: 'invalid_request', message: advanced.message });
+                    case 'unattached':
+                        return unattached(reply, 'games bucket');
+                }
             },
         );
     };

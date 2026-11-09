@@ -1,5 +1,6 @@
 import { Redis } from 'ioredis';
-import { databaseOf, streamOf, type TaskId, type TaskKind } from '@grove/api-contract';
+import type { FastifyBaseLogger } from 'fastify';
+import { databaseOf, streamOf, type Task, type TaskId, type TaskKind } from '@grove/api-contract';
 
 /** Only `pushed` names work a consumer will be woken for; the row is written either way. */
 export type TaskPushed =
@@ -71,4 +72,20 @@ export function redisQueue(url: string): TaskQueue {
             );
         },
     };
+}
+
+/** Announces what was queued; a failed push is logged, since the sweeper makes it again. */
+export async function announce(
+    queue: TaskQueue,
+    tasks: readonly Task[],
+    log: FastifyBaseLogger,
+): Promise<void> {
+    const pushed = await Promise.all(
+        tasks.map(async (task) => ({ task, pushed: await queue.push(task.kind, task.taskId) })),
+    );
+    for (const { task, pushed: outcome } of pushed) {
+        if (outcome.outcome !== 'pushed') {
+            log.warn({ taskId: task.taskId, outcome: outcome.outcome }, 'task not announced');
+        }
+    }
 }

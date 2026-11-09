@@ -5,11 +5,12 @@ import { describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { PlayerId } from '@grove/api-contract';
 import type { GameVisibility } from '@grove/api-contract';
-import { buildApp } from '../src/app.js';
+import { buildApp, type Dependencies } from '../src/app.js';
+import { GENERAL_PER_MINUTE } from '../src/limits.js';
 import type { Mailer } from '../src/mailer.js';
-import { unattachedRecords } from '../src/records.js';
 import { unattachedStorage } from '../src/storage.js';
-import type { AccountRecord, GameRecord, Records } from '../src/records.js';
+import type { AccountRecord, Accounts, GameRecord, Games, Stores } from '../src/records.js';
+import { stores } from './doubles.js';
 import { CREATOR, GAME_ID, credentialsOf, signIn as signInWith, testEnv } from './fixtures.js';
 
 const HOLDER = CREATOR;
@@ -40,18 +41,37 @@ function game(over: Partial<GameRecord> = {}): GameRecord {
     };
 }
 
-/**
- * A store that answers whatever a test needs, over the unattached seam.
- *
- * Spread over `unattachedRecords` so a method a test did not name answers "nothing is attached"
- * rather than throwing, and so a widened seam never silently hands this double a real answer.
- */
-function store(over: Partial<Records> = {}): Records {
-    return { ...unattachedRecords, ...over };
+type Overrides = Partial<Accounts & Games>;
+
+const ACCOUNT_METHODS = new Set<string>([
+    'signIn',
+    'createAccount',
+    'accountOf',
+    'profileOf',
+    'renameAccount',
+    'changePassword',
+    'closeAccount',
+    'beginPasswordReset',
+    'finishPasswordReset',
+]);
+
+/** Whatever a case needs over the unattached seams, each method on the seam that owns it. */
+function store(over: Overrides = {}): Stores {
+    const accounts: Partial<Accounts> = {};
+    const games: Partial<Games> = {};
+    for (const [name, method] of Object.entries(over)) {
+        Object.assign(ACCOUNT_METHODS.has(name) ? accounts : games, { [name]: method });
+    }
+    return stores({ accounts, games });
+}
+
+/** The app over those seams, and whatever else a case attaches beside them. */
+function serve(held: Stores, extra: Partial<Dependencies> = {}) {
+    return buildApp(env, { ...held, ...extra });
 }
 
 /** A store that holds one account with a password, which is what most of these tests need. */
-function holding(over: Partial<Records> = {}): Records {
+function holding(over: Overrides = {}): Stores {
     return store({
         signIn: async (email, password) =>
             email === 'creator@grove.example' && password === PASSWORD ? HOLDER : undefined,
@@ -83,8 +103,7 @@ const signIn = (app: FastifyInstance) =>
 
 describe('signing up', () => {
     it('mints a session, and a token the next write is let through with', async () => {
-        const app = await buildApp(
-            env,
+        const app = await serve(
             store({
                 createAccount: async () => ({ outcome: 'created', account: account() }),
                 createGame: async () => ({ outcome: 'created', game: game() }),
@@ -105,8 +124,7 @@ describe('signing up', () => {
 
     it('hands the store the address folded, so one mailbox cannot become two accounts', async () => {
         let seen: string | undefined;
-        const app = await buildApp(
-            env,
+        const app = await serve(
             store({
                 createAccount: async (email) => {
                     seen = email;
@@ -119,10 +137,7 @@ describe('signing up', () => {
     });
 
     it('refuses an address that already answers to somebody', async () => {
-        const app = await buildApp(
-            env,
-            store({ createAccount: async () => ({ outcome: 'taken' }) }),
-        );
+        const app = await serve(store({ createAccount: async () => ({ outcome: 'taken' }) }));
         const { status, body } = await signUp(app);
         expect(status).toBe(409);
         expect(body.code).toBe('conflict');
@@ -149,8 +164,7 @@ describe('signing up', () => {
 
     it('trims the display name before the store ever sees it', async () => {
         let seen: string | undefined;
-        const app = await buildApp(
-            env,
+        const app = await serve(
             store({
                 createAccount: async (_email, _password, displayName) => {
                     seen = displayName;
@@ -163,17 +177,14 @@ describe('signing up', () => {
     });
 
     it('says so rather than pretending, while no store is attached', async () => {
-        const app = await buildApp(env, unattachedRecords);
+        const app = await buildApp(env, {});
         const { status, body } = await signUp(app);
         expect(status).toBe(501);
         expect(body.code).toBe('internal');
     });
 
     it('is rationed far tighter than the app, because it is a credential path', async () => {
-        const app = await buildApp(
-            env,
-            store({ createAccount: async () => ({ outcome: 'taken' }) }),
-        );
+        const app = await serve(store({ createAccount: async () => ({ outcome: 'taken' }) }));
         const response = await app.inject({
             method: 'POST',
             url: '/v1/players',
@@ -191,7 +202,7 @@ describe('signing up', () => {
             headers: { cookie },
         });
         expect(response.statusCode).toBe(200);
-        expect(Number(response.headers['x-ratelimit-limit'])).toBe(300);
+        expect(Number(response.headers['x-ratelimit-limit'])).toBe(GENERAL_PER_MINUTE);
     });
 });
 
@@ -215,8 +226,7 @@ describe('an account its holder is reading', () => {
     });
 
     it('renames, once the token rides along', async () => {
-        const app = await buildApp(
-            env,
+        const app = await serve(
             holding({
                 renameAccount: async (_p, displayName) => ({
                     outcome: 'renamed',
@@ -283,8 +293,7 @@ describe('an account somebody else is reading', () => {
 
 describe('changing a password', () => {
     it('is refused to a caller who cannot produce the current one', async () => {
-        const app = await buildApp(
-            env,
+        const app = await serve(
             holding({ changePassword: async () => ({ outcome: 'wrong_password' }) }),
         );
         const { cookie, csrfToken } = await signIn(app);
@@ -299,10 +308,7 @@ describe('changing a password', () => {
     });
 
     it('ends every other session the account was holding', async () => {
-        const app = await buildApp(
-            env,
-            holding({ changePassword: async () => ({ outcome: 'ok' }) }),
-        );
+        const app = await serve(holding({ changePassword: async () => ({ outcome: 'ok' }) }));
         const elsewhere = await signIn(app);
         const here = await signIn(app);
 
@@ -323,8 +329,7 @@ describe('changing a password', () => {
     });
 
     it('leaves the caller able to write, which rotating the session alone would not', async () => {
-        const app = await buildApp(
-            env,
+        const app = await serve(
             holding({
                 changePassword: async () => ({ outcome: 'ok' }),
                 createGame: async () => ({ outcome: 'created', game: game() }),
@@ -352,10 +357,7 @@ describe('changing a password', () => {
     });
 
     it('does not let a session survive on a request that was already in flight', async () => {
-        const app = await buildApp(
-            env,
-            holding({ changePassword: async () => ({ outcome: 'ok' }) }),
-        );
+        const app = await serve(holding({ changePassword: async () => ({ outcome: 'ok' }) }));
         const thief = await signIn(app);
         const holder = await signIn(app);
 
@@ -381,10 +383,7 @@ describe('changing a password', () => {
     });
 
     it('holds the new password to the same policy as the first one', async () => {
-        const app = await buildApp(
-            env,
-            holding({ changePassword: async () => ({ outcome: 'ok' }) }),
-        );
+        const app = await serve(holding({ changePassword: async () => ({ outcome: 'ok' }) }));
         const { cookie, csrfToken } = await signIn(app);
         const response = await app.inject({
             method: 'PUT',
@@ -399,8 +398,7 @@ describe('changing a password', () => {
 describe('making a game', () => {
     it('creates one for the player the cookie names', async () => {
         let owner: string | undefined;
-        const app = await buildApp(
-            env,
+        const app = await serve(
             holding({
                 createGame: async (asked, title) => {
                     owner = asked;
@@ -469,12 +467,11 @@ describe('making a game', () => {
 
     it('lists what the caller owns, and asks the store for nobody else', async () => {
         let asked: string | undefined;
-        const app = await buildApp(
-            env,
+        const app = await serve(
             holding({
                 gamesOf: async (owner) => {
                     asked = owner;
-                    return [game()];
+                    return { games: [game()], next: undefined };
                 },
             }),
         );
@@ -504,7 +501,7 @@ describe('making a game', () => {
 
 describe('who may play a game', () => {
     /** The store behind the settings route: one game, owned by whoever `owner` names. */
-    function owning(owner = HOLDER, over: Partial<Records> = {}): Records {
+    function owning(owner = HOLDER, over: Overrides = {}): Stores {
         let visibility: GameVisibility = 'private';
         return holding({
             ownerOf: async (asked) => (asked === GAME_ID ? owner : undefined),
@@ -593,8 +590,7 @@ describe('resetting a forgotten password', () => {
 
     it('mails a link to the address the store named', async () => {
         const mail = outbox();
-        const app = await buildApp(
-            env,
+        const app = await serve(
             holding({
                 beginPasswordReset: async () => ({
                     outcome: 'begun',
@@ -602,10 +598,7 @@ describe('resetting a forgotten password', () => {
                     token: TOKEN,
                 }),
             }),
-            undefined,
-            undefined,
-            undefined,
-            mail,
+            { mailer: mail },
         );
         expect((await askForReset(app)).statusCode).toBe(202);
         expect(mail.sent).toHaveLength(1);
@@ -619,18 +612,14 @@ describe('resetting a forgotten password', () => {
     // which addresses have accounts.
     it('answers the same, and as fast, for an address nobody holds', async () => {
         const mail = outbox();
-        const app = await buildApp(
-            env,
+        const app = await serve(
             holding({
                 beginPasswordReset: async (email) =>
                     email === 'creator@grove.example'
                         ? { outcome: 'begun', email, token: TOKEN }
                         : { outcome: 'no_account' },
             }),
-            undefined,
-            undefined,
-            undefined,
-            mail,
+            { mailer: mail },
         );
         const held = await askForReset(app);
         const unheld = await askForReset(app, 'nobody@grove.example');
@@ -644,26 +633,21 @@ describe('resetting a forgotten password', () => {
 
     it('folds the address before the store is asked', async () => {
         let seen: string | undefined;
-        const app = await buildApp(
-            env,
+        const app = await serve(
             holding({
                 beginPasswordReset: async (email) => {
                     seen = email;
                     return { outcome: 'no_account' };
                 },
             }),
-            undefined,
-            undefined,
-            undefined,
-            outbox(),
+            { mailer: outbox() },
         );
         await askForReset(app, 'Creator@Grove.Example');
         expect(seen).toBe('creator@grove.example');
     });
 
     it('says so rather than swallowing the request, while no mailer is attached', async () => {
-        const app = await buildApp(
-            env,
+        const app = await serve(
             holding({
                 beginPasswordReset: async () => ({
                     outcome: 'begun',
@@ -676,18 +660,14 @@ describe('resetting a forgotten password', () => {
     });
 
     it('is rationed on the same budget as signing in', async () => {
-        const app = await buildApp(env, holding(), undefined, undefined, undefined, outbox());
+        const app = await serve(holding(), { mailer: outbox() });
         expect(Number((await askForReset(app)).headers['x-ratelimit-limit'])).toBe(10);
     });
 
     it('sets the new password and ends every session the account was holding', async () => {
-        const app = await buildApp(
-            env,
+        const app = await serve(
             holding({ finishPasswordReset: async () => ({ outcome: 'reset', player: HOLDER }) }),
-            undefined,
-            undefined,
-            undefined,
-            outbox(),
+            { mailer: outbox() },
         );
         const open = await signIn(app);
 
@@ -709,13 +689,9 @@ describe('resetting a forgotten password', () => {
     });
 
     it('refuses a key the store would not take, without saying which kind of bad it was', async () => {
-        const app = await buildApp(
-            env,
+        const app = await serve(
             holding({ finishPasswordReset: async () => ({ outcome: 'refused' }) }),
-            undefined,
-            undefined,
-            undefined,
-            outbox(),
+            { mailer: outbox() },
         );
         const response = await app.inject({
             method: 'PUT',
@@ -727,7 +703,7 @@ describe('resetting a forgotten password', () => {
     });
 
     it('holds the new password to the same policy as the first one', async () => {
-        const app = await buildApp(env, holding(), undefined, undefined, undefined, outbox());
+        const app = await serve(holding(), { mailer: outbox() });
         const response = await app.inject({
             method: 'PUT',
             url: '/v1/auth/password',
@@ -738,7 +714,7 @@ describe('resetting a forgotten password', () => {
 });
 
 describe('deleting a game', () => {
-    function owning(owner = HOLDER, deleted: string[] = []): Records {
+    function owning(owner = HOLDER, deleted: string[] = []): Stores {
         return holding({
             ownerOf: async (asked) => (asked === GAME_ID ? owner : undefined),
             deleteGame: async (asked) => {
@@ -751,11 +727,13 @@ describe('deleting a game', () => {
     it('erases the bucket prefix, then the row', async () => {
         const erased: string[] = [];
         const deleted: string[] = [];
-        const app = await buildApp(env, owning(HOLDER, deleted), undefined, {
-            ...unattachedStorage,
-            erase: async (prefix) => {
-                erased.push(prefix);
-                return { outcome: 'erased' };
+        const app = await serve(owning(HOLDER, deleted), {
+            storage: {
+                ...unattachedStorage,
+                erase: async (prefix) => {
+                    erased.push(prefix);
+                    return { outcome: 'erased' };
+                },
             },
         });
         const { cookie, csrfToken } = await signIn(app);
@@ -766,15 +744,14 @@ describe('deleting a game', () => {
         });
 
         expect(response.statusCode).toBe(204);
-        expect(erased).toEqual([`${GAME_ID}/`]);
+        expect(erased).toEqual([`${GAME_ID}/`, `uploads/${GAME_ID}/`]);
         expect(deleted).toEqual([GAME_ID]);
     });
 
     it('keeps the row when the bucket would not answer', async () => {
         const deleted: string[] = [];
-        const app = await buildApp(env, owning(HOLDER, deleted), undefined, {
-            ...unattachedStorage,
-            erase: async () => ({ outcome: 'unavailable' }),
+        const app = await serve(owning(HOLDER, deleted), {
+            storage: { ...unattachedStorage, erase: async () => ({ outcome: 'unavailable' }) },
         });
         const { cookie, csrfToken } = await signIn(app);
         const response = await app.inject({

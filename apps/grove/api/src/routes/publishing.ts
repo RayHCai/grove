@@ -2,22 +2,23 @@ import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { ErrorBody, GameId, PublishedVersion, Task } from '@grove/api-contract';
 import type { TaskQueue } from '../queue.js';
-import type { Records } from '../records.js';
+import type { Games, Tasks, Workspaces } from '../records.js';
 import { requireGameOwner, requireSignedIn } from '../session.js';
 import { unattached } from '../reply.js';
+import { publish } from '../workflows/publishing.js';
 
-/** How many unverified assets a refusal names before the list stops being something to read. */
-const NAMED_ASSETS = 10;
+export interface PublishingDeps {
+    games: Pick<Games, 'ownerOf' | 'markPublished' | 'publishedVersionOf'>;
+    workspaces: Pick<Workspaces, 'workspaceOf'>;
+    tasks: Pick<Tasks, 'queueBuild'>;
+    queue: TaskQueue;
+}
 
-/**
- * Turning the saved draft into a version. A publish carries no body: it checks that every asset has
- * been verified, then writes a build row and pushes its id. The row goes first: a lost push is
- * work a sweeper still finds.
- */
-export function publishingRoutes(records: Records, queue: TaskQueue): FastifyPluginAsyncZod {
+/** Turning the saved draft into a version: a build pinned to the revision the last save froze. */
+export function publishingRoutes(deps: PublishingDeps): FastifyPluginAsyncZod {
     return async (app) => {
         requireSignedIn(app);
-        app.addHook('preHandler', requireGameOwner(records));
+        app.addHook('preHandler', requireGameOwner(deps.games));
 
         app.post(
             '/games/:gameId/versions',
@@ -25,8 +26,7 @@ export function publishingRoutes(records: Records, queue: TaskQueue): FastifyPlu
                 schema: {
                     tags: ['publishing'],
                     params: z.object({ gameId: GameId }),
-                    // The build is queued rather than run here: a compile is minutes of CPU on a
-                    // build box, and this service is the one replica every browser talks to.
+                    // Queued, not run: a compile is a build box's minutes, not this service's.
                     response: {
                         202: Task,
                         401: ErrorBody,
@@ -38,64 +38,35 @@ export function publishingRoutes(records: Records, queue: TaskQueue): FastifyPlu
                 },
             },
             async (request, reply) => {
-                const workspace = await records.workspaceOf(request.params.gameId);
-                if (workspace === undefined) {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such game' });
-                }
-                // Revision zero is a game whose editor has never saved. There is a manifest to
-                // build only once one save has happened, and a build of nothing is not a version.
-                if (workspace.revision === 0) {
-                    return reply
-                        .code(409)
-                        .send({ code: 'conflict', message: 'save before publishing' });
-                }
-
-                // Every asset has to have been verified before a build pins the game holding it: a
-                // published build is what every browser and game box joining it then loads.
-                const unverified = await records.unvalidatedAssets(
-                    request.params.gameId,
-                    NAMED_ASSETS,
-                );
-                if (unverified.length > 0) {
-                    return reply.code(409).send({
-                        code: 'conflict',
-                        message: `these assets are still being verified: ${unverified.join(', ')}`,
-                    });
-                }
-
-                const queued = await records.queueTask(
+                const published = await publish(
+                    { ...deps, log: request.log },
                     request.params.gameId,
                     request.viewer.playerId,
-                    'BUILD',
-                    workspace.revision,
                 );
-                if (queued.outcome === 'missing') {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such game' });
+                switch (published.outcome) {
+                    case 'queued':
+                    case 'existing':
+                        return reply.code(202).send(published.task);
+                    case 'missing':
+                        return reply.code(404).send({ code: 'not_found', message: 'no such game' });
+                    case 'unsaved':
+                        return reply
+                            .code(409)
+                            .send({ code: 'conflict', message: 'save before publishing' });
+                    // The paths: told only that something is unverified, a creator can do nothing.
+                    case 'unverified':
+                        return reply.code(409).send({
+                            code: 'conflict',
+                            message: `these assets are still being verified: ${published.paths.join(', ')}`,
+                        });
+                    case 'moved':
+                        return reply.code(409).send({
+                            code: 'conflict',
+                            message: 'the workspace was saved over while publishing; publish again',
+                        });
+                    case 'unattached':
+                        return unattached(reply, 'task store');
                 }
-                if (queued.outcome === 'unattached') {
-                    return unattached(reply, 'task store');
-                }
-
-                // A second publish of a manifest already queued gets the first task back rather
-                // than a second build of identical bytes; it is announced again all the same,
-                // because the push that would have woken a builder is the part that can go missing.
-                const pushed = await queue.push('BUILD', queued.task.taskId);
-                if (pushed.outcome !== 'pushed') {
-                    request.log.warn(
-                        { taskId: queued.task.taskId, outcome: pushed.outcome },
-                        'build not announced',
-                    );
-                }
-
-                // Written after the task exists, never before: a version this service remembers
-                // and nothing was ever asked to build is one no creator can ever play.
-                if (queued.outcome === 'queued') {
-                    await records.markPublished(request.params.gameId, {
-                        revision: workspace.revision,
-                        publishedAt: new Date().toISOString(),
-                    });
-                }
-                return reply.code(202).send(queued.task);
             },
         );
 
@@ -114,7 +85,7 @@ export function publishingRoutes(records: Records, queue: TaskQueue): FastifyPlu
                 },
             },
             async (request, reply) => {
-                const latest = await records.publishedVersionOf(request.params.gameId);
+                const latest = await deps.games.publishedVersionOf(request.params.gameId);
                 if (latest === undefined) {
                     return reply.code(404).send({ code: 'not_found', message: 'never published' });
                 }

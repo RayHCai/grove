@@ -1,51 +1,40 @@
-import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import {
     BuildArtifact,
     BuildOutputName,
     ErrorBody,
-    GameId,
     Manifest,
+    TaskId,
     WorkspacePath,
-    buildPrefix,
-    manifestKey,
-    objectKey,
 } from '@grove/api-contract';
-import type { WorkspaceFile } from '@grove/api-contract';
 import type { Env } from '../env.js';
-import { UNLIMITED, verifyFleetSecret } from '../service-scope.js';
+import type { Tasks } from '../records.js';
+import { UNLIMITED, admit } from '../service-scope.js';
 import type { Storage } from '../storage.js';
 import { unattached } from '../reply.js';
+import { ManifestCache, manifestFor, sourceFor, storeOutput } from '../workflows/build.js';
 
-/** What a build output is served as when nothing better is known; chunks are JavaScript. */
-const OPAQUE = 'application/octet-stream';
-
-/** A manifest is small and a build output is a chunk, so neither is streamed. */
+/** A source file is a script and a build output is a chunk, so neither is streamed. */
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
-/** A revision is what a task is pinned to, so it is positive: revision zero was never saved. */
-const Revision = z.coerce.number().int().positive();
+/** A claimed build nobody holds is refused rather than read: its source is no worker's business. */
+const UNCLAIMED = { code: 'conflict', message: 'the build is not claimed' } as const;
 
 /**
- * How a build box reads the source it was told to compile and writes what came out.
- *
- * It holds no bucket credential, so every byte it touches goes through here: what it may read is a
- * frozen manifest's files at the versions that manifest named, and what it may write is under a
- * revision's build prefix. No route spells a key outside those two shapes. The game and revision
- * are the caller's to name, though, so the fleet bearer reaches every game's manifests, sources
- * and build prefixes: the boundary is the key shape, not the task a builder was handed.
- *
- * A bucket that did not answer is a 503, never a 404, so a builder retries rather than failing
- * the creator's build over a read the bucket never made.
+ * How a build box reads the source of the build it claimed and stores what came out, all scoped to
+ * that one task, so the builder secret reaches no game nobody asked it to build.
  */
-export function fleetBuildRoutes(storage: Storage, env: Env): FastifyPluginAsyncZod {
+export function fleetBuildRoutes(
+    tasks: Pick<Tasks, 'buildOf' | 'recordArtifact'>,
+    storage: Storage,
+    env: Env,
+): FastifyPluginAsyncZod {
     return async (app) => {
-        app.addHook('onRequest', verifyFleetSecret(env));
+        app.addHook('onRequest', admit(env, 'builder'));
+        const deps = { tasks, storage, manifests: new ManifestCache(), cdnUrl: env.GAMES_CDN_URL };
 
-        // Every body in this scope is a build output, which is bytes and never a value. The JSON
-        // parser is overridden along with the rest: a build manifest that was parsed and
-        // re-serialised here would be stored as bytes whose hash is not the one it was written as.
+        // Bytes and never a value, so a manifest is stored under the hash of what was written.
         app.addContentTypeParser(
             ['*', 'application/json'],
             { parseAs: 'buffer' },
@@ -55,91 +44,69 @@ export function fleetBuildRoutes(storage: Storage, env: Env): FastifyPluginAsync
         );
 
         app.get(
-            '/fleet/games/:gameId/revisions/:revision/manifest',
+            '/fleet/tasks/:taskId/manifest',
             {
                 config: UNLIMITED,
                 schema: {
                     tags: ['build'],
-                    params: z.object({ gameId: GameId, revision: Revision }),
-                    response: { 200: Manifest, 401: ErrorBody, 404: ErrorBody, 503: ErrorBody },
+                    params: z.object({ taskId: TaskId }),
+                    response: {
+                        200: Manifest,
+                        401: ErrorBody,
+                        404: ErrorBody,
+                        409: ErrorBody,
+                        503: ErrorBody,
+                    },
                 },
             },
             async (request, reply) => {
-                const frozen = await manifestOf(
-                    storage,
-                    request.params.gameId,
-                    request.params.revision,
-                );
-                if (frozen === undefined) {
+                const found = await manifestFor(deps, request.params.taskId);
+                if (found.outcome === 'unclaimed') return reply.code(409).send(UNCLAIMED);
+                if (found.outcome === 'missing') {
                     return reply.code(404).send({ code: 'not_found', message: 'no such manifest' });
                 }
-                return reply.send(frozen);
+                return reply.send(found.value);
             },
         );
 
-        // A wildcard because a workspace path carries slashes. The version is the manifest's and
-        // never the caller's: a build compiles the snapshot it was pinned to, and reading whatever
-        // is current at a key would let an edit made after the publish reach the compiler.
+        // The manifest's version, never the caller's, so a later edit cannot reach a compiler.
         app.get(
-            '/fleet/games/:gameId/revisions/:revision/files/*',
+            '/fleet/tasks/:taskId/files/*',
             {
-                // No response schema: the body is the file's own bytes, and a serializer compiled
-                // for this route would turn every asset into JSON.
+                // No response schema: the body is the file's own bytes.
                 config: UNLIMITED,
                 schema: {
                     tags: ['build'],
-                    params: z.object({
-                        gameId: GameId,
-                        revision: Revision,
-                        '*': WorkspacePath,
-                    }),
+                    params: z.object({ taskId: TaskId, '*': WorkspacePath }),
                 },
             },
             async (request, reply) => {
-                const game = request.params.gameId;
-                const frozen = await manifestOf(storage, game, request.params.revision);
-                if (frozen === undefined) {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such manifest' });
-                }
-
-                const file: WorkspaceFile | undefined = frozen.files.find(
-                    (held) => held.path === request.params['*'],
-                );
-                if (file === undefined) {
+                const found = await sourceFor(deps, request.params.taskId, request.params['*']);
+                if (found.outcome === 'unclaimed') return reply.code(409).send(UNCLAIMED);
+                if (found.outcome === 'missing') {
                     return reply.code(404).send({ code: 'not_found', message: 'no such file' });
                 }
-
-                const found = await storage.get(
-                    objectKey(game, file.kind, file.path),
-                    file.versionId,
-                );
-                if (found === undefined) {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such file' });
-                }
-                // A version is one byte-set forever, so a build box that fetched it twice would be
-                // fetching the same answer.
+                // A version is one byte-set forever, so fetching it twice fetches the same answer.
                 return reply
                     .header('cache-control', 'private, max-age=31536000, immutable')
-                    .type(found.contentType)
-                    .send(found.body);
+                    .type(found.value.contentType)
+                    .send(found.value.body);
             },
         );
 
         app.put(
-            '/fleet/games/:gameId/revisions/:revision/build/:name',
+            '/fleet/tasks/:taskId/build/:name',
             {
                 bodyLimit: MAX_OUTPUT_BYTES,
                 config: UNLIMITED,
                 schema: {
                     tags: ['build'],
-                    params: z.object({
-                        gameId: GameId,
-                        revision: Revision,
-                        name: BuildOutputName,
-                    }),
+                    params: z.object({ taskId: TaskId, name: BuildOutputName }),
                     response: {
                         200: BuildArtifact,
                         401: ErrorBody,
+                        404: ErrorBody,
+                        409: ErrorBody,
                         501: ErrorBody,
                         502: ErrorBody,
                         503: ErrorBody,
@@ -150,66 +117,31 @@ export function fleetBuildRoutes(storage: Storage, env: Env): FastifyPluginAsync
                 const body = Buffer.isBuffer(request.body)
                     ? request.body
                     : Buffer.from(String(request.body), 'utf8');
-
-                const written = await storage.put(
-                    `${buildPrefix(request.params.gameId, request.params.revision)}${request.params.name}`,
+                const stored = await storeOutput(
+                    deps,
+                    request.params.taskId,
+                    request.params.name,
                     body,
-                    contentTypeOf(request.params.name, request.headers['content-type']),
                 );
-                if (written.outcome === 'unattached') {
-                    return unattached(reply, 'games bucket');
+                switch (stored.outcome) {
+                    // The address and digest are this service's: what a success is held to.
+                    case 'stored':
+                        return reply.send(stored.artifact);
+                    case 'missing':
+                        return reply
+                            .code(404)
+                            .send({ code: 'not_found', message: 'no such build' });
+                    case 'unclaimed':
+                        return reply.code(409).send(UNCLAIMED);
+                    case 'unattached':
+                        return unattached(reply, 'games bucket');
+                    case 'unavailable':
+                        return reply.code(502).send({
+                            code: 'internal',
+                            message: 'the build output could not be stored',
+                        });
                 }
-                if (written.outcome !== 'written') {
-                    return reply.code(502).send({
-                        code: 'internal',
-                        message: 'the build output could not be stored',
-                    });
-                }
-
-                return reply.send({
-                    name: request.params.name,
-                    // The address is this service's, so a build manifest names where the edge
-                    // actually serves these bytes rather than wherever a worker guessed.
-                    url: `${env.GAMES_CDN_URL.replace(/\/+$/u, '')}/${buildPrefix(request.params.gameId, request.params.revision)}${request.params.name}`,
-                    // Hashed here rather than taken on trust: a handshake compares this against a
-                    // digest of the bytes a browser fetched, and only the bytes that landed can
-                    // make that comparison mean anything.
-                    hash: createHash('sha256').update(body).digest('hex'),
-                    byteLength: body.byteLength,
-                });
             },
         );
     };
-}
-
-/** The snapshot one revision froze, as the bucket holds it. */
-async function manifestOf(
-    storage: Storage,
-    game: GameId,
-    revision: number,
-): Promise<Manifest | undefined> {
-    const found = await storage.get(manifestKey(game, revision));
-    if (found === undefined) return undefined;
-    // Parsed rather than cast: this is what decides which bytes a build box is handed, and a
-    // manifest that does not parse is one nothing should be compiled from.
-    const parsed = Manifest.safeParse(safeJson(found.body.toString('utf8')));
-    if (!parsed.success || parsed.data.gameId !== game || parsed.data.revision !== revision) {
-        return undefined;
-    }
-    return parsed.data;
-}
-
-function safeJson(text: string): unknown {
-    try {
-        return JSON.parse(text);
-    } catch {
-        return undefined;
-    }
-}
-
-/** What a build output is stored as, so the edge hands a browser something it will evaluate. */
-function contentTypeOf(name: string, presented: string | undefined): string {
-    if (name.endsWith('.js')) return 'text/javascript';
-    if (name.endsWith('.json')) return 'application/json';
-    return presented?.split(';')[0]?.trim() ?? OPAQUE;
 }
