@@ -5,7 +5,7 @@
 #
 #     docker build -f apps/grove/asset-upload-service/Dockerfile -t grove-asset-upload-service .
 ARG RUST_IMAGE=rust:1.98.1-bookworm
-ARG GO_IMAGE=golang:1.26-bookworm
+ARG GO_IMAGE=golang:1.26.10-bookworm
 
 FROM ${RUST_IMAGE} AS build
 WORKDIR /src
@@ -37,10 +37,6 @@ RUN touch asset-upload-service/src/main.rs request-id/src/lib.rs
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --locked --package grove-asset-upload-service --bin grove-asset-upload-service
 
-# Seeded here so the runtime stage can own it: that stage has no shell to `mkdir` with, and a named
-# volume mounted over this path takes its ownership from what the image has at it.
-RUN mkdir -p /seed/objects
-
 FROM ${GO_IMAGE} AS health
 WORKDIR /src
 COPY go.mod ./
@@ -49,11 +45,9 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/grove-healthcheck 
 
 # `cc` rather than `static`: this binary is dynamically linked against the builder's glibc. No shell
 # and no package manager either way, and non-root already.
-FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f AS runtime
 COPY --from=health /out/grove-healthcheck /usr/local/bin/grove-healthcheck
 COPY --from=build /src/target/release/grove-asset-upload-service /usr/local/bin/grove-asset-upload-service
-# 65532 is distroless's `nonroot`, named numerically because this stage has no `chown` to resolve it.
-COPY --from=build --chown=65532:65532 /seed/objects /var/lib/grove/objects
 EXPOSE 4005
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/usr/local/bin/grove-healthcheck", "-addr-env", "ASSET_UPLOAD_SERVICE_BIND", "-port-env", "PORT", "-port", "4005"]

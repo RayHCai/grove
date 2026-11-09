@@ -1,12 +1,10 @@
-//! Content-addressed object storage for the fleet, in one process, the composition root only.
-//! An object arrives and leaves as a stream, so the state held between a request and its answer
-//! is a chunk and a hasher.
+//! The worker that inspects every asset a creator uploads, in one process, the composition root only.
+//! An asset arrives on a stream and leaves as a copy beside the bundles, or not at all.
 
-mod auth;
 mod config;
 mod consumer;
+mod inspect;
 mod routes;
-mod store;
 mod tasks;
 
 use std::future::Future;
@@ -21,8 +19,8 @@ use tokio::net::TcpListener;
 use tokio::sync::{oneshot, watch};
 
 use crate::config::Config;
-use crate::routes::AppState;
-use crate::store::FileStore;
+use crate::consumer::Worker;
+use crate::inspect::HttpBucket;
 use crate::tasks::HttpTasks;
 
 /// How long a drain may run before whatever is still open is dropped, which is the ceiling
@@ -34,22 +32,9 @@ async fn main() -> Result<()> {
     request_id::init_tracing();
 
     let config = Config::from_env()?;
-    let store = FileStore::open(config.root.clone())
-        .await
-        .with_context(|| format!("opening the object root at {}", config.root.display()))?;
-    let consuming = config
-        .redis_url
-        .as_ref()
-        .map(|_| Arc::new(AtomicBool::new(true)));
-
-    let router = routes::router(
-        AppState {
-            store: Arc::new(store),
-            max_bytes: config.max_bytes,
-            consuming: consuming.clone(),
-        },
-        Arc::new(config.fleet_secret.clone()),
-    );
+    // Down until the consumer has joined its group, so a deploy with no stream fails its probe.
+    let consuming = Arc::new(AtomicBool::new(false));
+    let router = routes::router(consuming.clone());
 
     let bind: SocketAddr = config
         .bind
@@ -58,51 +43,34 @@ async fn main() -> Result<()> {
     let socket = TcpListener::bind(bind)
         .await
         .with_context(|| format!("binding {bind}"))?;
-    tracing::info!(addr = %bind, root = %config.root.display(), "listening");
+    tracing::info!(addr = %bind, "listening");
 
-    // The object routes come up either way. A deploy with no stream behind it serves bundles and
-    // claims nothing, a wiring fault to see in the logs rather than a process that will not start,
-    // which no host agent could tell from a box that is gone.
+    let worker = Arc::new(Worker {
+        tasks: Arc::new(HttpTasks::new(config.api_url, config.service_secret)?),
+        bucket: Arc::new(HttpBucket::new()?),
+    });
+    let client =
+        redis::Client::open(config.redis_url).context("REDIS_URL is not a Redis address")?;
+    tracing::info!(worker = %config.worker_name, "claiming asset uploads");
     let (stopping, stop) = watch::channel(false);
-    let consumer = match config.redis_url.as_deref().zip(consuming) {
-        None => {
-            tracing::error!("no asset stream is attached; nothing will be claimed");
-            None
-        }
-        Some((url, alive)) => {
-            let settling = Arc::new(HttpTasks::new(
-                config.api_url.clone(),
-                config.fleet_secret.clone(),
-            )?);
-            let client = redis::Client::open(url).context("REDIS_URL is not a Redis address")?;
-            let name = config.worker_name.clone();
-            tracing::info!(worker = %name, "claiming asset uploads");
-            Some(tokio::spawn(consumer::supervise(
-                client, settling, name, stop, alive,
-            )))
-        }
-    };
+    let consumer = tokio::spawn(consumer::supervise(
+        client,
+        worker,
+        config.worker_name,
+        stop,
+        consuming,
+    ));
 
-    let signal = async {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            () = terminate() => {}
-        }
-    };
-    let served = serve(socket, router, signal, DRAIN_TIMEOUT).await;
+    let served = serve(socket, router, request_id::stop_signal(), DRAIN_TIMEOUT).await;
 
     // After the drain, so an asset claimed on the way out is settled rather than left pending for
     // the reclaim window to hand back.
     let _ = stopping.send(true);
-    if let Some(handle) = consumer {
-        let _ = handle.await;
-    }
+    let _ = consumer.await;
     served
 }
 
 /// Serves until `shutdown` resolves, then until what is in flight finishes or `drain` elapses.
-/// A deploy is a drain rather than a kill: an upload holds a temp file only its own rename
-/// publishes, so a kill mid-stream loses an object the caller was never told about.
 async fn serve(
     socket: TcpListener,
     router: Router,
@@ -118,8 +86,7 @@ async fn serve(
 
     tokio::select! {
         result = serving => result.context("serving"),
-        // A peer that has stopped reading is never polled again and the body deadline maps only the
-        // request body, so without this the drain has nothing under it that ever ends.
+        // A peer that never finishes its request holds its connection open, and nothing else ends it.
         () = drain_deadline(draining, drain) => bail!("a connection outlasted the {drain:?} drain"),
     }
 }
@@ -132,82 +99,19 @@ async fn drain_deadline(began: oneshot::Receiver<()>, drain: Duration) {
     }
 }
 
-/// Resolves on SIGTERM, which is what a supervisor sends where a keyboard sends SIGINT.
-#[cfg(unix)]
-async fn terminate() {
-    use tokio::signal::unix::{signal, SignalKind};
-
-    match signal(SignalKind::terminate()) {
-        Ok(mut sigterm) => {
-            let _ = sigterm.recv().await;
-        }
-        // A handler this process could not register is not a drain it can ever start.
-        Err(err) => {
-            tracing::error!(error = ?err, "cannot listen for SIGTERM");
-            std::future::pending().await
-        }
-    }
-}
-
-/// Windows has no SIGTERM, so the drain there is the console signal alone.
-#[cfg(not(unix))]
-async fn terminate() {
-    std::future::pending().await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{ObjectHash, ObjectStore, PutRequest};
-    use bytes::Bytes;
-    use sha2::{Digest, Sha256};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use std::sync::atomic::AtomicBool;
+    use tokio::io::AsyncWriteExt;
     use tokio::net::TcpStream;
-
-    const SECRET: &str = "a-fleet-secret-at-least-thirty-two-characters";
-
-    /// Past any socket buffer the two ends can rest the response in, so a peer that stops reading
-    /// really does leave the write stuck rather than merely slow.
-    const STUCK_OBJECT_BYTES: usize = 16 * 1024 * 1024;
 
     /// Short enough to assert against, and the only thing this test changes about the real drain.
     const TEST_DRAIN: Duration = Duration::from_millis(250);
 
     #[tokio::test]
-    async fn a_peer_that_stops_reading_does_not_hold_the_drain_open() {
-        let root = tempfile::tempdir().unwrap();
-        let store = Arc::new(FileStore::open(root.path().to_path_buf()).await.unwrap());
-
-        let bytes = vec![7u8; STUCK_OBJECT_BYTES];
-        let mut hasher = Sha256::new();
-        hasher.update(&bytes);
-        let hash: String = hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        store
-            .put(
-                PutRequest {
-                    hash: ObjectHash::parse(&hash).unwrap(),
-                    content_type: "application/wasm".to_owned(),
-                    max_bytes: STUCK_OBJECT_BYTES as u64,
-                },
-                Box::pin(futures_util::stream::once(
-                    async move { Ok(Bytes::from(bytes)) },
-                )),
-            )
-            .await
-            .unwrap();
-
-        let router = routes::router(
-            AppState {
-                store: store.clone(),
-                max_bytes: STUCK_OBJECT_BYTES as u64,
-                consuming: None,
-            },
-            Arc::new(SECRET.to_owned()),
-        );
+    async fn a_peer_that_never_finishes_its_request_does_not_hold_the_drain_open() {
+        let router = routes::router(Arc::new(AtomicBool::new(true)));
         let socket = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = socket.local_addr().unwrap();
         let (signal, on_signal) = oneshot::channel();
@@ -220,19 +124,11 @@ mod tests {
             TEST_DRAIN,
         ));
 
+        // Half a head on a fresh connection, which hyper keeps waiting on through a graceful stop.
         let mut peer = TcpStream::connect(addr).await.unwrap();
-        peer.write_all(
-            format!(
-                "GET /v1/objects/{hash} HTTP/1.1\r\nHost: upload\r\nAuthorization: Bearer {SECRET}\r\n\r\n"
-            )
-            .as_bytes(),
-        )
-        .await
-        .unwrap();
-
-        // One byte proves the answer started; everything after it backs up, because this is the last
-        // read this peer ever does.
-        assert_eq!(peer.read(&mut [0u8; 1]).await.unwrap(), 1);
+        peer.write_all(b"GET /health HTTP/1.1\r\nHost: up")
+            .await
+            .unwrap();
         tokio::time::sleep(TEST_DRAIN).await;
         signal.send(()).unwrap();
 

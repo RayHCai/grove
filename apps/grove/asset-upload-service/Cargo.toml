@@ -1,6 +1,6 @@
 [package]
 name = "grove-asset-upload-service"
-description = "Content-addressed object storage: the bundles a session loads and the assets a game draws with."
+description = "The worker that inspects every asset a creator uploads before the CDN may serve it."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,46 +11,29 @@ name = "grove-asset-upload-service"
 path = "src/main.rs"
 
 [dependencies]
-# `fs` and `io-util` on top of the workspace set: an object is written a chunk at a time, and every
-# other crate in this workspace holds its state in memory.
-tokio = { workspace = true, features = ["fs", "io-util"] }
+tokio = { workspace = true }
 axum = { workspace = true }
 
-# A deadline between one frame of a body and the next, and a ceiling on the object requests running
-# at once: a stream that stops moving is what holds a descriptor and a file in `incoming/` open.
-tower = { workspace = true, features = ["limit"] }
-tower-http = { workspace = true }
-
-# The streams an object arrives and leaves on. `tokio-util` for the file half, `futures-util` for the
-# socket half, `bytes` for the chunk type both of them speak.
-tokio-util = { version = "0.7", features = ["io"] }
-futures-util = { workspace = true }
-bytes = "1"
-
-# The store is an `Arc<dyn ObjectStore>` so a second backing store lands on it without the router
-# becoming generic over one, and a trait with an async fn in it is not dyn-safe.
+# The API and the bucket are seams the worker holds as trait objects, and a trait with an async fn
+# in it is not dyn-safe.
 async-trait = "0.1"
 
 serde = { workspace = true }
+# A JSON asset is checked by parsing it, which is the one check its type has.
+serde_json = { workspace = true }
 
-# The asset stream a save queues work on, and the one call this service makes back to @grove/api.
+# The asset stream a save queues work on, and the calls this service makes out: the API, the bucket.
 redis = { workspace = true }
 reqwest = { workspace = true }
 
 grove-request-id = { workspace = true }
 
-# The hash is the name, so it is the hot loop rather than a checksum on the side.
-sha2 = { workspace = true }
-# The fleet bearer, compared the way `grove-game-instance` compares a signature.
-subtle = { workspace = true }
-
 anyhow = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
-# `start_paused` on a test, so a body deadline is asserted rather than waited out.
-tokio = { workspace = true, features = ["test-util"] }
+# `start_paused` on a test, so a backoff is asserted rather than waited out, and raw socket writes.
+tokio = { workspace = true, features = ["test-util", "io-util"] }
 tower = { workspace = true, features = ["util"] }
 
 [lints]
