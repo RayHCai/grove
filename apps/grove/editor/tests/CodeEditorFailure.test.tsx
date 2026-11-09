@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@grove/ui';
 import { CodeEditor } from '../src/editor/CodeEditor';
-import { mount, untilSettled } from './helpers';
+import { mount, untilSettled } from '@grove/ui/testing';
 
 // The setup file resolves the boundary for every other test; here the chunk never arrives.
 vi.mock('../src/editor/monaco', () => Promise.reject(new Error('the chunk is gone')));

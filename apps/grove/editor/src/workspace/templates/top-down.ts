@@ -30,9 +30,6 @@ const AVATAR_URL = '/avatar-square.svg';
  * where it starts already shows the whole world, and a follow would be a line doing nothing.
  */
 export const TOP_DOWN: GameTemplate = {
-    id: 'top-down',
-    name: 'Top-down player',
-    description: 'One player walking in four directions.',
     openPath: PLAYER_PATH,
     files: () => [draftFromText(PLAYER_PATH, source)],
     project: {

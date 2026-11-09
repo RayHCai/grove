@@ -5,7 +5,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorBoundary } from '@grove/ui';
 import { CrashFlush, useCrashFlush } from '../src/workspace/autosave';
-import { mount } from './helpers';
+import { mount } from '@grove/ui/testing';
 
 let breakNow: () => void = () => undefined;
 

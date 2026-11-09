@@ -15,6 +15,9 @@ export { ApiError, isLapsedSession };
 
 export type ApiOptions = ApiClientOptions;
 
+/** The most a keepalive request may carry; the browser refuses a larger one before it leaves. */
+export const KEEPALIVE_BYTES = 64 * 1024;
+
 /**
  * The @grove/api client the editor holds.
  *
@@ -33,25 +36,34 @@ export interface Api {
 
     workspace(game: GameId): Promise<Workspace>;
     save(game: GameId, save: WorkspaceSave): Promise<Workspace>;
-    /**
-     * Sent with `keepalive`, for the one save a closing tab gets to make.
-     *
-     * The browser kills an ordinary request as the page goes; a keepalive one outlives it, at the
-     * cost of a body ceiling the browser rather than this service sets.
-     */
-    saveOnExit(game: GameId, save: WorkspaceSave): Promise<void>;
+    /** The one save a closing tab gets: `keepalive`, and what it landed as for a tab that stayed. */
+    saveOnExit(game: GameId, save: WorkspaceSave): Promise<Workspace | undefined>;
     /** One file's bytes, at the version the saved set names. */
     file(game: GameId, path: WorkspacePath): Promise<Uint8Array>;
 
     /** Where an asset's bytes should go. Nothing is recorded until a save names the path. */
-    assetUpload(game: GameId, path: WorkspacePath, contentType: string): Promise<AssetUpload>;
+    assetUpload(
+        game: GameId,
+        path: WorkspacePath,
+        declared: { contentType: string; byteLength: number },
+    ): Promise<AssetUpload>;
     /** Straight to the bucket, carrying no cookie and no token: the URL is the whole credential. */
-    putAsset(upload: AssetUpload, bytes: Uint8Array, contentType: string): Promise<void>;
+    putAsset(upload: AssetUpload, bytes: Uint8Array): Promise<void>;
 }
 
 export function createApi(options: ApiOptions): Api {
-    const { baseUrl, fetch = globalThis.fetch } = options;
+    const { fetch = globalThis.fetch } = options;
     const base = createApiBase(options);
+
+    async function exitSave(game: GameId, body: string, keepalive: boolean): Promise<Workspace> {
+        const response = await base.call(`/v1/games/${encodeURIComponent(game)}/workspace`, {
+            method: 'PUT',
+            keepalive,
+            headers: { 'content-type': 'application/json' },
+            body,
+        });
+        return Workspace.parse(await response.json());
+    }
 
     return {
         session: async () => base.signedIn(await base.attempt('/v1/auth/session', {}, 401)),
@@ -67,15 +79,19 @@ export function createApi(options: ApiOptions): Api {
             base.write(`/v1/games/${encodeURIComponent(game)}/workspace`, 'PUT', save, Workspace),
 
         saveOnExit: async (game, save) => {
-            // Deliberately unchecked: the page is going, and there is nobody left to tell. What
-            // this buys is the request leaving at all, which an ordinary one would not.
-            await fetch(`${baseUrl}/v1/games/${encodeURIComponent(game)}/workspace`, {
-                method: 'PUT',
-                credentials: 'include',
-                keepalive: true,
-                headers: { 'content-type': 'application/json', ...base.csrfHeader() },
-                body: JSON.stringify(save),
-            }).catch(() => undefined);
+            const body = JSON.stringify(save);
+            const fits = new TextEncoder().encode(body).byteLength <= KEEPALIVE_BYTES;
+            const unsent = new ApiError(0, 'unreachable', 'too large to keep alive');
+            // An ordinary request still lands for a tab that was only hidden, which is the best
+            // left for a body the browser would refuse to keep alive, or one it did refuse.
+            return (fits ? exitSave(game, body, true) : Promise.reject(unsent))
+                .catch(async (failure: unknown) => {
+                    if (failure instanceof ApiError && failure.code === 'unreachable') {
+                        return exitSave(game, body, false);
+                    }
+                    throw failure;
+                })
+                .catch(() => undefined);
         },
 
         file: async (game, path) =>
@@ -85,20 +101,20 @@ export function createApi(options: ApiOptions): Api {
                 ).arrayBuffer(),
             ),
 
-        assetUpload: async (game, path, contentType) =>
+        assetUpload: async (game, path, { contentType, byteLength }) =>
             base.write(
                 `/v1/games/${encodeURIComponent(game)}/assets`,
                 'POST',
-                { path, contentType },
+                { path, contentType, byteLength },
                 AssetUpload,
             ),
 
-        putAsset: async (upload, bytes, contentType) => {
+        putAsset: async (upload, bytes) => {
             const response = await fetch(upload.url, {
                 method: 'PUT',
-                // No cookie: this is the bucket, not the API, and a credential sent there is a
-                // credential handed to a third party.
-                headers: { 'content-type': contentType },
+                // Exactly what was signed and nothing else: no cookie, since this is the bucket and
+                // a credential sent there is handed to a third party.
+                headers: upload.headers,
                 // Copied into a plain ArrayBuffer view: a Uint8Array over a SharedArrayBuffer is
                 // not a body `fetch` will take.
                 body: new Uint8Array(bytes),

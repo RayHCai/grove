@@ -1,15 +1,7 @@
-import {
-    Suspense,
-    lazy,
-    useEffect,
-    useMemo,
-    useReducer,
-    useRef,
-    useState,
-    useSyncExternalStore,
-} from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import type { Api } from '../api/client';
 import { profileUrl } from '../boot/platform';
+import { ConsoleLines } from '../console/lines';
 import { ConsolePane } from '../console/ConsolePane';
 import { EditorPane } from '../editor/EditorPane';
 import type { EditorHandle } from '../editor/monaco';
@@ -18,7 +10,6 @@ import { ExplorerPanel } from '../explorer/ExplorerPanel';
 import { asProjectFile, treeOf } from '../project/files';
 import { isProjectFile, withSettings } from '../project/manifest';
 import { PlayPane } from '../player/PlayPane';
-import type { LocalStageProps } from '../run/LocalStage';
 import { useRun } from '../run/useRun';
 import { SettingsPanel } from '../settings/SettingsPanel';
 import type { DraftFile } from '../workspace/files';
@@ -52,14 +43,6 @@ function sourcesOf(files: readonly DraftFile[]): ReturnType<typeof asProjectFile
     return files.filter((file) => !isProjectFile(file.path)).map(asProjectFile);
 }
 
-/**
- * The stage an engine game plays on, fetched the first time somebody presses Play.
- *
- * Behind a `lazy` because it is the only thing in this app that reaches the engine, the sim and
- * the renderer: several megabytes a creator writing their first line has no use for yet.
- */
-const LocalStage = lazy(async () => import('../run/LocalStage'));
-
 export interface EditorShellProps {
     api: Api;
     opened: OpenGame;
@@ -69,18 +52,13 @@ export interface EditorShellProps {
      * Whatever this does has to leave the screen standing: there is unsaved work here.
      */
     onSessionLapsed: () => void;
-    /** How a local world's renderer is built; a test hands in one that needs no GPU. */
-    createRenderer?: LocalStageProps['createRenderer'];
 }
 
 /** The workbench: top bar, rail, the Explorer and Grove AI panels, and the workspace of panes. */
-export function EditorShell({
-    api,
-    opened,
-    onSessionLapsed,
-    createRenderer,
-}: EditorShellProps): React.JSX.Element {
+export function EditorShell({ api, opened, onSessionLapsed }: EditorShellProps): React.JSX.Element {
     const [handle, setHandle] = useState<EditorHandle | null>(null);
+    // Held, never subscribed to here: only the console pane redraws when a run writes.
+    const [lines] = useState(() => new ConsoleLines());
     const workspace = useWorkspace({
         api,
         opened,
@@ -92,6 +70,8 @@ export function EditorShell({
         project: workspace.project,
         handle,
         title: opened.game.title,
+        name: opened.account.displayName,
+        lines,
         writeProject: workspace.writeProject,
     });
 
@@ -169,27 +149,6 @@ export function EditorShell({
         dispatchTabs({ type: 'close', path });
     }
 
-    // `undefined` rather than `false` when there is no world: the play pane shows its frame only
-    // when nothing was handed to it, and `false` is something.
-    const stage =
-        run.world === null ? undefined : (
-            <Suspense
-                fallback={
-                    <div className="play-booting" role="status">
-                        Loading the engine…
-                    </div>
-                }
-            >
-                <LocalStage
-                    version={run.world}
-                    name={opened.account.displayName}
-                    onLine={run.write}
-                    onControls={run.setStage}
-                    createRenderer={createRenderer}
-                />
-            </Suspense>
-        );
-
     return (
         <div className="shell">
             <TopBar
@@ -240,10 +199,9 @@ export function EditorShell({
                                 status={run.transport}
                                 dispatch={run.onTransport}
                                 frameRef={run.setFrame}
-                            >
-                                {stage}
-                            </PlayPane>
-                            <ConsolePane lines={run.lines} onClear={run.clearLines} />
+                                stageStatus={run.stage}
+                            />
+                            <ConsolePane lines={lines} />
                         </div>
                     </div>
                 </main>

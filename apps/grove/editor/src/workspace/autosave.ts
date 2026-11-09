@@ -14,8 +14,10 @@ export const SAVE_DEBOUNCE_MS = 1_500;
 export const SAVE_CEILING_MS = 30_000;
 
 export interface AutosaveOptions {
-    /** What the editor still owes the service; a new object per edit is what restarts the clock. */
+    /** What a save nobody asked for would carry; a new object per edit is what restarts the clock. */
     pending: Pending;
+    /** Whether anything at all is unsaved, held-back paths included, which the exit dialog guards. */
+    unsaved: boolean;
     /** An ordinary save. Failures are the caller's to report; this hook never reports one. */
     save: () => void;
     /**
@@ -34,14 +36,14 @@ export interface AutosaveOptions {
  * ceiling is the creator who never pauses; the hidden tab is the one that never comes back. The
  * autosave is what actually protects work; the exit dialog is only the backstop.
  */
-export function useAutosave({ pending, save, flush }: AutosaveOptions): void {
+export function useAutosave({ pending, unsaved, save, flush }: AutosaveOptions): void {
     // Effect events, so the listeners below are registered once rather than re-registered on
     // every keystroke, which on `beforeunload` is the difference between one handler and hundreds.
     const saveNow = useEffectEvent(save);
-    const flushIfOwed = useEffectEvent((): boolean => {
-        if (!isPending(pending)) return false;
-        flush();
-        return true;
+    // Answers whether anything is left unsaved, which an exit save of text alone may not cover.
+    const flushOwed = useEffectEvent((): boolean => {
+        if (isPending(pending)) flush();
+        return unsaved;
     });
 
     useEffect(() => {
@@ -61,14 +63,14 @@ export function useAutosave({ pending, save, flush }: AutosaveOptions): void {
 
     useEffect(() => {
         const onHidden = (): void => {
-            if (document.visibilityState === 'hidden') flushIfOwed();
+            if (document.visibilityState === 'hidden') flushOwed();
         };
         // `visibilitychange` and not `pagehide`: a phone switching apps fires this one, and it is
         // the last event a tab is guaranteed to get.
         document.addEventListener('visibilitychange', onHidden);
 
         const onUnload = (event: BeforeUnloadEvent): void => {
-            if (!flushIfOwed()) return;
+            if (!flushOwed()) return;
             // The browser shows its own wording and ignores anything set here; what matters is
             // that the event is cancelled at all.
             event.preventDefault();

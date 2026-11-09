@@ -64,8 +64,12 @@ export async function stamp(
     scriptModules: readonly ScriptModule[],
     sources: ReadonlyMap<string, string>,
 ): Promise<ProjectManifest> {
+    // A manifest a compile already stamped still carries the hash it was given, which nobody authored.
+    const { contentHash: _stamped, ...rest } = authored as AuthoredProject & {
+        contentHash?: string;
+    };
     const project: Omit<ProjectManifest, 'contentHash'> = {
-        ...authored,
+        ...rest,
         formatVersion: PROJECT_FORMAT_VERSION,
         scriptModules: [...scriptModules],
     };

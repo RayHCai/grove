@@ -2,21 +2,34 @@
 // and what a refusal puts on screen.
 
 import { act } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import { ThemeProvider } from '@grove/ui';
 import { ApiError } from '../src/api/client';
 import { mountEditor } from '../src/editor/monaco';
 import { EditorShell } from '../src/shell/EditorShell';
-import { SAVE_DEBOUNCE_MS } from '../src/workspace/autosave';
+import { SAVE_CEILING_MS, SAVE_DEBOUNCE_MS } from '../src/workspace/autosave';
 import { draftFromText } from '../src/workspace/files';
 import { openGame } from '../src/workspace/session';
 import { PROJECT_PATH } from '../src/project/manifest';
 import { fakeApi, opened, stored, TEMPLATE_PATH } from './doubles';
 import type { FakeApi } from './doubles';
-import { mount, until, untilSettled } from './helpers';
+import { mount, until, untilSettled } from '@grove/ui/testing';
 
 const mounted = vi.mocked(mountEditor);
+
+/** Shows or hides the tab the way the browser does, for a case that owns the restore below. */
+async function visibility(shown: 'hidden' | 'visible'): Promise<void> {
+    await act(async () => {
+        Object.defineProperty(document, 'visibilityState', { value: shown, configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+    });
+}
+
+afterEach(() => {
+    // The own property shadows jsdom's getter; without it gone every later case is a hidden tab.
+    Reflect.deleteProperty(document, 'visibilityState');
+});
 
 interface Workbench {
     onChange: Mock;
@@ -25,6 +38,8 @@ interface Workbench {
 }
 
 async function shell(api: FakeApi = fakeApi(), lapsed: () => void = vi.fn()): Promise<HTMLElement> {
+    // As Boot does before the workbench mounts, which is what hands the client its token.
+    await api.session();
     const host = await mount(
         <ThemeProvider>
             <EditorShell api={api} opened={opened()} onSessionLapsed={lapsed} />
@@ -35,11 +50,12 @@ async function shell(api: FakeApi = fakeApi(), lapsed: () => void = vi.fn()): Pr
 }
 
 /** The shell opened on a game the service is already holding, the way a second visit opens. */
-async function reopened(api: FakeApi): Promise<HTMLElement> {
+async function reopened(api: FakeApi, lapsed: () => void = vi.fn()): Promise<HTMLElement> {
+    await api.session();
     const open = await openGame(api, vi.fn());
     const host = await mount(
         <ThemeProvider>
-            <EditorShell api={api} opened={open} onSessionLapsed={vi.fn()} />
+            <EditorShell api={api} opened={open} onSessionLapsed={lapsed} />
         </ThemeProvider>,
     );
     await untilSettled(host);
@@ -218,7 +234,7 @@ describe('a session that lapses with the workbench open', () => {
         await until(() => state(host) !== 'Saving…');
 
         expect(lapsed).toHaveBeenCalledTimes(1);
-        expect(state(host)).toBe('your Grove session ended; sign in again, then save');
+        expect(state(host)).toBe('your Grove session ended; this saves once you sign in again');
         // The point of the second tab: what was typed is still here to save once they are back.
         expect(host.querySelector('main.workspace')).not.toBeNull();
     });
@@ -304,13 +320,7 @@ describe('saving without being asked', () => {
         const flushed = vi.spyOn(api, 'saveOnExit');
 
         await type('src/main.ts', 'const a = 2;');
-        await act(async () => {
-            Object.defineProperty(document, 'visibilityState', {
-                value: 'hidden',
-                configurable: true,
-            });
-            document.dispatchEvent(new Event('visibilitychange'));
-        });
+        await visibility('hidden');
 
         expect(flushed).toHaveBeenCalledOnce();
         expect(flushed.mock.calls[0]?.[1].sources.map((source) => source.path)).toEqual([
@@ -398,13 +408,7 @@ describe('the save a closing tab sends', () => {
         });
         await until(() => paths(host).includes('tile.png'));
 
-        await act(async () => {
-            Object.defineProperty(document, 'visibilityState', {
-                value: 'hidden',
-                configurable: true,
-            });
-            document.dispatchEvent(new Event('visibilitychange'));
-        });
+        await visibility('hidden');
 
         const save = flushed.mock.calls[0]?.[1];
         expect(save?.assets).toEqual([]);
@@ -437,5 +441,226 @@ describe('importing a file', () => {
             text: 'export const b = 1;',
         });
         expect(api.saves[0]?.assets).toEqual([]);
+    });
+});
+
+/** Picks a file through the explorer's own input, the way the import button does. */
+async function pick(host: HTMLElement, file: File): Promise<void> {
+    const picker = host.querySelector<HTMLInputElement>('input[type="file"]');
+    await act(async () => {
+        Object.defineProperty(picker, 'files', { value: [file], configurable: true });
+        picker?.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await until(() => paths(host).includes(file.name));
+}
+
+function artFile(name = 'tile.png'): File {
+    return new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' });
+}
+
+describe('a tab that was hidden and came back', () => {
+    it('saves what was typed after it at the revision its exit save landed as', async () => {
+        const api = fakeApi();
+        await stored(api, [draftFromText('src/main.ts', 'const a = 1;')], 1);
+        const host = await reopened(api);
+
+        await type('src/main.ts', 'const a = 2;');
+        await visibility('hidden');
+        await until(() => state(host) === 'Saved');
+        await visibility('visible');
+        await type('src/main.ts', 'const a = 3;');
+        await press(host, 'Save');
+        await until(() => api.saves.length === 2);
+
+        // Without adopting the exit save's answer the second would name revision 1 and lose to it.
+        expect(api.saves.map((save) => save.baseRevision)).toEqual([1, 2]);
+        expect(api.saves[1]?.sources[0]?.text).toBe('const a = 3;');
+        await until(() => state(host) === 'Saved');
+        expect(workbench().resetFiles).not.toHaveBeenCalled();
+    });
+
+    it('takes its own exit save landing first for what it is, not for somebody else', async () => {
+        const api = fakeApi();
+        await stored(api, [draftFromText('src/main.ts', 'const a = 1;')], 1);
+        const host = await reopened(api);
+        const real = api.save.bind(api);
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        api.save = async (game, save) => {
+            await held;
+            return real(game, save);
+        };
+
+        await type('src/main.ts', 'const a = 2;');
+        await press(host, 'Save');
+        await type('src/main.ts', 'const a = 3;');
+        // The exit save goes while the first is still out, and lands at revision 2 before it.
+        await visibility('hidden');
+        await until(() => api.saves.length === 1);
+        await act(async () => {
+            release();
+        });
+        await until(() => state(host) === 'Saved');
+
+        expect(workbench().resetFiles).not.toHaveBeenCalled();
+        expect(api.saves.map((save) => save.sources[0]?.text)).toEqual(['const a = 3;']);
+        expect(host.querySelector('.topbar__save')?.getAttribute('aria-disabled')).toBe('true');
+    });
+});
+
+describe('a game opened on a template', () => {
+    it('is not saved for being opened, whatever the clock or the tab does', async () => {
+        vi.useFakeTimers();
+        try {
+            const api = fakeApi();
+            const host = await shell(api);
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(SAVE_CEILING_MS + SAVE_DEBOUNCE_MS);
+            });
+            await visibility('hidden');
+            const unload = new Event('beforeunload', { cancelable: true });
+            window.dispatchEvent(unload);
+
+            expect(api.saves).toEqual([]);
+            expect(unload.defaultPrevented).toBe(false);
+            // Still offered: the first save is the creator's, and Save is how they ask for it.
+            expect(state(host)).toBe('Unsaved changes');
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('is not saved for being played, since its code declares what its manifest already says', async () => {
+        const api = fakeApi();
+        // Opened the way Boot opens it, so its manifest carries a real stamp rather than a fixture's.
+        const host = await reopened(api);
+
+        await press(host, 'Play');
+        await until(() => host.querySelector('.play-frame')?.getAttribute('src') !== null, 10_000);
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, SAVE_DEBOUNCE_MS + 300));
+        });
+
+        expect(api.saves).toEqual([]);
+        expect(state(host)).toBe('Unsaved changes');
+    });
+
+    it('is saved whole once the creator edits it', async () => {
+        vi.useFakeTimers();
+        try {
+            const api = fakeApi();
+            await shell(api);
+
+            await type(TEMPLATE_PATH, 'const a = 2;');
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS + 1);
+            });
+
+            expect(api.saves).toHaveLength(1);
+            expect(api.saves[0]?.sources.map((source) => source.path)).toEqual([
+                TEMPLATE_PATH,
+                PROJECT_PATH,
+            ]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+describe('an asset that would not upload', () => {
+    it('leaves the text beside it saved, and says which file held back', async () => {
+        const api = fakeApi();
+        await stored(api, [draftFromText('src/main.ts', 'const a = 1;')]);
+        const host = await reopened(api);
+        vi.spyOn(api, 'putAsset').mockRejectedValue(
+            new ApiError(503, 'internal', 'tile.png could not be uploaded'),
+        );
+
+        await type('src/main.ts', 'const a = 2;');
+        await pick(host, artFile());
+        await press(host, 'Save');
+        await until(() => state(host) !== 'Saving…');
+
+        expect(api.saves).toHaveLength(1);
+        expect(api.saves[0]?.sources.map((source) => source.path)).toEqual(['src/main.ts']);
+        expect(api.saves[0]?.assets).toEqual([]);
+        expect(state(host)).toBe('tile.png could not be uploaded; everything else saved');
+    });
+
+    it('is tried again by Save, and never by a save nobody asked for', async () => {
+        vi.useFakeTimers();
+        try {
+            const api = fakeApi();
+            await stored(api, [draftFromText('src/main.ts', 'const a = 1;')]);
+            const host = await reopened(api);
+            const put = vi
+                .spyOn(api, 'putAsset')
+                .mockRejectedValueOnce(
+                    new ApiError(503, 'internal', 'tile.png could not be uploaded'),
+                );
+
+            await pick(host, artFile());
+            await press(host, 'Save');
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(0);
+            });
+            expect(put).toHaveBeenCalledTimes(1);
+
+            await type('src/main.ts', 'const a = 2;');
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(SAVE_CEILING_MS + SAVE_DEBOUNCE_MS);
+            });
+            // The text went on its own; the bytes that failed did not go with it.
+            expect(api.saves.at(-1)?.sources.map((source) => source.path)).toEqual(['src/main.ts']);
+            expect(put).toHaveBeenCalledTimes(1);
+
+            await press(host, 'Save');
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(0);
+            });
+            expect(put).toHaveBeenCalledTimes(2);
+            expect(api.saves.at(-1)?.assets).toEqual(['tile.png']);
+            expect(state(host)).toBe('Saved');
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+describe('a session another tab signed in to', () => {
+    it('saves on the token a fresh read hands back, rather than failing on the stale one', async () => {
+        const api = fakeApi();
+        await stored(api, [draftFromText('src/main.ts', 'const a = 1;')]);
+        const host = await reopened(api);
+        api.signInElsewhere();
+
+        await type('src/main.ts', 'const a = 2;');
+        await press(host, 'Save');
+        await until(() => state(host) === 'Saved');
+
+        expect(api.saves).toHaveLength(1);
+        // Refused on the stale token, the session read again, and the save sent once more.
+        expect(api.requests.filter((request) => request.startsWith('PUT'))).toHaveLength(2);
+    });
+
+    it('waits out a lapse, and saves what is owed once the creator comes back signed in', async () => {
+        const api = fakeApi();
+        const lapsed = vi.fn();
+        await stored(api, [draftFromText('src/main.ts', 'const a = 1;')]);
+        const host = await reopened(api, lapsed);
+        api.signedIn = false;
+
+        await type('src/main.ts', 'const a = 2;');
+        await press(host, 'Save');
+        await until(() => lapsed.mock.calls.length === 1);
+        // Off to the other tab to sign in, which is a new session and a new token.
+        await visibility('hidden');
+        api.signInElsewhere();
+        await visibility('visible');
+        await until(() => state(host) === 'Saved');
+
+        expect(api.saves.map((save) => save.sources[0]?.text)).toEqual(['const a = 2;']);
+        expect(lapsed).toHaveBeenCalledTimes(1);
     });
 });

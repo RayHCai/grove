@@ -1,11 +1,11 @@
 import { act } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../src/api/client';
 import { App } from '../src/App';
 import { draftFromText } from '../src/workspace/files';
 import { fakeApi, GAME, stored } from './doubles';
 import type { FakeApi } from './doubles';
-import { mount, until, untilSettled } from './helpers';
+import { mount, until, untilSettled } from '@grove/ui/testing';
 
 function workbench(host: HTMLElement): HTMLElement | null {
     return host.querySelector<HTMLElement>('main.workspace');
@@ -331,6 +331,35 @@ describe('reading the session off the cookie', () => {
 
         expect(said[1]).toContain('could not be opened');
         expect(said[1]).toContain('/sign-in?return=');
+    });
+
+    it('opens the sign-in tab cut loose from this one, and believes it when it opened', async () => {
+        const said: string[] = [];
+        const tab = { opener: window as Window | null };
+        const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+        const api = fakeApi({ signedIn: true });
+        const host = await mount(
+            <App api={api} navigate={() => undefined} notify={(message) => said.push(message)} />,
+        );
+        await until(() => workbench(host) !== null);
+        await untilSettled(host);
+
+        api.save = async () => {
+            throw new ApiError(401, 'unauthorized', 'sign in first');
+        };
+        await act(async () => {
+            [...host.querySelectorAll('button')]
+                .find((each) => each.textContent === 'Save')
+                ?.click();
+        });
+        await until(() => open.mock.calls.length > 0);
+
+        // `noopener` makes `window.open` answer null whether or not a tab opened.
+        expect(open.mock.calls[0]?.[1]).toBe('_blank');
+        expect(open.mock.calls[0]?.[2]).toBeUndefined();
+        expect(tab.opener).toBeNull();
+        expect(said).toHaveLength(1);
+        open.mockRestore();
     });
 
     it('carries a way back that is this editor, so signing in lands where it started', async () => {

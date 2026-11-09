@@ -4,7 +4,7 @@ import { ThemeProvider } from '@grove/ui';
 import { EditorPane } from '../src/editor/EditorPane';
 import { tabsReducer } from '../src/editor/tabs';
 import { fileAt } from './doubles';
-import { mount, untilSettled } from './helpers';
+import { mount, untilSettled } from '@grove/ui/testing';
 
 const main = fileAt('src/main.ts');
 const sprout = fileAt('src/sprout.ts');

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@grove/ui';
 import { EditorShell } from '../src/shell/EditorShell';
 import { fakeApi, opened } from './doubles';
-import { mount, untilSettled } from './helpers';
+import { mount, untilSettled } from '@grove/ui/testing';
 
 vi.mock('../src/unfinished', () => ({ UNFINISHED: false }));
 

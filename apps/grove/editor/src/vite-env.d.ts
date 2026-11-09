@@ -12,3 +12,8 @@ interface ImportMetaEnv {
 interface ImportMeta {
     readonly env: ImportMetaEnv;
 }
+
+/** Where each kind of run's sandboxed document is served, which the preview plugin names. */
+declare module 'virtual:grove-preview' {
+    export const PREVIEW_DOCUMENTS: Readonly<Record<'plain' | 'world', string>>;
+}

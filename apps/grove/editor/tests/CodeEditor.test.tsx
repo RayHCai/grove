@@ -5,7 +5,7 @@ import type { Mock } from 'vitest';
 import { ThemeProvider, useTheme } from '@grove/ui';
 import { CodeEditor } from '../src/editor/CodeEditor';
 import { mountEditor } from '../src/editor/monaco';
-import { render, until } from './helpers';
+import { render, until } from '@grove/ui/testing';
 
 interface MockHandle {
     dispose: Mock;

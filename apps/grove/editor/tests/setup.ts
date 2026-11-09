@@ -26,7 +26,7 @@ if (globalThis.crypto.subtle === undefined) {
 afterEach(async () => {
     // Before the DOM is cleared: a root whose host is already gone still runs its cleanup, and a
     // shell left mounted keeps the window listeners it registered.
-    (await import('./helpers')).unmountAll();
+    (await import('@grove/ui/testing')).unmountAll();
     localStorage.clear();
     sessionStorage.clear();
     // A query left in the address bar would be read by whatever mounts next.

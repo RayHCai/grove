@@ -8,6 +8,8 @@ export interface ProjectFile {
     name: string;
     language: string;
     value: string;
+    /** An asset's tab shows a description of it, which is nothing anybody may type into. */
+    readOnly: boolean;
 }
 
 export interface ProjectFolder {
@@ -89,7 +91,7 @@ export function filesUnder(node: ProjectNode): readonly ProjectFile[] {
 
 /** What a file that is not text reads as when a tab opens on it: a description, never bytes. */
 function describe(file: DraftFile): string {
-    const size = file.bytes?.byteLength ?? 0;
+    const size = file.byteLength ?? file.bytes?.byteLength ?? 0;
     return `${file.path}: ${String(size)} bytes of ${file.contentType}.\nAssets are carried, not edited.\n`;
 }
 
@@ -101,5 +103,6 @@ export function asProjectFile(file: DraftFile): ProjectFile {
         name: nameOf(file.path),
         language: file.text === undefined ? 'plaintext' : languageOf(file.path),
         value: file.text ?? describe(file),
+        readOnly: file.text === undefined,
     };
 }
