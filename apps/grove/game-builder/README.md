@@ -24,7 +24,8 @@ answer to its own claim: `PATCH /v1/tasks/:taskId`, naming this box in `x-grove-
 the task, and with it the game and the manifest revision it is pinned to. That is deliberate: the
 row is the truth, and a message that has been sitting in a stream for ten minutes is not. The claim
 is a lease the API holds for a little less than the reclaim window, so a second delivery of a build
-another box is working on is a `409`, acknowledged without counting an attempt.
+another box is working on is a `409` with `Retry-After`, left pending for a later reclaim without
+counting an attempt; a `409` without one is a task already settled, and is acknowledged.
 
 ## What one build does
 

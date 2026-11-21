@@ -110,6 +110,8 @@ export const HostHeartbeat = z.object({
     /** False while the box cannot start a world, so the router stops choosing it first. */
     ready: z.boolean(),
     capacity: HostCapacity,
+    /** The player proxy's connection cap, which a box at it is not joined past; absent is no cap. */
+    playerMaxConnections: z.int().positive().optional(),
     /** Every instance every beat rather than a delta, so a dropped beat is free to recover. */
     instances: z.array(InstanceReport),
     /**

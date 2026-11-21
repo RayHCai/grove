@@ -5,7 +5,7 @@ import type { GameCursor, Games } from '../records.js';
 import type { Storage } from '../storage.js';
 import { requireGameOwner, requireSignedIn } from '../session.js';
 import { GameTitle } from '../values.js';
-import { unattached } from '../reply.js';
+import { unattached, refuse } from '../reply.js';
 import { deleteGame } from '../workflows/games.js';
 
 /** A page, and the most a page holds: a creator with more games pages through them. */
@@ -80,10 +80,7 @@ export function gameRoutes(games: Games): FastifyPluginAsyncZod {
                 const { cursor, limit } = request.query;
                 const after = cursor === undefined ? undefined : decodeCursor(cursor);
                 if (cursor !== undefined && after === undefined) {
-                    return reply.code(400).send({
-                        code: 'invalid_request',
-                        message: 'not a cursor this listing gave',
-                    });
+                    return refuse(reply, 'invalid_request', 'not a cursor this listing gave');
                 }
                 const page = await games.gamesOf(request.viewer.playerId, limit, after);
                 if (page.next !== undefined) {
@@ -123,7 +120,7 @@ export function gameSettingsRoutes(games: Games, storage: Storage): FastifyPlugi
                 if (request.body.visibility === undefined) {
                     const game = await games.gameOf(request.params.gameId);
                     if (game === undefined) {
-                        return reply.code(404).send({ code: 'not_found', message: 'no such game' });
+                        return refuse(reply, 'not_found', 'no such game');
                     }
                     return reply.send(game);
                 }
@@ -133,7 +130,7 @@ export function gameSettingsRoutes(games: Games, storage: Storage): FastifyPlugi
                     request.body.visibility,
                 );
                 if (updated.outcome === 'missing') {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such game' });
+                    return refuse(reply, 'not_found', 'no such game');
                 }
                 if (updated.outcome === 'unattached') {
                     return unattached(reply, 'game store');
@@ -166,7 +163,7 @@ export function gameSettingsRoutes(games: Games, storage: Storage): FastifyPlugi
                         .send({ code: 'internal', message: 'the game files could not be deleted' });
                 }
                 if (deleted.outcome === 'missing') {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such game' });
+                    return refuse(reply, 'not_found', 'no such game');
                 }
                 if (deleted.outcome === 'unattached') {
                     return unattached(reply, 'game store');

@@ -12,7 +12,7 @@ import type { TaskQueue } from '../queue.js';
 import type { Games, Workspaces } from '../records.js';
 import { requireGameOwner, requireSignedIn } from '../session.js';
 import type { Storage } from '../storage.js';
-import { unattached } from '../reply.js';
+import { unattached, refuse } from '../reply.js';
 import { readFile, saveWorkspace } from '../workflows/workspace.js';
 
 /** What a browser may keep a file for: nothing, because a key is overwritten in place. */
@@ -46,7 +46,7 @@ export function workspaceRoutes(deps: WorkspaceDeps): FastifyPluginAsyncZod {
             async (request, reply) => {
                 const workspace = await deps.workspaces.workspaceOf(request.params.gameId);
                 if (workspace === undefined) {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such game' });
+                    return refuse(reply, 'not_found', 'no such game');
                 }
                 const { saveId: _saveId, ...visible } = workspace;
                 return reply.send(visible);
@@ -89,28 +89,31 @@ export function workspaceRoutes(deps: WorkspaceDeps): FastifyPluginAsyncZod {
                         return reply.send(visible);
                     }
                     case 'missing':
-                        return reply.code(404).send({ code: 'not_found', message: 'no such game' });
+                        return refuse(reply, 'not_found', 'no such game');
                     // The revision it moved to, so a losing editor can say what it reloads from.
                     case 'stale':
-                        return reply.code(409).send({
-                            code: 'conflict',
-                            message: `the workspace is at revision ${String(saved.revision)}`,
-                        });
+                        return refuse(
+                            reply,
+                            'conflict',
+                            `the workspace is at revision ${String(saved.revision)}`,
+                        );
                     case 'too_many':
-                        return reply.code(400).send({
-                            code: 'invalid_request',
-                            message: `a game may hold ${String(MAX_WORKSPACE_FILES)} files`,
-                        });
+                        return refuse(
+                            reply,
+                            'invalid_request',
+                            `a game may hold ${String(MAX_WORKSPACE_FILES)} files`,
+                        );
                     case 'too_large':
                         return reply.code(413).send({
                             code: 'invalid_request',
                             message: `${saved.path} is too large to save`,
                         });
                     case 'not_uploaded':
-                        return reply.code(400).send({
-                            code: 'invalid_request',
-                            message: `this asset was never uploaded: ${saved.path}`,
-                        });
+                        return refuse(
+                            reply,
+                            'invalid_request',
+                            `this asset was never uploaded: ${saved.path}`,
+                        );
                     case 'unacceptable':
                         return reply.code(415).send({
                             code: 'invalid_request',
@@ -140,7 +143,7 @@ export function workspaceRoutes(deps: WorkspaceDeps): FastifyPluginAsyncZod {
             async (request, reply) => {
                 const found = await readFile(deps, request.params.gameId, request.params['*']);
                 if (found === undefined) {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such file' });
+                    return refuse(reply, 'not_found', 'no such file');
                 }
                 return reply
                     .header('cache-control', REVALIDATE)

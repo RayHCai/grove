@@ -5,7 +5,7 @@ import type { PlayableVersion, PublishedVersion, Task } from '@grove/api-contrac
 import { verifyTicket } from '@grove/api-contract/tokens';
 import { buildApp, type Dependencies } from '../src/app.js';
 import { readEnv } from '../src/env.js';
-import type { Fleet } from '../src/fleet.js';
+import { FleetUnavailable, type Fleet } from '../src/fleet.js';
 import { unattachedQueue } from '../src/queue.js';
 import type { BuildQueued, Stores } from '../src/records.js';
 import { announcing, stores, type StoreOverrides } from './doubles.js';
@@ -265,6 +265,25 @@ describe('the correlation id', () => {
         });
         expect(response.statusCode).toBe(500);
         expect(response.headers[REQUEST_ID_HEADER]).toBe('known-id');
+    });
+
+    it('is a 503 to retry, never a full fleet, when the router could not place in time', async () => {
+        const app = await serve({
+            fleet: {
+                ...placing,
+                place: async () => {
+                    throw new FleetUnavailable(503);
+                },
+            },
+        });
+        const { cookie, csrfToken } = await signIn(app);
+        const response = await app.inject({
+            method: 'POST',
+            url: `/v1/games/${GAME_ID}/play`,
+            headers: { cookie, 'x-csrf-token': csrfToken },
+        });
+        expect(response.statusCode).toBe(503);
+        expect(response.headers['retry-after']).toBe('1');
     });
 });
 
@@ -699,6 +718,29 @@ describe('a worker settling a task', () => {
             payload: { status: 'NOT_STARTED' },
         });
         expect(response.statusCode).toBe(400);
+    });
+
+    it('answers a claim on a live lease with when that lease lapses', async () => {
+        const held = fleet();
+        const app = await buildApp(env, {
+            ...held,
+            tasks: {
+                ...held.tasks,
+                claimTask: async () => ({
+                    outcome: 'held',
+                    task: { ...BUILD, status: 'IN_PROGRESS' },
+                    leaseUntil: new Date(Date.now() + 30_000),
+                }),
+            },
+        });
+        const response = await app.inject({
+            method: 'PATCH',
+            url: `/v1/tasks/${TASK_ID}`,
+            headers: bearer(BUILDER_SECRET),
+            payload: { status: 'IN_PROGRESS' },
+        });
+        expect(response.statusCode).toBe(409);
+        expect(Number(response.headers['retry-after'])).toBeGreaterThanOrEqual(29);
     });
 });
 

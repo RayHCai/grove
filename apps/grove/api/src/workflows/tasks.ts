@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import {
     AssetMediaType,
+    isTerminal,
     MAX_ASSET_BYTES,
     VersionId,
     objectKey,
@@ -38,7 +39,7 @@ export interface Advance {
 /** `deployment` settles once the fleet is told of a version; nothing but a test waits on it. */
 export type Advanced =
     | { outcome: 'advanced'; task: Task; deployment?: Promise<void> }
-    | { outcome: 'refused'; message: string }
+    | { outcome: 'refused'; message: string; retryAfterS?: number }
     | { outcome: 'invalid'; message: string }
     | { outcome: 'missing' }
     | { outcome: 'unattached' };
@@ -50,13 +51,20 @@ export async function advanceTask(deps: AdvanceDeps, advance: Advance): Promise<
         if (advance.kind === 'BUILD') return settleBuild(deps, advance);
         return settleUpload(deps, advance);
     }
-    return answer(await deps.tasks.settleTask(advance.taskId, advance.kind, advance.update));
+    return answer(
+        await deps.tasks.settleTask(advance.taskId, advance.kind, advance.update, {
+            holder: advance.worker,
+        }),
+    );
 }
 
 function answer(settled: TaskSettled): Advanced {
     if (settled.outcome === 'missing') return settled;
     if (settled.outcome === 'refused') {
-        return { outcome: 'refused', message: `the task is already ${settled.task.status}` };
+        if (isTerminal(settled.task.status)) {
+            return { outcome: 'refused', message: `the task is already ${settled.task.status}` };
+        }
+        return { outcome: 'refused', message: 'the task is held by another claim' };
     }
     return { outcome: 'advanced', task: settled.task };
 }
@@ -70,33 +78,47 @@ async function claim(deps: AdvanceDeps, { taskId, kind, worker }: Advance): Prom
     if (claimed.outcome === 'missing') return claimed;
     // Refused without counting an attempt, so a duplicate delivery is acknowledged, no more.
     if (claimed.outcome === 'held') {
-        return { outcome: 'refused', message: 'the task is already claimed' };
+        // Told when to come back, so a reclaim that came before the lease lapsed is retried, not dropped.
+        const retryAfterS = Math.max(
+            1,
+            Math.ceil((claimed.leaseUntil.getTime() - Date.now()) / 1000),
+        );
+        return { outcome: 'refused', message: 'the task is already claimed', retryAfterS };
     }
     if (claimed.outcome === 'settled') {
         return { outcome: 'refused', message: `the task is already ${claimed.task.status}` };
     }
     if (kind === 'BUILD') return { outcome: 'advanced', task: claimed.task };
-    return inspection(deps, claimed.task, claimed.leaseUntil);
+    return inspection(deps, claimed.task, claimed.leaseUntil, worker);
 }
 
 /** An upload worker's two presigned URLs, which expire with the lease they were claimed under. */
-async function inspection(deps: AdvanceDeps, task: Task, leaseUntil: Date): Promise<Advanced> {
+async function inspection(
+    deps: AdvanceDeps,
+    task: Task,
+    leaseUntil: Date,
+    holder: string,
+): Promise<Advanced> {
     const upload = await deps.tasks.uploadOf(task.taskId);
     if (upload === undefined) {
         const message = 'the upload was replaced before it was inspected';
-        await deps.tasks.settleTask(task.taskId, 'ASSET_UPLOAD', {
-            status: 'CANCELLED',
-            detail: { message },
-        });
+        await deps.tasks.settleTask(
+            task.taskId,
+            'ASSET_UPLOAD',
+            { status: 'CANCELLED', detail: { message } },
+            { holder },
+        );
         return { outcome: 'refused', message };
     }
     const contentType = AssetMediaType.safeParse(upload.contentType);
     if (!contentType.success || upload.byteLength < 1 || upload.byteLength > MAX_ASSET_BYTES) {
         const message = `${upload.path} is not a type or a size an asset may be`;
-        await deps.tasks.settleTask(task.taskId, 'ASSET_UPLOAD', {
-            status: 'FAILED',
-            detail: { message },
-        });
+        await deps.tasks.settleTask(
+            task.taskId,
+            'ASSET_UPLOAD',
+            { status: 'FAILED', detail: { message } },
+            { holder },
+        );
         return { outcome: 'refused', message };
     }
 
@@ -132,7 +154,7 @@ async function inspection(deps: AdvanceDeps, task: Task, leaseUntil: Date): Prom
 /** A build's success is accepted only when every output it names is one the API stored for it. */
 async function settleBuild(
     deps: AdvanceDeps,
-    { taskId, update, requestId }: Advance,
+    { taskId, update, requestId, worker }: Advance,
 ): Promise<Advanced> {
     const build = update.detail?.build;
     if (build === undefined) {
@@ -143,14 +165,18 @@ async function settleBuild(
 
     if (!pinned(build, work, await deps.tasks.artifactsOf(taskId))) {
         const message = 'the build named an output that was not stored for it';
-        const failed = await deps.tasks.settleTask(taskId, 'BUILD', {
-            status: 'FAILED',
-            detail: { message },
-        });
+        const failed = await deps.tasks.settleTask(
+            taskId,
+            'BUILD',
+            { status: 'FAILED', detail: { message } },
+            { holder: worker },
+        );
         return failed.outcome === 'missing' ? failed : { outcome: 'refused', message };
     }
 
-    const settled = answer(await deps.tasks.settleTask(taskId, 'BUILD', update));
+    const settled = answer(
+        await deps.tasks.settleTask(taskId, 'BUILD', update, { holder: worker }),
+    );
     if (settled.outcome !== 'advanced') return settled;
     return { ...settled, deployment: deploy(deps, settled.task, requestId) };
 }
@@ -180,7 +206,10 @@ async function deploy(deps: AdvanceDeps, task: Task, requestId: string): Promise
 }
 
 /** An upload's success is checked against the copy it names before the asset counts as verified. */
-async function settleUpload(deps: AdvanceDeps, { taskId, update }: Advance): Promise<Advanced> {
+async function settleUpload(
+    deps: AdvanceDeps,
+    { taskId, update, worker }: Advance,
+): Promise<Advanced> {
     const reported = VersionId.safeParse(update.detail?.versionId);
     if (!reported.success) {
         return { outcome: 'invalid', message: 'an upload that passed names the version it copied' };
@@ -195,22 +224,22 @@ async function settleUpload(deps: AdvanceDeps, { taskId, update }: Advance): Pro
         );
         if (copy === undefined || copy.byteLength !== upload.byteLength) {
             const message = 'the inspected copy is not where the inspection said it is';
-            const failed = await deps.tasks.settleTask(taskId, 'ASSET_UPLOAD', {
-                status: 'FAILED',
-                detail: { message },
-            });
+            const failed = await deps.tasks.settleTask(
+                taskId,
+                'ASSET_UPLOAD',
+                { status: 'FAILED', detail: { message } },
+                { holder: worker },
+            );
             if (failed.outcome === 'missing') return failed;
             await discardCopy(deps, failed.task, copied);
             return { outcome: 'refused', message };
         }
     }
 
-    const settled = await deps.tasks.settleTask(
-        taskId,
-        'ASSET_UPLOAD',
-        update,
-        upload === undefined ? undefined : copied,
-    );
+    const settled = await deps.tasks.settleTask(taskId, 'ASSET_UPLOAD', update, {
+        holder: worker,
+        ...(upload === undefined ? {} : { edgeVersionId: copied }),
+    });
     if (settled.outcome === 'missing') return settled;
     if (settled.outcome === 'refused' || !settled.validated) {
         await discardCopy(deps, settled.task, copied);

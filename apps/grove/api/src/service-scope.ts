@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { TaskKind } from '@grove/api-contract';
 import type { Env } from './env.js';
+import { refuse } from './reply.js';
 
 /** Which fleet service is calling, as the secret it presented says and nothing else does. */
 export type Caller = 'server-manager' | 'builder' | 'asset-service';
@@ -35,7 +36,7 @@ export function admit(env: Env, ...callers: Caller[]) {
     return async function hook(request: FastifyRequest, reply: FastifyReply): Promise<void> {
         const header = request.headers.authorization;
         if (header === undefined || !header.startsWith('Bearer ')) {
-            await reply.code(401).send({ code: 'unauthorized', message: 'no bearer' });
+            await refuse(reply, 'unauthorized', 'no bearer');
             return;
         }
 
@@ -49,7 +50,7 @@ export function admit(env: Env, ...callers: Caller[]) {
         }
         if (matched === undefined) {
             request.log.warn('bearer refused');
-            await reply.code(401).send({ code: 'unauthorized', message: 'bad bearer' });
+            await refuse(reply, 'unauthorized', 'bad bearer');
             return;
         }
         request.caller = matched;

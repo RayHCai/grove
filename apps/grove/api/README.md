@@ -239,15 +239,19 @@ what stops a build picking up edits made after the button was pressed.
 The row is written before the message is pushed, always. A push that was lost is work the sweeper
 still finds: every `TASK_SWEEP_INTERVAL_MS` it re-announces, once per `TASK_SWEEP_AFTER_MS`, each task
 nothing has announced since then that is unclaimed or whose claim's lease ran out, which is also what
-recovers a claim whose stream entry a trim took. A message nothing ever wrote down is work nobody
+recovers a claim whose stream entry a trim took. A pass takes its tasks by stamping them in one
+statement under `SKIP LOCKED`, so replicas sweeping at once split the backlog, and a push that failed
+is handed back for the next pass. A message nothing ever wrote down is work nobody
 can. One stream per kind, read with a consumer group by `@grove/game-builder` and
 `@grove/asset-upload-service`: one stream would make each skip the other's messages, and a group is
 what hands a dead worker's claim back.
 
 A claim is a lease: it takes a task that is unclaimed, or one whose lease ran out, records which
 worker holds it (`x-grove-worker`, the credential's name without one) and until when, and counts an
-attempt. A claim while another's lease is live is a `409` that counts nothing, so a redelivered
-message is acknowledged rather than becoming an attempt. Each kind's lease (`BUILD_LEASE_MS`,
+attempt. A claim while another's lease is live is a `409` that counts nothing and carries
+`Retry-After` until that lease lapses, so a redelivery is left pending rather than becoming an
+attempt or being dropped. A settle is taken only from the worker holding the claim, so one whose
+lease lapsed and was taken over cannot overwrite the outcome. Each kind's lease (`BUILD_LEASE_MS`,
 `ASSET_UPLOAD_LEASE_MS`) is shorter than its worker's reclaim window, so a dead worker's redelivery
 finds the task free. A claim nobody came back to for three lease windows is failed by the sweeper.
 

@@ -12,7 +12,7 @@ import type { Env } from '../env.js';
 import type { Games, Tasks } from '../records.js';
 import { KIND_OF, UNLIMITED, admit } from '../service-scope.js';
 import { requireGameOwner, requireSignedIn } from '../session.js';
-import { unattached } from '../reply.js';
+import { unattached, refuse } from '../reply.js';
 import { advanceTask, type AdvanceDeps } from '../workflows/tasks.js';
 
 /** Where a worker may name itself, which is what a claim records as its holder. */
@@ -36,7 +36,7 @@ export function taskRoutes(games: Pick<Games, 'ownerOf'>, tasks: Tasks): Fastify
             async (request, reply) => {
                 const task = await tasks.taskOf(request.params.gameId, request.params.taskId);
                 if (task === undefined) {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such task' });
+                    return refuse(reply, 'not_found', 'no such task');
                 }
                 return reply.send(task);
             },
@@ -89,16 +89,15 @@ export function fleetTaskRoutes(deps: Omit<AdvanceDeps, 'log'>, env: Env): Fasti
                         );
                         return reply.send(advanced.task);
                     case 'missing':
-                        return reply.code(404).send({ code: 'not_found', message: 'no such task' });
+                        return refuse(reply, 'not_found', 'no such task');
                     // A 409 rather than a quiet success, so a worker told it lost stops retrying.
                     case 'refused':
-                        return reply
-                            .code(409)
-                            .send({ code: 'conflict', message: advanced.message });
+                        if (advanced.retryAfterS !== undefined) {
+                            void reply.header('retry-after', String(advanced.retryAfterS));
+                        }
+                        return refuse(reply, 'conflict', advanced.message);
                     case 'invalid':
-                        return reply
-                            .code(400)
-                            .send({ code: 'invalid_request', message: advanced.message });
+                        return refuse(reply, 'invalid_request', advanced.message);
                     case 'unattached':
                         return unattached(reply, 'games bucket');
                 }

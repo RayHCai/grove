@@ -334,23 +334,25 @@ describe('what the sweeper is handed', () => {
         const { taskId } = await queued();
         const now = new Date();
         const minuteAgo = new Date(now.getTime() - 60_000);
-        expect(await stores.tasks.dueForAnnouncement('BUILD', minuteAgo, now, 10)).toEqual([]);
+        expect(await stores.tasks.claimAnnouncements('BUILD', minuteAgo, now, 10)).toEqual([]);
 
         const ahead = new Date(Date.now() + 60_000);
-        expect(await stores.tasks.dueForAnnouncement('BUILD', ahead, ahead, 10)).toEqual([taskId]);
-        expect(await stores.tasks.dueForAnnouncement('ASSET_UPLOAD', ahead, ahead, 10)).toEqual([]);
+        expect(await stores.tasks.claimAnnouncements('BUILD', ahead, ahead, 10)).toEqual([taskId]);
+        expect(await stores.tasks.claimAnnouncements('ASSET_UPLOAD', ahead, ahead, 10)).toEqual([]);
 
-        await stores.tasks.markAnnounced([taskId], ahead);
-        expect(await stores.tasks.dueForAnnouncement('BUILD', ahead, ahead, 10)).toEqual([]);
+        // Taken once: a second sweeper asking for the same window finds it already stamped.
+        expect(await stores.tasks.claimAnnouncements('BUILD', ahead, ahead, 10)).toEqual([]);
+        await stores.tasks.markAnnounced([taskId], new Date(0));
+        expect(await stores.tasks.claimAnnouncements('BUILD', ahead, ahead, 10)).toEqual([taskId]);
     });
 
     it('is a claim whose lease ran out, and never one still held', async () => {
         const { taskId } = await queued();
         await stores.tasks.claimTask(taskId, BUILD);
         const ahead = new Date(Date.now() + 1_000);
-        expect(await stores.tasks.dueForAnnouncement('BUILD', ahead, new Date(), 10)).toEqual([]);
+        expect(await stores.tasks.claimAnnouncements('BUILD', ahead, new Date(), 10)).toEqual([]);
         await lapse(taskId);
-        expect(await stores.tasks.dueForAnnouncement('BUILD', ahead, new Date(), 10)).toEqual([
+        expect(await stores.tasks.claimAnnouncements('BUILD', ahead, new Date(), 10)).toEqual([
             taskId,
         ]);
     });

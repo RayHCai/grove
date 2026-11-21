@@ -9,7 +9,7 @@ import type { Accounts } from '../records.js';
 import { beginSession, requireSignedIn } from '../session.js';
 import type { Sessions } from '../sessions.js';
 import { Email, Password } from '../values.js';
-import { unattached } from '../reply.js';
+import { unattached, refuse } from '../reply.js';
 
 export interface AuthDeps {
     accounts: Accounts;
@@ -52,9 +52,7 @@ export function authRoutes({
                 const playerId = await accounts.signIn(request.body.email, request.body.password);
                 // One answer for an unknown address, a wrong password and a locked account.
                 if (playerId === undefined) {
-                    return reply
-                        .code(401)
-                        .send({ code: 'unauthorized', message: 'no such account' });
+                    return refuse(reply, 'unauthorized', 'no such account');
                 }
 
                 const csrfToken = await beginSession(request, reply, playerId, sessions);
@@ -122,9 +120,7 @@ export function authRoutes({
                 }
                 // Wrong, already spent, and expired are one answer.
                 if (finished.outcome === 'refused') {
-                    return reply
-                        .code(401)
-                        .send({ code: 'unauthorized', message: 'that link is no longer good' });
+                    return refuse(reply, 'unauthorized', 'that link is no longer good');
                 }
 
                 // Nobody is signed in by it, and every session the account held ends.

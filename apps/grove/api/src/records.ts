@@ -171,7 +171,7 @@ export interface Claim {
 /** `held` is another worker's live lease; `settled` is work somebody already finished. */
 export type TaskClaimed =
     | { outcome: 'claimed'; task: Task; leaseUntil: Date }
-    | { outcome: 'held'; task: Task }
+    | { outcome: 'held'; task: Task; leaseUntil: Date }
     | { outcome: 'settled'; task: Task }
     | { outcome: 'missing' };
 
@@ -189,6 +189,13 @@ export type TaskSettled =
     | { outcome: 'settled'; task: Task; validated: boolean }
     | { outcome: 'refused'; task: Task }
     | { outcome: 'missing' };
+
+/** `holder` fences a worker's settle to the claim it holds; absent, any live task may settle. */
+export interface SettleTerms {
+    holder?: string;
+    /** The inspected copy a successful upload settles with. */
+    edgeVersionId?: VersionId;
+}
 
 /** A build task as the routes a builder reads and writes through need it. */
 export interface BuildWork {
@@ -211,20 +218,19 @@ export interface Tasks {
     taskOf(game: GameId, task: TaskId): Promise<Task | undefined>;
     claimTask(task: TaskId, claim: Claim): Promise<TaskClaimed>;
     uploadOf(task: TaskId): Promise<HeldUpload | undefined>;
-    /** `edgeVersionId` is the inspected copy a successful upload settles with. */
     settleTask(
         task: TaskId,
         kind: TaskKind,
         update: TaskStatusUpdate,
-        edgeVersionId?: VersionId,
+        terms?: SettleTerms,
     ): Promise<TaskSettled>;
     buildOf(task: TaskId): Promise<BuildWork | undefined>;
     recordArtifact(task: TaskId, artifact: BuildArtifact): Promise<void>;
     artifactsOf(task: TaskId): Promise<BuildArtifact[]>;
     /** The highest revision whose build finished, the latest finish breaking a tie. */
     playableVersionOf(game: GameId): Promise<PlayableVersion | undefined>;
-    /** Unclaimed or lapsed work of one kind that nothing has announced since `before`. */
-    dueForAnnouncement(kind: TaskKind, before: Date, now: Date, limit: number): Promise<TaskId[]>;
+    /** Takes unclaimed or lapsed work unannounced since `before`, stamped `now` so no replica takes it twice. */
+    claimAnnouncements(kind: TaskKind, before: Date, now: Date, limit: number): Promise<TaskId[]>;
     markAnnounced(tasks: readonly TaskId[], at: Date): Promise<void>;
     /** Fails each claim of one kind whose lease ran out before `before`: nobody came back. */
     reapAbandoned(kind: TaskKind, before: Date, message: string): Promise<TaskId[]>;
@@ -286,7 +292,7 @@ export const unattachedTasks: Tasks = {
     recordArtifact: async () => undefined,
     artifactsOf: async () => [],
     playableVersionOf: async () => undefined,
-    dueForAnnouncement: async () => [],
+    claimAnnouncements: async () => [],
     markAnnounced: async () => undefined,
     reapAbandoned: async () => [],
 };

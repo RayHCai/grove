@@ -105,11 +105,16 @@ async function uploaded(
     return { gameId, owner, task: queue.pushed[0]?.taskId as TaskId };
 }
 
-function claim(deps: AdvanceDeps, taskId: TaskId, kind: Task['kind'] = 'ASSET_UPLOAD') {
+function claim(
+    deps: AdvanceDeps,
+    taskId: TaskId,
+    kind: Task['kind'] = 'ASSET_UPLOAD',
+    worker = 'worker-1',
+) {
     return advanceTask(deps, {
         taskId,
         kind,
-        worker: 'worker-1',
+        worker,
         update: { status: 'IN_PROGRESS' },
         requestId: 'req-1',
     });
@@ -120,8 +125,9 @@ function settle(
     taskId: TaskId,
     update: Parameters<typeof advanceTask>[1]['update'],
     kind: Task['kind'] = 'ASSET_UPLOAD',
+    worker = 'worker-1',
 ) {
-    return advanceTask(deps, { taskId, kind, worker: 'worker-1', update, requestId: 'req-1' });
+    return advanceTask(deps, { taskId, kind, worker, update, requestId: 'req-1' });
 }
 
 /** What the asset service does with a claim: read quarantine, copy past it, name the copy. */
@@ -242,11 +248,54 @@ describe('an asset upload', () => {
         const { gameId, task } = await uploaded(storage);
         const deps = advancing(storage);
         await claim(deps, task);
-        expect(await claim(deps, task)).toEqual({
+        const refused = await claim(deps, task);
+        expect(refused).toMatchObject({
             outcome: 'refused',
             message: 'the task is already claimed',
         });
+        // Told when the lease lapses, so a worker that reclaimed too early comes back rather than dropping it.
+        if (refused.outcome !== 'refused') throw new Error(refused.outcome);
+        expect(refused.retryAfterS).toBeGreaterThanOrEqual(1);
+        expect(refused.retryAfterS).toBeLessThanOrEqual(LEASE_MS / 1000);
         expect(await stores.tasks.taskOf(gameId, task)).toMatchObject({ attempts: 1 });
+    });
+
+    it('takes a settle only from the worker holding the claim', async () => {
+        const storage = bucket();
+        const { gameId, task } = await uploaded(storage);
+        const deps = advancing(storage);
+        await claim(deps, task);
+        const fail = { status: 'FAILED', detail: { message: 'no' } } as const;
+        expect(await settle(deps, task, fail, 'ASSET_UPLOAD', 'worker-2')).toEqual({
+            outcome: 'refused',
+            message: 'the task is held by another claim',
+        });
+        expect(await stores.tasks.taskOf(gameId, task)).toMatchObject({ status: 'IN_PROGRESS' });
+    });
+
+    it('refuses the settle of a worker whose lapsed claim another worker took over', async () => {
+        const storage = bucket();
+        const { gameId, task } = await uploaded(storage);
+        const deps = advancing(storage);
+        await claim(deps, task);
+        await harness.pg.query(
+            `UPDATE "Task" SET "leaseUntil" = now() - interval '1 second' WHERE "id" = $1`,
+            [task],
+        );
+        expect(await claim(deps, task, 'ASSET_UPLOAD', 'worker-2')).toMatchObject({
+            outcome: 'advanced',
+        });
+
+        const fail = { status: 'FAILED', detail: { message: 'late' } } as const;
+        expect(await settle(deps, task, fail)).toMatchObject({ outcome: 'refused' });
+        expect(await stores.tasks.taskOf(gameId, task)).toMatchObject({
+            status: 'IN_PROGRESS',
+            attempts: 2,
+        });
+        expect(await settle(deps, task, fail, 'ASSET_UPLOAD', 'worker-2')).toMatchObject({
+            outcome: 'advanced',
+            task: { status: 'FAILED' },
+        });
     });
 
     it('is invalid as a success that names no copy', async () => {
@@ -562,7 +611,7 @@ describe('the sweeper', () => {
             let passes = 0;
             const tasks: Tasks = {
                 ...stores.tasks,
-                dueForAnnouncement: async () => {
+                claimAnnouncements: async () => {
                     passes += 1;
                     if (passes === 1) throw new Error('the database blinked');
                     return [];

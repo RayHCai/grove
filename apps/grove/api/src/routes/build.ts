@@ -12,7 +12,7 @@ import type { Env } from '../env.js';
 import type { Tasks } from '../records.js';
 import { UNLIMITED, admit } from '../service-scope.js';
 import type { Storage } from '../storage.js';
-import { unattached } from '../reply.js';
+import { unattached, refuse } from '../reply.js';
 import { ManifestCache, manifestFor, sourceFor, storeOutput } from '../workflows/build.js';
 
 /** A source file is a script and a build output is a chunk, so neither is streamed. */
@@ -63,7 +63,7 @@ export function fleetBuildRoutes(
                 const found = await manifestFor(deps, request.params.taskId);
                 if (found.outcome === 'unclaimed') return reply.code(409).send(UNCLAIMED);
                 if (found.outcome === 'missing') {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such manifest' });
+                    return refuse(reply, 'not_found', 'no such manifest');
                 }
                 return reply.send(found.value);
             },
@@ -84,7 +84,7 @@ export function fleetBuildRoutes(
                 const found = await sourceFor(deps, request.params.taskId, request.params['*']);
                 if (found.outcome === 'unclaimed') return reply.code(409).send(UNCLAIMED);
                 if (found.outcome === 'missing') {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such file' });
+                    return refuse(reply, 'not_found', 'no such file');
                 }
                 // A version is one byte-set forever, so fetching it twice fetches the same answer.
                 return reply
@@ -128,9 +128,7 @@ export function fleetBuildRoutes(
                     case 'stored':
                         return reply.send(stored.artifact);
                     case 'missing':
-                        return reply
-                            .code(404)
-                            .send({ code: 'not_found', message: 'no such build' });
+                        return refuse(reply, 'not_found', 'no such build');
                     case 'unclaimed':
                         return reply.code(409).send(UNCLAIMED);
                     case 'unattached':

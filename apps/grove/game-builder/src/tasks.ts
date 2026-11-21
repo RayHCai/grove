@@ -30,6 +30,10 @@ export function httpTasks(call: ApiCall, worker: string): Tasks {
             });
 
             if (written === undefined) return { outcome: 'unavailable' };
+            // Another worker's live lease: left for a later reclaim, which finds it lapsed or settled.
+            if (written.status === 409 && written.headers.has('retry-after')) {
+                return { outcome: 'unavailable' };
+            }
             // Told outright that this attempt lost, so it acknowledges rather than retrying.
             if (written.status === 404 || written.status === 409) return { outcome: 'refused' };
             if (written.status === 400) return { outcome: 'invalid' };

@@ -14,18 +14,18 @@ import { FOREIGN_KEY_VIOLATION, LIVE, UNIQUE_VIOLATION, asTask, codeOf } from '.
 /** How many unverified assets a refusal names before the list stops being something to read. */
 const NAMED_ASSETS = 10;
 
+/** The one live build a revision may have, which a unique index also holds the table to. */
+function liveBuild(game: string, revision: number) {
+    return {
+        gameId: game,
+        kind: 'BUILD' as const,
+        manifestRevision: revision,
+        status: { in: [...LIVE] },
+    };
+}
+
 /** The task tables: one row per piece of queued work, the lease on it, and what a build stored. */
 export function prismaTasks(db: PrismaClient): Tasks {
-    const liveBuild = async (game: string, revision: number) =>
-        db.task.findFirst({
-            where: {
-                gameId: game,
-                kind: 'BUILD',
-                manifestRevision: revision,
-                status: { in: [...LIVE] },
-            },
-        });
-
     return {
         queueBuild: async (game, account, revision, saveId) => {
             let queued: BuildQueued;
@@ -60,14 +60,7 @@ export function prismaTasks(db: PrismaClient): Tasks {
                         };
                     }
 
-                    const live = await tx.task.findFirst({
-                        where: {
-                            gameId: game,
-                            kind: 'BUILD',
-                            manifestRevision: revision,
-                            status: { in: [...LIVE] },
-                        },
-                    });
+                    const live = await tx.task.findFirst({ where: liveBuild(game, revision) });
                     if (live !== null) return { outcome: 'existing', task: asTask(live) };
 
                     const row = await tx.task.create({
@@ -84,7 +77,7 @@ export function prismaTasks(db: PrismaClient): Tasks {
             } catch (error) {
                 // Two publishes at once: the index refused the second, which wants the first.
                 if (codeOf(error) === UNIQUE_VIOLATION) {
-                    const won = await liveBuild(game, revision);
+                    const won = await db.task.findFirst({ where: liveBuild(game, revision) });
                     if (won !== null) return { outcome: 'existing', task: asTask(won) };
                 }
                 if (codeOf(error) === FOREIGN_KEY_VIOLATION) return { outcome: 'missing' };
@@ -124,9 +117,8 @@ export function prismaTasks(db: PrismaClient): Tasks {
 
             const row = await db.task.findUnique({ where: { id: task } });
             if (row === null || row.kind !== kind) return { outcome: 'missing' };
-            return isTerminal(row.status)
-                ? { outcome: 'settled', task: asTask(row) }
-                : { outcome: 'held', task: asTask(row) };
+            if (isTerminal(row.status)) return { outcome: 'settled', task: asTask(row) };
+            return { outcome: 'held', task: asTask(row), leaseUntil: row.leaseUntil ?? leaseUntil };
         },
 
         uploadOf: async (task) => {
@@ -156,7 +148,7 @@ export function prismaTasks(db: PrismaClient): Tasks {
             };
         },
 
-        settleTask: async (task, kind, update, edgeVersionId) => {
+        settleTask: async (task, kind, update, { holder, edgeVersionId } = {}) => {
             const current = await db.task.findUnique({ where: { id: task } });
             if (current === null || current.kind !== kind) return { outcome: 'missing' };
             if (isTerminal(current.status)) return { outcome: 'refused', task: asTask(current) };
@@ -166,8 +158,13 @@ export function prismaTasks(db: PrismaClient): Tasks {
             // Never before the start, whichever replica's clock wrote it.
             const finishedAt = new Date(Math.max(now.getTime(), startedAt.getTime()));
             return db.$transaction(async (tx): Promise<TaskSettled> => {
+                // A holder settles only the claim it holds, so a worker whose lease lapsed and was
+                // taken over cannot overwrite the outcome of the worker that took it.
                 const moved = await tx.task.updateMany({
-                    where: { id: task, kind, status: { in: [...LIVE] } },
+                    where:
+                        holder === undefined
+                            ? { id: task, kind, status: { in: [...LIVE] } }
+                            : { id: task, kind, status: 'IN_PROGRESS', claimedBy: holder },
                     data: {
                         status: update.status,
                         ...(update.detail === undefined ? {} : { detail: update.detail }),
@@ -260,20 +257,25 @@ export function prismaTasks(db: PrismaClient): Tasks {
             return version;
         },
 
-        dueForAnnouncement: async (kind, before, now, limit) => {
-            const rows = await db.task.findMany({
-                where: {
-                    kind,
-                    announcedAt: { lt: before },
-                    OR: [
-                        { status: 'NOT_STARTED' },
-                        { status: 'IN_PROGRESS', leaseUntil: { lte: now } },
-                    ],
-                },
-                orderBy: { announcedAt: 'asc' },
-                take: limit,
-                select: { id: true },
-            });
+        claimAnnouncements: async (kind, before, now, limit) => {
+            // Stamped in the statement that picks them, with SKIP LOCKED, so two replicas sweeping
+            // at once split the backlog instead of each announcing all of it.
+            const rows = await db.$queryRaw<{ id: string }[]>`
+                UPDATE "Task"
+                   SET "announcedAt" = ${now}::timestamptz,
+                       "updatedAt" = ${now}::timestamptz
+                 WHERE "id" IN (
+                       SELECT "id"
+                         FROM "Task"
+                        WHERE "kind" = ${kind}::"TaskKind"
+                          AND "announcedAt" < ${before}::timestamptz
+                          AND ("status" = 'NOT_STARTED'
+                               OR ("status" = 'IN_PROGRESS' AND "leaseUntil" <= ${now}::timestamptz))
+                        ORDER BY "announcedAt"
+                        LIMIT ${limit}
+                          FOR UPDATE SKIP LOCKED)
+             RETURNING "id"
+            `;
             return rows.map((row) => TaskId.parse(row.id));
         },
 

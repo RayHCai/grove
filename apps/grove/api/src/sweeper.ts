@@ -14,6 +14,9 @@ export const REAP_AFTER_LEASES = 3;
 /** Expired sessions are already refused on read, so pruning them is housekeeping, hourly. */
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
+/** Older than any cutoff, so a task stamped with it is due on the very next pass. */
+const NEVER_ANNOUNCED = new Date(0);
+
 export interface Swept {
     announced: TaskId[];
     reaped: TaskId[];
@@ -21,7 +24,7 @@ export interface Swept {
 
 /** One pass: re-announces what nothing was told about lately, then fails what was abandoned. */
 export async function sweepOnce(
-    tasks: Pick<Tasks, 'dueForAnnouncement' | 'markAnnounced' | 'reapAbandoned'>,
+    tasks: Pick<Tasks, 'claimAnnouncements' | 'markAnnounced' | 'reapAbandoned'>,
     queue: TaskQueue,
     env: Pick<Env, 'TASK_SWEEP_AFTER_MS' | 'BUILD_LEASE_MS' | 'ASSET_UPLOAD_LEASE_MS'>,
     log: FastifyBaseLogger,
@@ -30,15 +33,18 @@ export async function sweepOnce(
     const before = new Date(now - env.TASK_SWEEP_AFTER_MS);
     const kinds = await Promise.all(
         (TaskKind.options as Kind[]).map(async (kind): Promise<Swept> => {
-            const due = await tasks.dueForAnnouncement(kind, before, new Date(now), SWEEP_WIDTH);
+            const due = await tasks.claimAnnouncements(kind, before, new Date(now), SWEEP_WIDTH);
             const pushed = await Promise.all(
                 due.map(async (task) => ({ task, pushed: await queue.push(kind, task) })),
             );
-            // Only what the stream took is marked, so a push that failed is due again next pass.
             const landed = pushed
                 .filter((each) => each.pushed.outcome === 'pushed')
                 .map((each) => each.task);
-            await tasks.markAnnounced(landed, new Date(now));
+            // Claimed as announced up front, so a push that failed is handed back for the next pass.
+            const missed = pushed
+                .filter((each) => each.pushed.outcome !== 'pushed')
+                .map((each) => each.task);
+            await tasks.markAnnounced(missed, NEVER_ANNOUNCED);
             if (landed.length > 0) log.warn({ kind, tasks: landed }, 'tasks re-announced');
 
             const abandoned = await tasks.reapAbandoned(
@@ -64,10 +70,18 @@ export function sweepTasks(
     env: Env,
     log: FastifyBaseLogger,
 ): { stop: () => void } {
+    // A pass slower than the interval is let finish rather than joined by a second one.
+    let sweeping = false;
     const timer = setInterval(() => {
-        void sweepOnce(tasks, queue, env, log).catch((error: unknown) => {
-            log.error({ err: error }, 'task sweep failed');
-        });
+        if (sweeping) return;
+        sweeping = true;
+        void sweepOnce(tasks, queue, env, log)
+            .catch((error: unknown) => {
+                log.error({ err: error }, 'task sweep failed');
+            })
+            .finally(() => {
+                sweeping = false;
+            });
     }, env.TASK_SWEEP_INTERVAL_MS);
     // Nothing waits on this, so it must not be what keeps the process alive at shutdown.
     timer.unref();

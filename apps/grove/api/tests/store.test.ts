@@ -556,7 +556,7 @@ describe("a game's workspace", () => {
             task,
             'ASSET_UPLOAD',
             { status: 'SUCCESSFUL', detail: { versionId: 'copy.1' } },
-            VersionId.parse('copy.1'),
+            { edgeVersionId: VersionId.parse('copy.1') },
         );
         expect(await stores.workspaces.fileOf(gameId, ART.path)).toMatchObject({
             edgeVersionId: 'copy.1',

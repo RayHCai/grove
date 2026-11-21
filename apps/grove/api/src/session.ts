@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest, onRequestHookHandle
 import type { GameId, PlayerId } from '@grove/api-contract';
 import type { Games } from './records.js';
 import type { Sessions } from './sessions.js';
+import { refuse } from './reply.js';
 
 declare module 'fastify' {
     interface FastifyRequest {
@@ -32,7 +33,7 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export async function requireSession(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const playerId = request.session.playerId;
     if (playerId === undefined) {
-        await reply.code(401).send({ code: 'unauthorized', message: 'sign in first' });
+        await refuse(reply, 'unauthorized', 'sign in first');
         return;
     }
     request.viewer = { playerId };
@@ -70,7 +71,7 @@ export function requireGameOwner(games: Pick<Games, 'ownerOf'>) {
         const owner = await games.ownerOf(request.params.gameId);
         // One answer for "not yours" and "no such game": which exist is not this route's to say.
         if (owner !== request.viewer.playerId) {
-            await reply.code(403).send({ code: 'forbidden', message: 'not your game' });
+            await refuse(reply, 'forbidden', 'not your game');
         }
     };
 }

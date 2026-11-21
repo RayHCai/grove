@@ -67,6 +67,9 @@ async function served() {
     app.post('/denied', async () => {
         throw Object.assign(new Error('not yours'), { statusCode: 403 });
     });
+    app.get('/busy', async () => {
+        throw Object.assign(new Error('warming up'), { statusCode: 503, retryAfterS: 2 });
+    });
     return app;
 }
 
@@ -85,6 +88,11 @@ describe('a service', () => {
         const boom = await app.inject({ url: '/boom' });
         expect(boom.statusCode).toBe(500);
         expect(boom.json()).toEqual({ code: 'internal', message: 'internal error' });
+
+        const busy = await app.inject({ url: '/busy' });
+        expect(busy.statusCode).toBe(503);
+        expect(busy.headers['retry-after']).toBe('2');
+        expect(boom.headers['retry-after']).toBeUndefined();
 
         const missing = await app.inject({ url: '/nowhere' });
         expect(missing.statusCode).toBe(404);

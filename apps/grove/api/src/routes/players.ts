@@ -6,7 +6,7 @@ import type { Accounts } from '../records.js';
 import { beginSession, requireSignedIn } from '../session.js';
 import type { Sessions } from '../sessions.js';
 import { DisplayName, Email, Password } from '../values.js';
-import { unattached } from '../reply.js';
+import { unattached, refuse } from '../reply.js';
 
 export interface PlayerDeps {
     accounts: Accounts;
@@ -62,9 +62,7 @@ export function playerRoutes({
                 // An address that already answers to somebody is the one fact this route cannot
                 // hide: there is no mailer to defer the answer to.
                 if (created.outcome === 'taken') {
-                    return reply
-                        .code(409)
-                        .send({ code: 'conflict', message: 'that address already has an account' });
+                    return refuse(reply, 'conflict', 'that address already has an account');
                 }
 
                 const csrfToken = await beginSession(
@@ -96,7 +94,7 @@ function heldAccountRoutes(accounts: Accounts, sessions: Sessions): FastifyPlugi
             async (request, reply) => {
                 const account = await accounts.accountOf(request.viewer.playerId);
                 if (account === undefined) {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such account' });
+                    return refuse(reply, 'not_found', 'no such account');
                 }
                 return reply.send(account);
             },
@@ -127,7 +125,7 @@ function heldAccountRoutes(accounts: Accounts, sessions: Sessions): FastifyPlugi
                     return unattached(reply, 'account store');
                 }
                 if (renamed.outcome === 'missing') {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such account' });
+                    return refuse(reply, 'not_found', 'no such account');
                 }
                 return reply.send(renamed.account);
             },
@@ -164,7 +162,7 @@ function heldAccountRoutes(accounts: Accounts, sessions: Sessions): FastifyPlugi
                     return unattached(reply, 'account store');
                 }
                 if (changed.outcome === 'wrong_password') {
-                    return reply.code(403).send({ code: 'forbidden', message: 'wrong password' });
+                    return refuse(reply, 'forbidden', 'wrong password');
                 }
 
                 // Every other session this account holds is one a stolen password opened, which is
@@ -207,14 +205,12 @@ function heldAccountRoutes(accounts: Accounts, sessions: Sessions): FastifyPlugi
                     return unattached(reply, 'account store');
                 }
                 if (closed.outcome === 'wrong_password') {
-                    return reply.code(403).send({ code: 'forbidden', message: 'wrong password' });
+                    return refuse(reply, 'forbidden', 'wrong password');
                 }
                 // The games are Restrict, and their bundles and leaderboard rows live in services
                 // this one cannot reach. Deleting the row would orphan all of it.
                 if (closed.outcome === 'owns_games') {
-                    return reply
-                        .code(409)
-                        .send({ code: 'conflict', message: 'delete your games first' });
+                    return refuse(reply, 'conflict', 'delete your games first');
                 }
 
                 await sessions.destroyFor(request.viewer.playerId);
@@ -236,7 +232,7 @@ function heldAccountRoutes(accounts: Accounts, sessions: Sessions): FastifyPlugi
             async (request, reply) => {
                 const profile = await accounts.profileOf(request.params.playerId);
                 if (profile === undefined) {
-                    return reply.code(404).send({ code: 'not_found', message: 'no such account' });
+                    return refuse(reply, 'not_found', 'no such account');
                 }
                 return reply.send(profile);
             },

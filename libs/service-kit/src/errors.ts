@@ -43,6 +43,9 @@ export function installErrorHandler(app: FastifyInstance): void {
 
         const status = error.statusCode ?? 500;
         if (status >= 500) request.log.error({ err: error }, 'unhandled');
+        // An error that knows when a retry is worth making says so, which a bare 503 cannot.
+        const { retryAfterS } = error as { retryAfterS?: unknown };
+        if (typeof retryAfterS === 'number') void reply.header('retry-after', String(retryAfterS));
 
         return reply.code(status).send({
             code: status >= 500 ? 'internal' : (CODE_BY_STATUS.get(status) ?? 'invalid_request'),
