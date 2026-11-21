@@ -11,15 +11,15 @@ export type ScriptKind = 'ticker' | 'writer' | 'collider';
 
 export interface WorldSpec {
     entities: number;
-    /** Whether bodies carry a collider. The contact walk visits every entity either way. */
+    /** Whether bodies carry a collider; without one the contact walk visits none of them. */
     colliders: boolean;
     /** How many of the entities carry a script, from slot 0 up. */
     scripts: number;
     scriptKind: ScriptKind;
     isServer: boolean;
     /**
-     * Grid pitch in world units. Load-bearing: half-extents of zero compare equal, so bodies at
-     * one point register as pairs and a stacked world prices DISPATCH, not the walk.
+     * Grid pitch in world units. Load-bearing: collider bodies nearer than one box width register
+     * as pairs, so a stacked world prices DISPATCH, not the walk.
      */
     spacing: number;
     /**

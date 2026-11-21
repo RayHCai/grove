@@ -86,7 +86,9 @@ export class GameInstance {
         // The store reaches the world twice over, and deliberately: as the creator's `storage`
         // seam, which a handler awaits, and as the load-and-save protocol this class runs for
         // `@serverState`. No `log` sink: every line already arrives in `OutputBatch.log`.
-        this.sim = createSim(project, { ...forwarded, kv: this.#kv });
+        // The codec too: the sim measures a `Welcome` against it, and one measured against another
+        // codec fits a frame this host cannot produce.
+        this.sim = createSim(project, { ...forwarded, kv: this.#kv, codec: this.#codec });
 
         this.#driver = new Driver(
             { stepOnce: (drain) => this.#step(drain) },
@@ -228,10 +230,24 @@ export class GameInstance {
         for (const line of out.log) this.#log(line.line);
 
         for (const send of out.sends) {
-            // Encoded once for a shared envelope, which is the whole point of `to` being a list:
-            // most of a state envelope is per-connection, so the transform frame is the only
-            // subset N peers can share.
+            // Encoded once for a shared envelope, which is the whole point of `to` being a list,
+            // and before the loop: a refusal there is the envelope's, not any one peer's.
             let encoded: EncodedFrame | null = null;
+            if (send.to.length > 1) {
+                try {
+                    encoded = this.#codec.encode(send.envelope);
+                } catch (cause) {
+                    this.#log(
+                        `send-unencodable kind=${send.envelope.kind} peers=${send.to.length}: ${reason(cause)}`,
+                    );
+                    // A lost reliable frame leaves every recipient diverged with nothing to say so,
+                    // while a droppable one is superseded by the next of its kind.
+                    if (send.class === 'reliable') {
+                        for (const connectionId of send.to) this.#closeConnection(connectionId);
+                    }
+                    continue;
+                }
+            }
             for (const connectionId of send.to) {
                 const transport = this.#transports.get(connectionId);
                 if (transport === undefined) continue;
@@ -244,15 +260,10 @@ export class GameInstance {
                     continue;
                 }
                 try {
-                    if (send.to.length === 1) {
-                        transport.send(send.envelope);
-                        continue;
-                    }
-                    encoded ??= this.#codec.encode(send.envelope);
-                    transport.sendEncoded(encoded);
+                    if (encoded === null) transport.send(send.envelope);
+                    else transport.sendEncoded(encoded);
                 } catch (cause) {
-                    // Per connection: without it one peer whose encode throws takes the broadcast
-                    // down for every peer behind it.
+                    // Per connection: one socket's write failure must not reach the peers behind it.
                     this.#log(`close conn=${connectionId} reason=send-failed: ${reason(cause)}`);
                     this.#closeConnection(connectionId);
                 }

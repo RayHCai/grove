@@ -20,10 +20,17 @@ sender cannot build a frame its receiver refuses whole. No bytes move here. It s
 | `src/envelopes.ts` | every message, both direction unions, every payload type                |
 | `src/limits.ts`    | the per-frame caps a sender sizes to and a receiver refuses past        |
 | `src/validate.ts`  | `asClientEnvelope`, and the name and payload predicates a sender checks |
+| `src/encode.ts`    | `toWireValue`: the sender's walk from a creator value to JSON           |
 | `src/index.ts`     | the barrel, grouped by concern                                          |
 
-The runtime values are `PROTOCOL_VERSION`, the limits and the client-frame narrowing; everything else is a
-type. Server-to-client narrowing stays with the client, since its bounds are the receiver's own.
+The runtime values are `PROTOCOL_VERSION`, the limits, the client-frame narrowing and `toWireValue`;
+everything else is a type. Server-to-client narrowing stays with the client, since its bounds are the
+receiver's own. `toWireValue` is the one walk both senders turn a creator value into JSON with (a request
+payload on the client, `@serverState` on the sim, whose `Entity` and `Player` it reaches through a `WireRef`
+it is handed, since this package cannot import core): it drops what the codec would throw on rather than
+throwing. It stays apart from the codec's own admission, which validates a whole envelope, throws and is
+swapped with the codec, and from `isAdmissiblePayload`, which bounds the node count of a payload a parse
+produced and so never meets a class instance, a getter or a cycle.
 
 | Constant                     | Value | Bounds                                           |
 | ---------------------------- | ----- | ------------------------------------------------ |
@@ -35,6 +42,8 @@ type. Server-to-client narrowing stays with the client, since its bounds are the
 | `MAX_REQUEST_NAME_LENGTH`    | 64    | longest accepted request name                    |
 | `MAX_REQUEST_PAYLOAD_NODES`  | 256   | values one request payload may hold, whole graph |
 | `MAX_IDENTITY_LENGTH`        | 128   | longest accepted `projectId` / hash on a join    |
+| `MAX_CLIENT_FRAME_BYTES`     | 64 Ki | bytes one client → server frame may encode to    |
+| `MAX_VALUE_DEPTH`            | 64    | nesting `toWireValue` drops a creator value past |
 
 Dependencies: `@platform/transport` (`JsonValue`, and the `RESERVED_KEYS` the payload narrowing refuses) and
 `@platform/project`, whose authoring ids are exempt from the restatement rule below. `@platform/core` is
@@ -63,8 +72,8 @@ A message not in one of the two unions is not on the wire, and this table is tha
 `Envelope` is both unions. The unions are **disjoint**, so neither end can
 accept a frame it minted.
 
-**Payload types.** `WireSingleStructuralOp` (nine arms: `spawn`, `destroy`, `reparent`, `tag`,
-`enter-interest`, `leave-interest`, `player-join`, `player-leave`, `attach`), `WireStructuralGroup`, their
+**Payload types.** `WireSingleStructuralOp` (seven arms: `spawn`, `destroy`, `reparent`, `tag`,
+`player-join`, `player-leave`, `attach`), `WireStructuralGroup`, their
 union `WireStructuralOp` and `WireStructuralOpKind`; `WireScriptAttachment`, `EntityOverrides`;
 `StateHostAddr`,
 `StateDiff`; `WireTransform`, `TransformDiff`; `EntitySnapshot`, `PlayerSnapshot`, `WorldSnapshot`;
@@ -129,10 +138,11 @@ flattened `TransformDiff` free.
 - **`WorldSnapshot.entities` is parents-before-children**, a real topological emit; core's slot order does not
   satisfy it, since parenting is a later mutation. A client rejects or roots-and-counts an out-of-order entity
   rather than silently rooting it.
-- **An interest set is parent-closed**, and leaving is bottom-up.
-- **`spawn` and `enter-interest` carry a full `EntitySnapshot`** (all seven transform fields, `parent`,
-  `owner`, `tags`) because transform is dropped first under backpressure and a static entity is dirty exactly
-  once. The duplicate transform in the same tick's `transform` envelope is deliberate. `template` is a
+- **`spawn` carries a full `EntitySnapshot`** (all seven transform fields and `owner`) because transform is
+  dropped first under backpressure and a static entity is dirty exactly once. The duplicate transform in the
+  same tick's `transform` envelope is deliberate. Its `parent` is `null`, its `tags` empty and `overrides`
+  absent, because at the moment the spawn is journaled none of them is set yet and each reaches the receiver
+  as its own later `reparent`, `tag` or `attach` op; a joiner's `WorldSnapshot.entities` carries all three. `template` is a
   `TemplateId` rather than a free string: it keys the render manifest on one end and a saved file on the
   other, and a rename that misses one of them should not typecheck. Both ends of that join declare the id:
   a `TemplateVisual`'s `template` too, as `texture` and `WireAssetRef.key` both declare `AssetId`.
@@ -142,7 +152,9 @@ flattened `TransformDiff` free.
   bounded _before_ the element walk; the count is peer-chosen and both validation and the work behind it are
   linear in it. No type here expresses a cap, because a cap is a receiver's policy and not a shape. Three layers
   hold one each: transport refuses a frame over `MAX_FRAME_BYTES` before parsing it, since parsing is what
-  allocates; the server bounds the unauthenticated client → server surface (`MAX_ACTIONS_PER_FRAME`,
+  allocates, and a host closes a socket whose client → server frame passes the far smaller
+  `MAX_CLIENT_FRAME_BYTES`, also unparsed, which the client sizes every frame it sends to, since a request
+  payload's strings are bounded by no count; the server bounds the unauthenticated client → server surface (`MAX_ACTIONS_PER_FRAME`,
   `MAX_ACTION_NAME_LENGTH`, `MAX_ACTION_NAMES`, `MAX_INTERACTIONS_PER_FRAME`, `MAX_WIDGET_NAME_LENGTH`,
   `MAX_NAME_LENGTH`, `MAX_REQUESTS_PER_FRAME`, `MAX_REQUEST_NAME_LENGTH`, `MAX_REQUEST_PAYLOAD_NODES`,
   `maxSeqGap`); the client bounds every array

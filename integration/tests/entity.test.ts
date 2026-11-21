@@ -229,6 +229,16 @@ describe("an entity's tags", () => {
         expect(session.trips).toEqual([]);
     });
 
+    it('refuses a creator tag under the bubble prefix, which no delta would carry', async () => {
+        const { session, tab } = await open();
+        await press(session, tab, W.fakeBubble);
+        // Taken, it would sit in the authority's index, reach every joiner's snapshot and be
+        // dropped from every delta, so a tab already here and one joining later would disagree.
+        expect(reading<boolean>(tab, S.refusedTag)).toBe(true);
+        expect(reading<string>(tab, S.marks)).toBe('');
+        expect(runtimeOf(tab).tags.tagsOf(mine(tab))).toHaveLength(0);
+    });
+
     it('reports what it is touching, which needs a collider on both bodies', async () => {
         const { session, tab } = await open();
         // Walked onto the mark, which carries the same collider the avatar does.

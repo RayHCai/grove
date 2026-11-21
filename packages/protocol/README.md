@@ -43,5 +43,5 @@ The envelope catalogue and the reasoning are in [DESIGN.md](./DESIGN.md); this f
 document is authoritative for the wire: the transport, server, and client designs each specified parts of the
 protocol before this package existed, so where they disagree with it they are the ones that are wrong.
 
-`src/{ids,version,envelopes,limits,validate,index}.ts` is the whole wire, and `src/version.ts` holds the `PROTOCOL_VERSION` a
+`src/{ids,version,envelopes,limits,validate,encode,index}.ts` is the whole wire, and `src/version.ts` holds the `PROTOCOL_VERSION` a
 codec change negotiates against.

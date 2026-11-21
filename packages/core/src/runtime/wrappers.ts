@@ -43,20 +43,30 @@ export abstract class StatefulWrapper {
     }
 }
 
+// Thrown at the write rather than dropped at the drain: a non-finite count cannot be encoded, so
+// the whole field would stop replicating for the session with nothing naming the call that did it.
+function requireFinite(value: number, method: string): number {
+    if (!Number.isFinite(value)) {
+        throw new RangeError(`${method} needs a finite number, received ${String(value)}`);
+    }
+    return value;
+}
+
 export class Scoreboard extends StatefulWrapper {
     readonly #scores = new Map<string, number>();
 
     add(amount: number, player?: Player): void {
         this.requireBound();
         const p = this.#require(player, 'add');
-        this.#scores.set(p.id, (this.#scores.get(p.id) ?? 0) + amount);
+        const total = (this.#scores.get(p.id) ?? 0) + requireFinite(amount, 'Scoreboard.add');
+        this.#scores.set(p.id, requireFinite(total, 'Scoreboard.add'));
         this.mark();
     }
 
     set(amount: number, player?: Player): void {
         this.requireBound();
         const p = this.#require(player, 'set');
-        this.#scores.set(p.id, amount);
+        this.#scores.set(p.id, requireFinite(amount, 'Scoreboard.set'));
         this.mark();
     }
 
@@ -113,6 +123,7 @@ export class Leaderboard extends StatefulWrapper {
         this.requireBound();
         // Throwing rather than dropping the score: nothing here can infer whose it was.
         if (!player) throw new Error('Leaderboard.submit needs the player whose score it is');
+        requireFinite(score, 'Leaderboard.submit');
         const prev = this.#scores.get(player.id);
         const better = prev === undefined || (this.#order === 'high' ? score > prev : score < prev);
         if (better) {
@@ -168,13 +179,14 @@ export class Inventory extends StatefulWrapper {
 
     add(item: string, count = 1): void {
         this.requireBound();
-        this.#items.set(item, (this.#items.get(item) ?? 0) + count);
+        const total = (this.#items.get(item) ?? 0) + requireFinite(count, 'Inventory.add');
+        this.#items.set(item, requireFinite(total, 'Inventory.add'));
         this.mark();
     }
 
     remove(item: string, count = 1): void {
         this.requireBound();
-        const next = (this.#items.get(item) ?? 0) - count;
+        const next = (this.#items.get(item) ?? 0) - requireFinite(count, 'Inventory.remove');
         if (next <= 0) this.#items.delete(item);
         else this.#items.set(item, next);
         this.mark();

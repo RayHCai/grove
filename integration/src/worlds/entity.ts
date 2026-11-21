@@ -50,6 +50,7 @@ export const W = {
     hide: 'hide',
     say: 'say',
     clearSay: 'clear-say',
+    fakeBubble: 'fake-bubble',
     think: 'think',
     playClip: 'play-clip',
     stopAnimation: 'stop-animation',
@@ -73,6 +74,7 @@ export const S = {
     alive: 'alive',
     effects: 'effects',
     animated: 'animated',
+    refusedTag: 'refusedTag',
 } as const;
 
 /** Seconds every tween below runs for, short enough that a test settles it in a few dozen ticks. */
@@ -112,6 +114,8 @@ export class Director extends ServerScript<Game> {
     @serverState effects = 0;
     /** Whether playing a clip left an `Animation` on the entity. Nothing mints one. */
     @serverState animated = false;
+    /** Whether `tag` refused a name under the prefix a speech bubble rides. */
+    @serverState refusedTag = false;
 
     @onPlayerJoin
     join(ctx: Ctx): void {
@@ -239,6 +243,16 @@ export class Director extends ServerScript<Game> {
     @onPress(W.clearSay)
     doClearSay(ctx: Ctx): void {
         this.#avatar(ctx)?.clearSay();
+        this.#readTags(ctx);
+    }
+
+    @onPress(W.fakeBubble)
+    doFakeBubble(ctx: Ctx): void {
+        try {
+            this.#avatar(ctx)?.tag(`say:${TAG_SAID}`);
+        } catch {
+            this.refusedTag = true;
+        }
         this.#readTags(ctx);
     }
 

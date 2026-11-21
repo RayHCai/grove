@@ -214,7 +214,9 @@ pipe's.
   `MAX_MISSED_HEARTBEATS` (3) consecutive ones close the connection, so the cutoff falls between 10 and
   15 s: a frame may land just before a boundary. Protocol's messages are the whole wire and a browser
   cannot send a ping control frame, so liveness is read off traffic both directions already carry
-  unprompted: `state` every send-tick, `time-sync` every 2 s. Any inbound frame resets the count, one the
+  unprompted: `state` every send-tick, and `time-sync` every 2 s while the page is rendering, since the
+  client sends it from its frame loop. A hidden page's loop stops, so it goes silent upstream and is closed
+  after the idle window like any other silent peer. Any inbound frame resets the count, one the
   codec refuses included. The interval is cleared on every close path, because its closure holds the end.
 - **`maxBufferedBytes`** (default `MAX_FRAME_BYTES`) bounds the socket's own `bufferedAmount` ahead of
   each send, and the connection closes past it. Sized off the frame cap rather than chosen: a peer

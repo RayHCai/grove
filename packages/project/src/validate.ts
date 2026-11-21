@@ -12,7 +12,7 @@ import type {
     ScriptLocation,
     SpriteVisual,
 } from './manifest.js';
-import { MAX_TEMPLATE_DEPTH, RESERVED_KEYS } from './limits.js';
+import { MAX_TEMPLATE_DEPTH, RESERVED_KEYS, RESERVED_TAG_PREFIX } from './limits.js';
 import { PROJECT_FORMAT_VERSION } from './manifest.js';
 
 /** Why a value is not a `ProjectManifest`, and where in it the fault sits. */
@@ -328,6 +328,12 @@ function readTags(value: unknown, path: string): void {
     for (const [index, tag] of readArray(value, path).entries()) {
         const name = readKey(tag, `${path}[${index}]`);
         if (seen.has(name)) fail(`${path}[${index}]`, `duplicate tag "${name}"`);
+        if (name.startsWith(RESERVED_TAG_PREFIX)) {
+            fail(
+                `${path}[${index}]`,
+                `tag "${name}" uses the "${RESERVED_TAG_PREFIX}" prefix, which speech bubbles reserve`,
+            );
+        }
         seen.add(name);
     }
 }

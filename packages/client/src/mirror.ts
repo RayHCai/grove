@@ -16,6 +16,7 @@ import type { ClientPassContext } from './passes.js';
 import type { Bounds } from '@platform/math';
 import { bounds as makeBounds } from '@platform/math';
 import type { ScriptId } from '@platform/project';
+import { RESERVED_TAG_PREFIX } from '@platform/project/limits';
 import type {
     EntitySnapshot,
     NetId,
@@ -52,7 +53,7 @@ export interface MirrorDelta {
 
 /** Counters for ops the mirror declined to apply; nonzero after a clean session is a bug. */
 export interface MirrorCounters {
-    /** An op naming a netId the mirror does not hold: a reconnect or interest-management race. */
+    /** An op naming a netId the mirror does not hold: a reconnect race. */
     unknownNetId: number;
     /** A child applied before its parent, which the wire makes the server's obligation. */
     outOfOrderParent: number;
@@ -299,14 +300,10 @@ export class Mirror {
     #applySingle(op: WireSingleStructuralOp, delta: MirrorDelta): void {
         switch (op.kind) {
             case 'spawn':
-            case 'enter-interest':
-                // One applier for both: the same `EntitySnapshot` either way.
                 this.#spawn(op.snapshot, delta);
                 return;
 
             case 'destroy':
-            case 'leave-interest':
-                // Interest is parent-closed, so a parent leaving never orphans a child in view.
                 this.#destroy(op.netId, delta);
                 return;
 
@@ -329,6 +326,9 @@ export class Mirror {
             case 'tag': {
                 const local = this.#resolve(op.netId);
                 if (local === undefined) return;
+                // Skipped rather than thrown on: the authority never sends a bubble, and a peer that
+                // does has not earned the session's end over a tag.
+                if (op.tag.startsWith(RESERVED_TAG_PREFIX)) return;
                 const entity = this.#rt.entityManager.facade(local);
                 if (op.added) entity.tag(op.tag);
                 else entity.untag(op.tag);
@@ -399,7 +399,9 @@ export class Mirror {
         if (snapshot.tags.length > MAX_WIRE_ITEMS) {
             this.counters.oversizedList++;
         } else {
-            for (const tag of snapshot.tags) entity.tag(tag);
+            for (const tag of snapshot.tags) {
+                if (!tag.startsWith(RESERVED_TAG_PREFIX)) entity.tag(tag);
+            }
         }
 
         const attachments = snapshot.overrides?.scripts ?? [];

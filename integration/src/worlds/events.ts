@@ -69,6 +69,10 @@ export const HOME_AT = { x: 0, y: -120 };
 export const PIT_AT = { x: 140, y: 110 };
 /** Near enough the middle that the pick resolves against drawn art at any sane camera. */
 export const BEACON_AT = { x: -80, y: 40 };
+/** Where `toDecoy` puts a beacon-tagged entity with no collider, clear of every other body. */
+export const DECOY_AT = { x: -160, y: -40 };
+/** A key no template declares, so what it mints is a bare entity no script gives a collider. */
+export const DECOY_KEY = 'decoy';
 
 /** One widget per thing a test needs the authority to do to the pressing player's avatar. */
 export const W = {
@@ -77,6 +81,7 @@ export const W = {
     toPit: 'to-pit',
     toHome: 'to-home',
     toBeacon: 'to-beacon',
+    toDecoy: 'to-decoy',
     relay: 'relay',
     ring: 'ring',
     echo: 'echo',
@@ -190,6 +195,12 @@ export class Director extends ServerScript<Game> {
     @onPress(W.toBeacon)
     toBeacon(ctx: Ctx): void {
         ctx.player?.teleportTo(BEACON_AT.x, BEACON_AT.y);
+    }
+
+    @onPress(W.toDecoy)
+    toDecoy(ctx: Ctx): void {
+        game.spawn(DECOY_KEY, DECOY_AT.x, DECOY_AT.y).tag(TAG_BEACON);
+        ctx.player?.teleportTo(DECOY_AT.x, DECOY_AT.y);
     }
 
     /**

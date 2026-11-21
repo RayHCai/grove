@@ -580,8 +580,6 @@ type SnapshotBaseline =
 const SNAPSHOT_COVERAGE: Record<WireStructuralOpKind, SnapshotBaseline> = {
     spawn: 'entities',
     destroy: 'entities',
-    'enter-interest': 'entities',
-    'leave-interest': 'entities',
     reparent: 'entities[].parent',
     tag: 'entities[].tags',
     'player-join': 'players',

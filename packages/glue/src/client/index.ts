@@ -19,6 +19,7 @@ export type {
     Binding,
     ClientHUDSink,
     ClientStats,
+    DisconnectReason,
     EmittingInputDevice,
     FailureReason,
     FrameSource,

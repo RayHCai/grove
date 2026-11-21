@@ -165,6 +165,54 @@ describe('wrapper behavior', () => {
     });
 });
 
+// A non-finite count cannot be encoded, so the drain would drop the whole field for the session;
+// the write that caused it has to be the one that throws.
+describe('a non-finite number', () => {
+    const poison = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+
+    it('is refused by every mutator that takes one, leaving the held value and marks alone', () => {
+        const record = createHostRecord('game');
+        const marks: string[] = [];
+        record.markDirty = (field) => marks.push(field);
+        const s = new Scoreboard();
+        s.bind(record, 'scores');
+        const lb = new Leaderboard();
+        lb.bind(record, 'best');
+        const inv = new Inventory(player('a'));
+        inv.bind(record, 'bag');
+        s.add(3, player('a'));
+        inv.add('gem', 2);
+        lb.submit(5, player('a'));
+        marks.length = 0;
+
+        for (const bad of poison) {
+            expect(() => s.add(bad, player('a'))).toThrow(/Scoreboard\.add needs a finite/);
+            expect(() => s.set(bad, player('a'))).toThrow(/Scoreboard\.set needs a finite/);
+            expect(() => lb.submit(bad, player('a'))).toThrow(/Leaderboard\.submit needs a finite/);
+            expect(() => inv.add('gem', bad)).toThrow(/Inventory\.add needs a finite/);
+            expect(() => inv.remove('gem', bad)).toThrow(/Inventory\.remove needs a finite/);
+        }
+        expect(s.of(player('a'))).toBe(3);
+        expect(lb.of(player('a'))).toBe(5);
+        expect(inv.count('gem')).toBe(2);
+        expect(marks).toEqual([]);
+    });
+
+    it('is refused when finite operands overflow the running total', () => {
+        const s = new Scoreboard();
+        s.bind(createHostRecord('game'), 'scores');
+        s.add(Number.MAX_VALUE, player('a'));
+        expect(() => s.add(Number.MAX_VALUE, player('a'))).toThrow(/finite/);
+        expect(s.of(player('a'))).toBe(Number.MAX_VALUE);
+
+        const inv = new Inventory(player('a'));
+        inv.bind(createHostRecord('player:a'), 'bag');
+        inv.add('gem', Number.MAX_VALUE);
+        expect(() => inv.add('gem', Number.MAX_VALUE)).toThrow(/finite/);
+        expect(inv.count('gem')).toBe(Number.MAX_VALUE);
+    });
+});
+
 // The two ends both endpoints replicate a wrapper through. Without them the field's value is the
 // wrapper OBJECT, which no codec carries, so the mark is raised, the drain finds a class instance,
 // and the write is dropped and counted while everything upstream looks like it worked.

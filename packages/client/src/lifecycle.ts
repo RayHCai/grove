@@ -10,6 +10,12 @@ export type FailureReason =
     /** The script bundle would not load, or was not the bundle the server said it would be. */
     | { kind: 'bundle'; message: string };
 
+/** Why a session closed without failing, read once it is `disconnected`. */
+export type DisconnectReason =
+    | { kind: 'closed' }
+    /** No frame for `idleSeconds` when the close came: a hidden page the host dropped as silent. */
+    | { kind: 'frames-stopped'; idleSeconds: number };
+
 export type SessionState =
     /** `JoinRequest` sent, no `Welcome` yet. Input refused. */
     | 'connecting'
@@ -40,6 +46,7 @@ export function isTerminal(state: SessionState): boolean {
 export class Lifecycle {
     #state: SessionState = 'connecting';
     #failure: FailureReason | undefined;
+    #disconnection: DisconnectReason | undefined;
     readonly #listeners = new Set<(state: SessionState) => void>();
 
     get state(): SessionState {
@@ -48,6 +55,11 @@ export class Lifecycle {
 
     get failure(): FailureReason | undefined {
         return this.#failure;
+    }
+
+    /** Set once, by the move into `disconnected`; a session that failed never has one. */
+    get disconnection(): DisconnectReason | undefined {
+        return this.#disconnection;
     }
 
     get acceptsInput(): boolean {
@@ -65,6 +77,14 @@ export class Lifecycle {
     to(state: SessionState): void {
         if (isTerminal(this.#state)) return;
         this.#move(state);
+    }
+
+    /** Moves to `disconnected` with a reason, unless already terminal. */
+    disconnect(reason: DisconnectReason): void {
+        if (isTerminal(this.#state)) return;
+        // Before the move, so a listener told `disconnected` can already read why.
+        this.#disconnection = reason;
+        this.#move('disconnected');
     }
 
     /** Ends the session with a reason, from any state, the one move terminal does not absorb. */

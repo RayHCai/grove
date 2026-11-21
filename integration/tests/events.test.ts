@@ -30,6 +30,7 @@ import {
     S,
     SCREEN_KIOSK,
     SENDER_NONE,
+    TAG_BEACON,
     TEMPLATE_BEACON,
     W,
     WIDGET_ASK,
@@ -234,6 +235,19 @@ describe('two bodies and a named rectangle', () => {
         // predicate.
         await session.step(SETTLE * 3);
         expect(reading<number>(tab, S.bumps)).toBe(1);
+    });
+
+    it('never reports one with an entity that carries no collider', async () => {
+        const { session, tab } = await open();
+        await press(session, tab, W.toDecoy);
+        await session.step(SETTLE);
+        // The decoy carries the tag the avatar's handler listens for and sits on the avatar, so
+        // only the missing collider stands between this reading and a bump.
+        const decoy = runtimeOf(tab)
+            .entities.liveIds()
+            .filter((id) => runtimeOf(tab).tags.has(id, TAG_BEACON));
+        expect(decoy).toHaveLength(2);
+        expect(reading<number>(tab, S.bumps)).toBe(0);
     });
 
     it('reports a region entry, then the exit that leaving it produces', async () => {

@@ -14,7 +14,7 @@ export type { ClientProject, ClockSource } from './handshake.js';
 export type { ScriptIndex } from './mirror.js';
 
 // What `GameClient`'s own members are typed as, so a host can name what it holds.
-export type { FailureReason, Lifecycle, SessionState } from './lifecycle.js';
+export type { DisconnectReason, FailureReason, Lifecycle, SessionState } from './lifecycle.js';
 export type { Mirror, MirrorCounters, MirrorDelta, MirrorReparent, MirrorView } from './mirror.js';
 export type { MirrorIndex } from './index-map.js';
 export type { Prediction, PredictionCounters } from './prediction.js';

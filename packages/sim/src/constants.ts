@@ -40,9 +40,6 @@ export const MAX_ACTION_NAMES = 64;
 /** Longest accepted display name. */
 export const MAX_NAME_LENGTH = 24;
 
-/** Nesting past which a `@serverState` value is dropped, far below the codec's own cap. */
-export const MAX_STATE_DEPTH = 64;
-
 /** Unjoined connections held at once, so unjoined sockets cannot lock out real players. */
 export const MAX_UNJOINED_CONNECTIONS = 32;
 

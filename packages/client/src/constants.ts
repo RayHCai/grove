@@ -56,11 +56,14 @@ export const MAX_BUNDLE_BYTES = 8 * 1024 * 1024;
 /** Seconds the session may wait for the bundle before failing; also bounds the held inbox. */
 export const BUNDLE_DEADLINE_SECONDS = 30;
 
+/** Envelopes held undrained before the backlog is discarded for a resync; above the bundle hold. */
+export const MAX_INBOX_ENVELOPES = 4_096;
+
+/** Seconds without a frame after which a close is put down to the stopped loop, not the host. */
+export const FRAMES_STOPPED_SECONDS = 5;
+
 /** Seconds in `connecting` or `resyncing` before the join fails; longer than the server's. */
 export const JOIN_DEADLINE_SECONDS = 10;
-
-/** Nesting past which a `request()` payload value is dropped; held below the codec's own cap. */
-export const MAX_REQUEST_DEPTH = 64;
 
 /** Cardinality cap on any array a server sends, so one frame cannot buy unbounded work. */
 export const MAX_WIRE_ITEMS = 65_536;

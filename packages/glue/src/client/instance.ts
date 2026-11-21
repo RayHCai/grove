@@ -1,7 +1,12 @@
 // It dials nothing and builds no renderer: a `Transport` and an `IRenderer` arrive already made,
 // which lets a session run over a loopback pair with no socket and no GPU.
 
-import type { ClientHUDSink, FailureReason, SessionState } from '@platform/client';
+import type {
+    ClientHUDSink,
+    DisconnectReason,
+    FailureReason,
+    SessionState,
+} from '@platform/client';
 import type { GameClient } from '@platform/client';
 import { createClient } from '@platform/engine/host';
 import type { CreateClientOptions } from '@platform/engine/host';
@@ -9,10 +14,14 @@ import type { CreateClientOptions } from '@platform/engine/host';
 /** What a host supplies that an authored project cannot describe. */
 export interface ClientInstanceOptions extends CreateClientOptions {
     /**
-     * Every session state change, and the reason when one is a failure.
+     * Every session state change, the reason when one is a failure, and why when it is a close.
      * An option rather than a later registration: `start()` may reach `failed` synchronously.
      */
-    onState?: (state: SessionState, failure: FailureReason | undefined) => void;
+    onState?: (
+        state: SessionState,
+        failure: FailureReason | undefined,
+        disconnection: DisconnectReason | undefined,
+    ) => void;
     /**
      * Destroys the renderer with the session. Left false by a host whose renderer outlives the
      * session: a React app whose canvas hook owns it, which is the usual case.
@@ -40,7 +49,8 @@ export class ClientInstance {
 
         if (onState !== undefined) {
             this.#unsubscribe = this.client.lifecycle.onChange((next: SessionState) => {
-                onState(next, this.client.lifecycle.failure);
+                const { failure, disconnection } = this.client.lifecycle;
+                onState(next, failure, disconnection);
             });
         }
     }
@@ -51,6 +61,11 @@ export class ClientInstance {
 
     get failure(): FailureReason | undefined {
         return this.client.lifecycle.failure;
+    }
+
+    /** Why a `disconnected` session closed: `frames-stopped` is a page that went hidden. */
+    get disconnection(): DisconnectReason | undefined {
+        return this.client.lifecycle.disconnection;
     }
 
     /** The live HUD a host's own interface subscribes to. */

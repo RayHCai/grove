@@ -11,7 +11,9 @@ import { GameClient } from '../src/client.js';
 import {
     ACK_STALL_TICKS,
     BUNDLE_DEADLINE_SECONDS,
+    FRAMES_STOPPED_SECONDS,
     JOIN_DEADLINE_SECONDS,
+    MAX_INBOX_ENVELOPES,
     MAX_WIRE_ITEMS,
     RING_TICKS,
 } from '../src/constants.js';
@@ -95,6 +97,8 @@ interface Harness {
     runSilentWithTraffic(n?: number): void;
     /** Delivers in-flight frames without advancing anything; loopback is one deliver() late. */
     flush(): void;
+    /** Moves the wall clock with no frame run, as a hidden page's stopped loop does. */
+    elapse(seconds: number): void;
     now(): number;
 }
 
@@ -178,6 +182,9 @@ async function harness(
         },
         flush(): void {
             pair.deliver();
+        },
+        elapse(seconds: number): void {
+            now += seconds;
         },
     };
     if (clientOpts.start !== false) client.start();
@@ -596,10 +603,54 @@ describe('a refusal is distinguishable from a drop', () => {
         h.server.close();
         h.run(2);
         expect(h.client.state).toBe('disconnected');
+        expect(h.client.lifecycle.disconnection).toEqual({ kind: 'closed' });
         // The frame source is stopped, so driving it further does nothing.
         const at = h.client.stats().localTick;
         h.run(5);
         expect(h.client.stats().localTick).toBe(at);
+    });
+});
+
+describe('a page whose frame loop stopped', () => {
+    it('names a close that lands while no frame has run, so a UI can say the tab was hidden', async () => {
+        const h = await harness();
+        untilLive(h);
+        // The loop stops; the host's idle window then closes the peer it no longer hears from.
+        h.elapse(FRAMES_STOPPED_SECONDS * 3);
+        h.server.close();
+        h.flush();
+        expect(h.client.state).toBe('disconnected');
+        const reason = h.client.lifecycle.disconnection;
+        expect(reason?.kind).toBe('frames-stopped');
+        expect(reason?.kind === 'frames-stopped' && reason.idleSeconds).toBeGreaterThanOrEqual(
+            FRAMES_STOPPED_SECONDS * 3,
+        );
+    });
+
+    it('discards a backlog past the cap and resyncs on the next frame, rather than holding it', async () => {
+        const h = await harness();
+        untilLive(h);
+        const joins = h.server.joins.length;
+        for (let i = 0; i <= MAX_INBOX_ENVELOPES; i++) h.server.sendState();
+        h.flush();
+        // Nothing drains while the loop is stopped, so the cap is all that bounds what is held.
+        h.run(1);
+        expect(h.client.state).toBe('resyncing');
+        h.flush();
+        expect(h.server.joins.length).toBe(joins + 1);
+        untilLive(h);
+        expect(h.client.state).toBe('live');
+    });
+
+    it('holds a backlog under the cap and applies it on the next frame', async () => {
+        const h = await harness();
+        untilLive(h);
+        const joins = h.server.joins.length;
+        for (let i = 0; i < 8; i++) h.server.sendState();
+        h.flush();
+        h.run(1);
+        expect(h.client.state).toBe('live');
+        expect(h.server.joins.length).toBe(joins);
     });
 });
 

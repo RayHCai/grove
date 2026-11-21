@@ -122,9 +122,6 @@ export type WireSingleStructuralOp =
     | { kind: 'destroy'; netId: NetId }
     | { kind: 'reparent'; netId: NetId; parent: NetId | null }
     | { kind: 'tag'; netId: NetId; tag: string; added: boolean }
-    /** Distinct from spawn/destroy: an entity leaving a view is still alive server-side. */
-    | { kind: 'enter-interest'; snapshot: EntitySnapshot }
-    | { kind: 'leave-interest'; netId: NetId }
     /** Carries the roster because nothing else on the wire names a player. */
     | { kind: 'player-join'; player: PlayerSnapshot }
     | { kind: 'player-leave'; id: PlayerId }
@@ -184,7 +181,7 @@ export type WireTransform = {
  */
 export type TransformDiff = WireTransform & { netId: NetId };
 
-/** One entity as a joiner, interest re-entrant, or spawn must receive it: enough to RECONSTRUCT. */
+/** One entity as a joiner or a spawn must receive it: enough to RECONSTRUCT. */
 export type EntitySnapshot = {
     netId: NetId;
     /** Keys the render manifest on one end and a template registry on the other. */

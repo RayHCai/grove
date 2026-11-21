@@ -250,8 +250,8 @@ declare module '@platform/engine' {
         readonly children: Entity[];
 
         // tags: a set, not a field
-        tag(name: string): this; // (B) adds
-        untag(name: string): this; // (B)
+        tag(name: string): this; // (B) adds; throws on a name starting "say:", which bubbles reserve
+        untag(name: string): this; // (B) throws on a "say:" name, like tag
         hasTag(name: string): boolean; // (B)
         readonly tags: string[];
 
@@ -1149,6 +1149,8 @@ declare module '@platform/engine' {
         restore(data: unknown): void;
     }
 
+    // Every number a wrapper method takes must be finite: NaN, Infinity, or a total that
+    // overflows to one throws at the call rather than silently stopping the field's replication.
     class Scoreboard extends StatefulWrapper {
         constructor();
         add(amount: number, player?: Player): void; // (B) defaults to acting player

@@ -3,6 +3,7 @@ import { templateId } from '@platform/project';
 import type { Message } from '@platform/transport';
 import { jsonCodec } from '@platform/transport';
 import type { InputAction, Welcome } from '@platform/protocol';
+import { MAX_VALUE_DEPTH } from '@platform/protocol';
 import { Sim } from '../src/sim.js';
 import { encodeStateValue } from '../src/replicate.js';
 import {
@@ -10,7 +11,6 @@ import {
     MAX_ACTIONS_PER_FRAME,
     MAX_ACTION_NAMES,
     MAX_ACTION_NAME_LENGTH,
-    MAX_STATE_DEPTH,
     MAX_UNJOINED_CONNECTIONS,
 } from '../src/constants.js';
 import { harness } from './harness.js';
@@ -132,12 +132,12 @@ describe('control frames draw on their own bucket', () => {
 
 describe('anything the state encoder accepts, the codec accepts', () => {
     it('drops a value nested past the cap rather than letting encode abort the send', () => {
-        expect(encodeStateValue(nest(MAX_STATE_DEPTH))).toBeUndefined();
+        expect(encodeStateValue(nest(MAX_VALUE_DEPTH))).toBeUndefined();
 
         // The deepest envelope a state value rides is the join snapshot's, so the margin has to
         // hold there: a value the encoder passes and the codec refuses throws out of the fan-out
         // and takes every connection's send with it.
-        const accepted = encodeStateValue(nest(MAX_STATE_DEPTH - 1));
+        const accepted = encodeStateValue(nest(MAX_VALUE_DEPTH - 1));
         expect(accepted).toBeDefined();
         const welcome = {
             kind: 'welcome',

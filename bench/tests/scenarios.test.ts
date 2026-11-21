@@ -18,17 +18,21 @@ describe('world construction', () => {
         expect(overlappingPairs(rt)).toBeGreaterThan(0);
     });
 
-    it('counts colliderless bodies stacked at one point as overlapping', () => {
-        // Zero half-extents compare equal, so this is the world shape a benchmark must not build
-        // by accident; the spacing dial exists because of it.
-        const rt = buildWorld({ entities: 50, colliders: false, spacing: 0 });
-        expect(overlappingPairs(rt)).toBeGreaterThan(0);
+    it('counts collider bodies stacked at one point as overlapping, and colliderless ones never', () => {
+        // The world shape a benchmark must not build by accident; the spacing dial exists because
+        // of it. Without a collider a body never enters the walk, however it is stacked.
+        expect(overlappingPairs(buildWorld({ entities: 50, colliders: true, spacing: 0 }))).toBe(
+            (50 * 49) / 2,
+        );
+        expect(overlappingPairs(buildWorld({ entities: 50, colliders: false, spacing: 0 }))).toBe(
+            0,
+        );
     });
 
     it('keeps a fixed grid width injective, which is what the churn scenarios spawn onto', () => {
         // A width derived from the count wraps later spawns back onto the base world; this is the
         // guard that caught it, and the reason `gridSide` is a dial rather than a derivation.
-        const rt = buildWorld({ entities: 700, colliders: false, spacing: 4, gridSide: 512 });
+        const rt = buildWorld({ entities: 700, colliders: true, spacing: 4, gridSide: 512 });
         expect(overlappingPairs(rt)).toBe(0);
     });
 });

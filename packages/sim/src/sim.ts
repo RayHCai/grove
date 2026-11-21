@@ -189,7 +189,7 @@ export class Sim {
             name: r.name,
             bounds: toWireBounds(r.bounds),
         }));
-        this.#visuals = new ManifestStore(config.visuals);
+        this.#visuals = new ManifestStore(config.visuals, this.#codec);
         this.#project = config.project ?? UNIDENTIFIED;
 
         // `role: 'server'` is the trust boundary: the loop dispatches only server and synced
@@ -332,7 +332,7 @@ export class Sim {
         return this.#takeOutput();
     }
 
-    /** Declares visuals for templates that have come into use since boot. Idempotent per name. */
+    /** Declares visuals for templates in use since boot; idempotent per name, throws on unencodable. */
     declareVisuals(manifest: RenderManifest): void {
         this.#visuals.declare(manifest);
         // `rt.assets` is the read-only `Assets` facade; only the registry `loadGame` built can take
@@ -743,20 +743,27 @@ export class Sim {
         };
 
         // Measured rather than counted, so a world that fits pays one encode and nothing else.
-        if (encodedSize(welcome, this.#codec) <= MAX_FRAME_PAYLOAD_BYTES) {
+        const size = encodedSize(welcome, this.#codec);
+        if (size !== null && size <= MAX_FRAME_PAYLOAD_BYTES) {
             this.#send([session.connectionId], welcome, 'reliable');
             return;
         }
         const split = splitSnapshot(welcome.snapshot, this.#codec, MAX_FRAME_PAYLOAD_BYTES);
         this.#dropped += split.dropped;
+        const head: Welcome = {
+            ...welcome,
+            snapshot: split.head,
+            snapshotChunks: split.chunks.length,
+        };
+        // A refusal is not size: when it sits outside the snapshot's elements no split removes it,
+        // and the drain closes this session rather than queue a frame no host can encode.
+        if (size === null && encodedSize(head, this.#codec) === null) {
+            throw new Error('the Welcome holds a value the wire codec refuses');
+        }
         // Chunks first, then the `Welcome` that closes the set: the client holds them until the
         // `Welcome` names how many there were, so it never applies half a world.
         for (const chunk of split.chunks) this.#send([session.connectionId], chunk, 'reliable');
-        this.#send(
-            [session.connectionId],
-            { ...welcome, snapshot: split.head, snapshotChunks: split.chunks.length },
-            'reliable',
-        );
+        this.#send([session.connectionId], head, 'reliable');
     }
 
     /** The host reported a session gone: release it, however it came to close. */

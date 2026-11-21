@@ -7,6 +7,8 @@ export type SimErrorCode =
     | 'invalid-config'
     /** `loadGame` returned no tick passes, so the input pass has nowhere to install. */
     | 'no-pass-table'
+    /** A render manifest, at boot or in `declareVisuals`, holding a value the wire codec refuses. */
+    | 'invalid-visuals'
     /** The isolate entry was driven out of order: booted twice, or used before it was booted. */
     | 'entry-order';
 

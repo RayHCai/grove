@@ -22,5 +22,11 @@ export const MAX_REQUEST_NAME_LENGTH = 64;
 /** Values one request payload may hold, over the whole graph: it bounds nesting and count. */
 export const MAX_REQUEST_PAYLOAD_NODES = 256;
 
+/** Nesting past which a creator value is dropped: under the codec's 128, which envelopes use up. */
+export const MAX_VALUE_DEPTH = 64;
+
+/** Bytes one client → server frame may encode to; a host closes a socket past it, unparsed. */
+export const MAX_CLIENT_FRAME_BYTES = 64 * 1024;
+
 /** Longest accepted identity string; a hex digest and a panel id both sit far under this. */
 export const MAX_IDENTITY_LENGTH = 128;

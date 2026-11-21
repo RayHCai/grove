@@ -17,6 +17,7 @@ import { LoadError } from '../errors.js';
 import type { AssetRef } from './assets.js';
 import type { Player } from './player.js';
 import { MAX_BUBBLE_LENGTH } from '../config.js';
+import { RESERVED_TAG_PREFIX } from '@platform/project/limits';
 
 export interface Collider {
     enabled: boolean;
@@ -267,6 +268,7 @@ export class Entity {
     }
 
     tag(name: string): this {
+        refuseReservedTag(name, 'tag');
         // The tag index keys entities by slot, so a stale handle would tag the slot's next occupant.
         if (!this.#held()) return this;
         this.#rt.tags.add(this.#id, name);
@@ -275,6 +277,7 @@ export class Entity {
     }
 
     untag(name: string): this {
+        refuseReservedTag(name, 'untag');
         if (!this.#held()) return this;
         this.#rt.tags.remove(this.#id, name);
         this.#rt.channels.markStructural({ kind: 'tag', id: this.#id, tag: name, added: false });
@@ -333,9 +336,9 @@ export class Entity {
         if (seconds === undefined ? !this.#held() : !this.alive) {
             return seconds === undefined ? this : Promise.resolve();
         }
-        // Capped here rather than at the renderer: this string goes on the wire, so an unbounded
-        // one is a per-tick broadcast of whatever a client can talk the game into.
-        const tag = `say:${text.slice(0, MAX_BUBBLE_LENGTH)}`;
+        // Capped here: the journal holds the whole string until the drain, and neither endpoint's
+        // drain replicates a bubble, so nothing downstream would bound it.
+        const tag = `${RESERVED_TAG_PREFIX}${text.slice(0, MAX_BUBBLE_LENGTH)}`;
         this.clearSay();
         this.#bubble = tag;
         this.#rt.channels.markStructural({ kind: 'tag', id: this.#id, tag, added: true });
@@ -457,4 +460,14 @@ export class Entity {
 
 function resolvePoint(target: Entity | Vec3): Vec3 {
     return target instanceof Entity ? target.position : target;
+}
+
+// Thrown, not ignored: the tag index never holds a bubble, so a creator tag under the prefix would
+// reach a joiner's snapshot and be dropped from every delta, and the two would disagree for good.
+function refuseReservedTag(name: string, method: string): void {
+    if (name.startsWith(RESERVED_TAG_PREFIX)) {
+        throw new Error(
+            `Entity.${method}("${name}"): tags starting with "${RESERVED_TAG_PREFIX}" are reserved for speech bubbles`,
+        );
+    }
 }

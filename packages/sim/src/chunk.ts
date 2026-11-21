@@ -52,8 +52,9 @@ function pack<T>(
     let dropped = 0;
 
     for (const item of items) {
+        const measured = encodedSize(item, codec);
         // Plus the separator this element costs once it is one of several in an array.
-        const size = encodedSize(item, codec) + 1;
+        const size = measured === null ? Number.POSITIVE_INFINITY : measured + 1;
         if (size > budget) {
             dropped += 1;
             continue;
@@ -70,11 +71,13 @@ function pack<T>(
     return { groups, dropped };
 }
 
-/** One value's encoded size; one the codec refuses reads as unbounded, so it is over any budget. */
-export function encodedSize(item: unknown, codec: Codec): number {
+/** One value's encoded size, or `null` for one the codec refuses, which no split can make fit. */
+export function encodedSize(item: unknown, codec: Codec): number | null {
+    let frame: ReturnType<Codec['encode']>;
     try {
-        return codec.byteLength(codec.encode(item as Message));
+        frame = codec.encode(item as Message);
     } catch {
-        return Number.POSITIVE_INFINITY;
+        return null;
     }
+    return codec.byteLength(frame);
 }

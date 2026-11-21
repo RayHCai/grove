@@ -4,14 +4,18 @@ export type { NetId, PlayerId, ProjectId } from './ids.js';
 export { PROTOCOL_VERSION } from './version.js';
 export {
     MAX_ACTIONS_PER_FRAME,
+    MAX_CLIENT_FRAME_BYTES,
     MAX_ACTION_NAME_LENGTH,
     MAX_IDENTITY_LENGTH,
     MAX_INTERACTIONS_PER_FRAME,
     MAX_REQUESTS_PER_FRAME,
     MAX_REQUEST_NAME_LENGTH,
     MAX_REQUEST_PAYLOAD_NODES,
+    MAX_VALUE_DEPTH,
     MAX_WIDGET_NAME_LENGTH,
 } from './limits.js';
+export { toWireValue } from './encode.js';
+export type { WireRef } from './encode.js';
 export {
     asClientEnvelope,
     isActionName,

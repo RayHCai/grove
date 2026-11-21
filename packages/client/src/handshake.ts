@@ -10,7 +10,7 @@ import type {
     TimeSync,
     Welcome,
 } from '@platform/protocol';
-import { PROTOCOL_VERSION } from '@platform/protocol';
+import { MAX_CLIENT_FRAME_BYTES, PROTOCOL_VERSION } from '@platform/protocol';
 import { isFiniteNumber } from '@platform/math';
 import { MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_CHUNKS, MAX_WIRE_ITEMS } from './constants.js';
 
@@ -53,9 +53,16 @@ export function timeSync(clientSentMs: number): TimeSync {
     return { kind: 'time-sync', clientSentMs };
 }
 
-/** Sends a client envelope. Typed at the boundary, so nothing untyped reaches `Transport.send`. */
-export function send(transport: Transport, envelope: ClientToServer): void {
+/** Sends a client envelope that fits the host's inbound cap; false, and nothing sent, otherwise. */
+export function send(transport: Transport, envelope: ClientToServer): boolean {
+    if (clientFrameBytes(envelope) > MAX_CLIENT_FRAME_BYTES) return false;
     transport.send(envelope as unknown as Message);
+    return true;
+}
+
+/** A client envelope's size on the JSON wire, which every envelope rides. */
+export function clientFrameBytes(envelope: ClientToServer): number {
+    return jsonCodec.byteLength(jsonCodec.encode(envelope as unknown as Message));
 }
 
 /** The RTT the lead seeds from, in seconds; both stamps are the client's own, off one clock. */

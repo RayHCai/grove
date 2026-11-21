@@ -1,0 +1,17 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "extends": ["//"],
+    "tasks": {
+        "test": {
+            // The root's inputs plus the wire fixtures the batch-seam suite reads, which the Rust
+            // host is tested against too: a fixture change must not replay a cached pass.
+            "inputs": [
+                "src/**",
+                "tests/**",
+                "tsconfig*.json",
+                "vitest.config.ts",
+                "$TURBO_ROOT$/libs/api-contract/fixtures/**"
+            ]
+        }
+    }
+}

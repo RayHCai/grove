@@ -268,7 +268,7 @@ describe('apply order and the envelope pairing', () => {
         expect(m.runtime.entities.record(delta.added[0]!)?.parent).toBe(0);
     });
 
-    it('tears leave-interest down bottom-up, so a parent leaving never orphans a child', () => {
+    it('tears a destroyed parent down with its subtree, so no child is left orphaned', () => {
         const m = mirror();
         const delta = m.applyState(
             stateEnvelope([
@@ -279,24 +279,10 @@ describe('apply order and the envelope pairing', () => {
         const [parent, child] = delta.added as [never, never];
         expect(m.runtime.entities.record(child)?.parent).toBe(parent);
 
-        m.applyState(stateEnvelope([{ kind: 'leave-interest', netId: 1 as NetId }]));
+        m.applyState(stateEnvelope([{ kind: 'destroy', netId: 1 as NetId }]));
         // Core's cascade flips the whole subtree, so neither survives and no orphan is left rooted.
         expect(m.runtime.entities.isAlive(parent)).toBe(false);
         expect(m.runtime.entities.isAlive(child)).toBe(false);
-    });
-
-    it('treats enter-interest as spawn, through the one applier', () => {
-        const m = mirror();
-        const delta = m.applyState(
-            stateEnvelope([
-                {
-                    kind: 'enter-interest',
-                    snapshot: entity(7, 'thing', { transform: wireTransform({ posX: 3 }) }),
-                },
-            ]),
-        );
-        expect(delta.added).toHaveLength(1);
-        expect(m.runtime.transforms.posX(delta.added[0]!)).toBe(3);
     });
 
     it('drops attach with a counter when the bundle registered no class for the id', () => {
@@ -445,9 +431,7 @@ describe('the structural applier is exhaustive', () => {
         // Fails to compile when an arm is added, at the moment the omission is cheapest to fix.
         const HANDLED: Record<WireStructuralOpKind, true> = {
             spawn: true,
-            'enter-interest': true,
             destroy: true,
-            'leave-interest': true,
             reparent: true,
             tag: true,
             'player-join': true,
@@ -455,7 +439,7 @@ describe('the structural applier is exhaustive', () => {
             attach: true,
             group: true,
         };
-        expect(Object.keys(HANDLED)).toHaveLength(10);
+        expect(Object.keys(HANDLED)).toHaveLength(8);
     });
 });
 

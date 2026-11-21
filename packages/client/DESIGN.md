@@ -61,7 +61,10 @@ browser passes rAF and a headless host drives it by hand.
    exception escaping here unwinds through the frame source and ends the session with no state to show a
    person. While a bundle is in flight the drain **holds** instead: it returns before splicing, and a
    `Welcome` that opens a fetch mid-batch pushes the rest of that batch back onto the FRONT of the inbox, so
-   arrival order survives the wait and nothing is dropped into a session that does not exist yet.
+   arrival order survives the wait and nothing is dropped into a session that does not exist yet. Held or
+   not, the inbox is capped at `MAX_INBOX_ENVELOPES`, above what a bundle wait holds: past it the backlog is
+   discarded whole, everything but a `Reject` is refused until the next frame, and that frame resyncs
+   before it drains, since a stream missing any envelope is one no drain can apply.
 3. `clock.advance(now)` → 0..N tick indices (dt clamped inside), then flush one input frame stamped with
    the newest of them. A frame that advanced none sends nothing.
 4. `#predict()`: carry the predicted world to `localTick`. After the flush, so the tick just stamped is
@@ -82,8 +85,9 @@ The push is after tick advance, not inside it: a frame that advanced three ticks
 retention. `destroy()` is ordered reverse of setup and idempotent; it destroys the renderer only when
 `ownsRenderer` is passed, and clears core's module-global runtime **only if that slot still holds its own**.
 
-`#now` is always the **frame source's** seconds. The injected `ClockSource` is read only to stamp the join
-and each `TimeSync`, so the two time bases never meet in one subtraction.
+`#now` is always the **frame source's** seconds. The injected `ClockSource` is read only to stamp the join,
+each `TimeSync` and each frame's start, the last of which only the close differences against the clock's own
+now, so the two time bases never meet in one subtraction.
 
 ## Handshake ([src/handshake.ts](src/handshake.ts))
 
@@ -172,13 +176,14 @@ Three wire write paths, and outside them only a prediction step:
 - `applySnapshot(welcome)`: the join snapshot replayed as `player-join` + `spawn` ops through
   `applyState`. Applied to a non-empty mirror this _is_ a resync. `reset()` empties the world for one.
 
-Structural ops: `spawn`/`enter-interest` share one applier over `EntitySnapshot` (template, owner, parent,
+Structural ops: `spawn` and the join snapshot share one applier over `EntitySnapshot` (template, owner, parent,
 tags, all transform fields; a static entity is dirty exactly once, so `spawn`'s position-only write would
 strand scale/layer; then `overrides.scripts`, the baseline for the `attach` ops a joiner was not there for,
 `tags` bounded at `MAX_WIRE_ITEMS` and the attachment list at the smaller `MAX_ENTITY_SCRIPTS`, since each
 entry there mints an instance that outlives the frame);
-`destroy`/`leave-interest`; `reparent` (**also reported on the delta**, since the
-render tree cannot infer it); `tag`; `player-join` (mints a `Player` and `playerManager.adopt`s it, keeping
+`destroy`; `reparent` (**also reported on the delta**, since the
+render tree cannot infer it); `tag` (one under `RESERVED_TAG_PREFIX` is skipped, here and in a snapshot's
+`tags`, since the authority never sends a bubble); `player-join` (mints a `Player` and `playerManager.adopt`s it, keeping
 the **wire's** index); `player-leave`; `attach`, resolved through the script registry; and `group`, whose
 ops are applied verbatim and in order like the outer journal, bounded at `MAX_WIRE_ITEMS` before the walk.
 The switch ends in a `never` default, because `noImplicitReturns` is off and an unhandled arm would no-op
@@ -302,10 +307,12 @@ for the next frame, since the receiver refuses an over-cap frame whole and a bur
 every call in it; interactions are chunked the same way at `MAX_INTERACTIONS_PER_FRAME`, an input frame keeps
 its first `MAX_ACTIONS_PER_FRAME` coalesced actions and folds only those, and a press, action or request the
 protocol's predicates refuse (a name past its cap, a payload `isAdmissiblePayload` rejects) never leaves and
-is counted in `stats().outboundRefused`; a resync drops the queue with the world it belonged to. The
-payload is encoded by `src/request.ts` at queue time rather than at `send`, dropping a reserved key, a
-cycle, anything past `MAX_REQUEST_DEPTH` levels, and any value the wire would deliver as something other
-than itself, because `encode` throws on each and that throw would end the session over a field a creator
+is counted in `stats().outboundRefused`. Every frame is also measured against `MAX_CLIENT_FRAME_BYTES` before
+it is sent: requests are chunked by bytes as well as by count, a request too big to go alone throws a
+`RangeError` out of `request()` into the creator's handler, and a join past it fails the session as `internal`; a resync drops the queue with the world it belonged to. The
+payload is encoded by `src/request.ts` at queue time rather than at `send`, through protocol's `toWireValue`
+(the walk the sim encodes `@serverState` with), dropping a reserved key, a getter, a cycle, anything past
+`MAX_VALUE_DEPTH` levels, and any value the wire would deliver as something other than itself, because `encode` throws on each and that throw would end the session over a field a creator
 named.
 
 **A correction is eased on screen and exact in the simulation.** What the authority disagreed with is
@@ -443,7 +450,7 @@ map keys on the **local `EntityId`**, so the render layer never learns there is 
 | `live`         | `Welcome` applied, clock seeded                                                       | yes   |
 | `stalled`      | no envelope for `STALL_SECONDS`, **or** `ackSeq` frozen                               | no    |
 | `resyncing`    | `localTick < depictedTick`, or a `RateChange`                                         | no    |
-| `disconnected` | `onClose` fired with no `Reject` queued behind it                                     | no    |
+| `disconnected` | `onClose` fired with no `Reject` queued behind it; `disconnection` says why           | no    |
 | `failed`       | `Reject`, unusable `Welcome`, a bad bundle, an unanswered join, or a `TransportError` | no    |
 
 `failed` and `disconnected` are terminal and absorb later transitions, `failed` outranking a close that
@@ -455,7 +462,10 @@ reason + `serverProtocolVersion`), `undecodable`, `internal` (`encode-rejected`:
 (a malformed or hostile frame, an envelope that threw while applying, or a join unanswered past
 `JOIN_DEADLINE_SECONDS`, the client's half of the server's own join deadline, which is otherwise a spinner
 for the life of the tab) and `bundle` (code that would
-not load, or was not the code the server said it would be). `loading` refuses input for the reason `stalled`
+not load, or was not the code the server said it would be). `DisconnectReason` is `disconnected`'s
+equivalent, set before the move: `frames-stopped` when no frame had run for `FRAMES_STOPPED_SECONDS` of the
+injected clock as the close arrived, which is a hidden page, since `TimeSync` is sent from the frame loop
+and a host closes a peer silent past its idle window; `closed` otherwise. `loading` refuses input for the reason `stalled`
 does not cover: there is no session yet, so there is nothing for a tick to be stamped against. Both stall triggers are
 evidence about the _connection_; ring occupancy deliberately is not, or an energetic player could disable
 their own controls. `RateChange` resyncs rather than retuning, because core does not retune pending timers,
@@ -472,9 +482,9 @@ Each constant states its unit in its own doc line, because mixing them is the fa
 | `HEADROOM_TARGET` 2 · `LEAD_MIN_TICKS` 1 | `LEAD_MAX_SECONDS` = core's `MAX_REWIND_MS` / 1000 · `SYNC_INTERVAL_SECONDS` 2 · `MAX_FRAME_DT` .1 · `STALL_SECONDS` 1 · `CORRECTION_SMOOTH_SECONDS` .1 · `MAX_INTERPOLATION_DELAY_SECONDS` .1 | `GAIN` .25 · `NUDGE_MAX` .02 · `AXIS_QUANTUM` 1/64 |
 
 Plus, in the session's own ticks: `ACK_STALL_TICKS` 60, `RING_TICKS` 48, `MAX_REPLAY_TICKS` 48. In world
-units squared, `CORRECTION_SNAP_DISTANCE_SQUARED` 64². In seconds, `BUNDLE_DEADLINE_SECONDS` 30 and
-`JOIN_DEADLINE_SECONDS` 10; in bytes, `MAX_BUNDLE_BYTES` 8 MiB and `MAX_SNAPSHOT_BYTES` 16 MiB. In frames,
-`MAX_SNAPSHOT_CHUNKS` 256. And `DEFAULT_VIEWPORT`, the extent the
+units squared, `CORRECTION_SNAP_DISTANCE_SQUARED` 64². In seconds, `BUNDLE_DEADLINE_SECONDS` 30,
+`JOIN_DEADLINE_SECONDS` 10 and `FRAMES_STOPPED_SECONDS` 5; in bytes, `MAX_BUNDLE_BYTES` 8 MiB and `MAX_SNAPSHOT_BYTES` 16 MiB. In frames,
+`MAX_SNAPSHOT_CHUNKS` 256, and in envelopes `MAX_INBOX_ENVELOPES` 4 096. And `DEFAULT_VIEWPORT`, the extent the
 cursor quantum falls back to before the first `Welcome`.
 
 ## Traps

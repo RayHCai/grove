@@ -5,9 +5,16 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import type { TransportError } from '@platform/transport';
+import { MAX_CLIENT_FRAME_BYTES } from '@platform/protocol';
 import { webSocketTransport } from '@platform/transport/websocket';
 import type { GameInstance } from './instance.js';
 import { reason } from './instance.js';
+
+/** Bytes one socket may send inside a second before it is closed: four frames at the cap. */
+const INBOUND_BUDGET_BYTES = 4 * MAX_CLIENT_FRAME_BYTES;
+
+/** The close code a byte flood gets; a frame past `maxPayload` gets 1009 from `ws` itself. */
+const POLICY_VIOLATION = 1008;
 
 /** Where to bind, and how to decide who a socket is. */
 export interface ListenOptions {
@@ -45,8 +52,13 @@ export function listenOn(instance: GameInstance, opts: ListenOptions): ServedGam
 
     const log = onLog ?? ((): void => {});
     instance.start();
-    // Narrowed rather than asserted: the guard above is what rules out both being absent.
-    const wss = new WebSocketServer(server !== undefined ? { server } : { port });
+    // Capped at the protocol's client frame size, which the client sizes to: `ws` otherwise buffers
+    // up to 100 MiB of one frame before the transport could refuse it unparsed.
+    const wss = new WebSocketServer({
+        // Narrowed rather than asserted: the guard above is what rules out both being absent.
+        ...(server !== undefined ? { server } : { port }),
+        maxPayload: MAX_CLIENT_FRAME_BYTES,
+    });
 
     const listening = new Promise<void>((resolve, reject) => {
         // A shared http server is already listening, so no event is coming for it.
@@ -63,6 +75,23 @@ export function listenOn(instance: GameInstance, opts: ListenOptions): ServedGam
     });
 
     wss.on('connection', (socket: WebSocket, request: IncomingMessage) => {
+        // The instance counts frames and the transport sees decoded messages, so raw bytes are
+        // only countable here, ahead of the parse a flood would otherwise buy.
+        let windowStart = performance.now();
+        let bytes = 0;
+        socket.on('message', (data: Buffer | ArrayBuffer | Buffer[]) => {
+            const now = performance.now();
+            if (now - windowStart >= 1000) {
+                windowStart = now;
+                bytes = 0;
+            }
+            bytes += byteLengthOf(data);
+            if (bytes <= INBOUND_BUDGET_BYTES) return;
+            log(
+                `closing a connection that sent more than ${INBOUND_BUDGET_BYTES} bytes in a second`,
+            );
+            socket.close(POLICY_VIOLATION);
+        });
         // Synchronously, before any await: `ws` resumes the stream on the next tick, so a frame
         // arriving before the transport's own listener exists is simply gone.
         try {
@@ -96,4 +125,9 @@ export function listenOn(instance: GameInstance, opts: ListenOptions): ServedGam
             await drained;
         },
     };
+}
+
+function byteLengthOf(data: Buffer | ArrayBuffer | Buffer[]): number {
+    if (Array.isArray(data)) return data.reduce((total, part) => total + part.length, 0);
+    return data.byteLength;
 }

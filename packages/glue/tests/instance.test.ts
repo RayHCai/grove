@@ -10,7 +10,8 @@ import type { ProjectManifest } from '@platform/project';
 import { createReadyNullRenderer } from '@platform/renderer/null';
 import { ScriptRegistry } from '@platform/scripting';
 import type { ScriptEntry } from '@platform/scripting';
-import { loopbackPair } from '@platform/transport';
+import { jsonCodec, loopbackPair } from '@platform/transport';
+import type { Codec, EncodedFrame, Message } from '@platform/transport';
 import { ClientInstance } from '../src/client/index.js';
 import { GameInstance } from '../src/server/index.js';
 
@@ -227,5 +228,120 @@ describe('a game instance', () => {
         expect(() => new GameInstance({ project: broken, scripts: registry() })).toThrow(
             /game-hosted and cannot attach to a entity|is game-hosted/,
         );
+    });
+});
+
+/** The JSON codec, except that it refuses whichever envelope kind the test names. */
+class RefusingCodec implements Codec {
+    refuse: string | null = null;
+
+    encode(message: Message): EncodedFrame {
+        if ((message as { kind?: unknown }).kind === this.refuse) throw new Error('refused');
+        return jsonCodec.encode(message);
+    }
+
+    decode(frame: Parameters<Codec['decode']>[0]): Message {
+        return jsonCodec.decode(frame);
+    }
+
+    byteLength(frame: Parameters<Codec['byteLength']>[0]): number {
+        return jsonCodec.byteLength(frame);
+    }
+}
+
+describe('a shared envelope the codec refuses', () => {
+    async function twoPeers(codec: Codec): Promise<{
+        instance: GameInstance;
+        sessions: ClientInstance[];
+        lines: string[];
+        step(ticks: number): Promise<void>;
+        dispose(): void;
+    }> {
+        let now = 0;
+        const lines: string[] = [];
+        const pairs = [loopbackPair(), loopbackPair()];
+        const instance = new GameInstance({
+            project: project(),
+            scripts: registry(),
+            codec,
+            now: () => now,
+            deliver: () => {
+                for (const pair of pairs) pair.deliver();
+            },
+            onLog: (line) => lines.push(line),
+        });
+        const frames: ManualFrameSource[] = [];
+        const sessions: ClientInstance[] = [];
+        for (const [at, pair] of pairs.entries()) {
+            instance.accept(pair.server, `p${at}`);
+            const source = new ManualFrameSource();
+            frames.push(source);
+            const renderer = await createReadyNullRenderer({ design: { width: 200, height: 200 } });
+            const session = new ClientInstance({
+                transport: pair.client,
+                renderer,
+                frames: source,
+                device: new ScriptedInputDevice(),
+                clock: { nowSeconds: () => now },
+                name: `p${at}`,
+                project: project(),
+                ownsRenderer: true,
+            });
+            session.start();
+            sessions.push(session);
+        }
+        const step = async (ticks: number): Promise<void> => {
+            for (let i = 0; i < ticks; i++) {
+                now += TICK;
+                instance.pump();
+                for (const source of frames) source.frame(now);
+                await flushMicrotasks();
+            }
+        };
+        for (let i = 0; i < 200 && sessions.some((s) => s.state !== 'live'); i++) await step(1);
+        return {
+            instance,
+            sessions,
+            lines,
+            step,
+            dispose(): void {
+                for (const session of sessions) session.close();
+                instance.close();
+            },
+        };
+    }
+
+    it('is logged once per send and skipped when droppable, closing nobody', async () => {
+        const codec = new RefusingCodec();
+        const world = await twoPeers(codec);
+        expect(world.sessions.map((s) => s.state)).toEqual(['live', 'live']);
+        codec.refuse = 'transform';
+        await world.step(6);
+
+        // One line per send, never one per peer.
+        const refused = world.lines.filter((l) => l.startsWith('send-unencodable'));
+        expect(refused.length).toBeGreaterThan(0);
+        for (const line of refused) expect(line).toMatch(/kind=transform peers=2/);
+        expect(world.lines.filter((l) => l.includes('send-failed'))).toEqual([]);
+        expect(world.sessions.map((s) => s.state)).toEqual(['live', 'live']);
+        world.dispose();
+    });
+
+    it('is logged once and closes every recipient when reliable, since each would diverge', async () => {
+        const codec = new RefusingCodec();
+        const world = await twoPeers(codec);
+        // Refused only after the declaration, which the sim checks against this same codec.
+        world.instance.declareVisuals({
+            assets: [],
+            templates: [{ template: templateId('gem'), kind: 'sprite', texture: DOT }],
+        });
+        codec.refuse = 'manifest';
+        await world.step(6);
+
+        const refused = world.lines.filter((l) => l.startsWith('send-unencodable'));
+        expect(refused).toEqual([expect.stringMatching(/kind=manifest peers=2/)]);
+        expect(world.lines.filter((l) => l.includes('send-failed'))).toEqual([]);
+        expect(world.sessions.map((s) => s.state)).not.toContain('live');
+        world.dispose();
     });
 });

@@ -55,7 +55,10 @@ Both instances are transport-agnostic: `GameInstance.accept(transport, playerId)
 `new ClientInstance({ transport })` each take a pipe someone else made. The socket is a separate
 function on top (`listenOn` for the authority, `connectTo` for a session), and both of those
 **start** what they are put in front of, because a caller that reached for the socket layer wants the
-thing running.
+thing running. `listenOn` holds the two bounds only raw bytes can: `maxPayload` at protocol's
+`MAX_CLIENT_FRAME_BYTES`, so `ws` refuses an oversized frame before buffering it, and four of those frames'
+worth of bytes per socket per second, past which the socket is closed 1008; the instance's own cap counts
+frames.
 
 That split is what keeps a whole game drivable over `loopbackPair()` with no socket, no port and no
 GPU, which is how this package's own suite runs both ends on one hand-turned clock.
@@ -92,7 +95,9 @@ quietly:
 
 - **The state listener is an option, not a later registration.** `start()` can reach `failed`
   synchronously, and a listener attached after it would never hear the only transition there was. So
-  `onState` is taken at construction and wired before anything is sent.
+  `onState` is taken at construction and wired before anything is sent. It is handed the
+  `FailureReason` and, for a close, the `DisconnectReason`, whose `frames-stopped` is a page that was
+  hidden long enough for the host's idle window to drop it.
 - **A dial is abandoned through an `AbortSignal`.** A dial resolves on its own schedule, so a host
   that gave up while one was in flight holds no session to close and its socket becomes a player that
   never leaves. `connectTo` closes the transport and constructs nothing when the signal is already
@@ -109,7 +114,8 @@ session's teardown reaches the same renderer, and only the host knows which node
 The sim reads no clock, opens no socket and writes to no store. Everything it needs arrives in one
 input batch and everything it wants done comes back in one output batch, and this class is the half
 that acts on it: it writes the `sends` (one `encode` per envelope, however many peers are in its
-`to`), closes the sockets `closes` names, reads the records `loads` asks for and hands them back on
+`to`, made before any peer is written to, so a shared envelope the codec refuses is logged once as
+`send-unencodable`, skipped when droppable and closes every recipient when reliable), closes the sockets `closes` names, reads the records `loads` asks for and hands them back on
 a later tick, and writes `saves` through, telling the sim which of them landed, so a rejoin inside
 one session reads its own values back whether or not the store has caught up.
 

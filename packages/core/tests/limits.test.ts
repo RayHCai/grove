@@ -226,6 +226,29 @@ describe('MAX_LOG_RECORDS', () => {
     });
 });
 
+describe('the say: tag prefix', () => {
+    it('is refused to a creator tag, so no tag can reach a snapshot and miss every delta', () => {
+        const rt = loadGame();
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
+        rt.channels.drainStructural();
+
+        expect(() => e.tag('say:hi')).toThrow(/reserved for speech bubbles/);
+        expect(() => e.untag('say:hi')).toThrow(/reserved for speech bubbles/);
+        expect(e.tags).toStrictEqual([]);
+        expect(rt.channels.drainStructural()).toStrictEqual([]);
+        // A tag merely containing it is an ordinary tag.
+        e.tag('nosay:hi');
+        expect(e.hasTag('nosay:hi')).toBe(true);
+    });
+
+    it('stays open to the engine: a bubble journals without entering the tag index', () => {
+        const rt = loadGame();
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
+        e.say('hello');
+        expect(e.tags).toStrictEqual([]);
+    });
+});
+
 describe('MAX_BUBBLE_LENGTH', () => {
     it('truncates the text rather than putting an unbounded string on the wire', () => {
         const rt = loadGame();
@@ -328,7 +351,7 @@ function hold(ms: number): void {
 }
 
 describe('MAX_HANDLER_MS', () => {
-    it('charges a handler that holds the tick, instead of counting it a success', async () => {
+    it('logs a handler that holds the tick, and charges the breaker nothing for it', async () => {
         const rt = loadGame();
         const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         const si = probe(rt, e, () => hold(MAX_HANDLER_MS * 2));
@@ -336,8 +359,7 @@ describe('MAX_HANDLER_MS', () => {
 
         await e.send('go');
 
-        // Through the same record as a throw, so the dedup, the log and the breaker cannot drift.
-        expect(rt.breaker.count(si.id, 'go')).toBe(1);
+        // Through the same record and dedup as a throw, so the log reads the same either way.
         expect(rt.log.records.at(-1)?.stack).toContain(`${MAX_HANDLER_MS}ms budget`);
         expect(
             rt.dispatcher.throwCount(
@@ -346,9 +368,11 @@ describe('MAX_HANDLER_MS', () => {
                 `held the tick past the ${MAX_HANDLER_MS}ms budget`,
             ),
         ).toBe(1);
+        // The count is snapshot state a client's prediction must agree on, and wall time is not.
+        expect(rt.breaker.count(si.id, 'go')).toBe(0);
     });
 
-    it('trips the breaker, which is the only abort a single realm has', async () => {
+    it('counts an overrun as the success it is, so it resets a run of throws', async () => {
         const rt = loadGame();
         const e = rt.wired.gameInstance.spawn('crate', 0, 0);
         let calls = 0;
@@ -360,17 +384,31 @@ describe('MAX_HANDLER_MS', () => {
 
         const trips: BreakerTrip[] = [];
         rt.dispatcher.onTrip((trip) => trips.push(trip));
-        // Charged, not held for a hundred real seconds: what is under test is that an overrun
-        // counts toward the same threshold a throw does, not how long a hundred of them take.
         for (let i = 1; i < BREAKER_THRESHOLD; i++) rt.breaker.recordThrow(si.id, 'go');
 
         await e.send('go');
-        expect(trips).toHaveLength(1);
-        expect(calls).toBe(1);
-
-        // Nothing interrupts the loop that is already running; what the trip buys is the next one.
         await e.send('go');
-        expect(calls).toBe(1);
+        expect(trips).toEqual([]);
+        expect(calls).toBe(2);
+        expect(rt.breaker.count(si.id, 'go')).toBe(0);
+    });
+
+    it('measures with the clock it bound at load, whatever a script does to it later', async () => {
+        const rt = loadGame();
+        const e = rt.wired.gameInstance.spawn('crate', 0, 0);
+        const realNow = performance.now;
+        const si = probe(rt, e, () => {
+            // A creator stopping the clock it believes the budget reads.
+            performance.now = (): number => 0;
+            hold(MAX_HANDLER_MS * 2);
+        });
+        rt.instances.attach(entityKey(e.entityId as number), si);
+        try {
+            await e.send('go');
+        } finally {
+            performance.now = realNow;
+        }
+        expect(rt.log.records.at(-1)?.stack).toContain(`${MAX_HANDLER_MS}ms budget`);
     });
 });
 

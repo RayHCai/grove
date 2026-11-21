@@ -67,8 +67,9 @@ path and core only ever receives an already-valid manifest.
   `(instance, method)`; a success resets it, and an async handler counts as a success only once its promise
   settles. The handler is read **inside** the try, since a handler declared as an accessor makes the property
   read itself creator code. A call that returns without throwing but held the tick past `MAX_HANDLER_MS`
-  takes the same record and the same count, since nothing inside one realm can interrupt a synchronous loop
-  and the only bound left is how many more times it is entered. Breaker counts are snapshot state and are
+  takes the same record and dedup and **no** breaker charge, counting as the success it is: the counts are
+  snapshot state that a client's prediction must reproduce, and wall time differs per machine. The clock
+  is `performance.now` bound once at load, so a script reassigning it cannot silence the record. Breaker counts are snapshot state and are
   dropped with the instances a host removal takes; the dedup map is not, and both it and the default log are
   capped so a session cannot grow them without bound.
   Wiring throws are fatal (`LoadError`) because a half-hoisted host record matches no declaration.
@@ -188,14 +189,19 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   bookkeeping. `detach()` journals `reparent → NO_ENTITY`; `attachTo` refuses a parent already inside its
   own subtree with a `LoadError`, then unlinks silently and journals one op.
   A bubble is a `say:<text>` tag op, and `say` clears the one it replaces while `clearSay`, which the timed
-  form calls on its own tag alone, journals the removal, so an entity carries one bubble at a time.
+  form calls on its own tag alone, journals the removal, so an entity carries one bubble at a time. The
+  prefix is `@platform/project/limits`' `RESERVED_TAG_PREFIX`, and `tag` / `untag` throw on a name under it,
+  since the tag index never holds a bubble and a creator tag there would reach a joiner's snapshot and miss
+  every delta.
   `attach` carries the `ScriptId` the running bundle stamped, resolved through `rt.scriptIdOf`, and is
   journaled at entity hosts alone; a class that resolver cannot name is attached locally and journaled
   nowhere, since nothing on the wire can name a class.
 - **Wrappers:** `StatefulWrapper` gives `bind(record, field)` (throws if bound twice), `mark()`, and
   `serialize`/`restore`; `Scoreboard`, `Leaderboard`, `Inventory`, `Team` sit on it and mark per key with no
   decorator. An omitted player defaults to the dispatcher's acting-player ambient in `Scoreboard`, and throws
-  in `Leaderboard.submit`, which has no one to attribute a bare score to. `Countdown` (own `onZero`, not
+  in `Leaderboard.submit`, which has no one to attribute a bare score to. A non-finite amount, score or count,
+  or a total that overflows to one, throws at the call, since the drain could not encode it and would drop the
+  field for the session. `Countdown` (own `onZero`, not
   `@onEnd`) and `Storage` (over the `KVStore` seam) sit outside it.
 - **A wrapper field's value in `values` is the wrapper itself**, put there by `#bindWrappers`, the same map
   every other field uses, because the replication path reads that map and a wrapper left out of it marks a
@@ -253,9 +259,12 @@ layer that knows what its clock means; `step` establishes the ambient runtime fo
   `validate` puts a parent's record ahead of its children's: one pass, no deferred parenting.
 - `Broadphase` is naive O(n²) over a `TransformView`, ascending id order, and takes its transform source as a
   constructor argument: the live store or a ring buffer. `liveTransformView` is the one factory for a view
-  over the live stores, so `rt.broadphase`'s point-only view and `ContactSource`'s differ in one argument:
-  the half-extent lookup. `ContactSource` layers self/parent/child exclusion and tag filtering on top;
-  half-extents come from `collider.bounds`.
+  over the live stores, so `rt.broadphase`'s point-only view and `ContactSource`'s differ in two arguments:
+  the half-extent lookup and a body filter that lists only collider-bearing entities, since a body without
+  a collider touches nothing. `Broadphase.pairs` is the one pair walk, each pair once as `[earlier, later]`
+  in ascending id order, so the `@onCollide` edge folds identically wherever it runs. `ContactSource` layers
+  self/parent/child exclusion and tag filtering on top, and re-checks the collider on a historical hit,
+  since a ring lists every entity it captured; half-extents come from `collider.bounds`.
 - `RegionIndex` is build-time named rectangles with point queries; `find({ in })` resolves against it, and
   the regions pass folds live membership through it to get the `@onEnter` / `@onExit` edges.
 
@@ -332,7 +341,7 @@ Each is an interface with a null implementation, so every live member is exercis
 | `KVStore`       | `MemoryKVStore`, behind `PersistedState`                    | host app              |
 | `EffectSink`    | `NullEffectSink`: audio, particles, camera shake            | client / audio layer  |
 | `Broadphase`    | naive O(n²) over any `TransformView`                        | Rapier or a grid      |
-| `ContactSource` | over `Broadphase`                                           | Rapier                |
+| `ContactSource` | over `Broadphase`, collider-bearing bodies only             | Rapier                |
 | `RegionIndex`   | built once at load                                          | core (panel-authored) |
 | `HUDSink`       | `NullHUDSink`: widget and screen writes                     | client                |
 

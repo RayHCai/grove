@@ -93,6 +93,37 @@ describe('@onCollide is the enter edge', () => {
         loop.step(5); // touched again
         expect(script.contacts).toBe(2);
     });
+
+    it('never pairs a body with no collider, on either side of the pair', () => {
+        const rt = world();
+        const loop = new Loop(rt);
+        const self = rt.wired.gameInstance.spawn('walker', 300, 0);
+        rt.wired.gameInstance.spawn('spike', 300, 0).tag('hazard');
+        self.addScript(Edges as never);
+        const script = instanceOf<Edges>(rt, self, 'Edges');
+
+        loop.step(1); // two points on one spot: touching, were either a body
+        expect(rt.wired.contacts.pairs()).toStrictEqual([]);
+        expect(script.contacts).toBe(0);
+
+        boxed(self);
+        loop.step(2); // one side boxed: `getTouching` already says no, so the pass agrees
+        expect(self.getTouching()).toStrictEqual([]);
+        expect(script.contacts).toBe(0);
+    });
+
+    it('reports pairs once each, earlier slot first, in ascending order', () => {
+        const rt = world();
+        const [a, b, c] = [0, 1, 2].map((i) => boxed(rt.wired.gameInstance.spawn(`b${i}`, 0, 0)));
+        rt.wired.gameInstance.spawn('point', 0, 0);
+        const ids = rt.wired.contacts.pairs().map(([x, y]) => [x as number, y as number]);
+        const [ia, ib, ic] = [a!, b!, c!].map((e) => e.entityId as number);
+        expect(ids).toStrictEqual([
+            [ia, ib],
+            [ia, ic],
+            [ib, ic],
+        ]);
+    });
 });
 
 describe('@onEnd', () => {

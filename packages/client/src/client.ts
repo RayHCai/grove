@@ -28,6 +28,7 @@ import type {
 } from '@platform/protocol';
 import {
     MAX_ACTIONS_PER_FRAME,
+    MAX_CLIENT_FRAME_BYTES,
     MAX_INTERACTIONS_PER_FRAME,
     MAX_REQUESTS_PER_FRAME,
     isActionName,
@@ -36,13 +37,15 @@ import {
     isWidgetName,
 } from '@platform/protocol';
 import type { Message, Transport } from '@platform/transport';
-import { TransportError } from '@platform/transport';
+import { TransportError, jsonCodec } from '@platform/transport';
 import {
     ACK_STALL_TICKS,
     BUNDLE_DEADLINE_SECONDS,
     DEFAULT_VIEWPORT,
+    FRAMES_STOPPED_SECONDS,
     JOIN_DEADLINE_SECONDS,
     MAX_FRAME_DT,
+    MAX_INBOX_ENVELOPES,
     STALL_SECONDS,
     SYNC_INTERVAL_SECONDS,
 } from './constants.js';
@@ -53,6 +56,7 @@ import { RenderBridge } from './bridge.js';
 import {
     SnapshotChunks,
     asServerEnvelope,
+    clientFrameBytes,
     isUsableWelcome,
     joinRequest,
     rejectMessage,
@@ -157,6 +161,10 @@ export class GameClient {
 
     /** Envelopes delivered since the last frame, drained in arrival order. */
     readonly #inbox: ServerToClient[] = [];
+    /** The inbox passed `MAX_INBOX_ENVELOPES` while no frame drained it; the next frame resyncs. */
+    #inboxOverflowed = false;
+    /** The injected clock's ms at the last frame, or at `start()` before one has run. */
+    #lastFrameMs = 0;
 
     /** The pieces of a snapshot too big for one frame, held for the `Welcome` that counts them. */
     readonly #chunks = new SnapshotChunks();
@@ -338,7 +346,12 @@ export class GameClient {
                     this.#onReject(refusal);
                     return;
                 }
-                this.#lifecycle.to('disconnected');
+                const idleSeconds = (this.#nowMs() - this.#lastFrameMs) / 1000;
+                this.#lifecycle.disconnect(
+                    idleSeconds >= FRAMES_STOPPED_SECONDS
+                        ? { kind: 'frames-stopped', idleSeconds }
+                        : { kind: 'closed' },
+                );
                 // A fetch in flight belongs to a session that no longer exists.
                 this.#loadingSince = undefined;
                 frames.stop();
@@ -346,7 +359,8 @@ export class GameClient {
         );
         this.#disposers.push(device.onRaw((event) => this.#onRaw(event)));
 
-        this.#guard(() => send(transport, this.#joinFrame()));
+        this.#lastFrameMs = this.#nowMs();
+        this.#sendJoin();
 
         frames.start((now) => this.frame(now));
     }
@@ -354,6 +368,17 @@ export class GameClient {
     /** The injected wall clock in ms, the base every wire stamp is in, and never `#now`'s. */
     #nowMs(): number {
         return this.#opts.clock.nowSeconds() * 1000;
+    }
+
+    /** Sends the join; one past the host's cap can only be a name too long, a host's defect. */
+    #sendJoin(): void {
+        this.#guard(() => {
+            if (send(this.#opts.transport, this.#joinFrame())) return;
+            this.#fail({
+                kind: 'internal',
+                message: `the join request is over ${MAX_CLIENT_FRAME_BYTES} bytes: the player name is too long`,
+            });
+        });
     }
 
     /** The join request, stamped now and carrying the bundle this client holds. */
@@ -373,8 +398,17 @@ export class GameClient {
     frame(nowSeconds: number): void {
         if (this.#torn) return;
         this.#now = nowSeconds;
+        // In the injected clock's base, which runs while this loop does not: what a close reads.
+        this.#lastFrameMs = this.#nowMs();
 
         this.#opts.pump?.();
+
+        // Answered before anything drains, as a suspended tab is: the backlog is gone, so the
+        // mirror's world has a hole only a fresh snapshot fills.
+        if (this.#inboxOverflowed) {
+            this.#inboxOverflowed = false;
+            this.#resync();
+        }
 
         // Order-sensitive: one `deliver()` hands over several envelopes, consumed in order.
         this.#drainInbox();
@@ -444,6 +478,15 @@ export class GameClient {
         const envelope = asServerEnvelope(message);
         // A frame that is not an envelope is a mismatched or hostile peer: dropped, not fatal.
         if (envelope === undefined) return;
+        // A `Reject` is kept through an overflow: it is what the close that follows it reads.
+        if (this.#inboxOverflowed && envelope.kind !== 'reject') return;
+        if (this.#inbox.length >= MAX_INBOX_ENVELOPES) {
+            // Dropped whole rather than trimmed: a stream missing any envelope is one no drain can
+            // apply, so everything until the resync is refused too.
+            this.#inbox.length = 0;
+            this.#inboxOverflowed = true;
+            if (envelope.kind !== 'reject') return;
+        }
         this.#inbox.push(envelope);
     }
 
@@ -768,11 +811,18 @@ export class GameClient {
         const frame: InputFrame = {
             kind: 'input',
             tick,
-            seq: this.#seq++,
+            seq: this.#seq,
             actions: [...byAction.values()],
         };
-        this.#ring.push(frame, clock.currentLeadTicks, clock.epoch);
-        this.#guard(() => send(this.#opts.transport, frame));
+        this.#guard(() => {
+            // The per-frame caps keep an input frame far under the byte cap; this is the backstop.
+            if (!send(this.#opts.transport, frame)) {
+                this.#outboundRefused += 1;
+                return;
+            }
+            this.#seq += 1;
+            this.#ring.push(frame, clock.currentLeadTicks, clock.epoch);
+        });
     }
 
     /** Sends this frame's interactions, stamped with the tick they happened on. No ring. */
@@ -789,7 +839,9 @@ export class GameClient {
             tick: clock.localTick,
             events: this.#interactions.splice(0, MAX_INTERACTIONS_PER_FRAME),
         };
-        this.#guard(() => send(this.#opts.transport, frame));
+        this.#guard(() => {
+            if (!send(this.#opts.transport, frame)) this.#outboundRefused += 1;
+        });
     }
 
     /** Queues a creator's `request()` for the uplink; gated like input, and encoded here. */
@@ -800,6 +852,15 @@ export class GameClient {
         if (!isRequestName(name) || (call.data !== undefined && !isAdmissiblePayload(call.data))) {
             this.#outboundRefused += 1;
             return;
+        }
+        // Thrown to the creator's handler rather than counted: a call no frame can ever carry is
+        // a payload to shrink, and the boundary logs it naming the script that made it.
+        const alone = clientFrameBytes(requestFrame(Number.MAX_SAFE_INTEGER, [call]));
+        if (alone > MAX_CLIENT_FRAME_BYTES) {
+            this.#outboundRefused += 1;
+            throw new RangeError(
+                `request("${name}") encodes to ${alone} bytes, past the ${MAX_CLIENT_FRAME_BYTES}-byte frame a host accepts`,
+            );
         }
         this.#requests.push(call);
     }
@@ -815,12 +876,27 @@ export class GameClient {
         // Chunked rather than sent whole: the receiver refuses an over-cap frame ENTIRE, so a burst
         // of seventeen would lose all seventeen. Carrying the excess costs it a frame, which a
         // request (unacked and unreplayed) has no ordering claim against.
-        const frame: RequestFrame = {
-            kind: 'request',
-            tick: clock.localTick,
-            requests: this.#requests.splice(0, MAX_REQUESTS_PER_FRAME),
-        };
-        this.#guard(() => send(this.#opts.transport, frame));
+        const frame = requestFrame(
+            clock.localTick,
+            this.#requests.splice(0, this.#requestsThatFit()),
+        );
+        this.#guard(() => {
+            if (!send(this.#opts.transport, frame)) this.#outboundRefused += 1;
+        });
+    }
+
+    /** How many queued requests one frame carries under both the count cap and the byte cap. */
+    #requestsThatFit(): number {
+        let bytes = clientFrameBytes(requestFrame(Number.MAX_SAFE_INTEGER, []));
+        const limit = Math.min(this.#requests.length, MAX_REQUESTS_PER_FRAME);
+        for (let at = 0; at < limit; at++) {
+            const call = this.#requests[at] as GameRequest;
+            // Plus the separator each element after the first costs in the array.
+            bytes += jsonCodec.byteLength(jsonCodec.encode(call)) + (at > 0 ? 1 : 0);
+            // At least one: the queue already refused any call too big to go alone.
+            if (bytes > MAX_CLIENT_FRAME_BYTES) return Math.max(1, at);
+        }
+        return limit;
     }
 
     /** Input resumed, so re-assert what the wire missed: axes always, presses after re-join. */
@@ -949,7 +1025,7 @@ export class GameClient {
         // hash is deliberately kept: the code is in this process, and the new join declares it.
         this.#loadingSince = undefined;
 
-        this.#guard(() => send(this.#opts.transport, this.#joinFrame()));
+        this.#sendJoin();
     }
 
     /** Core's `Camera` holds the intent; this resolves it per frame; the renderer draws it. */
@@ -1028,6 +1104,10 @@ export class GameClient {
         for (const dispose of this.#disposers.splice(0)) dispose();
         this.#opts.transport.close();
     }
+}
+
+function requestFrame(tick: number, requests: GameRequest[]): RequestFrame {
+    return { kind: 'request', tick, requests };
 }
 
 /** The two envelopes that write the world. Everything else leaves a predicted pose standing. */

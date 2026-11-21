@@ -343,11 +343,15 @@ move into `snapshot-chunk` envelopes queued **before** it, and the `Welcome` car
 how many. Measured once against the injected codec, so a world that fits pays one encode and nothing else.
 `splitSnapshot` sizes groups by **measuring** each element rather than counting them (`template`, `tags` and a
 `@serverState` value are all creator-authored, so element count says little about bytes), and an element no
-frame could carry alone is dropped and counted, like an unrepresentable mark. The tick and the roster stay on
+frame could carry alone, or one the codec refuses, is dropped and counted, like an unrepresentable mark. A
+refusal is measured as a refusal rather than as an unbounded size, so a `Welcome` whose refusal sits outside
+the snapshot's elements throws instead of being chunked, and the drain closes that session `send-failed`. The tick and the roster stay on
 the `Welcome`: one is a scalar and the other is bounded by `maxPlayers`.
 
 **The render manifest is live, not captured.** `ManifestStore` holds every visual declared so far, keyed by
-name so a re-declaration costs nothing, and queues whatever is genuinely new. `declareVisuals(manifest)` is how
+name so a re-declaration costs nothing, and queues whatever is genuinely new; an addition (or a boot manifest)
+the codec refuses throws `invalid-visuals` and keeps nothing, since a kept one would fail the `manifest` send
+to every peer and every `Welcome` after it. `declareVisuals(manifest)` is how
 a template comes into use mid-session; the additions go out as a `manifest` envelope **before** the fan-out on
 the next drain, because that same send's journal may carry the first spawn of one and a node created against a
 table that lacks the template draws the placeholder and keeps it. A session still awaiting its `Welcome` is
@@ -410,8 +414,9 @@ snapshot is read from live state and an entity destroyed while its op waited wou
   host misses the table and is counted as `staleMarks`, apart from `droppedMarks` because a write whose host
   dies inside the same send interval is churn rather than a defect. A field is read by one function,
   `encodeHostField`, which `buildSnapshot` calls too, so neither path can keep a field the other discards.
-  Values inside it go through `encodeStateValue` (`Entity` → netId, `Player` → id, plain objects/arrays
-  recursed, cycle- and depth-guarded); game/entity marks are shared, player marks scoped to their owner, and
+  Values inside it go through `encodeStateValue`, which is protocol's `toWireValue` (the walk the client
+  encodes a request payload with: plain objects/arrays recursed, getters refused, cycle-guarded and capped
+  at `MAX_VALUE_DEPTH`) with `Entity` → netId and `Player` → id as its refs; game/entity marks are shared, player marks scoped to their owner, and
   one bucket per host so an address is named once however many fields it wrote. Anything unrepresentable is
   **dropped and counted** (`droppedMarks`) rather than thrown, including a field named `__proto__` /
   `constructor` / `prototype`, transport's `RESERVED_KEYS` rather than a second copy of the set, since the
@@ -472,7 +477,7 @@ so nothing on this package's surface carries a decorator. Nothing here imports `
 lets the same bundle load in a V8 isolate and in a browser.
 
 Everything this package throws is a `SimError` carrying a `SimErrorCode`, so a host branches on the code rather
-than on message text: `invalid-config` is the caller's to fix, `no-pass-table` is a wiring fault,
+than on message text: `invalid-config` and `invalid-visuals` are the caller's to fix, `no-pass-table` is a wiring fault,
 `entry-order` is an isolate entry driven out of order. Engine constants live in `constants.ts`, grouped by unit, never
 on the creator surface; the per-frame caps of the narrowing are `@platform/protocol`'s, re-exported there:
 
@@ -487,7 +492,6 @@ on the creator surface; the per-frame caps of the narrowing are `@platform/proto
 | `CONTROL_REFILL_MS`           | 1 000                 | wall-clock per control token                           |
 | `MAX_ACTION_NAMES`            | 64                    | distinct action names one session may open             |
 | `MAX_NAME_LENGTH`             | 24                    | longest accepted display name, in code points          |
-| `MAX_STATE_DEPTH`             | 64                    | `@serverState` nesting past which a value is dropped   |
 | `MAX_UNJOINED_CONNECTIONS`    | 32                    | unjoined sessions held at once                         |
 | `HORIZON_CLAMP_TICKS`         | 2                     | ticks past the horizon clamped rather than refused     |
 | `MAX_STRUCTURAL_OPS_PER_SEND` | 2 048                 | structural ops one send carries; the rest spill        |
@@ -495,9 +499,7 @@ on the creator surface; the per-frame caps of the narrowing are `@platform/proto
 
 `pastGraceTicks` / `futureHorizonTicks` / `holdStaleTicks` / `controlRefillTicks` / `joinDeadlineTicks` convert
 these to ticks of the session's own rate, and `maxSeqGap` composes the first two with `HORIZON_CLAMP_TICKS`
-rather than naming a bound of its own. `MAX_STATE_DEPTH` is the one that is not a policy choice: it must stay
-far below the codec's own 128-level cap, which the envelope's own nesting eats into, because a value the
-encoder passes and the codec refuses throws out of the fan-out.
+rather than naming a bound of its own.
 
 The sim does not own the catch-up budget or the send cadence: they are the host's clock policy, stated in
 `packages/glue/src/server/driver.ts` and in `apps/grove/game-instance/src/clock.rs`.

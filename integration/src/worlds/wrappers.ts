@@ -53,6 +53,7 @@ export const W = {
     keep: 'keep',
     forget: 'forget',
     recall: 'recall',
+    poison: 'poison',
 } as const;
 
 /** Game-hosted readings, named so none of them collides with a member `Game` already owns. */
@@ -68,6 +69,7 @@ export const S = {
     remains: 'remains',
     ticking: 'ticking',
     rang: 'rang',
+    refused: 'refused',
 } as const;
 
 /** Player-hosted readings, which reach that player's own tab and no other. */
@@ -134,6 +136,8 @@ export class Vault extends ServerScript<Game> {
     @serverState remains = 0;
     @serverState ticking = false;
     @serverState rang = 0;
+    /** One token per write `poison` attempted, `range` for each the wrapper refused. */
+    @serverState refused = '';
 
     #clock: Countdown | null = null;
 
@@ -233,6 +237,28 @@ export class Vault extends ServerScript<Game> {
         if (!pack) return;
         pack.bag.clear();
         pack.read();
+    }
+
+    /** Each write is caught alone, so one refusal cannot hide whether the next was refused too. */
+    @onPress(W.poison)
+    poison(ctx: Ctx): void {
+        const player = ctx.player;
+        if (!player) return;
+        const writes = [
+            () => this.scores.add(Number.NaN),
+            () => this.best.submit(Number.POSITIVE_INFINITY, player),
+            () => player.getScript(Pack)?.bag.add(ITEM_GEM, Number.NaN),
+        ];
+        const outcomes: string[] = [];
+        for (const write of writes) {
+            try {
+                write();
+                outcomes.push('kept');
+            } catch (error) {
+                outcomes.push(error instanceof RangeError ? 'range' : 'other');
+            }
+        }
+        this.refused = outcomes.join(',');
     }
 
     @onPress(W.startClock)

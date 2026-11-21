@@ -16,6 +16,7 @@ import {
 } from '@platform/core';
 import { defined } from '@platform/math';
 import type { ScriptId, TemplateId } from '@platform/project';
+import { RESERVED_TAG_PREFIX } from '@platform/project/limits';
 import type {
     EntityOverrides,
     EntitySnapshot,
@@ -33,13 +34,10 @@ import type {
     WireTransform,
 } from '@platform/protocol';
 import { finiteOr } from '@platform/math';
+import { toWireValue } from '@platform/protocol';
 import type { JsonValue } from '@platform/transport';
 import { RESERVED_KEYS } from '@platform/transport';
 import type { Session } from './session.js';
-import { MAX_STATE_DEPTH } from './constants.js';
-
-/** Speech bubbles ride a `tag` op that is not in core's tag index, so it is filtered here. */
-const SAY_PREFIX = 'say:';
 
 /** A `NetId` numerically IS the server's `EntityId`; each brand keys off its own symbol. */
 export function toNetId(id: EntityId): NetId {
@@ -279,7 +277,8 @@ function toWireSingle(
                 parent: op.parent === NO_ENTITY ? null : toNetId(op.parent),
             };
         case 'tag':
-            if (op.tag.startsWith(SAY_PREFIX)) return null;
+            // A speech bubble rides a `tag` op the tag index never holds, so it is unreplicated.
+            if (op.tag.startsWith(RESERVED_TAG_PREFIX)) return null;
             return { kind: 'tag', netId: toNetId(op.id), tag: op.tag, added: op.added };
         case 'attach':
             return {
@@ -325,52 +324,14 @@ export function encodeHostField(record: HostRecord, field: string): JsonValue | 
 }
 
 /** A `@serverState` value as JSON, or `undefined`; a ref travels as what identifies it. */
-export function encodeStateValue(
-    value: unknown,
-    open: Set<object> = new Set(),
-    depth = 0,
-): JsonValue | undefined {
-    if (value === null) return null;
-    switch (typeof value) {
-        case 'number':
-            return Number.isFinite(value) ? value : undefined;
-        case 'string':
-        case 'boolean':
-            return value;
-        case 'object':
-            break;
-        default:
-            return undefined;
-    }
+export function encodeStateValue(value: unknown): JsonValue | undefined {
+    return toWireValue(value, stateRef);
+}
+
+function stateRef(value: object): JsonValue | undefined {
     if (value instanceof Entity) return toNetId(value.entityId) as number;
     if (value instanceof Player) return value.id;
-
-    // `open` is an ancestor set, deleted on the way out, so a DAG stays legal exactly as it is on
-    // the wire while a cycle is refused before the recursion blows the stack.
-    if (open.has(value) || depth >= MAX_STATE_DEPTH) return undefined;
-    open.add(value);
-    try {
-        if (Array.isArray(value)) {
-            const out: JsonValue[] = [];
-            for (const item of value) {
-                const encoded = encodeStateValue(item, open, depth + 1);
-                if (encoded === undefined) return undefined;
-                out.push(encoded);
-            }
-            return out;
-        }
-        if (Object.getPrototypeOf(value) !== Object.prototype) return undefined;
-        const out: { [key: string]: JsonValue } = {};
-        for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-            if (RESERVED_KEYS.has(key)) return undefined;
-            const encoded = encodeStateValue(item, open, depth + 1);
-            if (encoded === undefined) return undefined;
-            out[key] = encoded;
-        }
-        return out;
-    } finally {
-        open.delete(value);
-    }
+    return undefined;
 }
 
 /**

@@ -25,7 +25,7 @@ export const MAX_BUBBLE_LENGTH = 200;
 /** Live entities one world may hold; a spawn past it is refused. */
 export const MAX_ENTITIES = 10_000;
 
-/** Milliseconds one handler may hold the tick before the boundary charges it like a throw. */
+/** Milliseconds one handler may hold the tick before the boundary logs it; never a breaker charge. */
 export const MAX_HANDLER_MS = 50;
 
 /** The stream a world draws from when the host names no seed. */

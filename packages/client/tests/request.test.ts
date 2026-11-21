@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearRuntime, request, withRuntime } from '@platform/core';
-import { MAX_REQUESTS_PER_FRAME } from '@platform/protocol';
+import { MAX_CLIENT_FRAME_BYTES, MAX_REQUESTS_PER_FRAME } from '@platform/protocol';
 import type { RequestFrame } from '@platform/protocol';
 import { createReadyNullRenderer } from '@platform/renderer/null';
-import { loopbackPair } from '@platform/transport';
+import type { Message } from '@platform/transport';
+import { jsonCodec, loopbackPair } from '@platform/transport';
 import { LocalVault } from '../src/testkit/fixtures.js';
 import { GameClient } from '../src/client.js';
 import { ManualFrameSource, ScriptedInputDevice } from '../src/input.js';
@@ -156,6 +157,35 @@ describe('a client request goes to the authority', () => {
         );
     });
 
+    it('refuses a request no frame under the host cap could carry, to the code that made it', async () => {
+        const h = await harness();
+        // The node cap counts values, not bytes, so one long string is the whole of the danger.
+        expect(() => h.ask('note', { text: 'x'.repeat(MAX_CLIENT_FRAME_BYTES) })).toThrow(
+            /past the 65536-byte frame a host accepts/,
+        );
+        h.run(2);
+        expect(h.requests()).toStrictEqual([]);
+        expect(h.client.stats().outboundRefused).toBe(1);
+        expect(h.client.state).toBe('live');
+    });
+
+    it('splits requests that fit alone but not together, so every frame is under the cap', async () => {
+        const h = await harness();
+        const text = 'x'.repeat(Math.floor(MAX_CLIENT_FRAME_BYTES / 3));
+        for (let i = 0; i < 4; i++) h.ask('note', { text, i });
+        h.run(4);
+
+        const sent = h.requests();
+        expect(sent.length).toBeGreaterThan(1);
+        for (const frame of sent) {
+            const bytes = jsonCodec.byteLength(jsonCodec.encode(frame as unknown as Message));
+            expect(bytes).toBeLessThanOrEqual(MAX_CLIENT_FRAME_BYTES);
+        }
+        expect(sent.flatMap((f) => f.requests.map((r) => r.data?.['i']))).toStrictEqual([
+            0, 1, 2, 3,
+        ]);
+    });
+
     it('sends nothing while input is refused, since a stalled session can ask for nothing', async () => {
         const h = await harness();
         // A stall is the client's judgement that the authority is not processing; a request held
@@ -165,5 +195,27 @@ describe('a client request goes to the authority', () => {
         h.run(2);
 
         expect(h.requests()).toStrictEqual([]);
+    });
+});
+
+describe('a join over the host cap', () => {
+    it('fails the session locally rather than sending a frame the host would close on', async () => {
+        const pair = loopbackPair({ latency: 1 });
+        const server = new FakeServer(pair.server);
+        const client = new GameClient({
+            transport: pair.client,
+            renderer: await createReadyNullRenderer({ design: { width: 800, height: 600 } }),
+            frames: new ManualFrameSource(),
+            device: new ScriptedInputDevice(),
+            clock: { nowSeconds: () => 0 },
+            name: 'x'.repeat(MAX_CLIENT_FRAME_BYTES),
+            pump: () => pair.deliver(),
+        });
+        client.start();
+        pair.deliver();
+
+        expect(client.state).toBe('failed');
+        expect(client.lifecycle.failure).toMatchObject({ kind: 'internal' });
+        expect(server.joins).toStrictEqual([]);
     });
 });

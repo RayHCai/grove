@@ -242,6 +242,27 @@ describe('a countdown', () => {
     });
 });
 
+describe('a wrapper handed a non-finite number', () => {
+    it('refuses the write, and the field keeps replicating afterwards', async () => {
+        const { session, tab } = await open();
+        await press(session, tab, W.award);
+        await press(session, tab, W.poison);
+        expect(reading<string>(tab, S.refused)).toBe('range,range,range');
+
+        // Kept, the NaN would make the field unencodable and every later award would be dropped
+        // at the drain, so the mirror would still read the first one.
+        await press(session, tab, W.award);
+        expect(reading<Scoreboard>(tab, F.scores)?.serialize()).toEqual({
+            kind: 'Scoreboard',
+            scores: [[idOf(tab), AWARD * 2]],
+        });
+        await press(session, tab, W.bank);
+        expect(reading<number>(tab, S.banked)).toBe(AWARD * 2);
+        await press(session, tab, W.stock);
+        expect(mineField<Inventory>(tab, F.bag)?.count(ITEM_GEM)).toBe(1);
+    });
+});
+
 describe('a wrapper on the wire', () => {
     it('arrives as its own class and is updated in place rather than replaced', async () => {
         const { session, tab } = await open();

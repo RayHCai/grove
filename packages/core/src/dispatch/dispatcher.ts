@@ -30,11 +30,12 @@ export interface DispatchLog {
 /** The "nothing to await" answer, shared; a dispatch matching no handler is the common case. */
 const RESOLVED: Promise<void> = Promise.resolve();
 
-// Captured at load, so a script that later reassigns `Date.now` or `performance` cannot skew the handler budget.
+// Bound once at load, so a script reassigning `performance.now` or `Date.now` cannot skew or
+// silence the overrun diagnostic.
 const elapsedMs: () => number = (() => {
-    const host = (globalThis as { performance?: { now(): number } }).performance;
-    const dateNow = Date.now;
-    return host === undefined ? () => dateNow() : () => host.now();
+    const host = (globalThis as { performance?: { now?: () => number } }).performance;
+    if (typeof host?.now === 'function') return host.now.bind(host);
+    return Date.now.bind(Date);
 })();
 
 function matches(
@@ -109,7 +110,7 @@ export class Dispatcher {
 
     /**
      * Runs creator code that reaches the engine outside a handler invocation, under the same
-     * dedup, log and breaker as `#invoke`. False when disabled, when it threw, or when it overran.
+     * dedup, log and breaker as `#invoke`. False when disabled or when it threw.
      */
     guard(owner: GuardOwner | null, site: GuardSite, fn: () => void): boolean {
         // An unowned callback cannot be disabled (there is no instance to charge), but it is still
@@ -140,7 +141,7 @@ export class Dispatcher {
             setCurrentInvocation(outer);
             if (scope !== null) this.#scopes.completeInvocation(scope);
         }
-        if (this.#chargeOverrun(owner, site, startedAt)) return false;
+        this.#noteOverrun(owner, site, startedAt);
         if (owner !== null) this.#breaker.recordSuccess(owner.id, site.method);
         return true;
     }
@@ -252,17 +253,15 @@ export class Dispatcher {
             return null;
         }
 
+        // The synchronous span alone, never the wall time to the settle: `await sleep(30)` is a
+        // parked handler rather than a busy one.
+        this.#noteOverrun(si, site, startedAt);
+
         if (!(result instanceof Promise)) {
-            if (!this.#chargeOverrun(si, site, startedAt))
-                this.#breaker.recordSuccess(si.id, method);
+            this.#breaker.recordSuccess(si.id, method);
             this.#scopes.completeInvocation(scope);
             return null;
         }
-
-        // The synchronous span alone, never the wall time to the settle: `await sleep(30)` is a
-        // parked handler rather than a busy one, and charging it would disable every handler that
-        // waits.
-        const overran = this.#chargeOverrun(si, site, startedAt);
 
         // Only once the promise settles: recording success when the call returns (at the first
         // await) resets the count before the rejection arrives, so the breaker never trips.
@@ -270,7 +269,7 @@ export class Dispatcher {
         // ticks leaves the slot where it found it rather than holding a finished invocation open.
         return resumeWith(result as Promise<unknown>).then(
             () => {
-                if (!overran) this.#breaker.recordSuccess(si.id, method);
+                this.#breaker.recordSuccess(si.id, method);
                 if (!scope.dead) this.#scopes.completeInvocation(scope);
             },
             (err: unknown) => {
@@ -283,20 +282,24 @@ export class Dispatcher {
     }
 
     /**
-     * Charges a call that held the tick past `MAX_HANDLER_MS`, as a throw rather than a success.
-     * Checked on the way out: nothing in one realm can interrupt a synchronous loop.
+     * Logs a call that held the tick past `MAX_HANDLER_MS`, and never charges the breaker: the
+     * count is snapshot state both endpoints must agree on, and wall time differs per machine.
      */
-    #chargeOverrun(owner: GuardOwner | null, site: GuardSite, startedAt: number): boolean {
-        if (elapsedMs() - startedAt <= MAX_HANDLER_MS) return false;
-        this.#recordThrow(
+    #noteOverrun(owner: GuardOwner | null, site: GuardSite, startedAt: number): void {
+        if (elapsedMs() - startedAt <= MAX_HANDLER_MS) return;
+        this.#record(
             owner,
             site,
             new RangeError(`held the tick past the ${MAX_HANDLER_MS}ms budget`),
+            false,
         );
-        return true;
     }
 
     #recordThrow(owner: GuardOwner | null, site: GuardSite, err: unknown): void {
+        this.#record(owner, site, err, true);
+    }
+
+    #record(owner: GuardOwner | null, site: GuardSite, err: unknown, charge: boolean): void {
         const { method, hostId, tick, event } = site;
         const scriptClass = owner?.className ?? '(engine)';
         const message = err instanceof Error ? err.message : String(err);
@@ -313,7 +316,7 @@ export class Dispatcher {
             this.#log.error({ scriptClass, method, hostId, tick, event, stack });
         }
 
-        if (owner === null) return;
+        if (owner === null || !charge) return;
         const consecutive = this.#breaker.recordThrow(owner.id, method);
         if (consecutive === BREAKER_THRESHOLD) {
             const disabled = `handler disabled after ${BREAKER_THRESHOLD} consecutive throws`;

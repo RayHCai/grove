@@ -170,6 +170,12 @@ describe('validate', () => {
         expect(refusal(doubled).path).toBe('gameScripts[1].script');
     });
 
+    it('refuses a placed tag under the prefix speech bubbles reserve', () => {
+        const bubbly = draft();
+        bubbly.entities[0]!.tags = ['spawner', 'say:hi'];
+        expect(refusal(bubbly).path).toBe('entities[0].tags[1]');
+    });
+
     it('refuses a reserved key in a props map rather than stripping it', () => {
         const polluted = draft();
         polluted.templates[0]!.scripts[0]!.props = JSON.parse(

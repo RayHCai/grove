@@ -4,6 +4,9 @@ import type { ManifestUpdate, RenderManifest } from '@platform/protocol';
 import { assetId, templateId } from '@platform/project';
 import { Rules } from '../src/testkit/fixtures.js';
 import { ManifestStore } from '../src/manifest.js';
+import { encodedSize } from '../src/chunk.js';
+import { SimError } from '../src/errors.js';
+import { jsonCodec } from '@platform/transport';
 import { harness } from './harness.js';
 import type { Peer } from './harness.js';
 
@@ -54,6 +57,53 @@ describe('ManifestStore', () => {
         });
         expect(store.snapshot().templates.map((t) => t.template)).toEqual(['coin', 'gem']);
         expect(store.hasTemplate('gem')).toBe(true);
+    });
+});
+
+/** A visual the wire codec refuses: JSON would carry the NaN anchor as `null`. */
+const broken: RenderManifest = {
+    assets: [],
+    templates: [
+        {
+            template: templateId('gem'),
+            kind: 'sprite',
+            texture: assetId('coin'),
+            anchorX: Number.NaN,
+        },
+    ],
+};
+
+describe('a visual the codec refuses', () => {
+    it('throws at declare and keeps nothing, so no later send or Welcome carries it', () => {
+        const store = new ManifestStore(coin);
+        expect(() => store.declare({ assets: coin.assets, templates: broken.templates })).toThrow(
+            expect.objectContaining({ code: 'invalid-visuals' }) as SimError,
+        );
+        expect(store.hasTemplate('gem')).toBe(false);
+        expect(store.drain()).toBeNull();
+        expect(store.snapshot()).toEqual(coin);
+    });
+
+    it('refuses a boot manifest holding one, rather than every Welcome after boot', () => {
+        expect(() => new ManifestStore(broken)).toThrow(SimError);
+    });
+
+    it('reaches a host through declareVisuals, and later joiners still get a Welcome', () => {
+        const h = harness({ config: { gameScripts: [Rules] } });
+        const first = h.joined('a');
+        h.settle([first]);
+        expect(() => h.sim.declareVisuals(broken)).toThrow(SimError);
+        h.pumpTicks(6);
+        expect(updates(first)).toHaveLength(0);
+
+        const second = h.joined('b');
+        expect(second.welcome?.visuals.templates).toEqual([]);
+        expect(h.closes).toEqual([]);
+    });
+
+    it('is measured as refused, not as too big, so it is never chunked as oversized', () => {
+        expect(encodedSize({ x: Number.NaN }, jsonCodec)).toBeNull();
+        expect(encodedSize({ x: 1 }, jsonCodec)).toBe(7);
     });
 });
 
