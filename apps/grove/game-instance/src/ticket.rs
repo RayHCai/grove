@@ -4,7 +4,7 @@
 //! Ed25519 under public keys alone, so nothing this process holds can mint a ticket.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{bail, Result};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -23,6 +23,9 @@ const MAX_TICKET_HORIZON_SECONDS: i64 = 300;
 
 /// Spent tickets held at once: past it a join is refused rather than a spent ticket forgotten.
 const MAX_SPENT_TICKETS: usize = 4096;
+
+/// Sockets one player may hold at once: a tab, its reconnect while the old socket idles out, two spare.
+pub(crate) const MAX_CONNECTIONS_PER_PLAYER: usize = 4;
 
 const PUBLIC_KEY_BYTES: usize = 32;
 const SIGNATURE_BYTES: usize = 64;
@@ -97,6 +100,8 @@ pub enum TicketFailure {
     Reused,
     /// Every slot for a spent ticket is taken, which is this process's limit and not the peer's fault.
     Crowded,
+    /// The player already holds as many sockets here as one player may.
+    TooManyConnections,
 }
 
 impl TicketFailure {
@@ -114,6 +119,7 @@ impl TicketFailure {
             Self::ExpiresTooLate(_) => "expires_too_late",
             Self::Reused => "reused",
             Self::Crowded => "too_many_tickets",
+            Self::TooManyConnections => "too_many_connections",
         }
     }
 
@@ -185,7 +191,10 @@ pub fn verify(
     })
 }
 
-/// Admits a ticket for this game and this session, and each ticket once.
+/// Open sockets by player, shared with every `Seat` so a closing socket gives its place back.
+type Seated = Arc<Mutex<HashMap<String, usize>>>;
+
+/// Admits a ticket for this game and this session, each ticket once, and each player a few times.
 pub struct Gate {
     keys: TicketKeys,
     game_id: String,
@@ -193,6 +202,26 @@ pub struct Gate {
     /// Admitted tickets by signature, each until its expiry: Ed25519 gives one payload one signature.
     spent: Mutex<HashMap<[u8; SIGNATURE_BYTES], i64>>,
     room: usize,
+    seated: Seated,
+    per_player: usize,
+}
+
+/// One admitted socket's place under its player's cap, given back when dropped.
+pub struct Seat {
+    seated: Seated,
+    player_id: String,
+}
+
+impl Drop for Seat {
+    fn drop(&mut self) {
+        let mut seated = lock(&self.seated);
+        if let Some(open) = seated.get_mut(&self.player_id) {
+            *open -= 1;
+            if *open == 0 {
+                seated.remove(&self.player_id);
+            }
+        }
+    }
 }
 
 impl Gate {
@@ -203,11 +232,42 @@ impl Gate {
             session_id,
             spent: Mutex::new(HashMap::new()),
             room: MAX_SPENT_TICKETS,
+            seated: Arc::default(),
+            per_player: MAX_CONNECTIONS_PER_PLAYER,
         }
     }
 
+    /// Admits `ticket` as `admit` does and seats its player, unless that player holds every seat.
+    pub fn seat(&self, ticket: &str, now_seconds: i64) -> Result<(Claims, Seat), TicketFailure> {
+        // Held across the admit, so two handshakes cannot both take one player's last seat.
+        let mut seated = lock(&self.seated);
+        let claims = self.admit_where(ticket, now_seconds, |claims| {
+            if seated.get(&claims.player_id).copied().unwrap_or(0) >= self.per_player {
+                return Err(TicketFailure::TooManyConnections);
+            }
+            Ok(())
+        })?;
+        *seated.entry(claims.player_id.clone()).or_default() += 1;
+        let seat = Seat {
+            seated: self.seated.clone(),
+            player_id: claims.player_id.clone(),
+        };
+        Ok((claims, seat))
+    }
+
     /// Verifies `ticket` and spends it, so a second presentation of the same bytes is refused.
+    #[cfg(test)]
     pub fn admit(&self, ticket: &str, now_seconds: i64) -> Result<Claims, TicketFailure> {
+        self.admit_where(ticket, now_seconds, |_| Ok(()))
+    }
+
+    /// `admit`, with `allowed` the last check before the ticket is spent, so a refusal spends nothing.
+    fn admit_where(
+        &self,
+        ticket: &str,
+        now_seconds: i64,
+        allowed: impl FnOnce(&Claims) -> Result<(), TicketFailure>,
+    ) -> Result<Claims, TicketFailure> {
         let Verified { claims, signature } = verify(ticket, &self.keys, now_seconds)?;
         // Checked here rather than at the data layer too: a process serving one game must refuse a
         // ticket for another outright, so the mistake cannot become a cross-game read later.
@@ -231,16 +291,21 @@ impl Gate {
         if spent.len() >= self.room {
             return Err(TicketFailure::Crowded);
         }
+        allowed(&claims)?;
         spent.insert(signature, claims.exp);
         Ok(claims)
     }
 
-    /// Poison is ignored: every write under this lock leaves the set whole.
     fn spent(&self) -> MutexGuard<'_, HashMap<[u8; SIGNATURE_BYTES], i64>> {
-        self.spent
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        lock(&self.spent)
     }
+}
+
+/// Poison is ignored: every write under either of the gate's locks leaves its map whole.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]
@@ -546,6 +611,35 @@ pub mod tests {
             TicketFailure::Expired(NOW + 60)
         );
         assert!(gate.admit(&ticket, NOW).is_ok());
+    }
+
+    pub fn ticket_for(player: &str, exp: i64) -> String {
+        let mut each = claims(exp);
+        each["playerId"] = serde_json::json!(player);
+        mint(&each, SEED)
+    }
+
+    /// One player opening sockets without end would hold every task and queue this process has.
+    #[test]
+    fn seats_a_player_no_more_times_than_the_cap() {
+        let gate = gate();
+        let seats: Vec<Seat> = (0..MAX_CONNECTIONS_PER_PLAYER as i64)
+            .map(|n| gate.seat(&ticket_for(PLAYER, NOW + 10 + n), NOW).unwrap().1)
+            .collect();
+
+        let one_more = ticket_for(PLAYER, NOW + 60);
+        assert_eq!(
+            gate.seat(&one_more, NOW).err().map(TicketFailure::token),
+            Some("too_many_connections")
+        );
+        assert!(gate
+            .seat(&ticket_for("someone-else", NOW + 60), NOW)
+            .is_ok());
+
+        // Unspent by the refusal, so the same ticket seats the player once a socket gives one back.
+        drop(seats);
+        let (_, _seat) = gate.seat(&one_more, NOW).unwrap();
+        assert_eq!(lock(&gate.seated).get(PLAYER), Some(&1));
     }
 
     /// Full is a refusal, and a spent ticket is forgotten only once its expiry would refuse it anyway.

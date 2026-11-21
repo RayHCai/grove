@@ -17,7 +17,8 @@ upload that fails stays where it is, and its creator is told why.
 Everything else is a refusal carrying `ErrorBody` from `libs/api-contract`: a `code` a caller matches
 on and a `message` a human reads, on an unknown path as much as on an unanswered method. A `SIGTERM`
 or `SIGINT` drains the listener for at most thirty seconds and only then stops the consumer, so an
-asset claimed on the way out is settled rather than left for the reclaim window.
+asset claimed on the way out is settled rather than left for the reclaim window; the consumer claims
+nothing after the stop, and is waited on for thirty seconds more.
 
 ## The asset stream
 
@@ -32,9 +33,10 @@ One asset, start to finish:
 
 1. The claim moves the task to `IN_PROGRESS`, and its answer carries the inspection: a presigned GET
    of the quarantined bytes, pinned to the version the save recorded, a presigned PUT to the key the
-   CDN serves, the declared type and the declared length.
+   CDN serves, the declared type, the declared length, and when the claim's lease lapses.
 2. The bytes are read no further than one past the declared length. They must be exactly that long
-   and begin the way their type does: PNG, JPEG, GIF and WebP by their signatures, MP3 by an ID3 tag
+   and begin the way their type does: PNG, JPEG, GIF and WebP by their signatures and a whole header
+   declaring at most 16384 pixels a side and 8192 squared in all, MP3 by an ID3 tag
    or a frame sync, Ogg, WAV and WebM by theirs, WOFF2, WOFF, TrueType and OpenType by their tags,
    and JSON by parsing whole as UTF-8.
 3. A pass is copied to `assets/` under its declared type, and the task settles `SUCCESSFUL` with the
@@ -51,9 +53,12 @@ stream so that what was waiting is handed out again, and three passes over the s
 row turn `/health` to 503 until one answers.
 
 A message is acknowledged once its outcome is written down. A claim that was refused is work somebody
-already holds or settled: acknowledged, or it comes back forever. A status update the API rejects
-outright, with a 400, 401 or 403, is acknowledged too, with an error line, since a retry would send
-the same request. A bucket or an API that could not be reached leaves the message claimed for another
+already settled: acknowledged, or it comes back forever; a `409` carrying `Retry-After` is another
+worker's live lease, and is left pending. A status update the API rejects outright, with a 400, is
+acknowledged too, with an error line, since a retry would send the same request. A 401 or 403 is this
+process's credential refused: the message stays pending, `/health` turns 503, and that message alone
+is tried again every thirty seconds until it is taken. A bucket or an API that could not be reached,
+or a lease that would lapse before the settle could land, leaves the message claimed for another
 worker to take back after five minutes, and a message handed out more than five times is dropped
 with an error line as one no worker can finish. The transitions are checked at `@grove/api`: a worker
 that comes back from the dead cannot overwrite an outcome another already wrote.
@@ -61,7 +66,8 @@ that comes back from the dead cannot overwrite an outcome another already wrote.
 ## The credential
 
 `ASSET_SERVICE_SECRET` is the bearer this process presents to the status route, and `@grove/api`
-takes it for asset uploads and nothing else.
+takes it for asset uploads and nothing else. Every claim and settle names this worker in
+`x-grove-worker`, its consumer name held to the request-id alphabet, which is whom a claim is fenced to.
 
 ## What it does not own
 

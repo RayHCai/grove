@@ -30,12 +30,10 @@ use tower::Service as _;
 
 use crate::protocol::{ConnectionId, SendClass};
 use crate::session::HostEvent;
-use crate::ticket::{Gate, TicketFailure};
+use crate::ticket::{Gate, Seat, TicketFailure};
 
-/// 4 MiB, the same ceiling `@platform/transport`'s codec refuses a frame at. Restated rather than
-/// derived, because the cap has to hold on this side BEFORE a parse: `serde_json` allocates a
-/// graph several times the wire bytes, which no downstream check can undo.
-pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
+/// `MAX_CLIENT_FRAME_BYTES` in `@platform/protocol`, which every client sizes its frames to.
+pub const MAX_INBOUND_FRAME_BYTES: usize = 64 * 1024;
 
 /// Frames one peer may fall behind by before its droppable ones start being discarded.
 const WRITE_QUEUE_DEPTH: usize = 64;
@@ -49,9 +47,8 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 /// The sim refuses extra input a tick later, so this is the only bound on how fast one socket
 /// can feed the event queue, an order of magnitude above what a 60 Hz client sends.
 const INBOUND_BUDGET_FRAMES: usize = 600;
-/// Bytes one peer may send inside `INBOUND_WINDOW`: two whole frames at the codec's ceiling, so a
-/// legitimate large frame fits, while a peer cannot hold the frame budget at 4 MiB apiece.
-const INBOUND_BUDGET_BYTES: usize = 2 * MAX_FRAME_BYTES;
+/// Four whole frames at the inbound cap a second, against the few KiB a healthy 60 Hz client sends.
+const INBOUND_BUDGET_BYTES: usize = 4 * MAX_INBOUND_FRAME_BYTES;
 const INBOUND_WINDOW: Duration = Duration::from_secs(1);
 
 /// How long the writer gets to drain its queue once the session has hung the peer up.
@@ -110,6 +107,12 @@ impl Outgoing {
 /// only a cancellation it is selecting on can wake it, and a dropped sender is that cancellation.
 pub struct HangUp {
     _sender: mpsc::Sender<()>,
+}
+
+impl HangUp {
+    pub fn new(sender: mpsc::Sender<()>) -> Self {
+        Self { _sender: sender }
+    }
 }
 
 /// What `/healthz` answers with, mirroring the `Vitals` the agent on this box decodes.
@@ -300,8 +303,8 @@ async fn upgrade(
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
 
-    let claims = match listener.gate.admit(raw, now) {
-        Ok(claims) => claims,
+    let (claims, seat) = match listener.gate.seat(raw, now) {
+        Ok(seated) => seated,
         Err(failure) => {
             // Logged here and answered with nothing but a status: a peer that cannot present a
             // ticket has no session to be told about, and the reason is the operator's, carrying
@@ -317,6 +320,9 @@ async fn upgrade(
             // A full set of spent tickets is this process's limit, which a peer can wait out.
             if failure == TicketFailure::Crowded {
                 return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+            if failure == TicketFailure::TooManyConnections {
+                return StatusCode::TOO_MANY_REQUESTS.into_response();
             }
             return StatusCode::UNAUTHORIZED.into_response();
         }
@@ -335,11 +341,11 @@ async fn upgrade(
     // Held on the codec as well, because its own defaults are 16 MiB a frame and 64 MiB a message,
     // against which the check in `serve` only ever sees bytes this process has already buffered.
     let ws = ws
-        .max_message_size(MAX_FRAME_BYTES)
-        .max_frame_size(MAX_FRAME_BYTES);
+        .max_message_size(MAX_INBOUND_FRAME_BYTES)
+        .max_frame_size(MAX_INBOUND_FRAME_BYTES);
     // Echoed back, because a peer that named a subprotocol expects one and closes if it gets none.
     ws.protocols([offered.clone()])
-        .on_upgrade(move |socket| serve(socket, listener, connection_id, identity))
+        .on_upgrade(move |socket| serve(socket, listener, connection_id, identity, seat))
 }
 
 async fn healthz(State(listener): State<Listener>) -> Json<Vitals> {
@@ -364,6 +370,8 @@ async fn serve(
     listener: Listener,
     connection_id: ConnectionId,
     identity: String,
+    // Held for the socket's life, which is what gives its player's seat back when it closes.
+    _seat: Seat,
 ) {
     let (writes, mut queue) = mpsc::channel::<Outgoing>(WRITE_QUEUE_DEPTH);
     let (hangup, mut hung_up) = mpsc::channel::<()>(1);
@@ -373,7 +381,7 @@ async fn serve(
             connection_id: connection_id.clone(),
             identity,
             writes,
-            hangup: HangUp { _sender: hangup },
+            hangup: HangUp::new(hangup),
         })
         .await
         .is_err()
@@ -426,7 +434,7 @@ async fn serve(
             // is a peer running something else.
             _ => continue,
         };
-        if text.len() > MAX_FRAME_BYTES {
+        if text.len() > MAX_INBOUND_FRAME_BYTES {
             tracing::warn!(conn = %connection_id, "close conn reason=frame-too-large");
             break;
         }
@@ -514,7 +522,7 @@ fn unix_seconds() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ticket::tests::{claims, keys, mint, GAME, PLAYER, SEED, SESSION};
+    use crate::ticket::tests::{claims, keys, mint, ticket_for, GAME, PLAYER, SEED, SESSION};
     use axum::body::Body;
     use axum::http::Request as HttpRequest;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -619,10 +627,11 @@ mod tests {
         let opened = Instant::now();
         let mut inbound = Inbound::new(opened);
 
-        assert!(inbound.admit(opened, MAX_FRAME_BYTES));
-        assert!(inbound.admit(opened, MAX_FRAME_BYTES));
+        for _ in 0..INBOUND_BUDGET_BYTES / MAX_INBOUND_FRAME_BYTES {
+            assert!(inbound.admit(opened, MAX_INBOUND_FRAME_BYTES));
+        }
         assert!(!inbound.admit(opened, 1));
-        assert!(inbound.admit(opened + INBOUND_WINDOW, MAX_FRAME_BYTES));
+        assert!(inbound.admit(opened + INBOUND_WINDOW, MAX_INBOUND_FRAME_BYTES));
     }
 
     #[test]
@@ -797,5 +806,86 @@ mod tests {
             .await
             .expect("the closed peer never gave its place back");
         assert!(answer.starts_with("http/1.1 200"), "{answer}");
+    }
+
+    /// One masked text frame, as a browser puts it on the wire.
+    fn text_frame(payload: &[u8]) -> Vec<u8> {
+        let mask = [1u8, 2, 3, 4];
+        let mut frame = vec![0x81, 0x80 | 127];
+        frame.extend_from_slice(&(payload.len() as u64).to_be_bytes());
+        frame.extend_from_slice(&mask);
+        frame.extend(payload.iter().enumerate().map(|(i, b)| b ^ mask[i % 4]));
+        frame
+    }
+
+    /// A JSON string exactly `bytes` long, which is a frame the session would be handed whole.
+    fn json_of(bytes: usize) -> Vec<u8> {
+        format!("\"{}\"", "a".repeat(bytes - 2)).into_bytes()
+    }
+
+    async fn next_event(opened: &mut mpsc::Receiver<HostEvent>) -> HostEvent {
+        tokio::time::timeout(Duration::from_secs(5), opened.recv())
+            .await
+            .expect("the session heard nothing")
+            .expect("the event queue closed")
+    }
+
+    /// A frame past the cap would be copied into a batch the isolate parses whole for every peer.
+    #[tokio::test]
+    async fn closes_a_peer_whose_frame_is_past_the_inbound_cap_before_the_session_sees_it() {
+        let (addr, mut opened) = bound(Limits::default()).await;
+        let mut peer = TcpStream::connect(addr).await.unwrap();
+        assert!(ask(&mut peer, &handshake(&ticket()))
+            .await
+            .starts_with("http/1.1 101"));
+        let _session = next_event(&mut opened).await;
+
+        peer.write_all(&text_frame(&json_of(MAX_INBOUND_FRAME_BYTES)))
+            .await
+            .unwrap();
+        match next_event(&mut opened).await {
+            HostEvent::Frame { message, .. } => {
+                assert_eq!(message.get().len(), MAX_INBOUND_FRAME_BYTES)
+            }
+            _ => panic!("a frame at the cap did not reach the session"),
+        }
+
+        // Unchecked, since the listener may hang up before it has read the whole of it.
+        let _ = peer
+            .write_all(&text_frame(&json_of(MAX_INBOUND_FRAME_BYTES + 1)))
+            .await;
+        assert!(matches!(
+            next_event(&mut opened).await,
+            HostEvent::Closed { .. }
+        ));
+    }
+
+    /// Past the cap a player's next handshake is refused, and a socket closing gives a seat back.
+    #[tokio::test]
+    async fn seats_one_player_on_no_more_sockets_than_the_cap() {
+        let (addr, mut opened) = bound(Limits::default()).await;
+        let exp = unix_seconds() + 60;
+        let mut peers = Vec::new();
+        let mut sessions = Vec::new();
+        for n in 0..crate::ticket::MAX_CONNECTIONS_PER_PLAYER as i64 {
+            let mut peer = TcpStream::connect(addr).await.unwrap();
+            let answer = ask(&mut peer, &handshake(&ticket_for(PLAYER, exp + n))).await;
+            assert!(answer.starts_with("http/1.1 101"), "{answer}");
+            sessions.push(next_event(&mut opened).await);
+            peers.push(peer);
+        }
+
+        let mut refused = TcpStream::connect(addr).await.unwrap();
+        let answer = ask(&mut refused, &handshake(&ticket_for(PLAYER, exp + 100))).await;
+        assert!(answer.starts_with("http/1.1 429"), "{answer}");
+
+        drop(peers.pop());
+        assert!(matches!(
+            next_event(&mut opened).await,
+            HostEvent::Closed { .. }
+        ));
+        let mut seated = TcpStream::connect(addr).await.unwrap();
+        let answer = ask(&mut seated, &handshake(&ticket_for(PLAYER, exp + 101))).await;
+        assert!(answer.starts_with("http/1.1 101"), "{answer}");
     }
 }

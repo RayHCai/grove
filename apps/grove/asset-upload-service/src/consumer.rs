@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use redis::aio::{ConnectionManager, ConnectionManagerConfig};
 use redis::streams::{
@@ -18,7 +18,7 @@ use redis::{AsyncCommands, RedisError};
 use tokio::sync::watch;
 
 use crate::inspect::{self, Bucket, Invalid};
-use crate::tasks::{Claim, Inspection, Outcome, Settled, Tasks};
+use crate::tasks::{Claim, Inspection, Outcome, Settled, Tasks, SETTLE_TIMEOUT};
 
 /// The stream a save pushes an asset upload onto; `@grove/api-contract` spells the same name.
 pub const STREAM: &str = "grove:tasks:asset-upload";
@@ -50,6 +50,9 @@ const MAX_FAILED_PASSES: u32 = 3;
 /// Times one message may be handed out before it is dropped as one no worker can finish.
 const MAX_DELIVERIES: u64 = 5;
 
+/// How long a consumer whose credential the API refused waits before it tries the same message again.
+const LOCKED_BACKOFF: Duration = Duration::from_secs(30);
+
 /// What one asset did with its message.
 ///
 /// `Ack` is acknowledged: the outcome is written down, whatever it was. `Retry` leaves it claimed
@@ -59,6 +62,8 @@ const MAX_DELIVERIES: u64 = 5;
 pub enum Handled {
     Ack,
     Retry,
+    /// The API refused this service's credential, so every message would be refused alike.
+    Locked,
 }
 
 /// What claiming and inspecting an asset needs: the API that settles it and the bucket holding it.
@@ -70,17 +75,30 @@ pub struct Worker {
 /// Claims one asset upload, holds its bytes to the type they were declared as, and settles it.
 pub async fn run_upload(task: &str, worker: &Worker) -> Handled {
     let outcome = match worker.tasks.claim(task).await {
-        Claim::Claimed(inspection) => match inspected(&inspection, worker.bucket.as_ref()).await {
-            Ok(outcome) => outcome,
-            Err(error) => {
-                tracing::warn!(task, error = ?error, "asset upload could not be inspected");
+        Claim::Claimed(inspection) => {
+            // Settled inside the lease or not at all: past it another worker may hold the task.
+            let Some(deadline) = work_deadline(inspection.expires_at) else {
+                tracing::warn!(task, "the claim's lease is too short to settle inside");
                 return Handled::Retry;
+            };
+            let inspecting = inspected(&inspection, worker.bucket.as_ref());
+            match tokio::time::timeout_at(deadline, inspecting).await {
+                Ok(Ok(outcome)) => outcome,
+                Ok(Err(error)) => {
+                    tracing::warn!(task, error = ?error, "asset upload could not be inspected");
+                    return Handled::Retry;
+                }
+                Err(_) => {
+                    tracing::warn!(task, "the lease ran out before the inspection did");
+                    return Handled::Retry;
+                }
             }
-        },
+        }
         Claim::Uninspectable => Outcome::Failed {
             message: "this upload could not be checked; save it again".to_owned(),
         },
-        Claim::Not(Settled::Unavailable) => return Handled::Retry,
+        Claim::Not(Settled::Unavailable | Settled::Held) => return Handled::Retry,
+        Claim::Not(Settled::Unauthorized) => return Handled::Locked,
         // Somebody already holds or settled it, or the API never will take it: either way a retry
         // brings the same message straight back, so it is acknowledged.
         Claim::Not(settled) => {
@@ -93,8 +111,15 @@ pub async fn run_upload(task: &str, worker: &Worker) -> Handled {
         // The outcome could not be written down, so the work has to come back: acknowledging here
         // would leave a creator watching a task nothing will ever move.
         Settled::Unavailable => Handled::Retry,
+        Settled::Unauthorized => Handled::Locked,
         _ => Handled::Ack,
     }
+}
+
+/// When the transfers must be done by, so the settle's own timeout still lands before `expires_at`.
+fn work_deadline(expires_at: SystemTime) -> Option<tokio::time::Instant> {
+    let left = expires_at.duration_since(SystemTime::now()).ok()?;
+    Some(tokio::time::Instant::now() + left.checked_sub(SETTLE_TIMEOUT)?)
 }
 
 /// The verdict on one upload, or an error where the bucket rather than the upload failed.
@@ -217,11 +242,29 @@ pub async fn drain(
     alive: &AtomicBool,
 ) {
     let mut failed_passes = 0;
+    // A message whose claim the API refused our credential for, tried again alone until it is not.
+    let mut locked: Option<Delivery> = None;
     while !*stop.borrow() {
-        match pass(queue, worker).await {
-            Ok(()) => {
+        let passed = match locked.take() {
+            Some(delivery) => Ok(handle(queue, worker, delivery)
+                .await
+                .map_or(Pass::Done, Pass::Locked)),
+            None => pass(queue, worker, &mut stop).await,
+        };
+        match passed {
+            Ok(Pass::Done) => {
                 failed_passes = 0;
                 alive.store(true, Ordering::Relaxed);
+            }
+            // Down rather than draining: acking what a wrong secret is refused for empties the stream.
+            Ok(Pass::Locked(delivery)) => {
+                alive.store(false, Ordering::Relaxed);
+                tracing::error!(
+                    id = %delivery.id,
+                    "the API refused ASSET_SERVICE_SECRET; holding the stream until it does not"
+                );
+                locked = Some(delivery);
+                let _ = tokio::time::timeout(LOCKED_BACKOFF, stop.changed()).await;
             }
             // A stream that would not answer is the next pass's problem: this loop is the whole of
             // what the process does, and giving up on it would be a worker that never comes back.
@@ -243,20 +286,44 @@ pub async fn drain(
     }
 }
 
-/// Reclaimed first: an asset another worker died holding is older work than anything new, and the
-/// creator waiting on it has been waiting longest.
-async fn pass(queue: &mut dyn Queue, worker: &Worker) -> Result<(), QueueError> {
-    for delivery in queue.reclaim().await? {
-        handle(queue, worker, delivery).await;
-    }
-    for delivery in queue.read().await? {
-        handle(queue, worker, delivery).await;
-    }
-    Ok(())
+/// How one pass over the stream ended.
+enum Pass {
+    Done,
+    /// The API refused this service's credential for this message, which is left unacknowledged.
+    Locked(Delivery),
 }
 
-/// Runs one message and acknowledges it if its outcome is written down.
-async fn handle(queue: &mut dyn Queue, worker: &Worker, delivery: Delivery) {
+/// Reclaimed first: an asset another worker died holding is older work than anything new, and the
+/// creator waiting on it has been waiting longest.
+async fn pass(
+    queue: &mut dyn Queue,
+    worker: &Worker,
+    stop: &mut watch::Receiver<bool>,
+) -> Result<Pass, QueueError> {
+    for delivery in queue.reclaim().await? {
+        if let Some(locked) = handle(queue, worker, delivery).await {
+            return Ok(Pass::Locked(locked));
+        }
+    }
+    // Checked again here and raced below, so a stop is never followed by a claim.
+    if *stop.borrow() {
+        return Ok(Pass::Done);
+    }
+    let read = tokio::select! {
+        biased;
+        Ok(()) = stop.changed() => return Ok(Pass::Done),
+        read = queue.read() => read?,
+    };
+    for delivery in read {
+        if let Some(locked) = handle(queue, worker, delivery).await {
+            return Ok(Pass::Locked(locked));
+        }
+    }
+    Ok(Pass::Done)
+}
+
+/// Runs one message and acknowledges it once its outcome is written down; a locked one comes back.
+async fn handle(queue: &mut dyn Queue, worker: &Worker, delivery: Delivery) -> Option<Delivery> {
     let finished = match &delivery.task {
         // Nothing this service can ever do with it, and leaving it pending would make every
         // reclaim pass pick it up again.
@@ -272,13 +339,18 @@ async fn handle(queue: &mut dyn Queue, worker: &Worker, delivery: Delivery) {
             );
             true
         }
-        Some(task) => run_upload(task, worker).await == Handled::Ack,
+        Some(task) => match run_upload(task, worker).await {
+            Handled::Ack => true,
+            Handled::Retry => false,
+            Handled::Locked => return Some(delivery),
+        },
     };
     if finished {
         if let Err(failed) = queue.ack(&delivery.id).await {
             tracing::warn!(error = ?failed.error, id = %delivery.id, "acknowledging failed");
         }
     }
+    None
 }
 
 struct RedisQueue {
@@ -374,13 +446,28 @@ mod tests {
     use std::sync::Mutex;
 
     const TASK: &str = "8c2e4a60-5d17-4b93-8f0a-1e6d2c4b7a35";
-    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+    /// A 1×1 PNG, as far as the end of the header the inspection reads its size from.
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0";
+
+    /// The API's own lease for an asset upload, as a claim would name its end.
+    fn leased_for(lease: Duration) -> Inspection {
+        Inspection {
+            source: "https://bucket/uploads/leaf".to_owned(),
+            destination: "https://bucket/assets/leaf".to_owned(),
+            content_type: "image/png".to_owned(),
+            byte_length: PNG.len() as u64,
+            expires_at: SystemTime::now() + lease,
+        }
+    }
 
     /// A status route that claims as `claim` says and keeps every outcome it was told.
     struct Writing {
         claim: Mutex<Option<Claim>>,
         settle: Mutex<VecDeque<Settled>>,
         settled: Mutex<Vec<Outcome>>,
+        /// What `/health` read at each claim, where a test hands over the flag it watches.
+        health: Mutex<Option<Arc<AtomicBool>>>,
+        healthy_at_claims: Mutex<Vec<bool>>,
     }
 
     impl Writing {
@@ -389,16 +476,17 @@ mod tests {
                 claim: Mutex::new(Some(claim)),
                 settle: Mutex::new(settle.into()),
                 settled: Mutex::new(Vec::new()),
+                health: Mutex::new(None),
+                healthy_at_claims: Mutex::new(Vec::new()),
             }
         }
 
         fn claiming(content_type: &str, byte_length: u64) -> Self {
             Self::new(
                 Claim::Claimed(Inspection {
-                    source: "https://bucket/uploads/leaf".to_owned(),
-                    destination: "https://bucket/assets/leaf".to_owned(),
                     content_type: content_type.to_owned(),
                     byte_length,
+                    ..leased_for(Duration::from_secs(240))
                 }),
                 vec![Settled::Written],
             )
@@ -408,6 +496,10 @@ mod tests {
     #[async_trait::async_trait]
     impl Tasks for Writing {
         async fn claim(&self, _task: &str) -> Claim {
+            if let Some(health) = &*self.health.lock().unwrap() {
+                let healthy = health.load(Ordering::Relaxed);
+                self.healthy_at_claims.lock().unwrap().push(healthy);
+            }
             self.claim
                 .lock()
                 .unwrap()
@@ -430,6 +522,8 @@ mod tests {
         upload: Option<Vec<u8>>,
         copied: Mutex<Vec<(String, Vec<u8>)>>,
         publishes: bool,
+        /// How long each read takes to answer.
+        reading: Duration,
     }
 
     impl Holding {
@@ -438,6 +532,7 @@ mod tests {
                 upload: Some(upload.to_vec()),
                 copied: Mutex::new(Vec::new()),
                 publishes: true,
+                reading: Duration::ZERO,
             }
         }
     }
@@ -445,6 +540,7 @@ mod tests {
     #[async_trait::async_trait]
     impl Bucket for Holding {
         async fn fetch(&self, _url: &str, limit: u64) -> anyhow::Result<Option<Vec<u8>>> {
+            tokio::time::sleep(self.reading).await;
             let upload = self
                 .upload
                 .clone()
@@ -544,6 +640,38 @@ mod tests {
         }
     }
 
+    /// Past the lease another worker may hold the task, so a late settle could undo its verdict.
+    #[tokio::test(start_paused = true)]
+    async fn gives_an_inspection_up_unsettled_before_its_lease_lapses() {
+        let lease = Duration::from_secs(20);
+        let mut slow = Holding::of(PNG);
+        slow.reading = Duration::from_secs(600);
+        let (worker, tasks, _) = worker(
+            Writing::new(Claim::Claimed(leased_for(lease)), vec![]),
+            slow,
+        );
+
+        let began = tokio::time::Instant::now();
+        assert_eq!(run_upload(TASK, &worker).await, Handled::Retry);
+
+        assert!(tasks.settled.lock().unwrap().is_empty());
+        // Gone with the settle's own timeout still to spare, so even a settle started then would land.
+        assert!(began.elapsed() <= lease - SETTLE_TIMEOUT);
+        assert!(began.elapsed() >= lease - SETTLE_TIMEOUT - Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn starts_no_inspection_on_a_lease_too_short_to_settle_inside() {
+        let (worker, tasks, bucket) = worker(
+            Writing::new(Claim::Claimed(leased_for(SETTLE_TIMEOUT / 2)), vec![]),
+            Holding::of(PNG),
+        );
+
+        assert_eq!(run_upload(TASK, &worker).await, Handled::Retry);
+        assert!(tasks.settled.lock().unwrap().is_empty());
+        assert!(bucket.copied.lock().unwrap().is_empty());
+    }
+
     #[tokio::test]
     async fn fails_a_claim_that_carried_nothing_to_inspect() {
         let (worker, tasks, _bucket) = worker(
@@ -564,6 +692,9 @@ mod tests {
             (Settled::Refused, Handled::Ack),
             (Settled::Rejected, Handled::Ack),
             (Settled::Unavailable, Handled::Retry),
+            // A reclaim that beat another worker's lease is taken again once that lease lapses.
+            (Settled::Held, Handled::Retry),
+            (Settled::Unauthorized, Handled::Locked),
         ] {
             let (worker, tasks, _bucket) =
                 worker(Writing::new(Claim::Not(settled), vec![]), Holding::of(PNG));
@@ -574,20 +705,20 @@ mod tests {
 
     #[tokio::test]
     async fn leaves_the_message_claimed_when_the_outcome_could_not_be_written() {
-        let (worker, _tasks, _bucket) = worker(
-            Writing::new(
-                Claim::Claimed(Inspection {
-                    source: String::new(),
-                    destination: String::new(),
-                    content_type: "image/png".to_owned(),
-                    byte_length: PNG.len() as u64,
-                }),
-                vec![Settled::Unavailable],
-            ),
-            Holding::of(PNG),
-        );
+        for (settled, handled) in [
+            (Settled::Unavailable, Handled::Retry),
+            (Settled::Unauthorized, Handled::Locked),
+        ] {
+            let (worker, _tasks, _bucket) = worker(
+                Writing::new(
+                    Claim::Claimed(leased_for(Duration::from_secs(240))),
+                    vec![settled],
+                ),
+                Holding::of(PNG),
+            );
 
-        assert_eq!(run_upload(TASK, &worker).await, Handled::Retry);
+            assert_eq!(run_upload(TASK, &worker).await, handled);
+        }
     }
 
     #[test]
@@ -598,11 +729,19 @@ mod tests {
         assert_eq!(named("a\r\nx-injected: yes"), None);
     }
 
+    /// One scripted answer, or a read held open until a test lets it go.
+    enum Step {
+        Answer(Result<Vec<Delivery>, bool>),
+        /// A blocking read that answers these deliveries only after an hour.
+        Blocks(Vec<Delivery>),
+    }
+
     /// Each call answers from a script; once a script runs dry the stream is quiet and the test stops.
     struct Scripted {
         joins: usize,
         reclaims: VecDeque<Result<Vec<Delivery>, bool>>,
-        reads: VecDeque<Result<Vec<Delivery>, bool>>,
+        reads: VecDeque<Step>,
+        read_calls: usize,
         acked: Vec<String>,
         alive_seen: Vec<bool>,
         alive: Arc<AtomicBool>,
@@ -611,10 +750,10 @@ mod tests {
 
     impl Scripted {
         fn answer(
-            script: &mut VecDeque<Result<Vec<Delivery>, bool>>,
+            step: Option<Result<Vec<Delivery>, bool>>,
             stop: &watch::Sender<bool>,
         ) -> Result<Vec<Delivery>, QueueError> {
-            match script.pop_front() {
+            match step {
                 Some(Ok(deliveries)) => Ok(deliveries),
                 Some(Err(missing_group)) => Err(QueueError {
                     missing_group,
@@ -637,11 +776,19 @@ mod tests {
 
         async fn reclaim(&mut self) -> Result<Vec<Delivery>, QueueError> {
             self.alive_seen.push(self.alive.load(Ordering::Relaxed));
-            Self::answer(&mut self.reclaims, &self.stop)
+            Self::answer(self.reclaims.pop_front(), &self.stop)
         }
 
         async fn read(&mut self) -> Result<Vec<Delivery>, QueueError> {
-            Self::answer(&mut self.reads, &self.stop)
+            self.read_calls += 1;
+            match self.reads.pop_front() {
+                Some(Step::Blocks(deliveries)) => {
+                    tokio::time::sleep(Duration::from_secs(3600)).await;
+                    Ok(deliveries)
+                }
+                Some(Step::Answer(answer)) => Self::answer(Some(answer), &self.stop),
+                None => Self::answer(None, &self.stop),
+            }
         }
 
         async fn ack(&mut self, id: &str) -> Result<(), QueueError> {
@@ -650,9 +797,9 @@ mod tests {
         }
     }
 
-    fn scripted(
+    fn scripted_steps(
         reclaims: Vec<Result<Vec<Delivery>, bool>>,
-        reads: Vec<Result<Vec<Delivery>, bool>>,
+        reads: Vec<Step>,
     ) -> (Scripted, watch::Receiver<bool>, Arc<AtomicBool>) {
         let (stop, stopped) = watch::channel(false);
         let alive = Arc::new(AtomicBool::new(true));
@@ -661,6 +808,7 @@ mod tests {
                 joins: 0,
                 reclaims: reclaims.into(),
                 reads: reads.into(),
+                read_calls: 0,
                 acked: Vec::new(),
                 alive_seen: Vec::new(),
                 alive: alive.clone(),
@@ -669,6 +817,13 @@ mod tests {
             stopped,
             alive,
         )
+    }
+
+    fn scripted(
+        reclaims: Vec<Result<Vec<Delivery>, bool>>,
+        reads: Vec<Result<Vec<Delivery>, bool>>,
+    ) -> (Scripted, watch::Receiver<bool>, Arc<AtomicBool>) {
+        scripted_steps(reclaims, reads.into_iter().map(Step::Answer).collect())
     }
 
     fn message(id: &str, deliveries: u64) -> Delivery {
@@ -745,5 +900,67 @@ mod tests {
         drain(&mut queue, &worker, stop, &alive).await;
 
         assert_eq!(queue.acked, vec!["2-0".to_owned()]);
+    }
+
+    /// A wrong secret refuses every claim alike, and acknowledging each would empty the stream.
+    #[tokio::test(start_paused = true)]
+    async fn holds_the_stream_and_reports_itself_down_while_its_credential_is_refused() {
+        let (mut queue, stop, alive) =
+            scripted(vec![Ok(vec![])], vec![Ok(vec![message("1-0", 1)])]);
+        let tasks = Writing::new(Claim::Not(Settled::Unauthorized), vec![]);
+        *tasks.health.lock().unwrap() = Some(alive.clone());
+        let (worker, tasks, _) = worker(tasks, Holding::of(PNG));
+
+        let began = tokio::time::Instant::now();
+        drain(&mut queue, &worker, stop, &alive).await;
+
+        // Refused, held unacknowledged and tried alone with `/health` down, then taken once answered.
+        assert_eq!(*tasks.healthy_at_claims.lock().unwrap(), vec![true, false]);
+        assert!(began.elapsed() >= LOCKED_BACKOFF);
+        assert_eq!(queue.acked, vec!["1-0".to_owned()]);
+        assert_eq!(queue.read_calls, 1);
+        assert!(alive.load(Ordering::Relaxed));
+    }
+
+    /// The drain stops the consumer to settle what it holds, not to start on something new.
+    #[tokio::test(start_paused = true)]
+    async fn reads_nothing_more_once_a_stop_has_landed() {
+        let (mut queue, stop, alive) = scripted(vec![], vec![Ok(vec![message("1-0", 1)])]);
+        let (worker, tasks, _) = worker(Writing::claiming("image/png", 1), Holding::of(PNG));
+
+        drain(&mut queue, &worker, stop, &alive).await;
+
+        assert_eq!(queue.read_calls, 0);
+        assert!(
+            tasks.claim.lock().unwrap().is_some(),
+            "a task was claimed after the stop"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stop_ends_a_read_still_waiting_on_the_stream() {
+        let (mut queue, stop, alive) = scripted_steps(
+            vec![Ok(vec![])],
+            vec![Step::Blocks(vec![message("1-0", 1)])],
+        );
+        let (worker, tasks, _) = worker(Writing::claiming("image/png", 1), Holding::of(PNG));
+        let stopping = queue.stop.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let _ = stopping.send(true);
+        });
+
+        let began = tokio::time::Instant::now();
+        drain(&mut queue, &worker, stop, &alive).await;
+
+        assert!(
+            began.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            began.elapsed()
+        );
+        assert!(
+            tasks.claim.lock().unwrap().is_some(),
+            "a task was claimed after the stop"
+        );
     }
 }

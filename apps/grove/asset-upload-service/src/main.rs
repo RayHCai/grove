@@ -17,6 +17,7 @@ use anyhow::{bail, Context, Result};
 use axum::Router;
 use tokio::net::TcpListener;
 use tokio::sync::{oneshot, watch};
+use tokio::task::JoinHandle;
 
 use crate::config::Config;
 use crate::consumer::Worker;
@@ -46,7 +47,11 @@ async fn main() -> Result<()> {
     tracing::info!(addr = %bind, "listening");
 
     let worker = Arc::new(Worker {
-        tasks: Arc::new(HttpTasks::new(config.api_url, config.service_secret)?),
+        tasks: Arc::new(HttpTasks::new(
+            config.api_url,
+            config.service_secret,
+            &config.worker_name,
+        )?),
         bucket: Arc::new(HttpBucket::new()?),
     });
     let client =
@@ -65,9 +70,19 @@ async fn main() -> Result<()> {
 
     // After the drain, so an asset claimed on the way out is settled rather than left pending for
     // the reclaim window to hand back.
-    let _ = stopping.send(true);
-    let _ = consumer.await;
+    stop_consumer(stopping, consumer, DRAIN_TIMEOUT).await;
     served
+}
+
+/// Stops the consumer and waits on it no longer than `within`, past which its claim lapses unsettled.
+async fn stop_consumer(stopping: watch::Sender<bool>, consumer: JoinHandle<()>, within: Duration) {
+    let _ = stopping.send(true);
+    if tokio::time::timeout(within, consumer).await.is_err() {
+        tracing::error!(
+            ?within,
+            "the consumer outlasted its stop; what it held is left for the reclaim window"
+        );
+    }
 }
 
 /// Serves until `shutdown` resolves, then until what is in flight finishes or `drain` elapses.
@@ -108,6 +123,26 @@ mod tests {
 
     /// Short enough to assert against, and the only thing this test changes about the real drain.
     const TEST_DRAIN: Duration = Duration::from_millis(250);
+
+    /// An upload mid-transfer can run to its lease, minutes past the supervisor's patience.
+    #[tokio::test(start_paused = true)]
+    async fn waits_on_a_consumer_that_will_not_stop_no_longer_than_the_drain() {
+        let (stopping, mut stop) = watch::channel(false);
+        let consumer = tokio::spawn(async move {
+            let _ = stop.changed().await;
+            std::future::pending::<()>().await;
+        });
+
+        let began = tokio::time::Instant::now();
+        tokio::time::timeout(
+            DRAIN_TIMEOUT * 2,
+            stop_consumer(stopping, consumer, DRAIN_TIMEOUT),
+        )
+        .await
+        .expect("the stop waited on the consumer for ever");
+
+        assert_eq!(began.elapsed(), DRAIN_TIMEOUT);
+    }
 
     #[tokio::test]
     async fn a_peer_that_never_finishes_its_request_does_not_hold_the_drain_open() {

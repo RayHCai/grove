@@ -2,15 +2,14 @@
 //! database credential (it presents a session-scoped bearer), so a load and a save are HTTP
 //! calls, which is why neither can happen inside a tick.
 
-use std::collections::HashMap;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use reqwest::header::{HeaderMap, RETRY_AFTER};
 use serde_json::value::RawValue;
 
-use crate::saves::Records;
+use crate::saves::{Records, Unwritten};
 
 /// What one call to the manager may take before it answers as a failure.
 ///
@@ -25,22 +24,15 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(serde::Deserialize)]
 struct StateRecord {
     value: Box<RawValue>,
-    revision: i64,
-}
-
-/// What a write answers with: a caller compares the revision, not the value it sent.
-#[derive(serde::Deserialize)]
-struct Written {
-    revision: i64,
 }
 
 /// The body `writeState` decodes. A bare field map is refused with a 400, so the envelope is built
 /// here rather than assumed away.
+///
+/// No `ifRevision`: this host's one writer per key always holds the newest fields, so the last write wins.
 #[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
 struct StateWrite<'a> {
     value: &'a RawValue,
-    if_revision: i64,
 }
 
 #[derive(Clone)]
@@ -48,11 +40,6 @@ pub struct Store {
     client: reqwest::Client,
     base: String,
     token: String,
-    /// The revision each host key was last seen at, which is what makes a save a compare-and-set.
-    ///
-    /// Here rather than on the sim's record because it is the STORE's counter: the sim owns the
-    /// fields and has no business carrying a number only this side can interpret.
-    revisions: Arc<Mutex<HashMap<String, i64>>>,
 }
 
 impl Store {
@@ -64,7 +51,6 @@ impl Store {
                 .context("building the store client")?,
             base,
             token,
-            revisions: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -85,9 +71,6 @@ impl Store {
             .with_context(|| format!("reaching the game manager (requestId {id})"))?;
 
         if response.status() == reqwest::StatusCode::NOT_FOUND {
-            // Zero is what an unwritten key is at, so the first save of this host is a real
-            // compare-and-set rather than a blind write the mechanism cannot see.
-            self.remember(host_key, 0);
             return Ok(None);
         }
         if !response.status().is_success() {
@@ -98,67 +81,55 @@ impl Store {
         }
 
         let record: StateRecord = response.json().await.context("reading a state record")?;
-        self.remember(host_key, record.revision);
         Ok(Some(record.value))
     }
 
-    /// One write, against the revision this process last read. `false` is a 409 and nothing else;
-    /// every other failure is an `Err`.
-    async fn put(&self, host_key: &str, fields: &RawValue) -> Result<bool> {
+    /// One unconditional write, carrying the manager's `Retry-After` when it throttled the call.
+    async fn put(&self, host_key: &str, fields: &RawValue) -> Result<(), Unwritten> {
         let id = request_id::mint();
         let response = self
             .client
             .put(format!("{}/v1/state/{}", self.base, urlencode(host_key)))
             .bearer_auth(&self.token)
             .header(request_id::HEADER, id.as_str())
-            .json(&StateWrite {
-                value: fields,
-                if_revision: self.revision(host_key),
-            })
+            .json(&StateWrite { value: fields })
             .send()
             .await
             .with_context(|| format!("reaching the game manager (requestId {id})"))?;
 
-        if response.status() == reqwest::StatusCode::CONFLICT {
-            return Ok(false);
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
         }
-        if !response.status().is_success() {
-            bail!(
-                "the game manager answered {} for {host_key} (requestId {id})",
-                response.status()
-            );
-        }
-
-        let written: Written = response.json().await.context("reading a write answer")?;
-        self.remember(host_key, written.revision);
-        Ok(true)
-    }
-
-    fn revision(&self, host_key: &str) -> i64 {
-        self.revisions
-            .lock()
-            .expect("the revision map is never held across a panic")
-            .get(host_key)
-            .copied()
-            .unwrap_or(0)
-    }
-
-    fn remember(&self, host_key: &str, revision: i64) {
-        self.revisions
-            .lock()
-            .expect("the revision map is never held across a panic")
-            .insert(host_key.to_owned(), revision);
+        Err(Unwritten {
+            error: anyhow!("the game manager answered {status} for {host_key} (requestId {id})"),
+            retry_after: (status == reqwest::StatusCode::TOO_MANY_REQUESTS)
+                .then(|| retry_after(response.headers()))
+                .flatten(),
+        })
     }
 }
 
 impl Records for Store {
-    fn write(&self, key: &str, fields: &RawValue) -> impl Future<Output = Result<bool>> + Send {
+    fn write(
+        &self,
+        key: &str,
+        fields: &RawValue,
+    ) -> impl Future<Output = Result<(), Unwritten>> + Send {
         self.put(key, fields)
     }
+}
 
-    async fn reread(&self, key: &str) -> Result<()> {
-        self.load(key).await.map(drop)
-    }
+/// The delay-seconds form, which is the one `libs/go-grove`'s limiter writes.
+fn retry_after(headers: &HeaderMap) -> Option<Duration> {
+    let seconds = headers
+        .get(RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    Some(Duration::from_secs(seconds))
 }
 
 /// A host key is `player:<id>`, so the colon must survive as a path SEGMENT, not a separator.
@@ -178,79 +149,94 @@ fn urlencode(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::thread::JoinHandle;
+    use request_id::testing::OneCall;
 
-    /// A stand-in for the manager: answers one call and hands back the head it was sent.
-    ///
-    /// Blocking std rather than tokio, so the fake needs no io feature this crate does not already
-    /// carry for the sockets a session runs on.
-    fn one_call(answer: &'static str) -> (Store, JoinHandle<String>) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("binding a loopback port");
-        let base = format!("http://{}", listener.local_addr().expect("the bound port"));
-
-        let handle = std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().expect("a call from the store");
-            let mut head = Vec::new();
-            let mut chunk = [0_u8; 512];
-            while !head.windows(4).any(|four| four == b"\r\n\r\n") {
-                match socket.read(&mut chunk) {
-                    Ok(0) | Err(_) => break,
-                    Ok(read) => head.extend_from_slice(&chunk[..read]),
-                }
-            }
-            socket.write_all(answer.as_bytes()).expect("answering");
-            String::from_utf8_lossy(&head).to_lowercase()
-        });
-
-        (
-            Store::new(base, "a-session-scoped-bearer".to_owned()).unwrap(),
-            handle,
-        )
+    /// A store over a stand-in manager that answers one call.
+    fn one_call(status: &str, headers: &[&str], body: &str) -> (Store, OneCall) {
+        let manager = OneCall::replying(status, headers, body);
+        let store = Store::new(manager.base.clone(), "a-session-scoped-bearer".to_owned()).unwrap();
+        (store, manager)
     }
 
-    fn presented_id(head: &str) -> String {
-        head.lines()
+    fn presented_id(sent: &str) -> String {
+        sent.to_lowercase()
+            .lines()
             .find_map(|line| line.strip_prefix("x-request-id:"))
             .expect("a state call names the id the manager will log it under")
             .trim()
             .to_owned()
     }
 
+    fn coins(count: u32) -> Box<RawValue> {
+        RawValue::from_string(format!(r#"{{"coins":{count}}}"#)).unwrap()
+    }
+
     /// The hop this file exists for: the manager logs every read under an id, and until this header
     /// rides along, that id is one nothing on this side can name.
     #[tokio::test]
     async fn names_the_call_the_manager_is_about_to_log() {
-        let (store, manager) = one_call("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+        let (store, manager) = one_call("404 Not Found", &[], "");
 
         assert!(store.load("player:alice").await.unwrap().is_none());
 
-        let head = manager.join().expect("the manager thread");
-        assert!(request_id::valid(&presented_id(&head)));
+        assert!(request_id::valid(&presented_id(&manager.received_text())));
     }
 
     #[tokio::test]
     async fn names_a_write_the_same_way() {
-        let (store, manager) = one_call("HTTP/1.1 409 Conflict\r\nContent-Length: 0\r\n\r\n");
-        let fields = RawValue::from_string(r#"{"coins":3}"#.to_owned()).unwrap();
+        let (store, manager) = one_call("200 OK", &[], r#"{"revision":8}"#);
 
-        assert!(!store.put("player:alice", &fields).await.unwrap());
+        assert!(store.put("player:alice", &coins(3)).await.is_ok());
 
-        let head = manager.join().expect("the manager thread");
-        assert!(head.starts_with("put /v1/state/player%3aalice"));
-        assert!(request_id::valid(&presented_id(&head)));
+        let sent = manager.received_text();
+        assert!(sent.starts_with("PUT /v1/state/player%3Aalice"), "{sent}");
+        assert!(request_id::valid(&presented_id(&sent)));
+    }
+
+    /// Last writer wins: a write names no revision for the manager to refuse it against.
+    #[tokio::test]
+    async fn writes_with_no_precondition() {
+        let (store, manager) = one_call("200 OK", &[], r#"{"revision":8}"#);
+
+        store.put("player:alice", &coins(3)).await.unwrap();
+
+        assert!(manager
+            .received_text()
+            .ends_with("\r\n\r\n{\"value\":{\"coins\":3}}"));
+    }
+
+    /// The limiter says when it will take the write, where a guess spends attempts inside the window.
+    #[tokio::test]
+    async fn carries_the_wait_a_throttled_write_was_told() {
+        let (store, _manager) = one_call("429 Too Many Requests", &["Retry-After: 2"], "");
+
+        let unwritten = store.put("player:alice", &coins(3)).await.unwrap_err();
+
+        assert_eq!(unwritten.retry_after, Some(Duration::from_secs(2)));
+        assert!(unwritten.error.to_string().contains("429"));
+    }
+
+    /// Only a throttle carries a wait; every other refusal is a failure the writer backs off from.
+    #[tokio::test]
+    async fn a_refused_write_carries_no_wait() {
+        let (store, _manager) = one_call("503 Service Unavailable", &["Retry-After: 2"], "");
+
+        let unwritten = store.put("player:alice", &coins(3)).await.unwrap_err();
+
+        assert_eq!(unwritten.retry_after, None);
     }
 
     /// A failed state call is only traceable if the failure says which id to grep the manager for.
     #[tokio::test]
     async fn a_refused_read_names_the_id_it_went_out_under() {
-        let (store, manager) = one_call("HTTP/1.1 500 Server Error\r\nContent-Length: 0\r\n\r\n");
+        let (store, manager) = one_call("500 Server Error", &[], "");
 
         let failure = store.load("player:alice").await.unwrap_err().to_string();
 
-        let head = manager.join().expect("the manager thread");
-        assert!(failure.contains(&presented_id(&head)), "{failure}");
+        assert!(
+            failure.contains(&presented_id(&manager.received_text())),
+            "{failure}"
+        );
     }
 
     #[test]
@@ -271,22 +257,7 @@ mod tests {
         let body = r#"{"key":"player:alice","value":{"coins":3,"revision":"mine"},"revision":7}"#;
         let record: StateRecord = serde_json::from_str(body).unwrap();
 
-        assert_eq!(record.revision, 7);
         assert_eq!(record.value.get(), r#"{"coins":3,"revision":"mine"}"#);
-    }
-
-    /// `writeState` decodes `StateWrite` and 400s a body with no `value`, so the field map has to
-    /// travel inside one.
-    #[test]
-    fn writes_the_envelope_the_manager_decodes() {
-        let fields = RawValue::from_string(r#"{"coins":3}"#.to_owned()).unwrap();
-        let body = serde_json::to_string(&StateWrite {
-            value: &fields,
-            if_revision: 7,
-        })
-        .unwrap();
-
-        assert_eq!(body, r#"{"value":{"coins":3},"ifRevision":7}"#);
     }
 
     fn fixture(name: &str) -> String {
@@ -298,20 +269,20 @@ mod tests {
     fn reads_the_contracts_state_record() {
         let record: StateRecord = serde_json::from_str(&fixture("state-record.json")).unwrap();
 
-        assert_eq!(record.revision, 7);
         assert_eq!(record.value.get(), r#"{"coins":3,"name":"Wren"}"#);
     }
 
+    /// The contract's write with its optional precondition taken off, which is all this host sends.
     #[test]
-    fn writes_the_contracts_state_write() {
-        let wire = fixture("state-write.json");
-        let value = RawValue::from_string(r#"{"coins":4,"name":"Wren"}"#.to_owned()).unwrap();
-        let body = serde_json::to_string(&StateWrite {
-            value: &value,
-            if_revision: 7,
-        })
-        .unwrap();
+    fn writes_the_contracts_state_write_without_its_precondition() {
+        let mut wire: serde_json::Value =
+            serde_json::from_str(&fixture("state-write.json")).unwrap();
+        let value = wire["value"].to_string();
+        wire.as_object_mut().unwrap().remove("ifRevision");
 
-        assert_eq!(body, wire.trim());
+        let fields = RawValue::from_string(value).unwrap();
+        let body = serde_json::to_string(&StateWrite { value: &fields }).unwrap();
+
+        assert_eq!(body, wire.to_string());
     }
 }

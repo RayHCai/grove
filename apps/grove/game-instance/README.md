@@ -51,9 +51,10 @@ progress inside the tick budget, 250 ms by default. The batch is read before the
 a microtask does can change the batch its tick returned.
 
 `@serverState` is checkpointed through `store.rs` and the batch, one writer per key: the newest
-fields a key was handed are the last it is written with, a lost compare-and-set is retried with the
-newest fields after a fresh read, and the sim is told a key is saved only once its newest write
-lands. The creator's `storage` object is a different seam (a promise a handler awaits) and this
+fields a key was handed are the last it is written with, a write names no revision, so between two
+sessions writing one key the last write wins, a `429` is retried after its `Retry-After` only while
+that fits the 1.5 s a save may wait in all, and the sim is told a key is saved only once its newest
+write lands. The creator's `storage` object is a different seam (a promise a handler awaits) and this
 crate does not grant one, so a world it runs falls back to core's in-memory store and loses those
 writes at session end.
 
@@ -103,7 +104,9 @@ what every other peer sees and what persisted `@serverState` is keyed by across 
 
 The listener drives hyper itself, because `axum::serve` gives it no timer: a request head has five
 seconds to arrive, 64 connections may be short of an upgrade at once and 1024 open in all, and the
-bind is loopback, since the agent's player proxy is the one door into a world.
+bind is loopback, since the agent's player proxy is the one door into a world. One player may hold
+four sockets, a frame from a peer may be 64 KiB and its sender 256 KiB a second, and a tick's batch
+carries at most 4 MiB of frames: past that its heaviest sender is closed before the batch is built.
 
 ## Running it
 

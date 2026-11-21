@@ -13,6 +13,8 @@ path = "src/lib.rs"
 [features]
 # Off by default, so the id alone stays dependency-free for anything that only needs to mint one.
 service = ["dep:axum", "dep:anyhow", "dep:tokio", "dep:tracing", "dep:tracing-subscriber"]
+# A fake HTTP peer for the suites of the crates that depend on this one, never a release build's.
+testing = []
 
 [dependencies]
 axum = { workspace = true, optional = true }

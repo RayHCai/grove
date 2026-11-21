@@ -5,9 +5,12 @@ these shapes reads the same files, so a rename on any one side fails on all of t
 join.
 
 `wire/` holds one compact document per shape, with its members in the order the Go structs declare
-them, or the zod schema does for a shape no Go service carries. The Go suite unmarshals each it has a
-struct for and re-marshals it, comparing bytes; the vitest suite parses every one with the matching
-zod schema and compares the value, and holds `manifest.json` to the bytes `encodeManifest` writes. A member added to one copy
+them, or the zod schema does for a shape no Go service carries, or `packages/sim/src/batch.ts` does
+for the sim/host batch. The Go suite unmarshals each it has a
+struct for and re-marshals it, comparing bytes; the vitest suite parses every one a zod schema
+describes with that schema and compares the value, and holds `manifest.json` to the bytes `encodeManifest` writes.
+`input-batch.json` and `encoded-batch.json` are the batch, which `@grove/game-instance` round-trips
+byte for byte and `@platform/sim` encodes from its own types and drives its isolate entry with. A member added to one copy
 and not the other fails whichever suite the fixture no longer describes.
 
 `session-token.json` holds join tickets `signTicket` actually produced under one seed, with the

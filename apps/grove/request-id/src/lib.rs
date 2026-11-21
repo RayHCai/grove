@@ -9,6 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "service")]
 pub mod env;
 
+#[cfg(feature = "testing")]
+pub mod testing;
+
 /// Where a caller's id arrives and where this process echoes the one it chose.
 pub const HEADER: &str = "x-request-id";
 

@@ -32,6 +32,8 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+# `testing`, the one fake HTTP peer every suite in this workspace calls out to.
+grove-request-id = { workspace = true, features = ["testing"] }
 # `start_paused` on a test, so a backoff is asserted rather than waited out, and raw socket writes.
 tokio = { workspace = true, features = ["test-util", "io-util"] }
 tower = { workspace = true, features = ["util"] }

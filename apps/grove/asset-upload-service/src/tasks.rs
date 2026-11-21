@@ -4,14 +4,18 @@
 //! transitions are checked there, so a worker that comes back from the dead and tries to settle a
 //! task another process already finished is refused rather than overwriting it.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use reqwest::header::RETRY_AFTER;
 use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Settling a task is a row update behind a bearer, not a transcode: it answers or it is down.
-const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
+pub const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Where a worker names itself, which is what the API fences a settle by.
+const WORKER_HEADER: &str = "x-grove-worker";
 
 /// What the status route took.
 ///
@@ -21,8 +25,12 @@ const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 pub enum Settled {
     Written,
     Refused,
-    /// A body or a credential the API will never take, which a retry would only send again.
+    /// A body the API will never take, which a retry would only send again.
     Rejected,
+    /// This service's credential, refused: nothing it sends is taken until a deploy fixes it.
+    Unauthorized,
+    /// Another worker's lease on the task is live, and lapses later.
+    Held,
     Unavailable,
 }
 
@@ -46,6 +54,9 @@ pub struct Inspection {
     pub destination: String,
     pub content_type: String,
     pub byte_length: u64,
+    /// When the claim's lease lapses, after which another worker may take the task.
+    #[serde(deserialize_with = "timestamp")]
+    pub expires_at: SystemTime,
 }
 
 /// What the worker found, which is what the task is settled with.
@@ -120,10 +131,11 @@ pub struct HttpTasks {
     client: reqwest::Client,
     api_url: String,
     secret: String,
+    worker: String,
 }
 
 impl HttpTasks {
-    pub fn new(api_url: String, secret: String) -> Result<Self> {
+    pub fn new(api_url: String, secret: String, worker: &str) -> Result<Self> {
         Ok(Self {
             client: reqwest::Client::builder()
                 .timeout(SETTLE_TIMEOUT)
@@ -131,6 +143,7 @@ impl HttpTasks {
                 .context("building the API client")?,
             api_url,
             secret,
+            worker: worker_id(worker),
         })
     }
 
@@ -141,6 +154,7 @@ impl HttpTasks {
             .patch(format!("{}/v1/tasks/{task}", self.api_url))
             .bearer_auth(&self.secret)
             .header(request_id::HEADER, task)
+            .header(WORKER_HEADER, &self.worker)
             .json(body)
             .send()
             .await;
@@ -154,13 +168,21 @@ impl HttpTasks {
 
         let status = response.status();
         match status {
+            // A live lease names when it lapses, and a claim that came early is taken again then.
+            StatusCode::CONFLICT if response.headers().contains_key(RETRY_AFTER) => {
+                return Err(Settled::Held);
+            }
             // Told outright that this attempt lost rather than left to infer it: a worker that
             // keeps retrying a settled task is one that never acknowledges its message.
             StatusCode::NOT_FOUND | StatusCode::CONFLICT => return Err(Settled::Refused),
-            // The contract or the credential is wrong, and the same request is all a retry would send.
-            StatusCode::BAD_REQUEST | StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+            // The contract is wrong, and the same request is all a retry would send.
+            StatusCode::BAD_REQUEST => {
                 tracing::error!(task, %status, "the API rejected a status update outright");
                 return Err(Settled::Rejected);
+            }
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                tracing::error!(task, %status, "the API refused this service's credential");
+                return Err(Settled::Unauthorized);
             }
             status if !status.is_success() => {
                 tracing::warn!(task, %status, "task not settled");
@@ -201,56 +223,107 @@ impl Tasks for HttpTasks {
     }
 }
 
+/// What this worker is called on the wire: the request-id alphabet the API holds a holder's name to.
+pub fn worker_id(name: &str) -> String {
+    let id: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(request_id::MAX_LEN)
+        .collect();
+    if id.is_empty() {
+        "asset-upload-service".to_owned()
+    } else {
+        id
+    }
+}
+
+/// An instant in UTC as zod's `iso.datetime()` admits one: `2026-11-08T12:05:00.000Z`.
+fn timestamp<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SystemTime, D::Error> {
+    let text = String::deserialize(deserializer)?;
+    instant(&text).ok_or_else(|| serde::de::Error::custom(format!("{text:?} is not a UTC instant")))
+}
+
+fn instant(text: &str) -> Option<SystemTime> {
+    let (date, time) = text.strip_suffix('Z')?.split_once('T')?;
+    let (clock, fraction) = match time.split_once('.') {
+        Some((clock, fraction)) => (clock, Some(fraction)),
+        None => (time, None),
+    };
+    let [year, month, day] = fields(date, '-', [4, 2, 2])?;
+    let [hour, minute, second] = fields(clock, ':', [2, 2, 2])?;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+    let nanos = match fraction.map(str::len) {
+        None => 0,
+        Some(width @ 1..=9) => number(fraction?, width)? * 10_i64.pow(9 - width as u32),
+        Some(_) => return None,
+    };
+    let seconds = days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second;
+    Some(UNIX_EPOCH + Duration::new(u64::try_from(seconds).ok()?, u32::try_from(nanos).ok()?))
+}
+
+/// Three numbers of the given widths between `separator`s, and nothing else.
+fn fields(text: &str, separator: char, widths: [usize; 3]) -> Option<[i64; 3]> {
+    let mut parts = text.split(separator);
+    let mut out = [0; 3];
+    for (slot, width) in out.iter_mut().zip(widths) {
+        *slot = number(parts.next()?, width)?;
+    }
+    parts.next().is_none().then_some(out)
+}
+
+fn number(text: &str, width: usize) -> Option<i64> {
+    if text.len() != width || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok()
+}
+
+/// Days from 1970-01-01 to a proleptic Gregorian date, the inverse of Howard Hinnant's `civil_from_days`.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let of_era = year - era * 400;
+    let of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let of_cycle = of_era * 365 + of_era / 4 - of_era / 100 + of_year;
+    era * 146_097 + of_cycle - 719_468
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::thread::JoinHandle;
+    use request_id::testing::OneCall;
 
     const TASK: &str = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
     const SECRET: &str = "an-asset-service-secret-of-32-characters";
+    const WORKER: &str = "ip-10-0-1-7.ec2.internal";
 
     fn fixture(name: &str) -> String {
         let path = format!("../../../libs/api-contract/fixtures/wire/{name}");
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
     }
 
-    /// A stand-in for the API: answers one call and hands back everything it was sent.
-    fn one_call(status: &'static str, body: String) -> (HttpTasks, JoinHandle<String>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let base = format!("http://{}", listener.local_addr().unwrap());
-        let handle = std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().unwrap();
-            socket
-                .set_read_timeout(Some(Duration::from_millis(500)))
-                .unwrap();
-            let mut seen = Vec::new();
-            let mut chunk = [0_u8; 4096];
-            loop {
-                match socket.read(&mut chunk) {
-                    Ok(0) | Err(_) => break,
-                    Ok(read) => seen.extend_from_slice(&chunk[..read]),
-                }
-                let text = String::from_utf8_lossy(&seen).to_lowercase();
-                if let Some(end) = text.find("\r\n\r\n") {
-                    let length = text
-                        .lines()
-                        .find_map(|line| line.strip_prefix("content-length:"))
-                        .map_or(0, |value| value.trim().parse::<usize>().unwrap());
-                    if seen.len() >= end + 4 + length {
-                        break;
-                    }
-                }
-            }
-            let answer = format!(
-                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
-                body.len()
-            );
-            socket.write_all(answer.as_bytes()).unwrap();
-            String::from_utf8_lossy(&seen).into_owned()
-        });
-        (HttpTasks::new(base, SECRET.to_owned()).unwrap(), handle)
+    /// The status route over a stand-in API that answers one call.
+    fn one_call(status: &str, headers: &[&str], body: &str) -> (HttpTasks, OneCall) {
+        let api = OneCall::replying(status, headers, body);
+        let tasks = HttpTasks::new(api.base.clone(), SECRET.to_owned(), WORKER).unwrap();
+        (tasks, api)
+    }
+
+    fn at(seconds: u64, nanos: u32) -> SystemTime {
+        UNIX_EPOCH + Duration::new(seconds, nanos)
     }
 
     #[test]
@@ -264,6 +337,40 @@ mod tests {
         assert!(inspection
             .destination
             .contains("X-Amz-SignedHeaders=content-type"));
+        // 2026-11-08T12:05:00.000Z, which `date -u -d` agrees is this many seconds.
+        assert_eq!(inspection.expires_at, at(1_794_139_500, 0));
+    }
+
+    #[test]
+    fn reads_an_instant_the_way_zod_writes_one() {
+        assert_eq!(instant("1970-01-01T00:00:00Z"), Some(UNIX_EPOCH));
+        assert_eq!(instant("2000-02-29T23:59:59Z"), Some(at(951_868_799, 0)));
+        assert_eq!(
+            instant("2026-11-08T12:05:00.25Z"),
+            Some(at(1_794_139_500, 250_000_000))
+        );
+        for refused in [
+            "2026-11-08T12:05:00+01:00",
+            "2026-11-08T12:05:00",
+            "2026-13-08T12:05:00Z",
+            "2026-11-08T24:05:00Z",
+            "2026-11-08 12:05:00Z",
+            "2026-11-08T12:05:00.Z",
+            "2026-11-08T12:05:00.1234567890Z",
+            "26-11-08T12:05:00Z",
+        ] {
+            assert_eq!(instant(refused), None, "{refused}");
+        }
+    }
+
+    /// A lease with no end the worker can read is a claim it cannot bound, so it is no inspection.
+    #[test]
+    fn refuses_an_inspection_whose_expiry_is_not_an_instant() {
+        let mut claimed: serde_json::Value =
+            serde_json::from_str(&fixture("asset-inspection.json")).unwrap();
+        claimed["inspection"]["expiresAt"] = serde_json::json!("soon");
+
+        assert!(serde_json::from_value::<ClaimedTask>(claimed).is_err());
     }
 
     #[test]
@@ -294,12 +401,12 @@ mod tests {
 
     #[tokio::test]
     async fn claims_under_the_asset_credential_and_hands_back_the_inspection() {
-        let (tasks, api) = one_call("200 OK", fixture("asset-inspection.json"));
+        let (tasks, api) = one_call("200 OK", &[], &fixture("asset-inspection.json"));
 
         let claim = tasks.claim(TASK).await;
 
         assert!(matches!(claim, Claim::Claimed(ref inspection) if inspection.byte_length == 2048));
-        let sent = api.join().unwrap();
+        let sent = api.received_text();
         assert!(
             sent.starts_with(&format!("PATCH /v1/tasks/{TASK} ")),
             "{sent}"
@@ -310,32 +417,69 @@ mod tests {
         assert!(sent.ends_with(r#"{"status":"IN_PROGRESS"}"#), "{sent}");
     }
 
+    /// The API fences a settle to the worker holding the claim, and knows a worker only by this name.
+    #[tokio::test]
+    async fn names_itself_on_a_claim_and_a_settle_in_the_alphabet_the_api_accepts() {
+        let (tasks, claimed) = one_call("200 OK", &[], &fixture("asset-inspection.json"));
+        tasks.claim(TASK).await;
+        let (tasks, settled) = one_call("200 OK", &[], "{}");
+        let outcome = Outcome::Failed {
+            message: "no".to_owned(),
+        };
+        tasks.settle(TASK, &outcome).await;
+
+        for sent in [claimed.received_text(), settled.received_text()] {
+            assert!(
+                sent.to_lowercase()
+                    .contains("\r\nx-grove-worker: ip-10-0-1-7-ec2-internal\r\n"),
+                "{sent}"
+            );
+        }
+    }
+
+    #[test]
+    fn names_a_worker_with_a_valid_request_id_whatever_its_host_is_called() {
+        assert_eq!(worker_id("upload-1"), "upload-1");
+        assert_eq!(worker_id("box.local"), "box-local");
+        assert!(request_id::valid(&worker_id(&"é".repeat(100))));
+        assert_eq!(worker_id(&"a".repeat(100)).len(), request_id::MAX_LEN);
+        assert_eq!(worker_id(""), "asset-upload-service");
+    }
+
     #[tokio::test]
     async fn a_claim_answered_without_an_inspection_is_uninspectable() {
-        let (tasks, _api) = one_call("200 OK", fixture("asset-task.json"));
+        let (tasks, _api) = one_call("200 OK", &[], &fixture("asset-task.json"));
 
         assert_eq!(tasks.claim(TASK).await, Claim::Uninspectable);
     }
 
     /// A duplicate claim is somebody else's work, and acknowledging it is what stops it coming back.
     #[tokio::test]
-    async fn a_claim_somebody_else_holds_is_refused() {
-        let (tasks, _api) = one_call("409 Conflict", String::new());
+    async fn a_claim_somebody_already_settled_is_refused() {
+        let (tasks, _api) = one_call("409 Conflict", &[], "");
 
         assert_eq!(tasks.claim(TASK).await, Claim::Not(Settled::Refused));
+    }
+
+    /// A reclaim that came before the other worker's lease lapsed is told when it does.
+    #[tokio::test]
+    async fn a_claim_another_worker_holds_a_live_lease_on_is_held() {
+        let (tasks, _api) = one_call("409 Conflict", &["Retry-After: 30"], "");
+
+        assert_eq!(tasks.claim(TASK).await, Claim::Not(Settled::Held));
     }
 
     #[tokio::test]
     async fn tells_a_rejected_update_from_one_worth_retrying() {
         for (status, settled) in [
             ("400 Bad Request", Settled::Rejected),
-            ("401 Unauthorized", Settled::Rejected),
-            ("403 Forbidden", Settled::Rejected),
+            ("401 Unauthorized", Settled::Unauthorized),
+            ("403 Forbidden", Settled::Unauthorized),
             ("404 Not Found", Settled::Refused),
             ("503 Service Unavailable", Settled::Unavailable),
             ("200 OK", Settled::Written),
         ] {
-            let (tasks, _api) = one_call(status, "{}".to_owned());
+            let (tasks, _api) = one_call(status, &[], "{}");
             let outcome = Outcome::Failed {
                 message: "no".to_owned(),
             };
@@ -345,10 +489,10 @@ mod tests {
 
     #[tokio::test]
     async fn an_api_nobody_answers_is_unavailable() {
-        let unbound = TcpListener::bind("127.0.0.1:0").unwrap();
+        let unbound = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}", unbound.local_addr().unwrap());
         drop(unbound);
-        let tasks = HttpTasks::new(base, SECRET.to_owned()).unwrap();
+        let tasks = HttpTasks::new(base, SECRET.to_owned(), WORKER).unwrap();
 
         assert_eq!(tasks.claim(TASK).await, Claim::Not(Settled::Unavailable));
     }

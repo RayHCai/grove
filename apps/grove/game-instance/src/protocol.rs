@@ -10,6 +10,7 @@ use serde_json::value::RawValue;
 pub type ConnectionId = String;
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct OpenedConnection {
     pub connection_id: ConnectionId,
@@ -18,6 +19,7 @@ pub struct OpenedConnection {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct InboundFrame {
     pub connection_id: ConnectionId,
@@ -27,6 +29,7 @@ pub struct InboundFrame {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct LoadedRecord {
     pub connection_id: ConnectionId,
@@ -36,6 +39,7 @@ pub struct LoadedRecord {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct InputBatch {
     pub now_ms: f64,
@@ -63,6 +67,7 @@ impl InputBatch {
 
 /// Which class a frame belongs to, which is the whole of the host's backpressure vocabulary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(rename_all = "lowercase")]
 pub enum SendClass {
     /// Every op must arrive, in order; the journal does not commute.
@@ -72,6 +77,7 @@ pub enum SendClass {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(rename_all = "camelCase")]
 pub struct Send {
     /// One entry per recipient. More than one means the frame is byte-identical for all of them,
@@ -85,6 +91,7 @@ pub struct Send {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(rename_all = "camelCase")]
 pub struct CloseOrder {
     pub connection_id: ConnectionId,
@@ -92,6 +99,7 @@ pub struct CloseOrder {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(rename_all = "camelCase")]
 pub struct LoadOrder {
     pub connection_id: ConnectionId,
@@ -99,6 +107,7 @@ pub struct LoadOrder {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(rename_all = "camelCase")]
 pub struct SaveOrder {
     pub host_key: String,
@@ -106,12 +115,14 @@ pub struct SaveOrder {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 pub struct LogLine {
     pub level: String,
     pub line: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 pub struct SimDiagnostics {
     /// Marks and ops dropped as unrepresentable. Nonzero is a bug report, not a failure.
     pub dropped: u64,
@@ -123,6 +134,7 @@ pub struct SimDiagnostics {
 /// change, because the seam is a value and not a stream: a host that missed one would run the
 /// world at the old rate for as long as it kept missing.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(rename_all = "camelCase")]
 pub struct Rates {
     pub sim_rate: f64,
@@ -130,6 +142,7 @@ pub struct Rates {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(rename_all = "camelCase")]
 pub struct OutputBatch {
     pub tick: u64,
@@ -140,4 +153,42 @@ pub struct OutputBatch {
     pub saves: Vec<SaveOrder>,
     pub log: Vec<LogLine>,
     pub diagnostics: SimDiagnostics,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The files `packages/sim` reads too, so a member renamed on one side fails on both.
+    fn fixture(name: &str) -> String {
+        let path = format!("../../../libs/api-contract/fixtures/wire/{name}");
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+    }
+
+    #[test]
+    fn writes_the_contracts_input_batch_byte_for_byte() {
+        let wire = fixture("input-batch.json");
+        let batch: InputBatch = serde_json::from_str(&wire).unwrap();
+
+        assert_eq!(serde_json::to_string(&batch).unwrap(), wire);
+        assert_eq!(batch.opened[1].identity, None);
+        assert!(batch.records[1].fields.is_none());
+        assert_eq!(
+            batch.records[0].fields.as_ref().unwrap().get(),
+            r#"{"coins":3,"name":"Wren"}"#
+        );
+    }
+
+    #[test]
+    fn reads_the_contracts_encoded_batch_without_losing_a_member() {
+        let wire = fixture("encoded-batch.json");
+        let batch: OutputBatch = serde_json::from_str(&wire).unwrap();
+
+        assert_eq!(serde_json::to_string(&batch).unwrap(), wire);
+        let classes: Vec<SendClass> = batch.sends.iter().map(|send| send.class).collect();
+        assert_eq!(classes, vec![SendClass::Droppable, SendClass::Reliable]);
+        assert!(batch.sends[0]
+            .envelope
+            .starts_with(r#"{"kind":"time-sync-reply""#));
+    }
 }

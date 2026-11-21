@@ -49,6 +49,9 @@ const SETTLE_DEADLINE: Duration = Duration::from_secs(8);
 /// the peers feeding it their sockets rather than costing the box its memory.
 pub const EVENT_QUEUE_DEPTH: usize = 4096;
 
+/// Frame bytes one batch may carry, the codec's whole-frame ceiling, so one tick's parse is one frame's.
+const MAX_BATCH_FRAME_BYTES: usize = 4 * 1024 * 1024;
+
 /// Everything the async half tells the session thread. One channel, so the order is one order.
 pub enum HostEvent {
     Opened {
@@ -131,10 +134,8 @@ pub fn run(
 
     let mut clock = Clock::new(opts.sim_rate, opts.send_rate);
     let saves = Saves::new(opts.store.clone());
-    let mut peers: HashMap<ConnectionId, Peer> = HashMap::new();
-    let mut pending = Pending::default();
+    let mut session = Session::default();
     let mut drains: Vec<bool> = Vec::new();
-    let mut draining: Option<Instant> = None;
     // Retained rather than detached: dropping the runtime at the end of this function cancels a
     // spawned save at its first await, which is inside the PUT the drain exists for.
     let mut spawned: Vec<JoinHandle<()>> = Vec::new();
@@ -153,55 +154,9 @@ pub fn run(
         // Non-blocking: the loop's pace is the clock's, not the channel's, and a wake that waited
         // on a message would run the game at the rate its players happened to type.
         while let Ok(event) = events.try_recv() {
-            match event {
-                HostEvent::Opened {
-                    connection_id,
-                    identity,
-                    writes,
-                    hangup,
-                } => {
-                    peers.insert(
-                        connection_id.clone(),
-                        Peer {
-                            writes,
-                            _hangup: hangup,
-                        },
-                    );
-                    pending.opened.push(OpenedConnection {
-                        connection_id,
-                        identity: Some(identity),
-                    });
-                }
-                HostEvent::Frame {
-                    connection_id,
-                    message,
-                } => {
-                    pending.frames.push(InboundFrame {
-                        connection_id,
-                        message,
-                    });
-                }
-                HostEvent::Closed { connection_id } => {
-                    peers.remove(&connection_id);
-                    pending.closed.push(connection_id);
-                }
-                HostEvent::Loaded {
-                    connection_id,
-                    fields,
-                } => {
-                    pending.records.push(LoadedRecord {
-                        connection_id,
-                        fields,
-                    });
-                }
-                HostEvent::Saved { host_key } => pending.saved.push(host_key),
-                HostEvent::Drain => {
-                    draining.get_or_insert_with(Instant::now);
-                }
-                HostEvent::Fatal { error } => {
-                    settle(&io, &mut spawned);
-                    return Err(anyhow!(error));
-                }
+            if let Err(error) = session.absorb(event) {
+                settle(&io, &mut spawned);
+                return Err(anyhow!(error));
             }
         }
 
@@ -218,7 +173,8 @@ pub fn run(
 
         for drain in drains.iter().copied() {
             let mut batch = InputBatch::new(clock.now_seconds() * 1000.0, drain);
-            pending.take_into(&mut batch);
+            session.shed_floods();
+            session.pending.take_into(&mut batch);
 
             watchdog.enter(opts.tick_budget);
             let out = isolate.tick(&batch);
@@ -256,7 +212,7 @@ pub fn run(
                     }
                     apply(
                         out,
-                        &mut peers,
+                        &mut session.peers,
                         &opts.store,
                         &saves,
                         &io,
@@ -270,17 +226,7 @@ pub fn run(
                 Err(error) => {
                     let reason = isolate.death().map_or("sim-threw", Death::token);
                     tracing::error!(%error, reason, "the tick failed; ending the session");
-                    for (connection_id, peer) in &peers {
-                        tracing::info!(conn = %connection_id, reason, "close conn");
-                        let _ = peer.writes.try_send(Outgoing::Death(reason));
-                    }
-                    let hung_up = peers.len();
-                    // Dropped, which hangs up every socket: a peer left open against a dead world
-                    // would sit waiting for a tick that is never coming.
-                    peers.clear();
-                    opts.players.store(0, Ordering::Relaxed);
-                    flush(&io, &mut events, hung_up);
-                    settle(&io, &mut spawned);
+                    session.teardown(Some(reason), &opts.players, &io, &mut events, &mut spawned);
                     return Err(error);
                 }
             }
@@ -288,17 +234,17 @@ pub fn run(
 
         // Published after the batch rather than at each mutation: the probe is seconds apart and a
         // reading per tick is one the agent could never have asked for.
-        opts.players.store(peers.len(), Ordering::Relaxed);
+        opts.players.store(session.peers.len(), Ordering::Relaxed);
         prune(&mut spawned);
 
-        if let Some(started) = draining {
-            if peers.is_empty() {
+        if let Some(started) = session.draining {
+            if session.peers.is_empty() {
                 break;
             }
             // A player who will not leave is not worth the SIGKILL that ends this process at twenty
             // seconds: a close batch written late still carries every save, and the kill does not.
             if started.elapsed() > DRAIN_DEADLINE {
-                tracing::warn!(held = peers.len(), "the drain ran out of time");
+                tracing::warn!(held = session.peers.len(), "the drain ran out of time");
                 break;
             }
         }
@@ -311,28 +257,20 @@ pub fn run(
     watchdog.enter(CLOSE_BUDGET);
     let closed = isolate.close();
     watchdog.leave();
-    let outcome = match closed {
-        Ok(out) => {
-            apply(
-                out,
-                &mut peers,
-                &opts.store,
-                &saves,
-                &io,
-                &answers,
-                &mut spawned,
-            );
-            Ok(())
-        }
-        Err(error) => Err(error),
-    };
-    let hung_up = peers.len();
+    let outcome = closed.map(|out| {
+        apply(
+            out,
+            &mut session.peers,
+            &opts.store,
+            &saves,
+            &io,
+            &answers,
+            &mut spawned,
+        );
+    });
     // Every socket goes with the world: the sim released each session inline, and a peer still
     // holding an open connection would wait on a tick that will never run.
-    peers.clear();
-    opts.players.store(0, Ordering::Relaxed);
-    flush(&io, &mut events, hung_up);
-    settle(&io, &mut spawned);
+    session.teardown(None, &opts.players, &io, &mut events, &mut spawned);
     outcome
 }
 
@@ -343,6 +281,103 @@ struct Peer {
     _hangup: HangUp,
 }
 
+/// What the session thread holds between ticks: who is connected, and what the next batch carries.
+#[derive(Default)]
+struct Session {
+    peers: HashMap<ConnectionId, Peer>,
+    pending: Pending,
+    draining: Option<Instant>,
+}
+
+impl Session {
+    /// Folds one event into the next batch, or answers the error the session has to end on.
+    fn absorb(&mut self, event: HostEvent) -> Result<(), String> {
+        match event {
+            HostEvent::Opened {
+                connection_id,
+                identity,
+                writes,
+                hangup,
+            } => {
+                self.peers.insert(
+                    connection_id.clone(),
+                    Peer {
+                        writes,
+                        _hangup: hangup,
+                    },
+                );
+                self.pending.opened.push(OpenedConnection {
+                    connection_id,
+                    identity: Some(identity),
+                });
+            }
+            HostEvent::Frame {
+                connection_id,
+                message,
+            } => {
+                // Read before its socket closed, from a peer the sim is told is gone either way.
+                if self.peers.contains_key(&connection_id) {
+                    self.pending.frame(InboundFrame {
+                        connection_id,
+                        message,
+                    });
+                }
+            }
+            HostEvent::Closed { connection_id } => {
+                self.peers.remove(&connection_id);
+                self.pending.closed.push(connection_id);
+            }
+            HostEvent::Loaded {
+                connection_id,
+                fields,
+            } => {
+                self.pending.records.push(LoadedRecord {
+                    connection_id,
+                    fields,
+                });
+            }
+            HostEvent::Saved { host_key } => self.pending.saved.push(host_key),
+            HostEvent::Drain => {
+                self.draining.get_or_insert_with(Instant::now);
+            }
+            HostEvent::Fatal { error } => return Err(error),
+        }
+        Ok(())
+    }
+
+    /// Hangs up the heaviest senders until one batch fits, rather than fail a tick every peer shares.
+    fn shed_floods(&mut self) {
+        for connection_id in self.pending.shed(MAX_BATCH_FRAME_BYTES) {
+            tracing::warn!(conn = %connection_id, "close conn reason=batch-flood");
+            self.peers.remove(&connection_id);
+        }
+    }
+
+    /// Hangs every peer up, told `death` first where there is one, and waits out closes and saves.
+    fn teardown(
+        &mut self,
+        death: Option<&'static str>,
+        players: &AtomicUsize,
+        io: &tokio::runtime::Handle,
+        events: &mut mpsc::Receiver<HostEvent>,
+        spawned: &mut Vec<JoinHandle<()>>,
+    ) {
+        if let Some(reason) = death {
+            for (connection_id, peer) in &self.peers {
+                tracing::info!(conn = %connection_id, reason, "close conn");
+                let _ = peer.writes.try_send(Outgoing::Death(reason));
+            }
+        }
+        let hung_up = self.peers.len();
+        // Dropped, which hangs up every socket: a peer left open against a dead world would sit
+        // waiting for a tick that is never coming.
+        self.peers.clear();
+        players.store(0, Ordering::Relaxed);
+        flush(io, events, hung_up);
+        settle(io, spawned);
+    }
+}
+
 /// What has arrived since the last tick. Emptied into the batch, never copied out of it.
 #[derive(Default)]
 struct Pending {
@@ -351,15 +386,44 @@ struct Pending {
     closed: Vec<ConnectionId>,
     records: Vec<LoadedRecord>,
     saved: Vec<String>,
+    /// Bytes of `frames` by the connection that sent them.
+    sent: HashMap<ConnectionId, usize>,
 }
 
 impl Pending {
+    fn frame(&mut self, frame: InboundFrame) {
+        *self.sent.entry(frame.connection_id.clone()).or_default() += frame.message.get().len();
+        self.frames.push(frame);
+    }
+
+    /// Drops the heaviest sender's frames until at most `cap` bytes are left, answering whose went.
+    fn shed(&mut self, cap: usize) -> Vec<ConnectionId> {
+        let mut total: usize = self.sent.values().sum();
+        let mut shed = Vec::new();
+        while total > cap {
+            let Some((heaviest, bytes)) = self
+                .sent
+                .iter()
+                .max_by_key(|(_, bytes)| **bytes)
+                .map(|(id, bytes)| (id.clone(), *bytes))
+            else {
+                break;
+            };
+            self.sent.remove(&heaviest);
+            self.frames.retain(|frame| frame.connection_id != heaviest);
+            total -= bytes;
+            shed.push(heaviest);
+        }
+        shed
+    }
+
     fn take_into(&mut self, batch: &mut InputBatch) {
         batch.opened = std::mem::take(&mut self.opened);
         batch.frames = std::mem::take(&mut self.frames);
         batch.closed = std::mem::take(&mut self.closed);
         batch.records = std::mem::take(&mut self.records);
         batch.saved = std::mem::take(&mut self.saved);
+        self.sent.clear();
     }
 }
 
@@ -672,6 +736,99 @@ mod tests {
 
         assert!(waited.elapsed() >= Duration::from_millis(50));
         assert!(waited.elapsed() < FLUSH_DEADLINE);
+    }
+
+    /// A peer as the listener opens one, with the end its hang-up is heard on.
+    fn opened(session: &mut Session, id: &str) -> mpsc::Receiver<()> {
+        let (writes, _queue) = mpsc::channel(1);
+        let (hangup, hung_up) = mpsc::channel(1);
+        session
+            .absorb(HostEvent::Opened {
+                connection_id: id.to_owned(),
+                identity: id.to_owned(),
+                writes,
+                hangup: HangUp::new(hangup),
+            })
+            .unwrap();
+        hung_up
+    }
+
+    fn frame(session: &mut Session, id: &str, bytes: usize) {
+        let message = RawValue::from_string(format!("\"{}\"", "a".repeat(bytes - 2))).unwrap();
+        session
+            .absorb(HostEvent::Frame {
+                connection_id: id.to_owned(),
+                message,
+            })
+            .unwrap();
+    }
+
+    fn senders(batch: &InputBatch) -> Vec<&str> {
+        batch
+            .frames
+            .iter()
+            .map(|frame| frame.connection_id.as_str())
+            .collect()
+    }
+
+    /// One peer's bytes must cost that peer its socket, not every peer the tick they all share.
+    #[test]
+    fn hangs_up_the_heaviest_sender_before_a_batch_past_the_cap_is_built() {
+        let mut session = Session::default();
+        let mut flooding = opened(&mut session, "c1");
+        let mut quiet = opened(&mut session, "c2");
+        let mut busy = opened(&mut session, "c3");
+        for _ in 0..3 {
+            frame(&mut session, "c1", MAX_BATCH_FRAME_BYTES / 2);
+        }
+        frame(&mut session, "c2", 64);
+        frame(&mut session, "c3", MAX_BATCH_FRAME_BYTES / 2);
+
+        session.shed_floods();
+        let mut batch = InputBatch::new(0.0, false);
+        session.pending.take_into(&mut batch);
+
+        assert_eq!(senders(&batch), vec!["c2", "c3"]);
+        assert_eq!(batch.opened.len(), 3);
+        assert!(matches!(
+            flooding.try_recv(),
+            Err(mpsc::error::TryRecvError::Disconnected)
+        ));
+        assert!(matches!(
+            quiet.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            busy.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[test]
+    fn carries_a_batch_under_the_cap_whole() {
+        let mut session = Session::default();
+        let _c1 = opened(&mut session, "c1");
+        frame(&mut session, "c1", MAX_BATCH_FRAME_BYTES);
+
+        session.shed_floods();
+        let mut batch = InputBatch::new(0.0, false);
+        session.pending.take_into(&mut batch);
+
+        assert_eq!(senders(&batch), vec!["c1"]);
+        assert!(session.peers.contains_key("c1"));
+    }
+
+    /// A shed peer's frames still queued behind its hang-up must not refill the batch it was shed from.
+    #[test]
+    fn carries_no_frame_from_a_peer_already_hung_up() {
+        let mut session = Session::default();
+        let _c1 = opened(&mut session, "c1");
+        session.peers.remove("c1");
+        frame(&mut session, "c1", 64);
+
+        let mut batch = InputBatch::new(0.0, false);
+        session.pending.take_into(&mut batch);
+        assert!(batch.frames.is_empty());
     }
 
     /// The in-flight set is what `settle` has to wait on, so pruning may only drop what has landed.
