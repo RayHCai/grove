@@ -10,7 +10,7 @@ export type { ThemeToggleProps } from './theme/ThemeToggle.js';
 
 export { Panel } from './components/Panel.js';
 export type { PanelFace, PanelProps, PanelTag } from './components/Panel.js';
-export { Button, ButtonLabel, buttonClass, isAriaDisabled } from './components/Button.js';
+export { Button, ButtonLabel, buttonClass } from './components/Button.js';
 export type { ButtonLook, ButtonProps, ButtonSize, ButtonVariant } from './components/Button.js';
 export { IconButton, iconButtonClass } from './components/IconButton.js';
 export type {
@@ -49,8 +49,8 @@ export type { VisuallyHiddenProps, VisuallyHiddenTag } from './components/Visual
 export { ErrorBoundary } from './components/ErrorBoundary.js';
 export type { ErrorBoundaryProps } from './components/ErrorBoundary.js';
 
-export { Icon, SpriteIcon, sprite } from './icons/Icon.js';
-export type { IconFrameProps, IconProps, SpriteIconProps } from './icons/Icon.js';
+export { Icon, sprite } from './icons/Icon.js';
+export type { IconFrameProps, IconProps } from './icons/Icon.js';
 export { PlayIcon } from './icons/PlayIcon.js';
 export { PauseIcon } from './icons/PauseIcon.js';
 export { StopIcon } from './icons/StopIcon.js';
@@ -60,12 +60,9 @@ export { SunIcon } from './icons/SunIcon.js';
 export { MoonIcon } from './icons/MoonIcon.js';
 export { ChevronDownIcon } from './icons/ChevronDownIcon.js';
 export { ChevronRightIcon } from './icons/ChevronRightIcon.js';
-export { CodeIcon } from './icons/CodeIcon.js';
-export { BlocksIcon } from './icons/BlocksIcon.js';
 export { CloseIcon } from './icons/CloseIcon.js';
 export { SendIcon } from './icons/SendIcon.js';
 export { SettingsIcon } from './icons/SettingsIcon.js';
-export { LeafIcon } from './icons/LeafIcon.js';
 export { FileIcon } from './icons/FileIcon.js';
 export { NewFileIcon } from './icons/NewFileIcon.js';
 export { FilesIcon } from './icons/FilesIcon.js';
@@ -74,7 +71,6 @@ export { MaximizeIcon } from './icons/MaximizeIcon.js';
 export { MinimizeIcon } from './icons/MinimizeIcon.js';
 export { TerminalIcon } from './icons/TerminalIcon.js';
 export { UploadIcon } from './icons/UploadIcon.js';
-export { StarIcon } from './icons/StarIcon.js';
 export { HeartIcon } from './icons/HeartIcon.js';
 export { TrashIcon } from './icons/TrashIcon.js';
 export { PlusIcon } from './icons/PlusIcon.js';
@@ -86,6 +82,14 @@ export { ThumbDownIcon } from './icons/ThumbDownIcon.js';
 
 export { cx } from './cx.js';
 export { messageOf } from './messages.js';
-export { apiUrl, configuredUrl, leaveFor } from './env.js';
+export { apiUrl, configuredUrl, leaveFor, platformUrl } from './env.js';
+export {
+    MAX_REPORTS,
+    beaconTransport,
+    consoleTransport,
+    installErrorReporting,
+    reportError,
+} from './report.js';
+export type { ErrorReport, ErrorReportingOptions, ErrorTransport } from './report.js';
 export { fonts, readThemeColors } from './tokens.js';
 export type { HexToken, ThemeColors } from './tokens.js';

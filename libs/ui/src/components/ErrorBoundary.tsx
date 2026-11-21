@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import type { ReactNode } from 'react';
+import { reportError } from '../report.js';
 import { Button } from './Button.js';
 import { Panel } from './Panel.js';
 
@@ -28,6 +29,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
 
     override componentDidCatch(error: unknown): void {
+        reportError(error, 'render');
         this.props.onError?.(error);
     }
 

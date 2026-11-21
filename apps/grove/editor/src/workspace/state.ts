@@ -18,6 +18,15 @@ export interface WorkspaceState {
     held: Held;
     /** A template nothing has stored, owed in full to the first save the creator brings about. */
     seeded: boolean;
+    /** What the last conflict reload kept of this tab's work, or nothing before there was one. */
+    rebase: Rebase | undefined;
+}
+
+/** A conflict reload: the revision it landed on, and where each path both sides changed was kept. */
+export interface Rebase {
+    revision: number;
+    /** A path somebody else also changed, to the copy beside it that holds this tab's text. */
+    copies: ReadonlyMap<string, string>;
 }
 
 export type WorkspaceAction =
@@ -55,6 +64,7 @@ export function initialWorkspace(opened: OpenGame): WorkspaceState {
         pending: NOTHING_PENDING,
         held: NOTHING_HELD,
         seeded: opened.seeded,
+        rebase: undefined,
     };
 }
 
@@ -184,14 +194,76 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
             };
         }
         case 'reloaded':
-            return {
-                files: action.files,
-                saved: action.saved,
-                revision: action.revision,
-                project: action.project,
-                pending: NOTHING_PENDING,
-                held: NOTHING_HELD,
-                seeded: false,
-            };
+            return rebased(state, action);
     }
+}
+
+/** The sibling a path's losing text is kept at: `main.ts` beside `main.conflict.ts`, or a later one. */
+export function conflictPath(path: string, taken: ReadonlySet<string>): string {
+    const dot = path.lastIndexOf('.');
+    const [stem, extension] =
+        dot > path.lastIndexOf('/') + 1 ? [path.slice(0, dot), path.slice(dot)] : [path, ''];
+    for (let attempt = 1; ; attempt += 1) {
+        const copy = `${stem}.conflict${attempt === 1 ? '' : `-${String(attempt)}`}${extension}`;
+        if (!taken.has(copy)) return copy;
+    }
+}
+
+/** The service's set with this tab's work put back on top, and copied aside where both changed a path. */
+function rebased(
+    state: WorkspaceState,
+    remote: Extract<WorkspaceAction, { type: 'reloaded' }>,
+): WorkspaceState {
+    // A template nothing stored is not anybody's work yet, so the service's set simply wins.
+    const owed = state.seeded ? NOTHING_PENDING : state.pending;
+    const based = new Map(state.saved.map((file) => [file.path, file.versionId]));
+    const theirs = new Map(remote.saved.map((file) => [file.path, file.versionId]));
+    // A draft whose base is still the stored version is safe to re-apply; any other is a conflict.
+    const moved = (path: string): boolean =>
+        theirs.has(path) && theirs.get(path) !== based.get(path);
+
+    const files = new Map(remote.files.map((file) => [file.path, file]));
+    const upserted = new Set<string>();
+    const removed = new Set<string>();
+    const copies = new Map<string, string>();
+    let project = remote.project;
+
+    for (const path of owed.upserted) {
+        const mine = state.files.find((file) => file.path === path);
+        if (mine === undefined) continue;
+        const stored = files.get(path);
+        if (!moved(path)) {
+            files.set(path, mine);
+            upserted.add(path);
+            if (isProjectFile(path)) project = state.project;
+            continue;
+        }
+        // Both arriving at the same text is no conflict at all.
+        if (mine.text !== undefined && stored?.text === mine.text) continue;
+        const copy = conflictPath(
+            path,
+            new Set([...files.keys(), ...state.files.map((file) => file.path)]),
+        );
+        files.set(copy, { ...mine, path: copy });
+        upserted.add(copy);
+        copies.set(path, copy);
+    }
+    for (const path of owed.removed) {
+        // Gone on both sides needs no delete, and an edit they made outlives a delete this tab did.
+        if (!theirs.has(path) || moved(path)) continue;
+        files.delete(path);
+        removed.add(path);
+    }
+
+    return {
+        files: [...files.values()],
+        saved: remote.saved,
+        revision: remote.revision,
+        project,
+        pending:
+            upserted.size === 0 && removed.size === 0 ? NOTHING_PENDING : { upserted, removed },
+        held: new Map([...state.held].filter(([path]) => upserted.has(path))),
+        seeded: false,
+        rebase: { revision: remote.revision, copies },
+    };
 }

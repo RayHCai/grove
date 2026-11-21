@@ -11,7 +11,7 @@ import type { DraftFile, Pending } from './files';
 import { exitSaveOf, reloadGame, saveGame } from './session';
 import type { Held, Landed, OpenGame } from './session';
 import { autosaveOf, initialWorkspace, owedOf, workspaceReducer } from './state';
-import type { WorkspaceState } from './state';
+import type { Rebase, WorkspaceState } from './state';
 
 /** What the top bar says for a save or a reload that did not go through. */
 const SAVE_FAILED = 'something went wrong';
@@ -25,7 +25,7 @@ export interface WorkspaceOptions {
      * Whatever this does has to leave the screen standing: there is unsaved work here.
      */
     onSessionLapsed: () => void;
-    /** Hands over the files a reload replaced everything with, for whatever mirrors them. */
+    /** Hands over the files a conflict reload rebased this tab onto, for whatever mirrors them. */
     onReloaded: (files: readonly DraftFile[]) => void;
 }
 
@@ -53,6 +53,16 @@ function heldMessage(held: Held): string {
     const others = held.size - 1;
     const rest = others === 0 ? '' : ` (and ${String(others)} more)`;
     return `${first ?? SAVE_FAILED}${rest}; everything else saved`;
+}
+
+/** What the top bar says after a conflict reload, naming where any losing text was kept. */
+export function rebaseMessage({ revision, copies }: Rebase): string {
+    const at = `somebody else saved this game; reloaded at revision ${String(revision)}`;
+    const [first] = copies;
+    if (first === undefined) return `${at} with your changes on top`;
+    const others = copies.size - 1;
+    const rest = others === 0 ? '' : ` (and ${String(others)} more)`;
+    return `${at}. You both changed ${first[0]}${rest}: yours is kept as ${first[1]}`;
 }
 
 /**
@@ -87,6 +97,8 @@ export function useWorkspace({
     // The exit saves still out, since a conflict may be one of them landing first.
     const exits = useRef(new Set<Promise<void>>());
     const landed = useRef<Landed>(new Map());
+    // A conflict's sentence outlasts the autosave its rebase starts, or it is gone before it is read.
+    const notice = useRef<string | undefined>(undefined);
 
     function lapsed(failure: unknown): boolean {
         if (!isLapsedSession(failure)) return false;
@@ -115,23 +127,20 @@ export function useWorkspace({
         dispatch({ type: 'saved', workspace, sent, held, drafts });
     }
 
-    /**
-     * Throws away what is on this screen and takes what the service holds.
-     *
-     * A second editor claimed this revision, so there is no set here to merge into: warning and
-     * reloading is the honest answer, where saving over it would be one creator silently
-     * overwriting the other.
-     */
+    /** Takes what a second editor saved and rebases this tab's work onto it, in the reducer. */
     async function reload(): Promise<void> {
         const current = await reloadGame(api, gameId);
         adopted.current = current.revision;
         dispatch({ type: 'reloaded', ...current });
-        onReloaded(current.files);
-        setSaveState({
-            at: 'failed',
-            message: `somebody else saved this game; reloaded at revision ${String(current.revision)}`,
-        });
     }
+
+    // After the render that rebased, so the code editor is handed the drafts as they now are.
+    useEffect(() => {
+        if (state.rebase === undefined) return;
+        onReloaded(state.files);
+        notice.current = rebaseMessage(state.rebase);
+        setSaveState({ at: 'failed', message: notice.current });
+    }, [state.rebase]);
 
     async function save(asked: boolean): Promise<void> {
         // A creator's save carries what the last one held back; one nobody asked for does not.
@@ -151,9 +160,11 @@ export function useWorkspace({
             const outcome = await saveGame(api, gameId, base, state.files, sending, landed.current);
             adopt(outcome.workspace, outcome.sent, outcome.held, drafts);
             setSaveState(
-                outcome.held.size === 0
-                    ? { at: 'saved' }
-                    : { at: 'failed', message: heldMessage(outcome.held) },
+                outcome.held.size > 0
+                    ? { at: 'failed', message: heldMessage(outcome.held) }
+                    : notice.current === undefined
+                      ? { at: 'saved' }
+                      : { at: 'failed', message: notice.current },
             );
             // A save that landed is a session that answered, so the next lapse is a fresh one.
             told.current = false;
@@ -240,10 +251,12 @@ export function useWorkspace({
 
     // Stable, because the code editor holds the edit listener across renders.
     const edit = useCallback((path: string, text: string) => {
+        notice.current = undefined;
         dispatch({ type: 'edit', path, text });
         setSaveState({ at: 'idle' });
     }, []);
     const writeProject = useCallback((project: ProjectManifest) => {
+        notice.current = undefined;
         dispatch({ type: 'project', project });
         setSaveState({ at: 'idle' });
     }, []);

@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState } from 'react';
+import { useState } from 'react';
 import {
     Badge,
     Button,
@@ -11,7 +11,6 @@ import {
     TextInput,
     TrashIcon,
     VisuallyHidden,
-    messageOf,
 } from '@grove/ui';
 import type { Game } from '@grove/api-contract';
 import { isLapsedSession } from '../api/client';
@@ -20,6 +19,7 @@ import { SearchField } from '../chrome/SearchField';
 import { playRefusal } from '../player/refusal';
 import { IconLink } from '../router/Link';
 import { useAction } from '../session/useAction';
+import { useLoad } from '../session/useLoad';
 import { useSession } from '../session/SessionProvider';
 import { UNFINISHED } from '../unfinished';
 import { formatDate } from './date';
@@ -27,26 +27,16 @@ import { formatDate } from './date';
 /** The title a game gets when somebody made one without naming it. */
 const UNTITLED = 'Untitled game';
 
-type Listing =
-    { at: 'loading' } | { at: 'listed'; games: Game[] } | { at: 'failed'; message: string };
-
 /** What one row is in the middle of; every other row stays free to press. */
 interface RowDoing {
     gameId: string;
     kind: 'edit' | 'play' | 'delete';
 }
 
-/**
- * Every game this creator owns, newest first.
- *
- * The editor opens the newest of them and has no way to be pointed at another, so only the first
- * card offers to open one; a button on the rest would say it opens that game and open a different
- * one.
- */
+/** Every game this creator owns, newest first, each of them a way into the editor. */
 export function Games(): React.JSX.Element {
-    const { api, lapsed, openEditor, openPlayer } = useSession();
-    const [listing, setListing] = useState<Listing>({ at: 'loading' });
-    const [attempt, setAttempt] = useState(0);
+    const { api, openEditor, openPlayer } = useSession();
+    const listing = useLoad(() => api.games(), 'Your games could not be listed.', [api]);
     const [naming, setNaming] = useState(false);
     const [title, setTitle] = useState('');
     const [query, setQuery] = useState('');
@@ -54,50 +44,13 @@ export function Games(): React.JSX.Element {
     const row = useAction();
     const [doing, setDoing] = useState<RowDoing | null>(null);
 
-    const refused = useEffectEvent((failure: unknown) => {
-        if (isLapsedSession(failure)) {
-            lapsed();
-            return;
-        }
-        setListing({
-            at: 'failed',
-            message: messageOf(failure, 'Your games could not be listed.'),
-        });
-    });
-
-    useEffect(() => {
-        // A listing that lands after this effect was torn down belongs to nobody.
-        let live = true;
-        api.games().then(
-            (games) => {
-                if (live) setListing({ at: 'listed', games });
-            },
-            (failure: unknown) => {
-                if (live) refused(failure);
-            },
-        );
-        return () => {
-            live = false;
-        };
-    }, [api, attempt]);
-
-    function retry(): void {
-        setListing({ at: 'loading' });
-        setAttempt((count) => count + 1);
-    }
-
     function create(): void {
         void creating.run(async () => {
             const made = await api.createGame(title.trim() === '' ? UNTITLED : title.trim());
             setNaming(false);
             setTitle('');
-            // Made and then opened, in that order: the new game is now the newest, which is the one
-            // the editor opens on.
-            setListing((held) => ({
-                at: 'listed',
-                games: [made, ...(held.at === 'listed' ? held.games : [])],
-            }));
-            openEditor();
+            listing.update((held = []) => [made, ...held]);
+            openEditor({ gameId: made.gameId });
         }, 'That game could not be made. Try again.');
     }
 
@@ -126,14 +79,7 @@ export function Games(): React.JSX.Element {
             'delete',
             async () => {
                 await api.deleteGame(game.gameId);
-                setListing((held) =>
-                    held.at === 'listed'
-                        ? {
-                              at: 'listed',
-                              games: held.games.filter((each) => each.gameId !== game.gameId),
-                          }
-                        : held,
-                );
+                listing.update((held = []) => held.filter((each) => each.gameId !== game.gameId));
             },
             'That game could not be deleted. Try again.',
         );
@@ -143,7 +89,7 @@ export function Games(): React.JSX.Element {
         // Left set: the tab is on its way to the editor, and nothing on this page comes back.
         setDoing({ gameId: game.gameId, kind: 'edit' });
         row.reset();
-        openEditor();
+        openEditor({ gameId: game.gameId });
     }
 
     function play(game: Game): void {
@@ -164,7 +110,7 @@ export function Games(): React.JSX.Element {
         );
     }
 
-    const games = listing.at === 'listed' ? listing.games : [];
+    const games = listing.state.at === 'loaded' ? listing.state.value : [];
     const newestId = games[0]?.gameId;
     const needle = query.trim().toLowerCase();
     const shown =
@@ -234,20 +180,20 @@ export function Games(): React.JSX.Element {
                 </FormPanel>
             )}
 
-            {listing.at === 'loading' && (
+            {listing.state.at === 'loading' && (
                 <p className="zone__note" role="status" aria-busy="true">
                     Looking up your games…
                 </p>
             )}
 
-            {listing.at === 'failed' && (
+            {listing.state.at === 'failed' && (
                 <Panel className="zone__failure">
-                    <p role="alert">{listing.message}</p>
-                    <Button onClick={retry}>Try again</Button>
+                    <p role="alert">{listing.state.message}</p>
+                    <Button onClick={listing.retry}>Try again</Button>
                 </Panel>
             )}
 
-            {listing.at === 'listed' && games.length === 0 && !naming && (
+            {listing.state.at === 'loaded' && games.length === 0 && !naming && (
                 <Panel className="zone__empty">
                     <p>
                         A game starts as one file with a world in it. Make one and the editor opens
@@ -290,19 +236,15 @@ export function Games(): React.JSX.Element {
                                             <Tag>{game.visibility}</Tag>
                                         </span>
                                         <div className="gamecard__actions">
-                                            {game.gameId === newestId && (
-                                                <Button
-                                                    variant="primary"
-                                                    size="sm"
-                                                    aria-busy={busy === 'edit'}
-                                                    aria-disabled={busy !== undefined}
-                                                    onClick={() => edit(game)}
-                                                >
-                                                    {busy === 'edit'
-                                                        ? 'Opening…'
-                                                        : 'Open in editor'}
-                                                </Button>
-                                            )}
+                                            <Button
+                                                variant="primary"
+                                                size="sm"
+                                                aria-busy={busy === 'edit'}
+                                                aria-disabled={busy !== undefined}
+                                                onClick={() => edit(game)}
+                                            >
+                                                {busy === 'edit' ? 'Opening…' : 'Open in editor'}
+                                            </Button>
                                             <Button
                                                 size="sm"
                                                 aria-busy={busy === 'play'}

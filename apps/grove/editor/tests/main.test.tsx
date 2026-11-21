@@ -38,4 +38,21 @@ describe('the entry point', () => {
         stubApi();
         await expect(import('../src/main')).rejects.toThrow('#root is missing from index.html');
     });
+
+    it('hands an unhandled rejection to the error sink, before anything has mounted', async () => {
+        stubApi();
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        try {
+            await expect(import('../src/main')).rejects.toThrow('#root is missing');
+            window.dispatchEvent(
+                Object.assign(new Event('unhandledrejection'), { reason: new Error('lost') }),
+            );
+            expect(logged).toHaveBeenCalledWith(
+                '[grove:rejection] Error: lost',
+                expect.any(String),
+            );
+        } finally {
+            logged.mockRestore();
+        }
+    }, 30_000);
 });

@@ -4,6 +4,7 @@
 import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
+import type { VersionId } from '@grove/api-contract';
 import { ThemeProvider } from '@grove/ui';
 import { ApiError } from '../src/api/client';
 import { mountEditor } from '../src/editor/monaco';
@@ -106,6 +107,26 @@ async function remove(host: HTMLElement, name: string): Promise<void> {
     });
 }
 
+/** A second editor's save landing in the service: this file's text and version, at that revision. */
+async function somebodyElseSaves(
+    api: FakeApi,
+    path: string,
+    text: string,
+    revision: number,
+): Promise<void> {
+    const bytes = new TextEncoder().encode(text);
+    api.bucket.set(path, { bytes, type: 'text/typescript' });
+    api.workspaceState = {
+        ...api.workspaceState,
+        revision,
+        files: api.workspaceState.files.map((file) =>
+            file.path === path
+                ? { ...file, versionId: 'theirs' as VersionId, byteLength: bytes.byteLength }
+                : file,
+        ),
+    };
+}
+
 describe('saving', () => {
     it('offers nothing to save until something has changed', async () => {
         const api = fakeApi();
@@ -183,43 +204,95 @@ describe('saving', () => {
         expect(api.saves[1]?.deletes).toEqual(['src/enemy.ts']);
     });
 
-    it('reloads from the service rather than overwriting what somebody else saved', async () => {
+    it('reloads from the service and puts the typing back on top of what it did not touch', async () => {
         const api = fakeApi();
         await stored(api, [draftFromText('src/main.ts', 'const a = 1;')], 1);
         const host = await reopened(api);
 
         await type('src/main.ts', 'const a = 2;');
-        // Somebody else saved while this editor was open, so revision 1 is no longer the base.
+        // Somebody else saved while this editor was open, leaving this file as it was.
         api.workspaceState = { ...api.workspaceState, revision: 7 };
 
         await press(host, 'Save');
         await until(() => state(host)?.includes('reloaded') === true);
-        expect(state(host)).toContain('revision 7');
+        expect(state(host)).toBe(
+            'somebody else saved this game; reloaded at revision 7 with your changes on top',
+        );
         expect(host.querySelector('.topbar__state')?.className).toContain('--failed');
+
+        // The typing was rebased rather than lost, so the next save carries it at the new revision.
+        await press(host, 'Save');
+        await until(() => api.saves.length === 1);
+        expect(api.saves[0]?.baseRevision).toBe(7);
+        expect(api.saves[0]?.sources).toEqual([
+            { path: 'src/main.ts', contentType: 'text/typescript', text: 'const a = 2;' },
+        ]);
     });
 
-    it('puts what the service holds back into the code editor on a reload', async () => {
+    it('keeps both sides of a file both changed: theirs in place, and the typing in a copy', async () => {
         const api = fakeApi();
         await stored(api, [draftFromText('src/main.ts', 'const a = 1;')], 1);
         const host = await reopened(api);
 
         await type('src/main.ts', 'const a = 2;');
-        api.workspaceState = { ...api.workspaceState, revision: 7 };
+        await somebodyElseSaves(api, 'src/main.ts', 'const a = 3;', 7);
         await press(host, 'Save');
         await until(() => state(host)?.includes('reloaded') === true);
 
+        expect(state(host)).toBe(
+            'somebody else saved this game; reloaded at revision 7. You both changed src/main.ts: yours is kept as src/main.conflict.ts',
+        );
         // Without this the screen keeps the text that lost, and the next keystroke saves it over
         // the one that won.
         const reset = workbench().resetFiles.mock.lastCall?.[0] as {
             path: string;
             value: string;
         }[];
-        expect(reset.find((file) => file.path === 'src/main.ts')?.value).toBe('const a = 1;');
+        expect(reset.find((file) => file.path === 'src/main.ts')?.value).toBe('const a = 3;');
+        expect(reset.find((file) => file.path === 'src/main.conflict.ts')?.value).toBe(
+            'const a = 2;',
+        );
         expect(reset.some((file) => file.path === PROJECT_PATH)).toBe(false);
+        expect(paths(host)).toContain('main.conflict.ts');
 
-        const saves = api.saves.length;
+        // The copy is a new file, so what is saved next overwrites nothing of theirs.
         await press(host, 'Save');
-        expect(api.saves.length).toBe(saves);
+        await until(() => api.saves.length === 1);
+        expect(api.saves[0]?.sources.map((source) => source.path)).toEqual([
+            'src/main.conflict.ts',
+        ]);
+        expect(new TextDecoder().decode(api.bucket.get('src/main.ts')?.bytes)).toBe('const a = 3;');
+    });
+
+    it('keeps saying where the typing went through the save that stores the copy', async () => {
+        vi.useFakeTimers();
+        try {
+            const api = fakeApi();
+            await stored(api, [draftFromText('src/main.ts', 'const a = 1;')], 1);
+            const host = await reopened(api);
+
+            await type('src/main.ts', 'const a = 2;');
+            await somebodyElseSaves(api, 'src/main.ts', 'const a = 3;', 7);
+            await press(host, 'Save');
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(0);
+            });
+            expect(state(host)).toContain('kept as src/main.conflict.ts');
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS + 1);
+            });
+            expect(api.saves.map((save) => save.sources.map((source) => source.path))).toEqual([
+                ['src/main.conflict.ts'],
+            ]);
+            expect(state(host)).toContain('kept as src/main.conflict.ts');
+
+            // Typing again is reading it, and the top bar goes back to reporting saves.
+            await type('src/main.ts', 'const a = 4;');
+            expect(state(host)).toBe('Unsaved changes');
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
 

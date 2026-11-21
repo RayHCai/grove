@@ -54,12 +54,20 @@ describe('the url a creator crosses on', () => {
     });
 
     it('goes back to where the editor asked, untouched', () => {
-        const url = new URL(editorLink(`${EDITOR}/?mode=code`));
+        const url = new URL(editorLink({ returnTo: `${EDITOR}/?mode=code`, gameId: 'other' }));
         expect(url.searchParams.get('mode')).toBe('code');
+        expect(url.searchParams.has('game')).toBe(false);
+    });
+
+    it('names the game to open, and nothing else', () => {
+        const url = new URL(editorLink({ gameId: 'a6d0c0de-0000-4000-8000-000000000001' }));
+        expect(url.origin).toBe(EDITOR);
+        expect(url.pathname).toBe('/');
+        expect([...url.searchParams]).toEqual([['game', 'a6d0c0de-0000-4000-8000-000000000001']]);
     });
 
     it('falls back to the front door rather than honouring a foreign return address', () => {
-        const url = new URL(editorLink('http://evil.example/steal'));
+        const url = new URL(editorLink({ returnTo: 'http://evil.example/steal' }));
         expect(url.origin).toBe(EDITOR);
         expect(url.pathname).toBe('/');
     });

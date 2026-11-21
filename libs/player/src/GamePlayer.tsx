@@ -6,11 +6,18 @@ import {
     createRafFrameSource,
 } from '@platform/client/browser';
 import { ClientInstance, connectTo } from '@platform/glue/client';
-import type { Binding, FailureReason, SessionState, Transport } from '@platform/glue/client';
+import type {
+    Binding,
+    DisconnectReason,
+    FailureReason,
+    SessionState,
+    Transport,
+} from '@platform/glue/client';
 import type { ScriptId } from '@platform/project';
 import { createPixiRenderer } from '@platform/renderer/pixi';
 import type { IRenderer } from '@platform/renderer';
 import type { ScriptRegistry } from '@platform/scripting';
+import { TransportError } from '@platform/transport';
 
 /**
  * Why a join did not happen. Wider than the wire's `RejectReason`: a ticket is checked before the
@@ -18,7 +25,7 @@ import type { ScriptRegistry } from '@platform/scripting';
  * never opened produces no envelope at all.
  */
 export type RefusalReason =
-    'version' | 'full' | 'identity' | 'ticket' | 'bundle' | 'renderer' | 'unreachable';
+    'version' | 'full' | 'identity' | 'ticket' | 'bundle' | 'renderer' | 'unreachable' | 'hidden';
 
 /** What this client claims to be running, which the authority compares before it admits anyone. */
 export interface GameProject {
@@ -87,7 +94,8 @@ export interface GamePlayerProps {
      */
     background?: number | 'transparent';
     onReady?: () => void;
-    onRefused?: (reason: RefusalReason, message: string) => void;
+    /** Why a join did not happen, in words for whoever is playing, and the cause for an error sink. */
+    onRefused?: (reason: RefusalReason, message: string, cause?: unknown) => void;
     /** How the renderer is built; a test hands in one that needs no GPU. */
     createRenderer?: () => IRenderer;
     /** How a remote session is dialled; a test hands in one that needs no socket. */
@@ -185,21 +193,33 @@ export function GamePlayer({
         // canvas anyway, leaking a live WebGL context, which StrictMode hits every mount.
         let initialized = false;
 
-        const onState = (next: SessionState, failure: FailureReason | undefined): void => {
+        const onState = (
+            next: SessionState,
+            failure: FailureReason | undefined,
+            disconnection: DisconnectReason | undefined,
+        ): void => {
             setState(next);
             if (next === 'live') readyRef.current?.();
+            // A page the browser stopped rendering went silent, which the host closes as idle.
+            if (next === 'disconnected' && disconnection?.kind === 'frames-stopped') {
+                refusedRef.current?.(
+                    'hidden',
+                    'disconnected while the tab was hidden',
+                    disconnection,
+                );
+            }
             if (next === 'failed') {
                 const [reason, message] = describe(failure);
-                refusedRef.current?.(reason, message);
+                refusedRef.current?.(reason, message, failure);
             }
         };
 
-        const refuse = (reason: RefusalReason, message: string): void => {
+        const refuse = (reason: RefusalReason, message: string, cause: unknown): void => {
             // An abandoned mount is this component going away, not a failure to show anyone.
             if (abort.signal.aborted) return;
             device?.dispose();
             setState('failed');
-            refusedRef.current?.(reason, message);
+            refusedRef.current?.(reason, message, cause);
         };
 
         void (async () => {
@@ -213,6 +233,7 @@ export function GamePlayer({
                     local
                         ? `the stage could not start: ${causeOf(cause)}`
                         : 'this browser could not start the game',
+                    cause,
                 );
                 return;
             }
@@ -254,6 +275,7 @@ export function GamePlayer({
                     refuse(
                         'unreachable',
                         `the world in this page refused the join: ${causeOf(cause)}`,
+                        cause,
                     );
                 }
                 return;
@@ -270,10 +292,10 @@ export function GamePlayer({
                     // What the session fetches the creator's code with, once the welcome names it.
                     bundle: createBrowserBundleSource(),
                 });
-            } catch {
-                // A browser cannot tell an upgrade refused for its ticket from a box it could not
-                // reach, and a new join from Grove is the fix for both; the cause names the box.
-                refuse('ticket', 'this link may have expired: start the game again from Grove');
+            } catch (cause) {
+                // The cause names the box, so a player is shown the sentence and the sink the cause.
+                const [reason, message] = dialRefusal(cause);
+                refuse(reason, message, cause);
                 return;
             }
             // `close()` is idempotent, so a dial that also honoured the abort is no different.
@@ -294,6 +316,18 @@ export function GamePlayer({
     }, [serverUrl, ticket, open, scripts, projectId, projectHash, name, width, height, background]);
 
     return <div ref={stage} className="grove-stage" data-state={state} />;
+}
+
+/** A dial that never connected, as a player can act on it. */
+function dialRefusal(cause: unknown): [RefusalReason, string] {
+    if (globalThis.navigator?.onLine === false) {
+        return ['unreachable', 'this device is offline: reconnect, then start the game again'];
+    }
+    // A refused ticket and an unreachable box fail alike; only a socket never built carries a cause.
+    if (cause instanceof TransportError && cause.cause !== undefined) {
+        return ['unreachable', 'this game could not be reached: start it again from Grove'];
+    }
+    return ['ticket', 'this link may have expired: start the game again from Grove'];
 }
 
 function causeOf(cause: unknown): string {

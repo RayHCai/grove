@@ -1,18 +1,25 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Account, PlayHandoff } from '@grove/api-contract';
-import { leaveFor } from '@grove/ui';
+import { leaveFor, reportError } from '@grove/ui';
+import { isLapsedSession } from '../api/client';
 import type { Api } from '../api/client';
 import { editorLink } from '../editor/link';
+import type { EditorTarget } from '../editor/link';
 import { playerLink } from '../player/link';
 import { go } from '../router/useRoute';
 
-/** Who is signed in, once the cookie has been asked about. */
+/** Who is signed in, once the cookie has been asked about and the service has answered. */
 export type Session =
-    { at: 'loading' } | { at: 'anonymous' } | { at: 'signed-in'; account: Account };
+    | { at: 'loading' }
+    | { at: 'anonymous' }
+    | { at: 'signed-in'; account: Account }
+    | { at: 'unreachable' };
 
 export interface SessionContextValue {
     session: Session;
+    /** Asks about the session again, after a read the service never answered. */
+    retry: () => void;
     /** The service, for the pages that read and write things other than the session itself. */
     api: Api;
     /** `false` is the service's one answer to a wrong address, a wrong password and a lockout. */
@@ -28,8 +35,8 @@ export interface SessionContextValue {
      * and sends the visitor to sign in, rather than leaving them on a page that can do nothing.
      */
     lapsed: () => void;
-    /** Leaves for the editor, optionally back to where it sent somebody from. */
-    openEditor: (returnTo?: string | undefined) => void;
+    /** Leaves for the editor: back to where it sent somebody from, on one game, or on the newest. */
+    openEditor: (target?: EditorTarget) => void;
     /** Leaves for the player origin, carrying the join the allocator just minted. */
     openPlayer: (handoff: PlayHandoff) => void;
 }
@@ -56,6 +63,7 @@ export function SessionProvider({
     children,
 }: SessionProviderProps): React.JSX.Element {
     const [session, setSession] = useState<Session>({ at: 'loading' });
+    const [attempt, setAttempt] = useState(0);
 
     const leave = useCallback((url: string) => (navigate ?? leaveFor)(url), [navigate]);
 
@@ -71,19 +79,29 @@ export function SessionProvider({
                 return;
             }
             settle({ at: 'signed-in', account: await api.me() });
-        })().catch(() => {
-            // An API nobody can reach is a visitor who is not signed in: the pages behind the gate
-            // say so, and the ones in front of it still work.
-            settle({ at: 'anonymous' });
+        })().catch((failure: unknown) => {
+            // Only a refused cookie means signed out; an API nobody reached said nothing either way.
+            if (isLapsedSession(failure)) {
+                settle({ at: 'anonymous' });
+                return;
+            }
+            reportError(failure, 'session');
+            settle({ at: 'unreachable' });
         });
         return () => {
             live = false;
         };
-    }, [api]);
+    }, [api, attempt]);
+
+    const retry = useCallback(() => {
+        setSession({ at: 'loading' });
+        setAttempt((count) => count + 1);
+    }, []);
 
     const value = useMemo<SessionContextValue>(
         () => ({
             session,
+            retry,
             api,
 
             signIn: async (email, password) => {
@@ -111,14 +129,14 @@ export function SessionProvider({
 
             // Nothing is minted and nothing crosses: the session is a cookie on the API origin,
             // and the editor is a subdomain of this same site, so it is already carrying it.
-            openEditor: (returnTo) => {
-                leave(editorLink(returnTo));
+            openEditor: (target) => {
+                leave(editorLink(target));
             },
             openPlayer: (handoff) => {
                 leave(playerLink(handoff));
             },
         }),
-        [session, api, leave],
+        [session, retry, api, leave],
     );
 
     return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

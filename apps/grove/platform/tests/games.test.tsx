@@ -33,26 +33,25 @@ describe('the games page', () => {
         expect(titles).toEqual([GAME.title, OLDER_GAME.title]);
     });
 
-    /**
-     * The editor opens the newest game and has no way to be pointed at another, so only the first
-     * card offers to open one. A button on the rest would name that game and open a different one.
-     */
-    it('offers to open only the game the editor would actually open', async () => {
+    it('offers to open every game it lists', async () => {
         const { host } = await games();
 
         expect(host.querySelectorAll('.gamecard').length).toBe(2);
         expect(
             [...host.querySelectorAll('button')].filter((b) => b.textContent === 'Open in editor'),
-        ).toHaveLength(1);
+        ).toHaveLength(2);
     });
 
-    it('crosses to the editor from the newest card, carrying nothing', async () => {
+    it('crosses to the editor naming the game on the card, and nothing of the session', async () => {
         const { host, tab } = await games();
 
-        await click(need(host, 'button', 'Open in editor'));
+        const older = [...host.querySelectorAll<HTMLElement>('.gamecard')][1]!;
+        await click(need(older, 'button', 'Open in editor'));
         await until(() => tab.to.length > 0);
 
-        expect(new URL(tab.to[0] ?? '').origin).toBe(EDITOR);
+        const url = new URL(tab.to[0] ?? '');
+        expect(url.origin).toBe(EDITOR);
+        expect([...url.searchParams]).toEqual([['game', OLDER_GAME.gameId]]);
     });
 
     it('says so when there is nothing yet', async () => {
@@ -143,9 +142,9 @@ describe('making a game', () => {
         await until(() => tab.to.length > 0);
 
         expect(api.owned[0]?.title).toBe('Lantern Run');
-        // Made before the crossing, in that order: the new game is what makes it the newest, which
-        // is the one the editor opens on.
-        expect(new URL(tab.to[0] ?? '').origin).toBe(EDITOR);
+        const url = new URL(tab.to[0] ?? '');
+        expect(url.origin).toBe(EDITOR);
+        expect(url.searchParams.get('game')).toBe(api.owned[0]?.gameId);
     });
 
     it('takes an untitled one rather than refusing an empty field', async () => {

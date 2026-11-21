@@ -178,6 +178,21 @@ describe('opening a game', () => {
         const api = fakeApi({ owned: [GAME, older] });
         expect((await openGame(api, vi.fn())).game.title).toBe("Pip's Garden");
     });
+
+    it('opens the game the platform named, however far down the list it is', async () => {
+        const newer = { ...GAME, gameId: 'a6d0c0de-0000-4000-8000-000000000001', title: 'Newer' };
+        const api = fakeApi({ owned: [newer as typeof GAME, GAME] });
+        expect((await openGame(api, vi.fn(), GAME_ID)).game.title).toBe("Pip's Garden");
+    });
+
+    it('refuses a named game the account does not own, and makes none in its place', async () => {
+        const api = fakeApi();
+        await expect(
+            openGame(api, vi.fn(), 'a6d0c0de-0000-4000-8000-00000000beef'),
+        ).rejects.toThrow(/not one of yours/u);
+        expect(api.owned).toEqual([GAME]);
+        expect(api.requests.some((request) => request.includes('/workspace'))).toBe(false);
+    });
 });
 
 describe('saving a game', () => {
@@ -251,6 +266,21 @@ describe('saving a game', () => {
         );
         expect(api.saves[0]?.sources.map((source) => source.path)).toEqual(['src/main.ts']);
         expect(outcome.held.get('src/huge.ts')).toMatch(/too long/u);
+    });
+
+    it('measures a source in the UTF-8 bytes the service counts, not in characters', async () => {
+        const api = fakeApi();
+        // Half the limit in characters, and just over it in bytes: each one is two.
+        const accented = 'é'.repeat(MAX_SOURCE_BYTES / 2 + 1);
+        const outcome = await saveGame(
+            api,
+            GAME_ID,
+            0,
+            [draftFromText('src/main.ts', SOURCE), draftFromText('src/words.ts', accented)],
+            pendingOver('src/main.ts', 'src/words.ts'),
+        );
+        expect(api.saves[0]?.sources.map((source) => source.path)).toEqual(['src/main.ts']);
+        expect(outcome.held.get('src/words.ts')).toMatch(/too long/u);
     });
 
     it('does not upload an asset again for a save retried after it landed', async () => {

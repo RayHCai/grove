@@ -141,6 +141,31 @@ export function editorPolicy(html: string, apiUrl: string | undefined): string {
     ].join('; ');
 }
 
+/** A run's document, as a build names it and as a dev server answers for it. */
+const PREVIEW_PAGE =
+    /\/(?:preview-(?:plain|world)-[0-9a-f]+|@grove-preview\/(?:plain|world))\.html$/u;
+
+/** What a host sends with a path, since a `<meta>` policy can express neither framing nor a sandbox. */
+export function hostHeaders(pathname: string): Record<string, string> {
+    return {
+        // A run's document shares this origin, so only the sandbox keeps it opaque when opened bare.
+        'content-security-policy': PREVIEW_PAGE.test(pathname)
+            ? "sandbox allow-scripts; frame-ancestors 'self'"
+            : "frame-ancestors 'none'",
+        'x-content-type-options': 'nosniff',
+    };
+}
+
+function sendHostHeaders(
+    request: { url?: string | undefined },
+    response: { setHeader(name: string, value: string): unknown },
+    next: () => void,
+): void {
+    const asked = new URL(request.url ?? '/', 'http://localhost').pathname;
+    for (const [name, value] of Object.entries(hostHeaders(asked))) response.setHeader(name, value);
+    next();
+}
+
 /** Builds and serves the sandbox, and gives a built editor page its policy. */
 export function previewRuntime(): Plugin {
     let config: ResolvedConfig;
@@ -176,7 +201,12 @@ export function previewRuntime(): Plugin {
             return `export const PREVIEW_DOCUMENTS = ${JSON.stringify(documents)};`;
         },
 
+        configurePreviewServer(server) {
+            server.middlewares.use(sendHostHeaders);
+        },
+
         configureServer(server) {
+            server.middlewares.use(sendHostHeaders);
             server.watcher.on('change', (changed) => {
                 const file = sameFile(changed);
                 for (const [mode, built] of dev) {

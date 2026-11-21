@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     Badge,
     Button,
@@ -12,9 +12,7 @@ import {
     Tag,
     ThumbDownIcon,
     ThumbUpIcon,
-    messageOf,
 } from '@grove/ui';
-import type { Game } from '@grove/api-contract';
 import { isLapsedSession } from '../api/client';
 import { heldGame, placeholderGame } from '../catalog/detail';
 import type { GameDetail } from '../catalog/detail';
@@ -23,6 +21,7 @@ import { Shelf } from '../catalog/Shelf';
 import { playRefusal } from '../player/refusal';
 import { ButtonLink } from '../router/Link';
 import { useAction } from '../session/useAction';
+import { useLoad } from '../session/useLoad';
 import { useSession } from '../session/SessionProvider';
 import { GameMedia } from './game/GameMedia';
 import { GameTabs } from './game/GameTabs';
@@ -51,52 +50,22 @@ export interface GamePageProps {
  * games, because the service has no read of one game for anybody but the one who owns it.
  */
 export function GamePage({ gameId }: GamePageProps): React.JSX.Element {
-    const { api, session, lapsed } = useSession();
+    const { api, session } = useSession();
     const [sample] = useState(() => (UNFINISHED ? placeholderGame(gameId) : undefined));
-    const [load, setLoad] = useState<Load>(() =>
-        sample === undefined ? { at: 'loading' } : { at: 'shown', detail: sample },
+    const owned = useLoad(
+        sample === undefined
+            ? async () => (await api.games()).find((game) => game.gameId === gameId)
+            : undefined,
+        'This game could not be looked up.',
+        [api, gameId],
     );
-    const [attempt, setAttempt] = useState(0);
 
     const creator = session.at === 'signed-in' ? session.account.displayName : '';
-
-    const settle = useEffectEvent((games: Game[]) => {
-        const owned = games.find((game) => game.gameId === gameId);
-        setLoad(
-            owned === undefined
-                ? { at: 'absent' }
-                : { at: 'shown', detail: heldGame(owned, creator) },
-        );
-    });
-    const refused = useEffectEvent((failure: unknown) => {
-        if (isLapsedSession(failure)) {
-            lapsed();
-            return;
-        }
-        setLoad({ at: 'failed', message: messageOf(failure, 'This game could not be looked up.') });
-    });
-
-    useEffect(() => {
-        if (sample !== undefined) return undefined;
-        // An answer that lands after this effect was torn down belongs to nobody.
-        let live = true;
-        api.games().then(
-            (games) => {
-                if (live) settle(games);
-            },
-            (failure: unknown) => {
-                if (live) refused(failure);
-            },
-        );
-        return () => {
-            live = false;
-        };
-    }, [api, sample, attempt]);
-
-    function retry(): void {
-        setLoad({ at: 'loading' });
-        setAttempt((count) => count + 1);
-    }
+    let load: Load;
+    if (sample !== undefined) load = { at: 'shown', detail: sample };
+    else if (owned.state.at !== 'loaded') load = owned.state;
+    else if (owned.state.value === undefined) load = { at: 'absent' };
+    else load = { at: 'shown', detail: heldGame(owned.state.value, creator) };
 
     const title = load.at === 'shown' ? load.detail.title : undefined;
     useEffect(() => {
@@ -117,7 +86,7 @@ export function GamePage({ gameId }: GamePageProps): React.JSX.Element {
                 <main className="gamepage">
                     <Panel className="zone__failure">
                         <p role="alert">{load.message}</p>
-                        <Button onClick={retry}>Try again</Button>
+                        <Button onClick={owned.retry}>Try again</Button>
                     </Panel>
                 </main>
             );

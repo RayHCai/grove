@@ -1,5 +1,6 @@
 import { act } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../src/api/client';
 import { App } from '../src/App';
 import { fakeApi, navigation, signedInApi } from './doubles';
 import { mount, until, untilSettled } from '@grove/ui/testing';
@@ -176,6 +177,51 @@ describe('an API nobody can reach', () => {
         await untilSettled(host);
 
         expect(byText(host, 'a', 'Start building')).toBeDefined();
+    });
+
+    it('says so behind the gate and offers another try, rather than sending anybody to sign in', async () => {
+        at('/games');
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        let down = true;
+        const api = signedInApi();
+        const session = api.session.bind(api);
+        api.session = async () => {
+            if (down) throw new ApiError(0, 'unreachable', 'the Grove API could not be reached');
+            return session();
+        };
+        try {
+            const host = await mount(<App api={api} navigate={navigation().navigate} />);
+            await untilSettled(host);
+
+            expect(window.location.pathname).toBe('/games');
+            expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+                'Grove could not be reached, so this page cannot load yet.',
+            );
+            // Reported, because an API nobody reached is a failure worth seeing, not a visitor.
+            expect(logged).toHaveBeenCalledWith(
+                '[grove:session] ApiError: the Grove API could not be reached',
+                expect.any(String),
+            );
+
+            down = false;
+            await click(need(host, 'button', 'Try again'));
+            await until(() => host.querySelector('.gamecard') !== null);
+            expect(window.location.pathname).toBe('/games');
+        } finally {
+            logged.mockRestore();
+        }
+    });
+
+    it('still reads a cookie the service refused as somebody signed out', async () => {
+        at('/games');
+        const api = fakeApi({
+            session: async () => {
+                throw new ApiError(401, 'unauthorized', 'sign in first');
+            },
+        });
+        const host = await mount(<App api={api} navigate={navigation().navigate} />);
+        await until(() => window.location.pathname === '/sign-in');
+        expect(host.querySelector('[role="alert"]')).toBeNull();
     });
 });
 

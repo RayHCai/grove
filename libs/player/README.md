@@ -39,13 +39,15 @@ widget placed against one lands somewhere else in the other.
 ## What a host is told
 
 `onReady` when the session goes live. `onRefused` with a reason and a line written for a reader:
-the wire's `version`, `full` and `identity`, plus `ticket` for a socket that never opened (a browser
-cannot tell an upgrade refused for its ticket from a box it could not reach, and a new join is the
-fix for both), `bundle` for code that would not load, `renderer` for a stage the browser could not
-start, and `unreachable` for a session that broke after it opened. A reason token this build has no
-wording for is reported as `unreachable` rather than mapped to whichever case happened to be last.
-A refusal from a remote world carries no cause, since its reader is a player and the cause names
-the box; one from a world in this page carries it, since its reader is the creator whose world it is.
+the wire's `version`, `full` and `identity`, plus `ticket` for a socket that errored before it
+opened (a browser cannot tell an upgrade refused for its ticket from a box it could not reach, and a
+new join is the fix for both), `bundle` for code that would not load, `renderer` for a stage the
+browser could not start, and `unreachable` for a device that is offline, a socket that could not be
+built and a session that broke after it opened. A reason token this build has no wording for is
+reported as `unreachable` rather than mapped to whichever case happened to be last. The line from a
+remote world names no cause, since its reader is a player and the cause names the box; one from a
+world in this page names it, since its reader is the creator whose world it is. Either way the cause
+itself is the callback's third argument, for a host's error sink.
 
 `createRenderer` and `connect` are seams a test substitutes; a host passes neither.
 

@@ -1,13 +1,49 @@
 import { describe, expect, it } from 'vitest';
-import type { Workspace } from '@grove/api-contract';
+import type { Workspace, WorkspaceFile } from '@grove/api-contract';
 import { NOTHING_PENDING, draftFromBytes, draftFromText } from '../src/workspace/files';
-import type { Pending } from '../src/workspace/files';
-import { autosaveOf, initialWorkspace, owedOf, workspaceReducer } from '../src/workspace/state';
+import type { DraftFile, Pending } from '../src/workspace/files';
+import {
+    autosaveOf,
+    conflictPath,
+    initialWorkspace,
+    owedOf,
+    workspaceReducer,
+} from '../src/workspace/state';
 import type { WorkspaceState } from '../src/workspace/state';
 import { GAME, opened, templateDrafts } from './doubles';
 
 const MAIN = 'src/main.ts';
+const COPY = 'src/main.conflict.ts';
 const TILE = 'art/tile.png';
+
+/** A file as the service's saved set lists it, and the draft a reload reads its text into. */
+function stored(path: string, versionId: string, text: string): [WorkspaceFile, DraftFile] {
+    return [
+        {
+            path,
+            kind: 'source',
+            versionId,
+            byteLength: text.length,
+            contentType: 'text/typescript',
+        },
+        draftFromText(path, text),
+    ];
+}
+
+/** The reducer's answer to a conflict reload landing on these files at this revision. */
+function reload(
+    state: WorkspaceState,
+    revision: number,
+    files: [WorkspaceFile, DraftFile][],
+): WorkspaceState {
+    return workspaceReducer(state, {
+        type: 'reloaded',
+        revision,
+        saved: files.map(([file]) => file),
+        files: files.map(([, draft]) => draft),
+        project: state.project,
+    });
+}
 
 function clean(): WorkspaceState {
     return initialWorkspace(
@@ -158,17 +194,61 @@ describe('the workspace state', () => {
         expect(settle(newer, typed.pending, new Map(), answer(3, typed))).toBe(newer);
     });
 
-    it('owes nothing after a reload', () => {
+    it('puts a draft back on top of a reload that left its file alone', () => {
         const typed = workspaceReducer(clean(), { type: 'edit', path: MAIN, text: 'const a = 2;' });
-        const reloaded = workspaceReducer(typed, {
-            type: 'reloaded',
-            revision: 7,
-            saved: typed.saved,
-            files: clean().files,
-            project: typed.project,
-        });
+        const reloaded = reload(typed, 7, [stored(MAIN, 'v1', 'const a = 1;')]);
+
         expect(reloaded.revision).toBe(7);
-        expect(reloaded.files[0]?.text).toBe('const a = 1;');
+        expect(reloaded.files.find((file) => file.path === MAIN)?.text).toBe('const a = 2;');
+        expect([...reloaded.pending.upserted]).toEqual([MAIN]);
+        expect(reloaded.rebase?.copies.size).toBe(0);
+    });
+
+    it('keeps the service’s text where both changed a file, and this tab’s in a copy beside it', () => {
+        const typed = workspaceReducer(clean(), { type: 'edit', path: MAIN, text: 'const a = 2;' });
+        const reloaded = reload(typed, 7, [stored(MAIN, 'v9', 'const a = 3;')]);
+
+        expect(reloaded.files.find((file) => file.path === MAIN)?.text).toBe('const a = 3;');
+        expect(reloaded.files.find((file) => file.path === COPY)?.text).toBe('const a = 2;');
+        // Owed as a new file, which overwrites nothing; the contested path itself is owed nothing.
+        expect([...reloaded.pending.upserted]).toEqual([COPY]);
+        expect([...autosaveOf(reloaded).upserted]).toEqual([COPY]);
+        expect([...(reloaded.rebase?.copies ?? [])]).toEqual([[MAIN, COPY]]);
+    });
+
+    it('calls it no conflict when both sides arrived at the same text', () => {
+        const typed = workspaceReducer(clean(), { type: 'edit', path: MAIN, text: 'const a = 3;' });
+        const reloaded = reload(typed, 7, [stored(MAIN, 'v9', 'const a = 3;')]);
+
+        expect(reloaded.files.map((file) => file.path)).toEqual([MAIN]);
         expect(reloaded.pending).toBe(NOTHING_PENDING);
+    });
+
+    it('carries a delete over a file nobody else touched, and drops one they edited since', () => {
+        const removed = workspaceReducer(clean(), { type: 'remove', path: MAIN });
+
+        const untouched = reload(removed, 7, [stored(MAIN, 'v1', 'const a = 1;')]);
+        expect(untouched.files).toEqual([]);
+        expect([...untouched.pending.removed]).toEqual([MAIN]);
+
+        const edited = reload(removed, 7, [stored(MAIN, 'v9', 'const a = 3;')]);
+        expect(edited.files.find((file) => file.path === MAIN)?.text).toBe('const a = 3;');
+        expect(edited.pending).toBe(NOTHING_PENDING);
+    });
+
+    it('lets a template nothing stored give way to what the service holds', () => {
+        const reloaded = reload(initialWorkspace(opened()), 3, [stored(MAIN, 'v9', 'x;')]);
+        expect(reloaded.files.map((file) => file.path)).toEqual([MAIN]);
+        expect(reloaded.pending).toBe(NOTHING_PENDING);
+        expect(reloaded.seeded).toBe(false);
+    });
+
+    it('names a copy beside the file, past any copy already there', () => {
+        expect(conflictPath('src/main.ts', new Set())).toBe('src/main.conflict.ts');
+        expect(conflictPath('src/main.ts', new Set(['src/main.conflict.ts']))).toBe(
+            'src/main.conflict-2.ts',
+        );
+        expect(conflictPath('notes/README', new Set())).toBe('notes/README.conflict');
+        expect(conflictPath('a.b/file', new Set())).toBe('a.b/file.conflict');
     });
 });

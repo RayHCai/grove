@@ -11,6 +11,7 @@ import type { Root } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ConnectOptions } from '@platform/glue/client';
 import type { IRenderer } from '@platform/renderer';
+import { TransportError } from '@platform/transport';
 import { GamePlayer, ticketProtocol } from '../src/GamePlayer.js';
 import type { RefusalReason } from '../src/GamePlayer.js';
 
@@ -215,7 +216,7 @@ describe('the game surface', () => {
                 ready += 1;
             },
             connect: (async (opts: ConnectOptions) => {
-                opts.onState?.('live', undefined);
+                opts.onState?.('live', undefined, undefined);
                 return { close: () => undefined } as never;
             }) as never,
         });
@@ -224,7 +225,7 @@ describe('the game surface', () => {
     });
 
     it('keeps its session when a parent rerenders it with equal but new props', async () => {
-        const dial = fakeConnect((opts) => opts.onState?.('live', undefined));
+        const dial = fakeConnect((opts) => opts.onState?.('live', undefined, undefined));
         const renderer = fakeRenderer();
         const host = document.createElement('div');
         document.body.append(host);
@@ -314,7 +315,7 @@ describe('the game surface', () => {
             await mount({
                 onRefused: (why, text) => seen.push([why, text]),
                 connect: (async (opts: ConnectOptions) => {
-                    opts.onState?.('failed', failure as never);
+                    opts.onState?.('failed', failure as never, undefined);
                     return { close: () => undefined } as never;
                 }) as never,
             });
@@ -324,19 +325,72 @@ describe('the game surface', () => {
         }
     });
 
-    it('reports a dial that never connected as a link to start again, never as its cause', async () => {
+    it('says a session closed because the tab stopped rendering was a hidden tab', async () => {
         const seen: Array<[RefusalReason, string]> = [];
         await mount({
             onRefused: (why, text) => seen.push([why, text]),
+            connect: (async (opts: ConnectOptions) => {
+                opts.onState?.('disconnected', undefined, {
+                    kind: 'frames-stopped',
+                    idleSeconds: 16,
+                });
+                return { close: () => undefined } as never;
+            }) as never,
+        });
+
+        expect(seen).toEqual([['hidden', 'disconnected while the tab was hidden']]);
+    });
+
+    it('reports a dial that never connected as a link to start again, and hands over the cause', async () => {
+        const seen: unknown[][] = [];
+        const failed = new TransportError(
+            'connect-failed',
+            'The socket for wss://box.example/play errored before it opened.',
+        );
+        await mount({
+            onRefused: (...said) => seen.push(said),
             connect: (async () => {
-                throw new Error('The socket for wss://box.example/play errored before it opened.');
+                throw failed;
             }) as never,
         });
 
         // The browser cannot say whether the ticket was refused or the box never answered, and
-        // the cause names the box, which no player is shown.
+        // the cause names the box, which no player is shown but an error sink is.
         expect(seen).toEqual([
-            ['ticket', 'this link may have expired: start the game again from Grove'],
+            ['ticket', 'this link may have expired: start the game again from Grove', failed],
+        ]);
+    });
+
+    it('tells a socket that could not be built, or a device offline, from a spent ticket', async () => {
+        const unbuilt: unknown[][] = [];
+        await mount({
+            onRefused: (...said) => unbuilt.push(said),
+            connect: (async () => {
+                throw new TransportError('connect-failed', 'Could not create a socket', {
+                    cause: new SyntaxError('not a url'),
+                });
+            }) as never,
+        });
+        expect(unbuilt[0]?.slice(0, 2)).toEqual([
+            'unreachable',
+            'this game could not be reached: start it again from Grove',
+        ]);
+
+        const offline: unknown[][] = [];
+        const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+        try {
+            await mount({
+                onRefused: (...said) => offline.push(said),
+                connect: (async () => {
+                    throw new TransportError('connect-failed', 'errored before it opened');
+                }) as never,
+            });
+        } finally {
+            online.mockRestore();
+        }
+        expect(offline[0]?.slice(0, 2)).toEqual([
+            'unreachable',
+            'this device is offline: reconnect, then start the game again',
         ]);
     });
 

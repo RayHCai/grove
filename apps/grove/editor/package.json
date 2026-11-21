@@ -3,7 +3,7 @@
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "The game editor: opens a creator's newest game out of object storage, saves it as they type, and compiles and plays it here in the tab.",
+    "description": "The game editor: opens the creator's game the platform names out of object storage, saves it as they type, and compiles and plays it here in the tab.",
     "scripts": {
         "dev": "pnpm --filter @grove/ui build && vite",
         "build": "vite build",

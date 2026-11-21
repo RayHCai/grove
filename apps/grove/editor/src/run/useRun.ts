@@ -41,12 +41,7 @@ export interface Run {
     setFrame: (frame: HTMLIFrameElement | null) => void;
 }
 
-/**
- * Playing the game from here.
- *
- * Both kinds of game run in a sandboxed document with an origin of its own: a plain module graph,
- * and a world with the engine under it. Nothing a creator wrote is evaluated in this page.
- */
+/** Plays the game in an opaque-origin sandbox that refuses to start without one, never in this page. */
 export function useRun({
     files,
     project,

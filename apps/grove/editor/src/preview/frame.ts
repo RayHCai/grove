@@ -22,6 +22,10 @@ function describe(failure: unknown): string {
         : renderLine([failure]);
 }
 
+/** What a document opened anywhere but the editor's sandboxed stage says instead of running. */
+export const NOT_SANDBOXED =
+    'this preview runs only in the editor’s sandboxed stage, so it started nothing';
+
 /** Opens the document's end and starts the first run the editor hands it, and only that one. */
 export function openStage(
     start: (game: Game, stage: Stage) => Promise<void>,
@@ -37,6 +41,13 @@ export function openStage(
         (...values: unknown[]): void =>
             post({ type: 'line', level, text: renderLine(values) });
 
+    // Served from the editor's own origin, so only a sandbox without allow-same-origin makes it safe.
+    if (scope.origin !== 'null') {
+        post({ type: 'line', level: 'error', text: NOT_SANDBOXED });
+        post({ type: 'status', status: 'failed' });
+        return;
+    }
+
     let controls: { pause(): void; resume(): void } | undefined;
     let started = false;
     const stage: Stage = {
@@ -49,7 +60,7 @@ export function openStage(
     };
 
     scope.addEventListener('message', (event: MessageEvent<unknown>) => {
-        // The editor is this document's parent, and nothing else is: the run's own code included.
+        // Whoever frames this is its parent, which the opaque origin checked above makes harmless.
         if (event.source !== scope.parent) return;
         const message = toFrame(event.data, run);
         if (message?.type === 'pause') controls?.pause();

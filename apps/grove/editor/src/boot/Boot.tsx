@@ -4,7 +4,7 @@ import { ProjectFormatError } from '@platform/project';
 import { ApiError, isLapsedSession } from '../api/client';
 import type { Api } from '../api/client';
 import { EditorShell } from '../shell/EditorShell';
-import { openGame } from '../workspace/session';
+import { GAME_PARAM, openGame } from '../workspace/session';
 import type { OpenGame } from '../workspace/session';
 import { LoadingScreen } from './LoadingScreen';
 import type { Step } from './LoadingScreen';
@@ -128,8 +128,13 @@ export function Boot({ api, navigate, openTab, notify }: BootProps): React.JSX.E
     }
 
     async function open(): Promise<void> {
+        const named = new URL(window.location.href).searchParams.get(GAME_PARAM);
         try {
-            const opened = await openGame(api, (step) => setPhase({ at: 'loading', step }));
+            const opened = await openGame(
+                api,
+                (step) => setPhase({ at: 'loading', step }),
+                named === null || named === '' ? undefined : named,
+            );
             setPhase({ at: 'ready', opened });
         } catch (failure) {
             // A session that lapsed between the check and the first read is not a failure to

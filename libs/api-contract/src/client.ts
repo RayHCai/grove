@@ -61,16 +61,6 @@ export interface ApiBase {
     write<T>(path: string, method: string, body: unknown, shape: ParseableShape<T>): Promise<T>;
 }
 
-/** The one Vite define this package reaches for, cast rather than pulled in as a type dependency. */
-interface ViteEnv {
-    env?: { VITE_API_URL?: string };
-}
-
-/** Where the API is, which a build is told and a dev server defaults for. */
-export function apiBaseUrl(): string {
-    return (import.meta as unknown as ViteEnv).env?.VITE_API_URL ?? 'http://localhost:4000';
-}
-
 /** Where a browser still holding the cookie is handed the token its next write has to carry. */
 const SESSION_PATH = '/v1/auth/session';
 

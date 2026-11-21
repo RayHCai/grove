@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Splash, Tilestrip } from '@grove/ui';
+import { Button, Splash, Tilestrip } from '@grove/ui';
 import { SiteHeader } from './chrome/SiteHeader';
 import { ForgotPassword } from './pages/ForgotPassword';
 import { GamePage } from './pages/GamePage';
@@ -61,7 +61,7 @@ function pageFor(route: Route, session: Session): React.JSX.Element {
 export function Site(): React.JSX.Element {
     const route = useRoute();
     useRouteFocus(route);
-    const { session, openEditor } = useSession();
+    const { session, retry, openEditor } = useSession();
     // A tab that is already leaving must not be sent again: the crossing is a navigation, and a
     // test that hands in its own `navigate` does not actually leave.
     const crossing = useRef(false);
@@ -83,11 +83,21 @@ export function Site(): React.JSX.Element {
     useEffect(() => {
         if (!crossBack || crossing.current) return;
         crossing.current = true;
-        openEditor(returnTo);
+        openEditor({ returnTo });
     }, [crossBack, returnTo, openEditor]);
 
     function body(): React.JSX.Element {
         if (session.at === 'loading') return <Splash busy note="One moment…" />;
+        // Not a sign-in: nothing said this visitor is signed out, only that Grove did not answer.
+        if (session.at === 'unreachable' && needsSession(route)) {
+            return (
+                <Splash alert="Grove could not be reached, so this page cannot load yet.">
+                    <Button variant="primary" onClick={retry}>
+                        Try again
+                    </Button>
+                </Splash>
+            );
+        }
         if (crossBack) return <Splash busy note="Taking you back to the editor…" />;
         if (turnedAway || alreadyIn) return <Splash busy note="One moment…" />;
         return pageFor(route, session);

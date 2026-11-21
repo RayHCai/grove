@@ -9,6 +9,8 @@ interface ImportMetaEnv {
     readonly VITE_EDITOR_URL?: string;
     /** Where `@grove/player-app` is, which a game's Play button sends the join to. */
     readonly VITE_PLAYER_URL?: string;
+    /** A collector every client error is beaconed to besides the console; none sends nowhere. */
+    readonly VITE_ERROR_BEACON_URL?: string;
 }
 
 interface ImportMeta {

@@ -1,7 +1,7 @@
 // What a person sees between arriving here and playing, and what they are told when they will not.
 
 import { act } from 'react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { GameId, SessionId, encodeHandoff } from '@grove/api-contract';
 import type { PlayHandoff } from '@grove/api-contract';
 import type { GamePlayerProps } from '@grove/player';
@@ -216,6 +216,23 @@ describe('a join that does not happen', () => {
         expect(alert(host)).toMatch(/may have expired. Start the game again from Grove/u);
         expect(alert(host)).not.toContain('wss://');
         expect(alert(host)).not.toContain('fleet.grove.example');
+    });
+
+    it('hands the cause a player is never shown to the error sink', async () => {
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        try {
+            const { connect } = dial(async () => {
+                throw new Error('The socket for wss://box-7.fleet.grove.example errored.');
+            });
+            await render(`#${encodeHandoff(HANDOFF)}`, { connect });
+
+            expect(logged).toHaveBeenCalledWith(
+                '[grove:join:ticket] Error: The socket for wss://box-7.fleet.grove.example errored.',
+                expect.any(String),
+            );
+        } finally {
+            logged.mockRestore();
+        }
     });
 
     it('says a browser that could not start the game is the browser, not the link', async () => {

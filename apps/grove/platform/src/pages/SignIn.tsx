@@ -27,7 +27,7 @@ export function SignIn({ returnTo }: SignInProps): React.JSX.Element {
             }
             // Somebody the editor sent goes straight back to it, which reads the cookie this just set.
             if (returnTo === undefined) go({ at: 'landing' });
-            else openEditor(returnTo);
+            else openEditor({ returnTo });
             return undefined;
         }, 'Signing in did not go through. Try again.');
     }

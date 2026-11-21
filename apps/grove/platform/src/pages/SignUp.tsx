@@ -28,7 +28,7 @@ export function SignUp({ returnTo }: SignUpProps): React.JSX.Element {
         void action.run(async () => {
             await signUp(email, password, displayName);
             if (returnTo === undefined) go({ at: 'landing' });
-            else openEditor(returnTo);
+            else openEditor({ returnTo });
         }, 'That did not go through. Try again.');
     }
 

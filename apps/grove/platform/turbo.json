@@ -10,12 +10,13 @@
                 "src/**",
                 "tsconfig*.json",
                 "vite.config.ts",
+                "csp.plugin.ts",
                 "index.html",
                 "public/**"
             ]
         },
         "typecheck": {
-            "inputs": ["src/**", "tests/**", "tsconfig*.json", "*.config.ts"]
+            "inputs": ["src/**", "tests/**", "tsconfig*.json", "*.config.ts", "*.plugin.ts"]
         },
         "test": {
             "inputs": ["src/**", "tests/**", "vitest.config.ts", "tsconfig*.json"]

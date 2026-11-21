@@ -76,8 +76,13 @@ no data and no routing; an app composes these components inside a grid of its ow
   nothing else to show.
 - **What every app shares that is not drawn.** `messageOf()` turns a failed `@grove/api` call into
   the sentence a page shows, and `configuredUrl()` reads a `VITE_*` address: a default in a dev
-  server, and a thrown error in a production build that was never told one; `apiUrl()` is that for
-  `VITE_API_URL`. `leaveFor()` is the navigation every app's injectable `navigate` falls back to.
+  server, and a thrown error in a production build that was never told one; `apiUrl()` and
+  `platformUrl()` are that for `VITE_API_URL` and `VITE_PLATFORM_URL`. `leaveFor()` is the
+  navigation every app's injectable `navigate` falls back to. `reportError()` is the one sink a
+  client error goes to: the root `ErrorBoundary` calls it, `installErrorReporting()` hooks the
+  window's uncaught errors and unhandled rejections into it, and its transport is the console, plus
+  a `sendBeacon` of the JSON report when an app passes a collector's address. A report names the
+  page without its query or fragment, and a page beacons at most `MAX_REPORTS` (20).
 
 ## Using it
 

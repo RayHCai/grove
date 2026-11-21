@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, leaveFor } from '@grove/ui';
+import { Button, leaveFor, reportError } from '@grove/ui';
 import { DESIGN_STAGE, GamePlayer } from '@grove/player';
 import type { GameAuthority, GamePlayerProps, GameProject, RefusalReason } from '@grove/player';
 import { clearFragment, readHandoff } from './handoff';
@@ -85,7 +85,10 @@ export function App({
                 name="Player"
                 design={DESIGN_STAGE}
                 onReady={() => setPhase({ kind: 'playing' })}
-                onRefused={(reason) => setPhase({ kind: 'refused', message: textFor(reason) })}
+                onRefused={(reason, _message, cause) => {
+                    if (!DECIDED.has(reason)) reportError(cause, `join:${reason}`);
+                    setPhase({ kind: 'refused', message: textFor(reason) });
+                }}
                 {...(createRenderer === undefined ? {} : { createRenderer })}
                 {...(connect === undefined ? {} : { connect })}
             />
@@ -138,6 +141,9 @@ function refusalFor(handoff: Handoff): string {
     }
 }
 
+/** What a world decided, or a tab the player put away, rather than something that went wrong. */
+const DECIDED: ReadonlySet<RefusalReason> = new Set(['version', 'full', 'identity', 'hidden']);
+
 /** What a person is told: never a token, and never the session's own line, which can name a box. */
 function textFor(reason: RefusalReason): string {
     switch (reason) {
@@ -155,5 +161,7 @@ function textFor(reason: RefusalReason): string {
             return 'This browser could not start the game. Try another browser, or update this one.';
         case 'unreachable':
             return 'The game stopped answering. Start it again from Grove.';
+        case 'hidden':
+            return 'You were disconnected while this tab was in the background. Start the game again from Grove.';
     }
 }

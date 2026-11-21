@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { BlocksIcon } from '../src/icons/BlocksIcon.js';
 import { ChevronDownIcon } from '../src/icons/ChevronDownIcon.js';
 import { ChevronRightIcon } from '../src/icons/ChevronRightIcon.js';
 import { CloseIcon } from '../src/icons/CloseIcon.js';
-import { CodeIcon } from '../src/icons/CodeIcon.js';
 import { EyeIcon } from '../src/icons/EyeIcon.js';
 import { FileIcon } from '../src/icons/FileIcon.js';
 import { FilesIcon } from '../src/icons/FilesIcon.js';
@@ -39,8 +37,6 @@ const icons = [
     ['SunIcon', SunIcon],
     ['MoonIcon', MoonIcon],
     ['ChevronDownIcon', ChevronDownIcon],
-    ['CodeIcon', CodeIcon],
-    ['BlocksIcon', BlocksIcon],
     ['CloseIcon', CloseIcon],
     ['SendIcon', SendIcon],
     ['SettingsIcon', SettingsIcon],

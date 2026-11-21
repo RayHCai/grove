@@ -33,13 +33,26 @@ export function returnToEditor(raw: string | undefined): string | undefined {
     return asked.origin === editor.origin ? asked.toString() : undefined;
 }
 
+/** The query parameter the editor reads the game to open from; it names one, and grants nothing. */
+export const GAME_PARAM = 'game';
+
+/** Where a crossing to the editor lands: back where it sent somebody from, or on one game. */
+export interface EditorTarget {
+    gameId?: string | undefined;
+    returnTo?: string | undefined;
+}
+
 /**
- * The editor, and nothing else on the URL.
+ * The editor, and at most the game to open on the URL.
  *
  * Nothing of the session travels here. The API set the cookie on its own origin and the editor is a
  * subdomain of this same site, so the browser carries it across by itself; this is a destination,
  * not a credential, and there is nothing on it to leak into a history or a `Referer`.
  */
-export function editorLink(returnTo?: string | undefined): string {
-    return new URL(returnToEditor(returnTo) ?? '/', editorUrl()).toString();
+export function editorLink({ gameId, returnTo }: EditorTarget = {}): string {
+    const back = returnToEditor(returnTo);
+    if (back !== undefined) return back;
+    const url = new URL('/', editorUrl());
+    if (gameId !== undefined) url.searchParams.set(GAME_PARAM, gameId);
+    return url.toString();
 }

@@ -1,13 +1,8 @@
-import { configuredUrl } from '@grove/ui';
+import { platformUrl as configuredPlatform } from '@grove/ui';
 
 /** Where the platform is, so somebody with no session has somewhere to be sent. */
 export function platformUrl(): string {
-    return configuredUrl(
-        'VITE_PLATFORM_URL',
-        import.meta.env.VITE_PLATFORM_URL,
-        'http://localhost:5175',
-        import.meta.env.DEV,
-    );
+    return configuredPlatform(import.meta.env.VITE_PLATFORM_URL, import.meta.env.DEV);
 }
 
 /** The platform's profile, where the account is looked after and signed out of. */

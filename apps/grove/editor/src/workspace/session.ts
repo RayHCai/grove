@@ -19,6 +19,11 @@ import { bytesOf, draftFromBytes, isPending, isText, storedAsset } from './files
 import type { DraftFile, Pending } from './files';
 import { DEFAULT_TEMPLATE, seedFrom } from './templates';
 
+const encoder = new TextEncoder();
+
+/** The query parameter the platform names the game to open with, which a sign-in's way back keeps. */
+export const GAME_PARAM = 'game';
+
 /** The title a game gets when the editor made it rather than a creator naming one. */
 const FIRST_TITLE = 'Untitled game';
 
@@ -41,20 +46,25 @@ export interface OpenGame {
     seeded: boolean;
 }
 
-/**
- * The three steps behind the loading screen: who is signed in, which game, and what is in it.
- *
- * A game with nothing saved is seeded from a template **in memory** and left unsaved. Opening an
- * editor is not a reason to write to somebody's game, so the first save is the creator's.
- */
-export async function openGame(api: Api, report: (step: OpenStep) => void): Promise<OpenGame> {
+/** Opens the named game, else the newest; an empty one is seeded in memory, since opening writes nothing. */
+export async function openGame(
+    api: Api,
+    report: (step: OpenStep) => void,
+    wanted?: string | undefined,
+): Promise<OpenGame> {
     report('account');
     const account = await api.me();
 
     report('game');
     const owned = await api.games();
-    // The list is newest first, so the most recently made game is the one an editor opens on.
-    const game = owned[0] ?? (await api.createGame(FIRST_TITLE));
+    // The list is the account's own, so finding the id in it is the ownership check.
+    const game =
+        wanted === undefined
+            ? (owned[0] ?? (await api.createGame(FIRST_TITLE)))
+            : owned.find((each) => each.gameId === wanted);
+    if (game === undefined) {
+        throw new Error('that game is not one of yours, or it has been deleted');
+    }
 
     report('files');
     const workspace = await api.workspace(game.gameId);
@@ -106,12 +116,7 @@ async function projectOf(files: readonly DraftFile[], projectId: string): Promis
     );
 }
 
-/**
- * The saved set again, as drafts.
- *
- * What a conflict reloads through: a second editor won the revision, so what is on this screen is
- * measured against nothing the service holds and has to be replaced by what does.
- */
+/** The saved set again, as drafts: what a conflict reloads before this tab's work is rebased onto it. */
 export async function reloadGame(
     api: Api,
     game: GameId,
@@ -164,7 +169,7 @@ export function saveOf(
         if (!isText(draft.contentType)) continue;
         const text = draft.text ?? '';
         // The service refuses a whole save over one file this long, so it waits on its own.
-        if (text.length > MAX_SOURCE_BYTES) {
+        if (encoder.encode(text).byteLength > MAX_SOURCE_BYTES) {
             held.set(draft.path, `${draft.path} is too long to save until it is split up`);
             continue;
         }

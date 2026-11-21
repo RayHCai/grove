@@ -16,8 +16,8 @@ A creator signs in on the platform and clicks through to the editor. Nothing is 
 way: the API set the session cookie on **its own** origin, and the platform and this editor are two
 subdomains of one site, so the browser carries it here by itself. Reading it is one round trip,
 `GET /v1/auth/session`, because the cookie is `HttpOnly` and no script on this origin can touch it.
-Nothing a creator writes runs on this origin either (every run plays in a document with an origin of
-its own, below), so neither the token nor the authority it carries is in reach of their code.
+Nothing a creator writes runs on this origin either (every run plays in a document with an opaque
+origin, below), so neither the token nor the authority it carries is in reach of their code.
 
 Somebody the service does not recognise is sent to the platform: `VITE_PLATFORM_URL`
 (`http://localhost:5175` in a dev server) at `/sign-in?return=`, carrying this page's own address so
@@ -34,8 +34,10 @@ Behind one loading screen, `src/boot/Boot.tsx` answers three questions, because 
 leaves nothing worth rendering a workbench around:
 
 1. **Who is signed in.** The cookie, as above.
-2. **Which game.** The newest of `GET /v1/games`, or one made with `POST /v1/games` for a creator
-   who owns none.
+2. **Which game.** The one the platform named in `?game=`, found in `GET /v1/games`, which is the
+   ownership check: an id the account does not own is a message, never a game made in its place.
+   With none named, the newest, or one made with `POST /v1/games` for a creator who owns none. A
+   named id stays on this page's address, so a sign-in's way back reopens the same game.
 3. **What is in it.** `GET /v1/games/:gameId/workspace` names each path the game holds, and each
    source is fetched from `GET /v1/games/:gameId/files/<path>`; an asset's bytes stay in the bucket,
    since the saved set already says how big it is. A game with nothing saved is seeded from a
@@ -57,7 +59,7 @@ platform's sign-in again; anything else is a message and a Try again.
 | `src/workspace/files.ts`        | a draft, its media type, and what a save still owes the service          |
 | `src/workspace/session.ts`      | opening a game, what a save sends, and the reload a conflict forces      |
 | `src/workspace/autosave.ts`     | the three triggers that save without being asked                         |
-| `src/workspace/state.ts`        | the game as one reducer: drafts, saved set, revision, manifest, owed     |
+| `src/workspace/state.ts`        | the game as one reducer: drafts, saved set, revision, owed, the rebase   |
 | `src/workspace/useWorkspace.ts` | the save queue, the conflict reload and the lapsed session               |
 | `src/run/useRun.ts`             | Play, and the run it hands the stage's sandboxed document                |
 | `src/run/host.ts`               | that document, opened fresh per run, and this page's end of the channel  |
@@ -136,14 +138,19 @@ path, because the service refuses a save naming an asset that never landed. An a
 failed is **held back**: the text beside it commits anyway, the top bar names the file, and only a
 press of Save tries it again, so a save nobody asked for never re-sends its bytes. One that landed
 and whose save did not is not uploaded twice while its ticket lasts. A source too long for the
-service is held back the same way rather than refusing the save around it. An import the service
-would never take (a kind outside the asset media types, an asset over 32 MB, code over 1 MB) is
-refused inline by the explorer before it becomes a file.
+service (in the UTF-8 bytes it counts) is held back the same way rather than refusing the save around
+it. An import the service would never take (a kind outside the asset media types, an asset over
+32 MB, code over 1 MB) is refused inline by the explorer before it becomes a file.
 
 A save names the revision it started from, so a second editor that claimed it first is a `409`. The
-answer to that is to reload and say so, not to retry: there is no set here to merge into, and saving
-over it would be one creator silently overwriting the other. The reload replaces what the code
-editor's models hold as well as the drafts, unreported as typing, so the screen shows what won. A
+answer to that is to reload and **rebase**, not to retry over it: a path this tab owes whose stored
+version is still the one its draft was based on carries the draft again, and a delete of one nobody
+else touched stands. A path both changed keeps the service's text, and this tab's moves to a copy
+beside it (`main.ts` to `main.conflict.ts`, then `main.conflict-2.ts`) owed as a new file, so no save
+overwrites the other creator's work; both arriving at the same text is no conflict. The top bar says
+which file was copied where, and keeps saying it through the save that stores the copy, until the
+next keystroke. A seeded template nobody stored simply gives way. The rebased drafts replace what
+the code editor's models hold, unreported as typing, so the screen shows what the next save sends. A
 `409` on a revision this tab's own exit save moved is no conflict: once the exit saves still out
 have settled, the owed save simply goes again on top.
 
@@ -205,8 +212,10 @@ fresh document every time, since a module graph that has evaluated cannot be re-
 `src/run/host.ts` posts it the game once it says it is listening: the modules, and for a world the
 manifest, the creator's name and the bytes of every file of this origin the manifest names, which a
 document of its own cannot fetch. A message is believed only from that frame's window and for that
-run, because `event.origin` is "null" for every one. Stop drops the document, which is what ends a
-run.
+run, because `event.origin` is "null" for every one. The document is served from this origin, so
+the sandbox is all that keeps whatever frames it from running code as the editor: it starts nothing,
+and says so as a failed run, unless its own origin is that opaque "null". Stop drops the document,
+which is what ends a run.
 
 Each document loads one **classic** script holding that kind of run's whole runtime: a module script
 from an origin of its own would need a CORS grant from this one, and a classic one needs none, on a
@@ -243,6 +252,13 @@ since a static host is told nothing but the files: its own scripts and the theme
 Monaco's styles, `https:` for the API and for a presigned upload to a bucket the build is never told,
 and frames from itself. A dev server's page carries none, because its React refresh preamble is an
 inline script.
+
+Two directives a `<meta>` cannot carry are the static host's to send as headers, and
+`hostHeaders()` in `preview.plugin.ts` is the list, which a dev and a preview server already send:
+`Content-Security-Policy: frame-ancestors 'none'` with every editor page, and
+`Content-Security-Policy: sandbox allow-scripts; frame-ancestors 'self'` with every
+`preview-*.html`, so a run's document stays opaque even opened bare or framed without the attribute;
+and `X-Content-Type-Options: nosniff` with every response.
 
 A run shows in the play pane's stage, full screen from the button in its corner.
 
@@ -324,4 +340,7 @@ outlives the tab. It is dev-only: `vite build` never sees it, since the default 
 The two addresses above are a dev server's defaults only: a production build that was never told
 `VITE_API_URL` or `VITE_PLATFORM_URL` throws at load rather than dialling its visitor's own machine.
 Grove AI is drawn but answers nothing, so it shows only in a dev server or a build told
-`VITE_SHOW_UNFINISHED=true`. `.env.example` lists all three and `src/vite-env.d.ts` types them.
+`VITE_SHOW_UNFINISHED=true`. `VITE_ERROR_BEACON_URL` is an optional collector `@grove/ui`'s
+`reportError` beacons every client error to besides the console; `main.tsx` installs it before
+anything mounts, and the page's policy admits it only over `https:`. `.env.example` lists all four
+and `src/vite-env.d.ts` types them.

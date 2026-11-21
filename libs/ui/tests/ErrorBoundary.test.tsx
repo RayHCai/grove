@@ -1,6 +1,8 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorBoundary } from '../src/components/ErrorBoundary.js';
+import { installErrorReporting } from '../src/report.js';
+import type { ErrorReport } from '../src/report.js';
 import { mount } from '../src/testing.js';
 
 function Throws(): React.JSX.Element {
@@ -42,5 +44,22 @@ describe('ErrorBoundary', () => {
             host.querySelector('button')?.click();
         });
         expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports what broke to the installed sink, not only to its host', async () => {
+        const reports: ErrorReport[] = [];
+        const uninstall = installErrorReporting({ transport: (report) => reports.push(report) });
+        try {
+            await mount(
+                <ErrorBoundary>
+                    <Throws />
+                </ErrorBoundary>,
+            );
+        } finally {
+            uninstall();
+        }
+        expect(reports).toEqual([
+            expect.objectContaining({ source: 'render', message: 'Error: a render that broke' }),
+        ]);
     });
 });

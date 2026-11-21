@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { gateClocks } from '../src/preview/clock';
-import { openStage } from '../src/preview/frame';
+import { NOT_SANDBOXED, openStage } from '../src/preview/frame';
 import type { Stage } from '../src/preview/frame';
 import { LinkError } from '../src/preview/link';
 import { serve } from '../src/preview/stage';
@@ -19,12 +19,13 @@ const GAME: Game = {
     colors: { background: '#000', foreground: '#fff' },
 };
 
-/** A window the stage opens on: the editor as its parent, and the listeners it registered. */
-function scope() {
+/** A stage window under the editor, at the opaque origin a sandbox gives unless a case says otherwise. */
+function scope(origin = 'null') {
     const parent = { postMessage: vi.fn() };
     const listeners = new Map<string, (event: unknown) => void>();
     const window = {
         location: { href: `https://editor.grove.example/preview-plain.html?run=${RUN}` },
+        origin,
         parent,
         addEventListener: (type: string, listener: (event: unknown) => void) => {
             listeners.set(type, listener);
@@ -72,6 +73,24 @@ describe('the run’s document', () => {
         held.from({ type: 'run', game: GAME }, held.window);
         held.from({ type: 'run', game: GAME, run: 'another-run' });
         expect(start).not.toHaveBeenCalled();
+    });
+
+    it('starts nothing for a page that framed it without the sandbox, and says why', async () => {
+        // Framed by a stranger, or by anything that granted `allow-same-origin`: either way the
+        // document holds the editor's own origin, which no game may run under.
+        const held = scope('https://editor.grove.example');
+        const start = vi.fn(async () => undefined);
+        openStage(start, held.window);
+
+        held.from({ type: 'run', game: GAME });
+        await Promise.resolve();
+
+        expect(start).not.toHaveBeenCalled();
+        expect(held.listeners.has('message')).toBe(false);
+        expect(held.said()).toEqual([
+            { type: 'line', level: 'error', text: NOT_SANDBOXED, channel: CHANNEL, run: RUN },
+            { type: 'status', status: 'failed', channel: CHANNEL, run: RUN },
+        ]);
     });
 
     it('reaches the run’s clock with pause and resume once there is one', async () => {

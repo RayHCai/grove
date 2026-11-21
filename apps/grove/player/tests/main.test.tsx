@@ -31,4 +31,20 @@ describe('the entry point', () => {
     it('refuses to mount when the document carries no #root', async () => {
         await expect(import('../src/main')).rejects.toThrow('#root is missing from index.html');
     }, 30_000);
+
+    it('hands an unhandled rejection to the error sink, before anything has mounted', async () => {
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        try {
+            await expect(import('../src/main')).rejects.toThrow('#root is missing');
+            window.dispatchEvent(
+                Object.assign(new Event('unhandledrejection'), { reason: new Error('lost') }),
+            );
+            expect(logged).toHaveBeenCalledWith(
+                '[grove:rejection] Error: lost',
+                expect.any(String),
+            );
+        } finally {
+            logged.mockRestore();
+        }
+    }, 30_000);
 });

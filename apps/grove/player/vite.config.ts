@@ -22,6 +22,12 @@ function contentSecurityPolicy(hosts: readonly string[] | undefined): string {
     ].join('; ');
 }
 
+/** What a host sends with every response, since a `<meta>` policy cannot forbid framing. */
+export const HOST_HEADERS: Readonly<Record<string, string>> = {
+    'content-security-policy': "frame-ancestors 'none'",
+    'x-content-type-options': 'nosniff',
+};
+
 /** A meta tag rather than a header, since a static host is told nothing but the files. */
 function contentSecurity(): Plugin {
     let policy = '';
@@ -44,7 +50,9 @@ function contentSecurity(): Plugin {
 
 export default defineConfig({
     plugins: [react(), contentSecurity()],
+    preview: { headers: { ...HOST_HEADERS } },
     server: {
+        headers: { ...HOST_HEADERS },
         port: 5177,
         // Fail loudly rather than silently picking another port; an app on an unexpected port is
         // worse than one that did not start, because the others are configured to dial this one.

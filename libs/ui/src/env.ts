@@ -20,6 +20,11 @@ export function apiUrl(value: unknown, dev: boolean): string {
     return configuredUrl('VITE_API_URL', value, 'http://localhost:4000', dev);
 }
 
+/** Where `@grove/platform` is: what the build was told in `VITE_PLATFORM_URL`, or the local stack's in dev. */
+export function platformUrl(value: unknown, dev: boolean): string {
+    return configuredUrl('VITE_PLATFORM_URL', value, 'http://localhost:5175', dev);
+}
+
 /** Leaves this page for another address; what every app's injectable `navigate` falls back to. */
 export function leaveFor(url: string): void {
     globalThis.location.assign(url);

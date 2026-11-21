@@ -7,6 +7,8 @@ interface ImportMetaEnv {
     readonly VITE_API_URL?: string;
     /** Where the platform is, which signs somebody in and looks after their account. */
     readonly VITE_PLATFORM_URL?: string;
+    /** A collector every client error is beaconed to besides the console; none sends nowhere. */
+    readonly VITE_ERROR_BEACON_URL?: string;
 }
 
 interface ImportMeta {

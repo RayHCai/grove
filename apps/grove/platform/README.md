@@ -53,7 +53,7 @@ password.
 ## Crossing to the editor
 
 `VITE_EDITOR_URL` is where the editor is, and `src/editor/link.ts` is the only module that builds a
-link to it. Nothing of the session travels on that URL: the API set the cookie on its own origin and
+link to it. That URL names at most the game to open, as `?game=<gameId>`, and nothing of the session: the API set the cookie on its own origin and
 the editor reads the same one, so this is a destination rather than a credential, and there is
 nothing on it to leak into a history entry or a `Referer`.
 
@@ -67,10 +67,9 @@ parked on a games page they did not ask for: the editor will read the cookie the
 carrying, so there is nothing here for them to sign in to. That crossing happens once per tab, not
 once per render.
 
-**The editor opens a creator's newest game and nothing selects another**, so `/games` offers to open
-only the first card and says which game that is. A button on the rest would name one game and open a
-different one. `New game` makes one and then crosses, in that order, because making it is what makes
-it the newest.
+Every card on `/games` has **Open in editor**, which crosses naming that card's game; the editor
+checks the id against the account's own listing, so the link grants nothing. `New game` makes one
+and then crosses naming it. A crossing that names no game, the front page's, opens the newest.
 
 ## Crossing to a game
 
@@ -99,9 +98,15 @@ anywhere else `/` is the front door for everybody.
 `src/session/SessionProvider.tsx` holds who is signed in, read once on the first load and kept for
 every page after it. Two calls rather than one: `GET /v1/auth/session` is the route that answers a
 cookie naming nobody without it being a failure, and it hands back the CSRF token every write here
-has to carry, so it runs before the account is read and before any form can be submitted. An API
-nobody can reach is a visitor who is not signed in, which leaves the pages in front of the gate
-working.
+has to carry, so it runs before the account is read and before any form can be submitted. Only a
+refused cookie is a visitor who is not signed in. An API nobody reached said nothing either way, so
+the session is `unreachable`: it is reported through `@grove/ui`'s `reportError`, the pages in front
+of the gate still work, and one behind it says Grove could not be reached and offers Try again,
+which reads the session again, rather than sending anybody to sign in.
+
+A page that shows one read (`/games`, a game's page) goes through `src/session/useLoad.ts`: loading,
+then the value or the sentence it failed with and a Try again, a lapsed session handed to `lapsed`,
+and an answer that lands after the page moved on dropped.
 
 Every form and button that asks the service something goes through `src/session/useAction.ts`: busy
 while the request is out, then the sentence it was refused with, and a session the service stopped
@@ -157,6 +162,15 @@ drag that block down the page behind it. Two places invert to the plate pair rat
 page's own ink (a hovered nav link and a hovered link in the sign-in flow) because `--pg-ink` is
 the light parchment in dark, and a plate painted with it would be sun text on cream.
 
+A built page carries its Content-Security-Policy as a `<meta>`, from `csp.plugin.ts`, since a static
+host is told nothing but the files: scripts from this origin and any inline one by hash, the Google
+Fonts sheet and files, `data:` images, `connect-src` this origin and the API (and the error
+collector, when there is one), and no frames, objects or base. A dev server's page carries none,
+because its React refresh preamble is an inline script. Two headers are the host's to send with
+every response, which a dev and a preview server already do: `Content-Security-Policy:
+frame-ancestors 'none'`, since this is the origin a password is typed on and nothing may frame it,
+and `X-Content-Type-Options: nosniff`.
+
 `index.html` loads Press Start 2P and VT323, carries `class="pg-scanlines"` for the wash the kit
 paints over the viewport, and hard-codes `data-theme="dark"` on `<html>`. There is no toggle and no
 `ThemeProvider` here: the editor, which somebody reads code in all day, follows the system's
@@ -164,12 +178,13 @@ preference through one, and this app is a front door.
 
 ## The environment
 
-| Variable               | What                                                                |
-| ---------------------- | ------------------------------------------------------------------- |
-| `VITE_API_URL`         | Where `@grove/api` is; `http://localhost:4000` in dev               |
-| `VITE_EDITOR_URL`      | Where `@grove/editor` is; `http://localhost:5176` in dev            |
-| `VITE_PLAYER_URL`      | Where the player origin is; `http://localhost:5177` in dev          |
-| `VITE_SHOW_UNFINISHED` | `true` shows the made-up parts in a build; a dev server always does |
+| Variable                | What                                                                |
+| ----------------------- | ------------------------------------------------------------------- |
+| `VITE_API_URL`          | Where `@grove/api` is; `http://localhost:4000` in dev               |
+| `VITE_EDITOR_URL`       | Where `@grove/editor` is; `http://localhost:5176` in dev            |
+| `VITE_PLAYER_URL`       | Where the player origin is; `http://localhost:5177` in dev          |
+| `VITE_SHOW_UNFINISHED`  | `true` shows the made-up parts in a build; a dev server always does |
+| `VITE_ERROR_BEACON_URL` | A collector every client error is beaconed to besides the console   |
 
 The address defaults are a dev server's only: a production build that was never told one of them
 throws rather than sending somebody to their own machine. `.env.example` lists them and
