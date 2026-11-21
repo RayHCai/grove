@@ -55,9 +55,25 @@ flowchart LR
 
 ## Running it locally
 
-`compose.yaml` at the root is for development only; nothing deploys from it. It comes in three
-layers, because most work needs only the first. Copy `.env.example` to `.env` first: compose refuses
-to start without the secrets and keys in it.
+One command, with Docker running:
+
+```sh
+pnpm dev            # everything below, and safe to rerun: it only makes sure each piece is up
+pnpm dev --fleet    # and one box of the fleet, for a session end to end
+pnpm dev:down       # stop the containers pnpm dev left running
+```
+
+`pnpm dev` ([scripts/dev.mjs](scripts/dev.mjs)) creates each missing `.env` from its `.env.example`
+and adds keys an older `.env` lacks, starts Postgres, Redis and LocalStack and waits for them to be
+healthy, applies the api's migrations, starts `game-manager`, `server-manager` and
+`asset-upload-service` in compose (pointed at the api on the host), then runs `api`, `game-builder`
+and the three browser apps on the host with reload on edit. Ctrl-C stops the host processes; the
+containers stay up so the next run starts at once. `--no-native` skips the native images, which
+are the slow part of a first run, and `--no-docker` skips compose entirely.
+
+The layers underneath, for running pieces by hand: `compose.yaml` at the root is for development
+only; nothing deploys from it. Copy `.env.example` to `.env` first: compose refuses to start
+without the secrets and keys in it.
 
 ```sh
 docker compose up                    # Postgres, Redis and LocalStack

@@ -18,7 +18,8 @@ const children = [
     spawn(process.execPath, [tsc, '-p', 'tsconfig.json', '--watch', '--preserveWatchOutput'], {
         stdio: 'inherit',
     }),
-    spawn(process.execPath, ['--watch', entry], { stdio: 'inherit' }),
+    // The service's own `.env`, the same file its `db:*` scripts read; absent, the shell's env alone.
+    spawn(process.execPath, ['--env-file-if-exists=.env', '--watch', entry], { stdio: 'inherit' }),
 ];
 
 const stop = () => {

@@ -4,7 +4,9 @@
 #
 # Three layers, because most work needs only the first:
 #
-#   docker compose up                      the stores, for `pnpm dev` on the host
+#   pnpm dev                               the stores, the native services below, and the Node
+#                                          services and browser apps on the host: scripts/dev.mjs
+#   docker compose up                      the stores alone
 #   docker compose --profile app up        and the services, from the images that deploy
 #   docker compose --profile fleet up      and one box of the fleet, for a session end to end
 #
@@ -178,9 +180,12 @@ services:
         environment:
             ASSET_UPLOAD_SERVICE_BIND: 0.0.0.0:4005
             ASSET_SERVICE_SECRET: ${ASSET_SERVICE_SECRET:?copy .env.example to .env}
-            API_URL: http://api:4000
+            # `pnpm dev` runs the api on the host and points this at it; see scripts/dev.mjs.
+            API_URL: ${DEV_API_URL:-http://api:4000}
             REDIS_URL: redis://redis:6379
             UPLOAD_WORKER_NAME: asset-upload-local
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
         ports:
             - '127.0.0.1:4005:4005'
         depends_on:
@@ -218,7 +223,9 @@ services:
             FLEET_SECRET: ${FLEET_SECRET:?copy .env.example to .env}
             SERVER_MANAGER_SECRET: ${SERVER_MANAGER_SECRET:?copy .env.example to .env}
             STORE_SIGNING_KEY: ${STORE_SIGNING_KEY:?copy .env.example to .env}
-            API_URL: http://api:4000
+            API_URL: ${DEV_API_URL:-http://api:4000}
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
         ports:
             - '127.0.0.1:4003:4003'
 

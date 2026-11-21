@@ -9,7 +9,8 @@
     },
     "scripts": {
         "build": "turbo run build",
-        "dev": "turbo run dev",
+        "dev": "node scripts/dev.mjs",
+        "dev:down": "docker compose --profile fleet down",
         "test": "turbo run test",
         "typecheck": "turbo run typecheck",
         "lint": "oxlint --deny-warnings",
