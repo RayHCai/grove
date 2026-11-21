@@ -22,6 +22,8 @@ type Host struct {
 	// The name the box is reached by and the port its player proxy listens on, as it reported them.
 	PublicHost string
 	PlayerPort int
+	// How many sockets that proxy holds before it refuses one; zero is a box that did not say.
+	PlayerMaxConnections int
 	// Whether the box serves TLS, which picks every scheme a url to it is spelled with.
 	TLS bool
 	// The box's own word that a start could succeed there now.
@@ -44,6 +46,9 @@ type Host struct {
 	// Set by the box's own last beat. Silence is how this service finds a crash, so without this a
 	// deploy and a crash are the same event.
 	Leaving bool
+	// Whether the box's last beat presented the fleet secret rather than its own key, which marks an
+	// agent that predates control signing and so is still called under that secret.
+	SharedSecret bool
 	// Until when work this service dispatched there failed recently enough to route around it; a
 	// beat does not clear it, since a box that cannot start a world still beats.
 	SuspectedUntil time.Time
@@ -68,9 +73,23 @@ func (h Host) Liveness(now time.Time, staleAfter time.Duration) contract.HostLiv
 	}
 }
 
-// Placeable reports whether a new world may start here: healthy, and ready by its own account.
+// Placeable reports whether a new world may start here: healthy, ready by its own account, and with
+// a socket free for the player it is started for.
 func (h Host) Placeable(now time.Time, staleAfter time.Duration) bool {
-	return h.Ready && h.Liveness(now, staleAfter) == contract.HostHealthy
+	return h.Ready && h.Liveness(now, staleAfter) == contract.HostHealthy && !h.Crowded()
+}
+
+// Crowded reports whether the box's players already fill its proxy, which refuses the next at accept.
+// Read off the players each world last reported, so it trails a rush by one beat.
+func (h Host) Crowded() bool {
+	if h.PlayerMaxConnections <= 0 {
+		return false
+	}
+	players := 0
+	for _, inst := range h.Instances {
+		players += inst.Players
+	}
+	return players >= h.PlayerMaxConnections
 }
 
 // Joinable reports whether a player may still join a world already running here. Wider than

@@ -110,18 +110,19 @@ func newBeater(t *testing.T, url string, source Source) *Beater {
 	t.Helper()
 
 	return New(Options{
-		ServerManagerURL: url,
-		FleetSecret:      []byte("a-fleet-secret-of-at-least-32-chars"),
-		HostID:           hostID,
-		Region:           "us-east-1",
-		AgentPort:        agentPort,
-		PublicHost:       "box.fleet.grove.example",
-		PlayerPort:       443,
-		TLS:              true,
-		Interval:         time.Hour,
-		Source:           source,
-		Box:              fakeBox{cpu: 0.25, free: 3 << 30},
-		Log:              slog.New(slog.DiscardHandler),
+		ServerManagerURL:     url,
+		HostKey:              []byte("a-host-key-of-at-least-32-characters"),
+		HostID:               hostID,
+		Region:               "us-east-1",
+		AgentPort:            agentPort,
+		PublicHost:           "box.fleet.grove.example",
+		PlayerPort:           443,
+		PlayerMaxConnections: 512,
+		TLS:                  true,
+		Interval:             time.Hour,
+		Source:               source,
+		Box:                  fakeBox{cpu: 0.25, free: 3 << 30},
+		Log:                  slog.New(slog.DiscardHandler),
 	})
 }
 
@@ -184,7 +185,7 @@ func TestABeatCarriesTheBoxItself(t *testing.T) {
 	}
 
 	beat := <-beats
-	if beat.bearer != "Bearer a-fleet-secret-of-at-least-32-chars" {
+	if beat.bearer != "Bearer a-host-key-of-at-least-32-characters" {
 		t.Errorf("bearer: got %q", beat.bearer)
 	}
 	// The id Send reports is the one the receiver logs, or the two halves of a beat never join.
@@ -206,6 +207,10 @@ func TestABeatCarriesTheBoxItself(t *testing.T) {
 	// The router builds every url to this box from these, never from where the beat came from.
 	if beat.body.PublicHost != "box.fleet.grove.example" || beat.body.PlayerPort != 443 || !beat.body.TLS {
 		t.Errorf("addressing: got %q:%d tls %t", beat.body.PublicHost, beat.body.PlayerPort, beat.body.TLS)
+	}
+	// The proxy's cap, so the router stops sending joiners to a box that would refuse them at accept.
+	if beat.body.PlayerMaxConnections != 512 {
+		t.Errorf("playerMaxConnections: got %d, want 512", beat.body.PlayerMaxConnections)
 	}
 	if !beat.body.Ready {
 		t.Error("a box with nothing wrong with it reported itself unready")

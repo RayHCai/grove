@@ -59,6 +59,11 @@ func sessionID(r *http.Request) string {
 	return id
 }
 
+// world is the one session of one game a store bearer was minted for, which a rate limit is per.
+func world(r *http.Request) string {
+	return gameID(r) + "/" + sessionID(r)
+}
+
 // The words `verifySessionToken` reports on the TypeScript side, so both halves refuse alike.
 func refusal(err error) string {
 	switch {

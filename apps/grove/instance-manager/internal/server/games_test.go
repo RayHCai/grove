@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/bundles"
+	"github.com/RayHCai/grove/apps/grove/instance-manager/internal/supervisor"
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
@@ -88,7 +91,8 @@ func TestARedeployIsBehindTheFleetBearer(t *testing.T) {
 		header string
 	}{
 		{name: "no header"},
-		{name: "another fleet's secret", header: "Bearer " + strings.Repeat("x", len(fleetSecret))},
+		{name: "the fleet secret a box once shared", header: "Bearer " + strings.Repeat("x", 36)},
+		{name: "a push signed for another box", header: "Bearer " + signedFor(otherHostID, http.MethodPost, redeployPath(ours[0].GameID), "")},
 	}
 
 	for _, tc := range cases {
@@ -113,6 +117,38 @@ func TestARedeployIsBehindTheFleetBearer(t *testing.T) {
 				t.Errorf("%s: got %q, want starting", ours[0].InstanceID, state)
 			}
 		})
+	}
+}
+
+// countingBundles is the edge as a push reaches it: every fetch is counted, and each lands at once.
+type countingBundles struct{ fetched chan contract.BundleSet }
+
+func (b countingBundles) Fetch(_ context.Context, set contract.BundleSet) (bundles.Paths, error) {
+	b.fetched <- set
+	return bundles.Paths{Bundle: "/srv/b.js", SimConfig: "/srv/b.json"}, nil
+}
+
+// A push carries its code, which the box fetches at once so the first world of it here starts warm.
+func TestARedeployFetchesThePushedCode(t *testing.T) {
+	edge := countingBundles{fetched: make(chan contract.BundleSet, 1)}
+	handler := newTestServiceWith(supervisor.Options{MaxInstances: 2, Bundles: edge}, nil)
+
+	body := fmt.Sprintf(`{"revision":%d,"bundles":%s}`, testRevision+1, bundlesJSON())
+	if res := call(handler, http.MethodPost, redeployPath(unheldGame), body); res.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", res.Code, res.Body.String())
+	}
+	select {
+	case set := <-edge.fetched:
+		if set.Server.Hash != serverHash || set.SimConfig.Hash != simConfigHash {
+			t.Errorf("fetched: got %+v, want the pushed set", set)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the pushed code was never fetched")
+	}
+
+	bad := fmt.Sprintf(`{"revision":%d,"bundles":{"server":{}}}`, testRevision+1)
+	if res := call(handler, http.MethodPost, redeployPath(unheldGame), bad); res.Code != http.StatusBadRequest {
+		t.Errorf("a push naming no code it could fetch: got %d, want 400", res.Code)
 	}
 }
 

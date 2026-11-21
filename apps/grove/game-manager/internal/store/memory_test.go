@@ -55,8 +55,8 @@ func TestAGameHoldsOnlyAsManyKeysAsItMay(t *testing.T) {
 
 func TestAGameHoldsOnlyAsManyBytesAsItMay(t *testing.T) {
 	memory := NewMemory()
-	// A game's whole footprint, so what follows is one byte past the budget however small it is.
-	write(t, memory, gameA, "held", `"`+strings.Repeat("a", maxGameBytes-2)+`"`)
+	// A game's whole footprint, key and all, so what follows is past the budget however small it is.
+	write(t, memory, gameA, "held", `"`+strings.Repeat("a", maxGameBytes-2-len("held"))+`"`)
 
 	if _, err := memory.Write(context.Background(), gameA, "one-more", value(`1`)); !errors.Is(err, ErrGameFull) {
 		t.Fatalf("err: got %v, want %v", err, ErrGameFull)
@@ -64,7 +64,7 @@ func TestAGameHoldsOnlyAsManyBytesAsItMay(t *testing.T) {
 
 	// A key the game already holds is a swap rather than a fresh footprint, so a game at the bound
 	// can still rewrite one smaller and spend the room that gave back.
-	write(t, memory, gameA, "held", `"`+strings.Repeat("a", maxGameBytes-3)+`"`)
+	write(t, memory, gameA, "held", `"`+strings.Repeat("a", maxGameBytes-2-len("held")-len("after-the-swap")-1)+`"`)
 	write(t, memory, gameA, "after-the-swap", `1`)
 
 	// Releasing the row releases the bytes it held, which is what makes the bound survivable.
@@ -91,10 +91,20 @@ func TestDeleteLeavesAKeyNeverWritten(t *testing.T) {
 		t.Fatalf("second delete: got %v, want %v", err, ErrNotFound)
 	}
 
-	// A released key is at revision zero again, so the game's next write to it is a first write.
-	revision := write(t, memory, gameA, "score", `{"points":3}`)
-	if revision != 1 {
-		t.Fatalf("revision: got %d, want 1", revision)
+	// A released key is absent, so `ifRevision: 0` is again the first write of it, and it lands past
+	// the revision it held: a compare-and-set read before the release must never match the new row.
+	fresh := int64(0)
+	revision, err := memory.Write(context.Background(), gameA, "score", contract.StateWrite{
+		Value: json.RawMessage(`{"points":3}`), IfRevision: &fresh,
+	})
+	if err != nil || revision <= 1 {
+		t.Fatalf("the write after the release: got revision %d (%v), want past the 1 it held", revision, err)
+	}
+	stale := int64(1)
+	if _, err := memory.Write(context.Background(), gameA, "score", contract.StateWrite{
+		Value: json.RawMessage(`{"points":4}`), IfRevision: &stale,
+	}); !errors.Is(err, ErrStale) {
+		t.Fatalf("a compare-and-set from before the release: got %v, want %v", err, ErrStale)
 	}
 
 	// A delete reaches a row only through the game that owns it.
@@ -104,6 +114,23 @@ func TestDeleteLeavesAKeyNeverWritten(t *testing.T) {
 	}
 	if got := string(held.Value); got != `{"points":2}` {
 		t.Fatalf("neighbour value: got %s, want the row the delete never named", got)
+	}
+}
+
+// Every game shares the process's memory, so the whole store is bounded, keys counted with values.
+func TestTheStoreHoldsOnlyAsManyBytesAsItMay(t *testing.T) {
+	memory := newMemory(64)
+	write(t, memory, gameA, "a", `"`+strings.Repeat("x", 40)+`"`)
+
+	// Inside its own game's bound, and past the store's only because of the key it names.
+	if _, err := memory.Write(context.Background(), gameB, strings.Repeat("k", 22), value(`1`)); !errors.Is(err, ErrStoreFull) {
+		t.Fatalf("err: got %v, want %v", err, ErrStoreFull)
+	}
+	if err := memory.Delete(context.Background(), gameA, "a"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := memory.Write(context.Background(), gameB, strings.Repeat("k", 22), value(`1`)); err != nil {
+		t.Fatalf("after the release: %v", err)
 	}
 }
 

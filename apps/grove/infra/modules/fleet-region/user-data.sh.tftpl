@@ -69,8 +69,10 @@ aws route53 change-resource-record-sets --hosted-zone-id '${fleet_zone_id}' --ch
     "{\"Changes\":[{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"$public_host\",\"Type\":\"A\",\"TTL\":60,\"ResourceRecords\":[{\"Value\":\"$public_ip\"}]}}]}" \
     >/dev/null
 
-# 0600 and root's, because the file holds the fleet secret: systemd reads it before dropping to the
-# agent's user, and a game process, under another uid, can reach it from nowhere.
+# 0600 and root's, because the file holds this box's heartbeat key: systemd reads it before dropping
+# to the agent's user, and a game process, under another uid, can reach it from nowhere.
+# Derived here as root and read on stdin, so the fleet secret never reaches the agent or a command line.
+host_key=$(param FLEET_SECRET | python3 -c 'import hashlib, hmac, sys; print(hmac.new(sys.stdin.buffer.read().strip(), sys.argv[1].encode(), hashlib.sha256).hexdigest())' "$host_id")
 umask 077
 staged=$(mktemp /etc/grove/instance-manager.env.XXXXXX)
 cat > "$staged" <<ENV
@@ -95,7 +97,8 @@ GAME_GID=$(id -g grove-game)
 CGROUP_ROOT=/sys/fs/cgroup/system.slice/grove-instance-manager.service
 CHILD_MEMORY_MAX_BYTES=${child_memory_max_bytes}
 CHILD_PIDS_MAX=${child_pids_max}
-FLEET_SECRET=$(param FLEET_SECRET)
+FLEET_HOST_KEY=$host_key
+FLEET_CONTROL_PUBLIC_KEYS=$(param FLEET_CONTROL_PUBLIC_KEYS)
 TICKET_PUBLIC_KEYS=$(param TICKET_PUBLIC_KEYS)
 ENV
 mv "$staged" /etc/grove/instance-manager.env

@@ -7,7 +7,7 @@ import {
     REQUEST_ID_HEADER,
 } from '@grove/api-contract';
 import type { PlayableVersion } from '@grove/api-contract';
-import { httpFleet, unattachedFleet } from '../src/fleet.js';
+import { FleetUnavailable, httpFleet, unattachedFleet } from '../src/fleet.js';
 import { CREATOR, GAME_ID, SERVER_MANAGER_SECRET, SESSION_ID, testEnv } from './fixtures.js';
 
 const PLAYER = CREATOR;
@@ -135,10 +135,22 @@ describe('the fleet seam over http', () => {
     });
 
     it('refuses to read a broken router as a full one', async () => {
-        stubFetch(json({ code: 'internal', message: 'internal error' }, 503));
-        await expect(httpFleet(env).place(GAME_ID, PLAYER, VERSION, REQUEST_ID)).rejects.toThrow(
-            /503/u,
+        stubFetch(json({ code: 'internal', message: 'internal error' }, 500));
+        const placing = httpFleet(env).place(GAME_ID, PLAYER, VERSION, REQUEST_ID);
+        await expect(placing).rejects.toThrow(/500/u);
+        await expect(placing).rejects.not.toBeInstanceOf(FleetUnavailable);
+    });
+
+    it('reads a router that ran out of time as a retry, never as a full fleet', async () => {
+        stubFetch(
+            new Response(JSON.stringify({ code: 'internal', message: 'internal error' }), {
+                status: 503,
+                headers: { 'content-type': 'application/json', 'retry-after': '1' },
+            }),
         );
+        await expect(
+            httpFleet(env).place(GAME_ID, PLAYER, VERSION, REQUEST_ID),
+        ).rejects.toMatchObject({ name: 'FleetUnavailable', statusCode: 503 });
     });
 });
 

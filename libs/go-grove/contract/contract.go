@@ -16,11 +16,8 @@ import (
 
 // The bounds the zod schemas carry, so a Go handler refuses exactly what a Fastify one refuses.
 const (
-	StateKeyMaxLen          = 256
-	LeaderboardNameMaxLen   = 64
-	LeaderboardLimitDefault = 25
-	LeaderboardLimitMax     = 100
-	RegionMaxLen            = 32
+	StateKeyMaxLen = 256
+	RegionMaxLen   = 32
 	// Wide enough for a uuid, a 32-hex trace id or a w3c traceparent, and narrow enough that a
 	// caller cannot spend a megabyte of every log line on a header nobody bounded.
 	RequestIDMaxLen = 64
@@ -149,37 +146,6 @@ type StateWrite struct {
 	// A pointer because zero is a real revision: `omitempty` on a bare int would silently turn the
 	// first compare-and-set of a key into a blind write.
 	IfRevision *int64 `json:"ifRevision,omitempty"`
-}
-
-type LeaderboardQuery struct {
-	Board  string `json:"board"`
-	Limit  int    `json:"limit"`
-	Cursor string `json:"cursor,omitempty"`
-}
-
-type LeaderboardEntry struct {
-	PlayerID    string  `json:"playerId"`
-	DisplayName string  `json:"displayName"`
-	Score       float64 `json:"score"`
-	Rank        int     `json:"rank"`
-}
-
-// LeaderboardWrite is one player's standing, as a game process submits it.
-//
-// No rank: a rank is a position in a board rather than a property of a player, so it is assigned
-// when a page is built and a writer that sent one would be sending a guess.
-type LeaderboardWrite struct {
-	Board       string  `json:"board"`
-	PlayerID    string  `json:"playerId"`
-	DisplayName string  `json:"displayName"`
-	Score       float64 `json:"score"`
-}
-
-type LeaderboardPage struct {
-	Board   string             `json:"board"`
-	Entries []LeaderboardEntry `json:"entries"`
-	// Null rather than absent at the end of a board, so a caller loops on one condition.
-	NextCursor *string `json:"nextCursor"`
 }
 
 // BundleSide names which half of a game a bundle is, since both are built from one source.
@@ -347,6 +313,8 @@ type HostHeartbeat struct {
 	PublicHost string `json:"publicHost,omitempty"`
 	// Where the player proxy listens, which is the one port a browser reaches on this box.
 	PlayerPort int `json:"playerPort"`
+	// How many sockets that proxy holds at once, past which it refuses a player at accept.
+	PlayerMaxConnections int `json:"playerMaxConnections,omitempty"`
 	// Whether both listeners serve TLS, which picks wss/https over ws/http for every url to this box.
 	TLS bool `json:"tls"`
 	// False while the box cannot start a world, so the router stops choosing it before a start fails.
@@ -439,6 +407,8 @@ type DeploymentRequest struct {
 // services only. Zero revision drains every world of the game.
 type RedeployRequest struct {
 	Revision int `json:"revision"`
+	// The pushed version's code, which the box fetches at once so its first world there starts warm.
+	Bundles *BundleSet `json:"bundles,omitempty"`
 }
 
 // HostDeploymentStatus is what became of one box's worlds.

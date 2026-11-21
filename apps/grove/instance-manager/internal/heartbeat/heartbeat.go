@@ -38,15 +38,18 @@ type Source interface {
 // Options is everything one Beater needs.
 type Options struct {
 	ServerManagerURL string
-	FleetSecret      []byte
-	HostID           string
-	Region           string
+	// This box's own bearer, which names it and no other box.
+	HostKey []byte
+	HostID  string
+	Region  string
 	// Where this agent listens, so the router reaches this box without a port compiled into it.
 	AgentPort int
 	// The name and port players dial, and whether both listeners speak TLS.
 	PublicHost string
 	PlayerPort int
-	TLS        bool
+	// The proxy's socket cap, so the router stops sending joiners to a box that would refuse them.
+	PlayerMaxConnections int
+	TLS                  bool
 	// Whether a start could succeed now; nil is a box with nothing to check.
 	Ready    func(context.Context) error
 	Interval time.Duration
@@ -91,13 +94,14 @@ func (b *Beater) Body(now time.Time) contract.HostHeartbeat {
 	cpu, memory := b.opts.Box.Sample()
 
 	return contract.HostHeartbeat{
-		HostID:     b.opts.HostID,
-		Region:     b.opts.Region,
-		AgentPort:  b.opts.AgentPort,
-		PublicHost: b.opts.PublicHost,
-		PlayerPort: b.opts.PlayerPort,
-		TLS:        b.opts.TLS,
-		Ready:      b.ready(),
+		HostID:               b.opts.HostID,
+		Region:               b.opts.Region,
+		AgentPort:            b.opts.AgentPort,
+		PublicHost:           b.opts.PublicHost,
+		PlayerPort:           b.opts.PlayerPort,
+		PlayerMaxConnections: b.opts.PlayerMaxConnections,
+		TLS:                  b.opts.TLS,
+		Ready:                b.ready(),
 		Capacity: contract.HostCapacity{
 			RunningInstances: b.opts.Source.Running(),
 			MaxInstances:     b.opts.Source.Max(),
@@ -139,7 +143,7 @@ func (b *Beater) Farewell(ctx context.Context) (string, error) {
 }
 
 func (b *Beater) post(ctx context.Context, beat contract.HostHeartbeat) (string, error) {
-	fleet := httpx.FleetClient{Client: b.opts.Client, Secret: b.opts.FleetSecret}
+	fleet := httpx.FleetClient{Client: b.opts.Client, Secret: b.opts.HostKey}
 	requestID, err := fleet.PostJSON(ctx, b.url, beat, nil, maxAnswerBytes)
 	if err != nil {
 		return requestID, fmt.Errorf("post heartbeat: %w", err)

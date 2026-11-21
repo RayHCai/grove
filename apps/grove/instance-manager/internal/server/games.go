@@ -12,10 +12,11 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
 
-// redeployGame drains the worlds of one game not on the pushed revision and answers what it marked.
+// redeployGame drains the worlds of one game not on the pushed revision, answers what it marked, and
+// fetches the pushed code into the cache so the first world of it here starts warm.
 //
-// The body names only the revision: what a box runs is decided at start, from the refs its start
-// carries, and a bundle sent here would be state this agent has nowhere to keep.
+// The bundles are fetched and never kept as state: what a box runs is still decided at start, from
+// the refs its start carries, and the cache is content-addressed so a set fetched early is the same file.
 func (s *service) redeployGame(w http.ResponseWriter, r *http.Request) {
 	gameID := r.PathValue("gameId")
 	if !contract.ValidUUID(gameID) {
@@ -33,6 +34,13 @@ func (s *service) redeployGame(w http.ResponseWriter, r *http.Request) {
 	if len(raw) > 0 && (json.Unmarshal(raw, &push) != nil || push.Revision < 0) {
 		httpx.BadRequest(w, "body must be {\"revision\": a non-negative integer}")
 		return
+	}
+	if push.Bundles != nil {
+		if problem := push.Bundles.Problem(); problem != "" {
+			httpx.BadRequest(w, problem)
+			return
+		}
+		s.instances.Prefetch(*push.Bundles)
 	}
 
 	marked := s.instances.Redeploy(gameID, push.Revision, time.Now())

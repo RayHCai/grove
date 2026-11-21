@@ -18,6 +18,9 @@ var (
 	ErrBusy = errors.New("the join line is full")
 	// ErrNoCapacity is the fleet's own answer, and the only one a player is shown as a full game.
 	ErrNoCapacity = errors.New("no capacity")
+	// ErrUnavailable is a join the fleet did not answer in time, such as a cold box still fetching a
+	// version's code, which the same join retried a moment later is likely to land.
+	ErrUnavailable = errors.New("the fleet did not answer in time")
 )
 
 // Decision is what the worker concluded about one join.
@@ -25,8 +28,9 @@ type Decision struct {
 	// The answer, when Finish is nil.
 	Placement contract.Placement
 	Placed    bool
-	// Finish completes a decision that waits on a box, inside the joiner's own deadline.
-	Finish func(ctx context.Context) (contract.Placement, bool)
+	// Finish completes a decision that waits on a box, inside the joiner's own deadline, answering
+	// ErrNoCapacity or ErrUnavailable when it lands nowhere.
+	Finish func(ctx context.Context) (contract.Placement, error)
 	// Start says Finish calls a box, which the pool bounds; waiting on another join's start does not.
 	Start bool
 }
@@ -77,7 +81,7 @@ type job struct {
 
 type answer struct {
 	placement contract.Placement
-	placed    bool
+	err       error
 }
 
 type task struct {
@@ -118,14 +122,10 @@ func (l *Line) Join(ctx context.Context, req contract.PlacementRequest) (contrac
 
 	select {
 	case a := <-j.answers:
-		if !a.placed {
-			return contract.Placement{}, ErrNoCapacity
-		}
-		return a.placement, nil
+		return a.placement, a.err
 	case <-ctx.Done():
-		// A join the line could not reach in time is a game a player cannot get into, and a full
-		// fleet is the only shape @grove/api has for that.
-		return contract.Placement{}, ErrNoCapacity
+		// The clock ran out rather than the fleet, which a full game would misstate.
+		return contract.Placement{}, ErrUnavailable
 	}
 }
 
@@ -171,10 +171,18 @@ func (l *Line) decide(ctx context.Context, j *job) {
 	cancel()
 
 	switch {
+	case d.Finish == nil && d.Placed:
+		l.settle(j, answer{placement: d.Placement})
 	case d.Finish == nil:
-		l.settle(j, answer{placement: d.Placement, placed: d.Placed})
+		l.settle(j, answer{err: ErrNoCapacity})
 	case d.Start:
-		l.starts <- task{job: j, decision: d}
+		t := task{job: j, decision: d}
+		select {
+		case l.starts <- t:
+		case <-ctx.Done():
+			// Finished on the ended context rather than dropped, so the start it reserved is released.
+			l.finish(ctx, t)
+		}
 	default:
 		go l.finish(ctx, task{job: j, decision: d})
 	}
@@ -186,8 +194,8 @@ func (l *Line) finish(ctx context.Context, t task) {
 	ctx, cancel := context.WithDeadline(ctx, t.job.deadline)
 	defer cancel()
 
-	placement, placed := t.decision.Finish(ctx)
-	l.settle(t.job, answer{placement: placement, placed: placed})
+	placement, err := t.decision.Finish(ctx)
+	l.settle(t.job, answer{placement: placement, err: err})
 }
 
 func (l *Line) isGone(j *job) bool {

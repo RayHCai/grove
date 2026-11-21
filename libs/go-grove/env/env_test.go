@@ -324,3 +324,28 @@ func TestRefuseJoinsTheReport(t *testing.T) {
 		}
 	}
 }
+
+// Every fleet call carries a bearer, so production refuses a cleartext address and nothing else does.
+func TestSecureURLRefusesCleartextInProductionOnly(t *testing.T) {
+	cases := []struct {
+		name    string
+		vars    map[string]string
+		refused bool
+	}{
+		{"https in production", map[string]string{"GROVE_ENV": "production", "U": "https://x.test", "O": "https://y.test"}, false},
+		{"http in production", map[string]string{"GROVE_ENV": "production", "U": "http://x.test", "O": "https://y.test"}, true},
+		{"an optional http in production", map[string]string{"GROVE_ENV": "production", "U": "https://x.test", "O": "http://y.test"}, true},
+		{"an optional one unset in production", map[string]string{"GROVE_ENV": "production", "U": "https://x.test"}, false},
+		{"http in development", map[string]string{"U": "http://x.test", "O": "http://y.test"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := FromMap(tc.vars)
+			r.SecureURL("U")
+			r.OptionalSecureURL("O")
+			if err := r.Err(); (err != nil) != tc.refused {
+				t.Fatalf("got %v, want refused %t", err, tc.refused)
+			}
+		})
+	}
+}

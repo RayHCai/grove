@@ -15,6 +15,10 @@ import (
 // at the default, which is longer than any reboot and short enough that the map stops growing.
 const RetainWindows = 120
 
+// beatsToSettle is how many beats after Started one must be before its silence about a session is
+// the box having lost it rather than a snapshot taken before the spawn.
+const beatsToSettle = 2
+
 // Registry is every box that has beaten in, less the ones gone longer than RetainWindows.
 //
 // A stale host is kept rather than dropped: a box that comes back from a network partition should
@@ -51,6 +55,9 @@ type reservation struct {
 	reported bool
 	// Set until Started or Release: while Agent.Start runs, a beat not naming the session is early.
 	starting bool
+	// Beats from the box since Started. The first may have been built before the spawn, but a box
+	// beats one at a time, so the second was built after the first was answered, after Started.
+	beatsSinceStarted int
 }
 
 // Placement is the box one join landed on and the ids it carries, before an Ingress names a URL.
@@ -86,28 +93,39 @@ func NewRegistry(staleAfter time.Duration) *Registry {
 	}
 }
 
-// Beat records what one box reported, from the address it reported over.
+// Beat records what one box reported, from the address it reported over, under its own key.
 func (reg *Registry) Beat(hb contract.HostHeartbeat, addr string, at time.Time) {
+	reg.beat(hb, addr, at, false)
+}
+
+// BeatShared is Beat for a box that presented the fleet secret itself, which is called the same way.
+func (reg *Registry) BeatShared(hb contract.HostHeartbeat, addr string, at time.Time) {
+	reg.beat(hb, addr, at, true)
+}
+
+func (reg *Registry) beat(hb contract.HostHeartbeat, addr string, at time.Time, shared bool) {
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
 
 	previous, known := reg.hosts[hb.HostID]
 
 	h := Host{
-		ID:         hb.HostID,
-		Region:     hb.Region,
-		AgentPort:  hb.AgentPort,
-		PublicHost: hb.PublicHost,
-		PlayerPort: hb.PlayerPort,
-		TLS:        hb.TLS,
-		Ready:      hb.Ready,
-		Capacity:   hb.Capacity,
+		ID:                   hb.HostID,
+		Region:               hb.Region,
+		AgentPort:            hb.AgentPort,
+		PublicHost:           hb.PublicHost,
+		PlayerPort:           hb.PlayerPort,
+		PlayerMaxConnections: hb.PlayerMaxConnections,
+		TLS:                  hb.TLS,
+		Ready:                hb.Ready,
+		Capacity:             hb.Capacity,
 		// Cloned so the decoded body a handler is about to drop cannot alias registry state.
-		Instances:   slices.Clone(hb.Instances),
-		Addr:        addr,
-		LastSeenAt:  at,
-		Incarnation: hb.Incarnation,
-		Leaving:     hb.Leaving,
+		Instances:    slices.Clone(hb.Instances),
+		Addr:         addr,
+		LastSeenAt:   at,
+		Incarnation:  hb.Incarnation,
+		Leaving:      hb.Leaving,
+		SharedSecret: shared,
 		// Kept across beats, since a box whose starts fail still beats; a new incarnation drops it.
 		SuspectedUntil: previous.SuspectedUntil,
 		Reported:       previous.Reported,
@@ -154,11 +172,16 @@ func (reg *Registry) settle(hb contract.HostHeartbeat) {
 		if res.hostID != hb.HostID {
 			continue
 		}
+		if !res.starting {
+			res.beatsSinceStarted++
+		}
 		port, taken := portOf(hb.Instances, res.sessionID)
 		if !taken {
-			if !res.starting {
+			if !res.starting && res.beatsSinceStarted >= beatsToSettle {
 				delete(reg.pending, key)
+				continue
 			}
+			reg.pending[key] = res
 			continue
 		}
 		// Kept rather than dropped, so two players joining a game the box is still starting are
@@ -280,7 +303,9 @@ func (reg *Registry) serving(key world, region string, now time.Time) (Placement
 	found := false
 
 	for _, h := range reg.hosts {
-		if !h.Joinable(now, reg.staleAfter) {
+		// A world on a box whose proxy is full is one the joiner cannot reach, so it is passed over
+		// and the joiner placed as if nothing ran the game, which is a second world beside the first.
+		if !h.Joinable(now, reg.staleAfter) || h.Crowded() {
 			continue
 		}
 		if region != "" && h.Region != region {
@@ -313,7 +338,7 @@ func (reg *Registry) held(key world, region string, now time.Time) (Placement, b
 		return Placement{}, false
 	}
 	h, known := reg.hosts[res.hostID]
-	if !known || !h.Joinable(now, reg.staleAfter) {
+	if !known || !h.Joinable(now, reg.staleAfter) || h.Crowded() {
 		return Placement{}, false
 	}
 	// The same hard region filter a running session is joined under, so a caller that named one is

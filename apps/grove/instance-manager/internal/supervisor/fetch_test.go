@@ -90,3 +90,44 @@ func TestAColdFetchOutlivesTheStartThatAskedForIt(t *testing.T) {
 		t.Errorf("processes: got %d, want only the start that waited", launcher.count())
 	}
 }
+
+// A push fetches the pushed version's code at once, and the start that follows shares that download
+// rather than beginning its own inside a join's deadline.
+func TestAPrefetchIsTheDownloadTheNextStartWaitsOn(t *testing.T) {
+	slow := &slowBundles{release: make(chan struct{})}
+	launcher := newFakeLauncher()
+	opts := testOptions(4)
+	opts.Launcher = launcher
+	opts.Prober = fakeProber{launcher: launcher}
+	opts.Bundles = slow
+	registry := New(opts)
+
+	registry.Prefetch(request(0).Bundles)
+	registry.Prefetch(request(1).Bundles)
+	waitFor(t, "the prefetch to begin", func() bool {
+		fetches, _ := slow.count()
+		return fetches == 1
+	})
+
+	started := make(chan error, 1)
+	go func() {
+		_, err := registry.Start(context.Background(), request(0))
+		started <- err
+	}()
+	waitFor(t, "the start to join the download", func() bool {
+		registry.fetchMu.Lock()
+		defer registry.fetchMu.Unlock()
+		for _, f := range registry.fetching {
+			return f.askers == 1
+		}
+		return false
+	})
+	close(slow.release)
+
+	if err := <-started; err != nil {
+		t.Fatalf("the start after the push: %v", err)
+	}
+	if fetches, _ := slow.count(); fetches != 1 {
+		t.Errorf("downloads: got %d, want the one the push began", fetches)
+	}
+}

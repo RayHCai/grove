@@ -11,11 +11,15 @@ import (
 // The seed node:crypto signs the token package's vectors with, so the key is one a verifier pairs.
 const storeSeed = "ySjMqBN4rl4GCxpLhREJCFa_-F57bLOhFG75Jr_5YHg"
 
+// Another seed, since the key every call to a box is signed with is never the store's.
+const controlSeed = "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM"
+
 func complete() map[string]string {
 	return map[string]string{
-		"FLEET_SECRET":          strings.Repeat("f", 32),
-		"SERVER_MANAGER_SECRET": strings.Repeat("c", 32),
-		"STORE_SIGNING_KEY":     storeSeed,
+		"FLEET_SECRET":              strings.Repeat("f", 32),
+		"SERVER_MANAGER_SECRET":     strings.Repeat("c", 32),
+		"STORE_SIGNING_KEY":         storeSeed,
+		"FLEET_CONTROL_SIGNING_KEY": controlSeed,
 	}
 }
 
@@ -38,8 +42,11 @@ func TestReadFillsTheDefaults(t *testing.T) {
 	if cfg.SuspectFor != 2*time.Minute || cfg.PlacementWarmup != 10*time.Second {
 		t.Errorf("suspicion and warm-up: got %s and %s, want 2m and 10s", cfg.SuspectFor, cfg.PlacementWarmup)
 	}
-	if len(cfg.StoreKey) == 0 || len(cfg.CallerSecret) != 32 {
-		t.Error("the store key or the caller secret was not read")
+	if len(cfg.StoreKey) == 0 || len(cfg.CallerSecret) != 32 || len(cfg.ControlKey) == 0 {
+		t.Error("the store key, the control key or the caller secret was not read")
+	}
+	if cfg.AcceptSharedSecret {
+		t.Error("the shared secret opens a heartbeat by default, which only a transition should allow")
 	}
 	if cfg.JoinDeadline != 1500*time.Millisecond {
 		t.Errorf("join deadline: got %s, want 1.5s", cfg.JoinDeadline)
@@ -167,6 +174,31 @@ func TestReadRefusesAnEnvironmentItCannotRouteOn(t *testing.T) {
 			name:    "a box given no time to answer at all",
 			change:  func(m map[string]string) { m["AGENT_TIMEOUT"] = "0s" },
 			mention: "AGENT_TIMEOUT",
+		},
+		{
+			name:    "no key to sign a call to a box with",
+			change:  func(m map[string]string) { delete(m, "FLEET_CONTROL_SIGNING_KEY") },
+			mention: "FLEET_CONTROL_SIGNING_KEY",
+		},
+		{
+			// One key for both would make the signer of every store bearer a commander of every box.
+			name:    "the control key and the store key one seed",
+			change:  func(m map[string]string) { m["FLEET_CONTROL_SIGNING_KEY"] = m["STORE_SIGNING_KEY"] },
+			mention: "FLEET_CONTROL_SIGNING_KEY",
+		},
+		{
+			name:    "a transition switch that is neither on nor off",
+			change:  func(m map[string]string) { m["FLEET_ACCEPT_SHARED_SECRET"] = "yes" },
+			mention: "FLEET_ACCEPT_SHARED_SECRET",
+		},
+		{
+			// The report carries the caller bearer, which production never sends in the clear.
+			name: "a history receiver in the clear in production",
+			change: func(m map[string]string) {
+				m["GROVE_ENV"] = "production"
+				m["API_URL"] = "http://api.grove.example"
+			},
+			mention: "API_URL",
 		},
 		{
 			// Refused at boot rather than on the first report, which is fifteen seconds of looking fine.

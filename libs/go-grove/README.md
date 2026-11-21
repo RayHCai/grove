@@ -12,7 +12,8 @@ way the TypeScript services print `z.prettifyError`. A service with three unset 
 need three restarts to learn that. It also holds the decisions every service's `config`
 package would otherwise each make for itself: `SecretMinLen`, the floor key material is held to and
 the one `apps/grove/api/src/env.ts` states; `Environment`, the one reading of `GROVE_ENV`;
-`PlatformPort`, the `PORT` a host such as Railway assigns and whether it assigned one; `Refuse`,
+`PlatformPort`, the `PORT` a host such as Railway assigns and whether it assigned one; `SecureURL`,
+a url refused under production unless it is `https`, since every fleet call carries a bearer; `Refuse`,
 which reports a variable a service parsed itself among the rest; `Addr`,
 which joins a host and a port into what a
 listener binds; and `Logger`, the one construction the fleet logs through: JSON where an aggregator
@@ -28,8 +29,10 @@ the listener that drains what is in flight on the way down. Its codes are the on
 echoes it back, and tags the request and panic lines with `requestId`; `Forward` puts the same id on
 an outbound call, so a service reached that way logs under the one its caller did. `SharedSecret`
 is the gate a route sits behind, admitting any one of the credentials it is given, each compared in
-constant time, so a route names exactly which pair of services may call it, and `FleetClient` is the
-calling end: one JSON call under that bearer, with the request id forwarded, the answer read to a
+constant time, so a route names exactly which pair of services may call it; `HostKey` derives the one
+bearer a box beats with from the fleet secret and its host id, which the receiver derives again;
+`ControlGate` admits only a call `SignControl` signed for this box, method, target and body; and
+`FleetClient` is the calling end: one JSON call under a bearer or one signed per call, with the request id forwarded, the answer read to a
 bound, and a refused status returned as a `StatusError`. `Service` assembles every service's handler the same
 way: `/health` and `/ready` open, one `/v1` scope behind the gate it is given with the shared 404
 inside it, and the wraps in the order request id, access log, panic net, so a panic's 500 still
@@ -47,7 +50,8 @@ written twice drifts: unpadded base64url of the compact claims JSON, a dot, then
 that first segment. Each segment has one canonical spelling, a verifier holds a list of public keys
 so a signer rotates by adding its new key everywhere first, and the signature is checked before the
 payload is parsed. `@grove/server-manager` signs each world's store bearer with it and
-`@grove/game-manager` verifies them, so no box holds a key that signs one.
+`@grove/game-manager` verifies them, so no box holds a key that signs one. A control credential is the
+same codec over another shape, audience `instance-manager`, which no ticket or bearer can pass for.
 
 `contract` mirrors the zod schemas: the id and content-hash checks, and the structs the Go services
 exchange with the TypeScript ones, with json tags matching character for character. A timestamp

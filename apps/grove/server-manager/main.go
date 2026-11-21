@@ -31,7 +31,12 @@ func main() {
 	// must share one registry rather than each holding half the fleet.
 	registry := fleet.NewRegistry(cfg.StaleAfter)
 	// Both callers bound their own call; the timeout is the backstop for a redeploy and a start alike.
-	agent := fleet.HTTPAgent{Client: &http.Client{Timeout: cfg.AgentTimeout}, Secret: cfg.FleetSecret}
+	agent := fleet.HTTPAgent{
+		Client:     &http.Client{Timeout: cfg.AgentTimeout},
+		ControlKey: cfg.ControlKey,
+		Secret:     cfg.FleetSecret,
+		Now:        time.Now,
+	}
 	line := joins.New(joins.Options{
 		Placer: &fleet.Router{
 			Registry:     registry,
@@ -77,17 +82,18 @@ func main() {
 	go reporter.Run(answering, registry.Sweep)
 
 	server := api.New(api.Options{
-		Registry:      registry,
-		Joins:         line,
-		Agent:         agent,
-		FleetSecret:   cfg.FleetSecret,
-		CallerSecret:  cfg.CallerSecret,
-		Production:    cfg.Env == "production",
-		Warmup:        cfg.PlacementWarmup,
-		SuspectFor:    cfg.SuspectFor,
-		Log:           log,
-		DeployTimeout: cfg.DeployTimeout,
-		HostTimeout:   cfg.AgentTimeout,
+		Registry:           registry,
+		Joins:              line,
+		Agent:              agent,
+		FleetSecret:        cfg.FleetSecret,
+		AcceptSharedSecret: cfg.AcceptSharedSecret,
+		CallerSecret:       cfg.CallerSecret,
+		Production:         cfg.Env == "production",
+		Warmup:             cfg.PlacementWarmup,
+		SuspectFor:         cfg.SuspectFor,
+		Log:                log,
+		DeployTimeout:      cfg.DeployTimeout,
+		HostTimeout:        cfg.AgentTimeout,
 	})
 
 	serveErr := httpx.Serve(context.Background(), cfg.Addr(), server.Handler(), log)

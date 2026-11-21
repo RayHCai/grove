@@ -5,12 +5,14 @@ package fleet
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
@@ -30,8 +32,9 @@ const maxAgentAnswerBytes = 64 << 10
 // failure a fleet has is driven through it in a test without a box, a socket or a timer.
 type Agent interface {
 	// Redeploy forwards a push and answers what the box did with it: the worlds of the game on any
-	// revision but this one are drained. A row, not an error: an unreachable box is the report.
-	Redeploy(ctx context.Context, h Host, gameID string, revision int) contract.HostDeployment
+	// revision but this one are drained, and the code is fetched ahead of the first world on it. A
+	// row, not an error: an unreachable box is the report.
+	Redeploy(ctx context.Context, h Host, gameID string, revision int, bundles contract.BundleSet) contract.HostDeployment
 	// Start asks the box to run one world, and answers the process it now holds. An error, not a
 	// row: the join that asked tries the next box in its ranking, or is refused.
 	Start(ctx context.Context, h Host, req contract.InstanceStart) (contract.InstanceReport, error)
@@ -43,19 +46,24 @@ type Agent interface {
 // the box serves it, which a production box always does.
 type HTTPAgent struct {
 	Client *http.Client
+	// Signs every call for the one box it is sent to, so no box can replay one at another.
+	ControlKey ed25519.PrivateKey
+	// The fleet secret, presented only to a box that itself beat under it.
 	Secret []byte
+	Now    func() time.Time
 }
 
-func (a HTTPAgent) Redeploy(ctx context.Context, h Host, gameID string, revision int) contract.HostDeployment {
+func (a HTTPAgent) Redeploy(ctx context.Context, h Host, gameID string, revision int, bundles contract.BundleSet) contract.HostDeployment {
 	// The row names the box this service dialled and never the one the answer carried: a box that
 	// named another would put its drain on another box's row.
 	row := contract.HostDeployment{HostID: h.ID, InstanceIDs: []string{}}
 
 	target := a.base(h) + "/v1/games/" + url.PathEscape(gameID) + "/redeploy"
-	push := contract.RedeployRequest{Revision: revision}
+	// The code travels with the push so the box fetches it now, and the first world on it starts warm.
+	push := contract.RedeployRequest{Revision: revision, Bundles: &bundles}
 
 	var answered contract.HostDeployment
-	if _, err := a.fleet().PostJSON(ctx, target, push, &answered, maxAgentAnswerBytes); err != nil {
+	if _, err := a.fleet(h).PostJSON(ctx, target, push, &answered, maxAgentAnswerBytes); err != nil {
 		// An agent that predates this route answers 404, which is the realistic failure in a fleet
 		// whose boxes are replaced by scaling rather than by a rolling refresh.
 		return failed(row, fmt.Errorf("redeploy: %w", err))
@@ -77,7 +85,7 @@ func (a HTTPAgent) Redeploy(ctx context.Context, h Host, gameID string, revision
 // refs: this service holds no build output, and a box caches them by content hash.
 func (a HTTPAgent) Start(ctx context.Context, h Host, req contract.InstanceStart) (contract.InstanceReport, error) {
 	var started contract.InstanceReport
-	_, err := a.fleet().PostJSON(ctx, a.base(h)+"/v1/instances", req, &started, maxAgentAnswerBytes)
+	_, err := a.fleet(h).PostJSON(ctx, a.base(h)+"/v1/instances", req, &started, maxAgentAnswerBytes)
 
 	// A 409 is the box saying it filled between the ranking and this call, the one refusal that is
 	// not a fault.
@@ -94,20 +102,32 @@ func (a HTTPAgent) Start(ctx context.Context, h Host, req contract.InstanceStart
 	return started, nil
 }
 
+// Stop waits out the box's drain, so the client's backstop is lifted and ctx alone bounds the call.
 func (a HTTPAgent) Stop(ctx context.Context, h Host, instanceID string) error {
 	target := a.base(h) + "/v1/instances/" + url.PathEscape(instanceID)
-	if _, err := a.fleet().Call(ctx, http.MethodDelete, target, nil, nil, maxAgentAnswerBytes); err != nil {
+	fleet := a.fleet(h)
+	unbounded := *a.Client
+	unbounded.Timeout = 0
+	fleet.Client = &unbounded
+	if _, err := fleet.Call(ctx, http.MethodDelete, target, nil, nil, maxAgentAnswerBytes); err != nil {
 		return fmt.Errorf("stop %s: %w", instanceID, err)
 	}
 	return nil
 }
 
-func (a HTTPAgent) fleet() httpx.FleetClient {
-	return httpx.FleetClient{Client: a.Client, Secret: a.Secret}
+func (a HTTPAgent) fleet(h Host) httpx.FleetClient {
+	if h.SharedSecret {
+		return httpx.FleetClient{Client: a.Client, Secret: a.Secret}
+	}
+	now := a.Now
+	if now == nil {
+		now = time.Now
+	}
+	return httpx.FleetClient{Client: a.Client, Authorize: httpx.SignControl(a.ControlKey, h.ID, now)}
 }
 
-// base is the agent's own listener on the name the box reported; the bearer it carries is the
-// fleet secret, so a box that serves TLS is never dialled without it.
+// base is the agent's own listener on the name the box reported, under TLS wherever the box serves
+// it, so a credential bound to one call still never crosses the network in the clear.
 func (a HTTPAgent) base(h Host) string {
 	scheme := "http"
 	if h.TLS {

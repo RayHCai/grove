@@ -10,22 +10,22 @@ anywhere; both serve TLS under one certificate for the box's `PUBLIC_HOST`, requ
 
 ## The scope
 
-Every route under `/v1` sits behind the fleet's shared bearer, which `@grove/server-manager` holds
-and nothing outside the fleet network does. A shared secret rather than a signed claim because there
-is nothing to scope: every route acts on this box, and the only question is whether the caller is
-inside the fleet. `/health` and `/ready` sit outside that scope, for whatever supervises this agent.
+Every route under `/v1` opens only to a call `@grove/server-manager` signed with Ed25519 for this
+`HOST_ID`, this method, this path and query, and this body, alive for a minute; this box holds only
+the public keys, `FLEET_CONTROL_PUBLIC_KEYS`, so a box that is broken into can command no other box,
+nor replay a call it was sent anywhere else. `/health` and `/ready` sit outside that scope, for whatever supervises this agent.
 
-| Route                                        | Answers                                              |
-| -------------------------------------------- | ---------------------------------------------------- |
-| `GET /ready`                                 | `{"ok":true}` if the game binary is forkable         |
-| `GET /health`                                | `{"ok":true}`                                        |
-| `POST /v1/instances`                         | the report, port included, 201, or 409 at the cap    |
-| `GET /v1/instances`                          | every instance on this box, oldest first             |
-| `GET /v1/instances/{instanceId}`             | one, or 404                                          |
-| `DELETE /v1/instances/{instanceId}`          | 204 once the child has drained, or 404               |
-| `GET /v1/instances/{instanceId}/logs?limit=` | the tail of that child's output, oldest first        |
-| `POST /v1/games/{gameId}/redeploy`           | a `HostDeployment`: the worlds of that game, drained |
-| `GET /play/{instanceId}` (player port)       | the world's WebSocket, carried to its child, or 404  |
+| Route                                        | Answers                                             |
+| -------------------------------------------- | --------------------------------------------------- |
+| `GET /ready`                                 | `{"ok":true}` if the game binary is forkable        |
+| `GET /health`                                | `{"ok":true}`                                       |
+| `POST /v1/instances`                         | the report, port included, 201, or 409 at the cap   |
+| `GET /v1/instances`                          | every instance on this box, oldest first            |
+| `GET /v1/instances/{instanceId}`             | one, or 404                                         |
+| `DELETE /v1/instances/{instanceId}`          | 204 once the child has drained, or 404              |
+| `GET /v1/instances/{instanceId}/logs?limit=` | the tail of that child's output, oldest first       |
+| `POST /v1/games/{gameId}/redeploy`           | a `HostDeployment`: that game's worlds, drained     |
+| `GET /play/{instanceId}` (player port)       | the world's WebSocket, carried to its child, or 404 |
 
 The player proxy on `PLAYER_PORT` is the one door players have: no game process binds anything but
 loopback, and `/play/{instanceId}` is carried to that world's child at `/play` with the query and the
@@ -64,7 +64,8 @@ is checked before it becomes a filename, in the contract's own lowercase-hex spe
 the only part of a start that reaches this box's filesystem at all.
 
 The fetch happens before the instance lock, so one download does not hold up every other start on
-the box. It runs on its own `bundleFetchTimeout` rather than the start request's clock, and every
+the box, and a redeploy carrying the pushed bundle refs begins that same download at once, answering
+without waiting on it, so the first world of the version here starts on a warm cache. It runs on its own `bundleFetchTimeout` rather than the start request's clock, and every
 start of the same version waits on that one download: the router gives up on a start within a
 second, and a cold first download that died with it would make every retry start from nothing.
 The version travels on into the heartbeat: it is what lets the router tell a world a
@@ -72,7 +73,9 @@ joiner's code matches from one still draining on the version before it.
 
 ## Supervision
 
-One child process per session, spawned with `os/exec` and held until it ends. Nothing is restarted:
+One child process per session, spawned with `os/exec` and held until it ends. A start reserves its
+slot and its session under the lock and forks and writes its record outside it, so a spawn never
+holds up the proxy finding a world, and a second start of that session waits on the first. Nothing is restarted:
 a game-instance that died took its world with it, and a restart would hand its players a world that
 never existed. A dead child is reported dead, its last lines are kept, and the session ends there.
 
@@ -194,35 +197,36 @@ pnpm --filter @grove/instance-manager run build
 ./dist/instance-manager
 ```
 
-| Variable                  | What                                                                     |
-| ------------------------- | ------------------------------------------------------------------------ |
-| `INSTANCE_MANAGER_HOST`   | address to bind, `0.0.0.0` by default                                    |
-| `INSTANCE_MANAGER_PORT`   | control port to bind, `4004` by default                                  |
-| `PLAYER_PORT`             | player proxy port, every interface, `4006` by default                    |
-| `PLAYER_MAX_CONNECTIONS`  | sockets the proxy holds at once, `1024`, the child's own cap             |
-| `PUBLIC_HOST`             | the name players and the router dial; required in production             |
-| `TLS_CERT_FILE`           | PEM chain both listeners serve, re-read when it changes                  |
-| `TLS_KEY_FILE`            | its key; both or neither, both in production                             |
-| `FLEET_SECRET`            | shared with `@grove/server-manager`, both directions, 32 bytes up        |
-| `TICKET_PUBLIC_KEYS`      | the api's ticket keys, handed to every child verbatim                    |
-| `SERVER_MANAGER_URL`      | where the beat goes, `https` in production                               |
-| `GAME_MANAGER_URL`        | the data plane every child gets; this box holds it, not a join           |
-| `HOST_ID`                 | the uuid the fleet knows this box by                                     |
-| `HOST_REGION`             | which region it sits in                                                  |
-| `MAX_INSTANCES`           | game processes this box may hold, `8` by default                         |
-| `HEARTBEAT_INTERVAL`      | how often it beats, `10s` by default                                     |
-| `INSTANCE_DRAIN_DEADLINE` | how long a redeployed world waits for its last player, `15m`             |
-| `GAME_INSTANCE_BIN`       | the `grove-game-instance` binary it spawns                               |
-| `INSTANCE_STATE_DIR`      | where it writes its children down, `/var/lib/grove` by default           |
-| `BUNDLE_CACHE_DIR`        | one file per content hash, `/var/lib/grove/bundles` by default           |
-| `GAME_UID` / `GAME_GID`   | who a child runs as, never this agent; required in production            |
-| `CGROUP_ROOT`             | the cgroup v2 directory delegated to this agent; production only         |
-| `CHILD_MEMORY_MAX_BYTES`  | one child's `memory.max`, `1 GiB` by default                             |
-| `CHILD_PIDS_MAX`          | one child's `pids.max`, `256` by default                                 |
-| `REAP_IDLE`               | how long an empty world lives past its boot grace, `5m`                  |
-| `REAP_UNHEALTHY_PROBES`   | failed probes in a row that take a world down, `10`                      |
-| `REAP_TOKEN_MARGIN`       | how long before its bearer dies a world drains, over the deadline, `30m` |
-| `GROVE_ENV`               | `development`, `test` or `production`; the log level follows it          |
+| Variable                    | What                                                                      |
+| --------------------------- | ------------------------------------------------------------------------- |
+| `INSTANCE_MANAGER_HOST`     | address to bind, `0.0.0.0` by default                                     |
+| `INSTANCE_MANAGER_PORT`     | control port to bind, `4004` by default                                   |
+| `PLAYER_PORT`               | player proxy port, every interface, `4006` by default                     |
+| `PLAYER_MAX_CONNECTIONS`    | sockets the proxy holds at once, `1024`, the child's own cap; beaten up   |
+| `PUBLIC_HOST`               | the name players and the router dial; required in production              |
+| `TLS_CERT_FILE`             | PEM chain both listeners serve, re-read when it changes                   |
+| `TLS_KEY_FILE`              | its key; both or neither, both in production                              |
+| `FLEET_HOST_KEY`            | the heartbeat bearer: hex HMAC-SHA256 of `HOST_ID` under the fleet secret |
+| `FLEET_CONTROL_PUBLIC_KEYS` | the router's control-call keys, comma-separated                           |
+| `TICKET_PUBLIC_KEYS`        | the api's ticket keys, handed to every child verbatim                     |
+| `SERVER_MANAGER_URL`        | where the beat goes, `https` in production                                |
+| `GAME_MANAGER_URL`          | the data plane every child gets, `https` in production                    |
+| `HOST_ID`                   | the uuid the fleet knows this box by                                      |
+| `HOST_REGION`               | which region it sits in                                                   |
+| `MAX_INSTANCES`             | game processes this box may hold, `8` by default                          |
+| `HEARTBEAT_INTERVAL`        | how often it beats, `10s` by default                                      |
+| `INSTANCE_DRAIN_DEADLINE`   | how long a redeployed world waits for its last player, `15m`              |
+| `GAME_INSTANCE_BIN`         | the `grove-game-instance` binary it spawns                                |
+| `INSTANCE_STATE_DIR`        | where it writes its children down, `/var/lib/grove` by default            |
+| `BUNDLE_CACHE_DIR`          | one file per content hash, `/var/lib/grove/bundles` by default            |
+| `GAME_UID` / `GAME_GID`     | who a child runs as, never this agent; required in production             |
+| `CGROUP_ROOT`               | the cgroup v2 directory delegated to this agent; production only          |
+| `CHILD_MEMORY_MAX_BYTES`    | one child's `memory.max`, `1 GiB` by default                              |
+| `CHILD_PIDS_MAX`            | one child's `pids.max`, `256` by default                                  |
+| `REAP_IDLE`                 | how long an empty world lives past its boot grace, `5m`                   |
+| `REAP_UNHEALTHY_PROBES`     | failed probes in a row that take a world down, `10`                       |
+| `REAP_TOKEN_MARGIN`         | how long before its bearer dies a world drains, over the deadline, `30m`  |
+| `GROVE_ENV`                 | `development`, `test` or `production`; the log level follows it           |
 
 Every problem with that environment is reported in one error, so a box with three unset variables
 does not need three restarts to learn that. Both listeners bind every interface, unlike the services

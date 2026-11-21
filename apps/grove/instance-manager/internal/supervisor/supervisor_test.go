@@ -933,3 +933,80 @@ func TestALiveReportCarriesThePortItsChildBound(t *testing.T) {
 		}
 	}
 }
+
+// heldLauncher forks the one session it holds only once released, which is a spawn writing its
+// cgroup on a loaded box; every other session it forks at once.
+type heldLauncher struct {
+	*fakeLauncher
+	session string
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (l heldLauncher) Start(ctx context.Context, spec Spec, logs io.Writer) (Child, error) {
+	if spec.SessionID == l.session {
+		l.entered <- struct{}{}
+		<-l.release
+	}
+	return l.fakeLauncher.Start(ctx, spec, logs)
+}
+
+// A spawn in progress must not hold the registry: every player connecting asks Port where its world
+// is. It still holds its slot, and a second start of its session waits on it rather than forking.
+func TestASpawnHoldsItsSlotAndNoLockAPlayerWaitsOn(t *testing.T) {
+	inner := newFakeLauncher()
+	launcher := heldLauncher{
+		fakeLauncher: inner,
+		session:      request(1).SessionID,
+		entered:      make(chan struct{}, 4),
+		release:      make(chan struct{}),
+	}
+	opts := testOptions(2)
+	opts.Launcher = launcher
+	opts.Prober = fakeProber{launcher: inner}
+	registry := New(opts)
+
+	if _, err := registry.Start(context.Background(), request(0)); err != nil {
+		t.Fatalf("the running world: %v", err)
+	}
+
+	type started struct {
+		view contract.InstanceReport
+		err  error
+	}
+	spawning := make(chan started, 2)
+	for range 2 {
+		go func() {
+			view, err := registry.Start(context.Background(), request(1))
+			spawning <- started{view, err}
+		}()
+	}
+	<-launcher.entered
+
+	asked := make(chan bool, 1)
+	go func() {
+		_, ok := registry.Port(request(0).InstanceID)
+		asked <- ok
+	}()
+	select {
+	case ok := <-asked:
+		if !ok {
+			t.Error("Port: the running world was not found")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Port waited on a spawn of another world")
+	}
+
+	if _, err := registry.Start(context.Background(), request(2)); !errors.Is(err, ErrAtCapacity) {
+		t.Errorf("a start past the slot the spawn holds: got %v, want %v", err, ErrAtCapacity)
+	}
+
+	close(launcher.release)
+	first, second := <-spawning, <-spawning
+	if first.err != nil || second.err != nil || first.view.InstanceID != second.view.InstanceID {
+		t.Fatalf("the two starts of one session: got %+v and %+v, want one world", first, second)
+	}
+	if got := inner.count(); got != 2 {
+		t.Errorf("processes: got %d, want the running world and the one spawned", got)
+	}
+}

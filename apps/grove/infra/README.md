@@ -149,11 +149,13 @@ new launch template version on the next plan.
 
 ## The box's parameters
 
-Four live in Parameter Store, one copy per region because Parameter Store is regional, under
+Five live in Parameter Store, one copy per region because Parameter Store is regional, under
 `/grove/<environment>/fleet/`: `FLEET_SECRET` and `TLS_KEY` as `SecureString`, `TLS_CERT` (Advanced
-tier, for a chain's length) and `TICKET_PUBLIC_KEYS` as plain `String`, since a public key protects
-nothing. No box holds a key that signs anything: tickets are verified against the api's public keys,
-and a store bearer arrives with each world from `@grove/server-manager`. Terraform creates each
+tier, for a chain's length), `FLEET_CONTROL_PUBLIC_KEYS` and `TICKET_PUBLIC_KEYS` as plain `String`,
+since a public key protects nothing. No box holds a key that signs anything: tickets are verified
+against the api's public keys, every call from `@grove/server-manager` against its control keys, and
+a store bearer arrives with each world. The agent never holds `FLEET_SECRET`: the root-run env script
+derives `FLEET_HOST_KEY`, lowercase hex of HMAC-SHA256 of the box's host id under it, and writes only that. Terraform creates each
 parameter and never its value: a secret passed as a variable is a secret in the state file and in
 every plan output. Each is created holding `replace-me`, set out of band, and ignored here from then
 on; a box picks a new value up on the agent's next restart, and a renewed TLS pair within the hour.

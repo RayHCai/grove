@@ -34,6 +34,8 @@ type placer struct {
 	seen []string
 	// Players whose decision is a start, which blocks until release closes.
 	starting map[string]bool
+	// Players whose start ignores its context, as a box call stuck in a dial would.
+	stubborn map[string]bool
 	refuse   bool
 	// Closed to let every decision through; open, Decide holds the worker.
 	decide  chan struct{}
@@ -49,6 +51,7 @@ type placer struct {
 func newPlacer() *placer {
 	p := &placer{
 		starting: map[string]bool{},
+		stubborn: map[string]bool{},
 		decide:   make(chan struct{}),
 		release:  make(chan struct{}),
 		budgets:  make(chan time.Duration, 16),
@@ -66,14 +69,14 @@ func (p *placer) Decide(_ context.Context, req contract.PlacementRequest) Decisi
 	<-p.decide
 	p.mu.Lock()
 	p.seen = append(p.seen, req.PlayerID)
-	starts, refuse := p.starting[req.PlayerID], p.refuse
+	starts, stubborn, refuse := p.starting[req.PlayerID], p.stubborn[req.PlayerID], p.refuse
 	p.mu.Unlock()
 
 	switch {
 	case refuse:
 		return Decision{}
 	case starts:
-		return Decision{Start: true, Finish: func(ctx context.Context) (contract.Placement, bool) {
+		return Decision{Start: true, Finish: func(ctx context.Context) (contract.Placement, error) {
 			deadline, _ := ctx.Deadline()
 			p.budgets <- time.Until(deadline)
 			now := p.running.Add(1)
@@ -84,11 +87,15 @@ func (p *placer) Decide(_ context.Context, req contract.PlacementRequest) Decisi
 				}
 			}
 			defer p.running.Add(-1)
+			if stubborn {
+				<-p.release
+				return placementFor(req.PlayerID), nil
+			}
 			select {
 			case <-p.release:
-				return placementFor(req.PlayerID), true
+				return placementFor(req.PlayerID), nil
 			case <-ctx.Done():
-				return contract.Placement{}, false
+				return contract.Placement{}, ErrUnavailable
 			}
 		}}
 	}
@@ -280,8 +287,8 @@ func TestAStartWhoseJoinerLeftIsCancelled(t *testing.T) {
 
 	ctx, giveUp := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer giveUp()
-	if got := waitFor(t, joining(ctx, l, playerID), "the impatient join"); !errors.Is(got.err, ErrNoCapacity) {
-		t.Fatalf("got %v, want %v", got.err, ErrNoCapacity)
+	if got := waitFor(t, joining(ctx, l, playerID), "the impatient join"); !errors.Is(got.err, ErrUnavailable) {
+		t.Fatalf("got %v, want %v", got.err, ErrUnavailable)
 	}
 	eventually(t, "the start to see its joiner gone", func() bool { return p.running.Load() == 0 })
 }
@@ -297,4 +304,54 @@ func TestRunReturnsWhenItsContextEnds(t *testing.T) {
 	}()
 	stop()
 	waitFor(t, stopped, "Run returning")
+}
+
+// A join whose deadline passes is the clock running out, which a full game would misstate to the player.
+func TestAJoinThatOutlivesItsDeadlineIsUnavailableNotFull(t *testing.T) {
+	p := newPlacer()
+	p.starting[playerID] = true
+	l := New(Options{Placer: p, Log: slog.New(slog.DiscardHandler), Deadline: 50 * time.Millisecond, Depth: 4, StartWorkers: 1})
+	ctx, stop := context.WithCancel(context.Background())
+	t.Cleanup(stop)
+	go l.Run(ctx)
+
+	if got := waitFor(t, joining(context.Background(), l, playerID), "the slow join"); !errors.Is(got.err, ErrUnavailable) {
+		t.Fatalf("got %v, want %v", got.err, ErrUnavailable)
+	}
+}
+
+// A start the worker cannot hand to a full pool must not hold the worker past the line's end: its
+// joiner is answered at once, and Run returns.
+func TestADecisionWaitingOnAFullStartQueueEndsWithTheLine(t *testing.T) {
+	p := newPlacer()
+	for _, player := range []string{"held", "queued", "blocked"} {
+		p.starting[player] = true
+	}
+	p.stubborn["held"] = true
+	l := New(Options{Placer: p, Log: slog.New(slog.DiscardHandler), Deadline: joinDeadline, Depth: 1, StartWorkers: 1})
+
+	ctx, stop := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		l.Run(ctx)
+		close(stopped)
+	}()
+
+	held := joining(context.Background(), l, "held")
+	waitFor(t, p.budgets, "the held start to run")
+	queued := joining(context.Background(), l, "queued")
+	eventually(t, "the start queue to fill", func() bool { return len(l.starts) == 1 })
+	blocked := joining(context.Background(), l, "blocked")
+	eventually(t, "the worker to decide the third join", func() bool { return p.entered.Load() == 3 })
+
+	stop()
+	if got := waitFor(t, blocked, "the join behind the full queue"); !errors.Is(got.err, ErrUnavailable) {
+		t.Fatalf("the join behind the full queue: got %v, want %v", got.err, ErrUnavailable)
+	}
+
+	// The queued start may be left unread once the line ends, so only the held one is waited for.
+	close(p.release)
+	waitFor(t, held, "the held start")
+	waitFor(t, stopped, "Run returning")
+	_ = queued
 }

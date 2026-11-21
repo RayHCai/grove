@@ -1,9 +1,10 @@
-// Package server is the whole surface this agent answers on: two open routes, and one scope the
-// fleet's shared bearer opens.
+// Package server is the whole surface this agent answers on: two open routes, and one scope only a
+// call @grove/server-manager signed for this box opens.
 package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"log/slog"
 	"net/http"
 
@@ -23,7 +24,7 @@ type service struct {
 func New(
 	instances *supervisor.Registry,
 	ready func(context.Context) error,
-	fleetSecret []byte,
+	controlKeys []ed25519.PublicKey,
 	hostID string,
 	l *slog.Logger,
 ) http.Handler {
@@ -37,5 +38,5 @@ func New(
 	scope.HandleFunc("GET /v1/instances/{instanceId}/logs", s.readLogs)
 	scope.HandleFunc("POST /v1/games/{gameId}/redeploy", s.redeployGame)
 
-	return httpx.Service(scope, ready, l, httpx.SharedSecret(l, fleetSecret))
+	return httpx.Service(scope, ready, l, httpx.ControlGate(l, controlKeys, hostID))
 }

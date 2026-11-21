@@ -19,6 +19,9 @@ var (
 	// A game already holding as many bytes as it may, so one game's writes cannot spend the room
 	// every other game is stored in.
 	ErrGameFull = errors.New("game holds as many bytes as it may")
+	// A store already holding as many bytes as it may across every game, so the process outlives
+	// many games each inside its own bound.
+	ErrStoreFull = errors.New("the store holds as many bytes as it may")
 )
 
 // Store is every question this service asks its datastore.
@@ -30,6 +33,7 @@ type Store interface {
 	Ping(ctx context.Context) error
 	Read(ctx context.Context, game, key string) (contract.StateRecord, error)
 	Write(ctx context.Context, game, key string, write contract.StateWrite) (int64, error)
-	// A key released here is a key never written: the next write to it lands on revision one.
+	// A key released here is absent, which `ifRevision: 0` matches, and its next write lands past
+	// every revision it held, so a compare-and-set read before the release can never match it.
 	Delete(ctx context.Context, game, key string) error
 }

@@ -21,9 +21,6 @@ func TestWireShapesRoundTripTheirFixtures(t *testing.T) {
 	}{
 		{"state-record.json", func() any { return &StateRecord{} }},
 		{"state-write.json", func() any { return &StateWrite{} }},
-		{"leaderboard-entry.json", func() any { return &LeaderboardEntry{} }},
-		{"leaderboard-write.json", func() any { return &LeaderboardWrite{} }},
-		{"leaderboard-page.json", func() any { return &LeaderboardPage{} }},
 		{"bundle-set.json", func() any { return &BundleSet{} }},
 		{"placement-request.json", func() any { return &PlacementRequest{} }},
 		{"placement.json", func() any { return &Placement{} }},

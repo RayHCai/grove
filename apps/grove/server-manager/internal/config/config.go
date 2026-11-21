@@ -16,8 +16,13 @@ type Config struct {
 	Host string
 	Port int
 	Env  string
-	// The bearer the boxes and this service present to each other, and nothing else does.
+	// What every box's own heartbeat key is derived from, held here alone: a box holds only its own.
 	FleetSecret []byte
+	// Signs every call this service makes to a box, each of which holds only the public half.
+	ControlKey ed25519.PrivateKey
+	// Whether a box may still beat, and be commanded, under FleetSecret itself: on only while a fleet
+	// started before per-box keys is being replaced.
+	AcceptSharedSecret bool
 	// The bearer @grove/api and this service present to each other, so a leaked box opens no route
 	// a caller uses and a leaked caller opens no box.
 	CallerSecret []byte
@@ -65,13 +70,9 @@ func Read(r *env.Reader) (Config, error) {
 	c.Env = r.Environment()
 	c.FleetSecret = r.Secret("FLEET_SECRET", env.SecretMinLen)
 	c.CallerSecret = r.Secret("SERVER_MANAGER_SECRET", env.SecretMinLen)
-	if seed := r.Required("STORE_SIGNING_KEY"); seed != "" {
-		key, err := token.ParseSigningKey(seed)
-		if err != nil {
-			r.Refuse("STORE_SIGNING_KEY", err)
-		}
-		c.StoreKey = key
-	}
+	c.StoreKey = signingKey(r, "STORE_SIGNING_KEY")
+	c.ControlKey = signingKey(r, "FLEET_CONTROL_SIGNING_KEY")
+	c.AcceptSharedSecret = r.OneOf("FLEET_ACCEPT_SHARED_SECRET", "false", "true", "false") == "true"
 	// Two missed beats at the agent's default interval. A false positive costs one interval of
 	// placement on one box and ends no session, so the window is set to find a dead box quickly
 	// rather than to be sure, and the box clears it by beating.
@@ -87,7 +88,7 @@ func Read(r *env.Reader) (Config, error) {
 	c.DeployTimeout = r.Duration("DEPLOY_TIMEOUT", 20*time.Second)
 	c.AgentTimeout = r.Duration("AGENT_TIMEOUT", 5*time.Second)
 
-	c.APIURL = r.OptionalURL("API_URL")
+	c.APIURL = r.OptionalSecureURL("API_URL")
 	c.ReportInterval = r.Duration("FLEET_REPORT_INTERVAL", 15*time.Second)
 
 	if err := r.Err(); err != nil {
@@ -108,6 +109,10 @@ func Read(r *env.Reader) (Config, error) {
 	// One credential for both pairs would let a box call the routes only @grove/api may.
 	if subtle.ConstantTimeCompare(c.FleetSecret, c.CallerSecret) == 1 {
 		return Config{}, fmt.Errorf("SERVER_MANAGER_SECRET must differ from FLEET_SECRET")
+	}
+	// One key for both would make every store bearer's signer a box's commander too.
+	if c.ControlKey.Equal(c.StoreKey) {
+		return Config{}, fmt.Errorf("FLEET_CONTROL_SIGNING_KEY must differ from STORE_SIGNING_KEY")
 	}
 	if c.StartWorkers < 1 || c.SuspectFor <= 0 {
 		return Config{}, fmt.Errorf("START_WORKERS and SUSPECT_FOR must be positive, got %d and %s",
@@ -139,6 +144,19 @@ func Read(r *env.Reader) (Config, error) {
 			c.AgentTimeout, c.DeployTimeout)
 	}
 	return c, nil
+}
+
+// signingKey reads one Ed25519 seed, reporting a malformed one with every other problem.
+func signingKey(r *env.Reader, name string) ed25519.PrivateKey {
+	seed := r.Required(name)
+	if seed == "" {
+		return nil
+	}
+	key, err := token.ParseSigningKey(seed)
+	if err != nil {
+		r.Refuse(name, err)
+	}
+	return key
 }
 
 // Addr is what the listener binds.

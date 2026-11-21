@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/RayHCai/grove/apps/grove/server-manager/internal/fleet"
@@ -25,8 +26,10 @@ type Options struct {
 	Joins *joins.Line
 	// How a redeploy reaches each box; a join's start goes through the line's Router instead.
 	Agent fleet.Agent
-	// The boxes' bearer, which opens the heartbeat and nothing a caller uses.
+	// What each box's heartbeat key is derived from, which opens the heartbeat of that box alone.
 	FleetSecret []byte
+	// Whether a box may still beat under FleetSecret itself, while an older fleet is replaced.
+	AcceptSharedSecret bool
 	// @grove/api's bearer, which opens placements, deployments and the fleet listing.
 	CallerSecret []byte
 	// Whether a beat must name its box, which behind a proxy its source address never does.
@@ -52,6 +55,7 @@ type Server struct {
 	joins         *joins.Line
 	agent         fleet.Agent
 	fleetSecret   []byte
+	acceptShared  bool
 	callerSecret  []byte
 	production    bool
 	warmEnds      time.Time
@@ -75,6 +79,7 @@ func New(o Options) *Server {
 		joins:         o.Joins,
 		agent:         o.Agent,
 		fleetSecret:   o.FleetSecret,
+		acceptShared:  o.AcceptSharedSecret,
 		callerSecret:  o.CallerSecret,
 		production:    o.Production,
 		warmEnds:      o.Now().Add(o.Warmup),
@@ -89,7 +94,7 @@ func New(o Options) *Server {
 
 // Handler is the whole service: health and readiness outside the gate, everything else behind it.
 func (s *Server) Handler() http.Handler {
-	box := httpx.SharedSecret(s.log, s.fleetSecret)
+	box := httpx.Gate(s.log, s.boxAdmits(func(r *http.Request) string { return r.PathValue("hostId") })...)
 	caller := httpx.SharedSecret(s.log, s.callerSecret)
 
 	v1 := http.NewServeMux()
@@ -99,7 +104,31 @@ func (s *Server) Handler() http.Handler {
 	v1.Handle("POST /v1/deployments", caller(http.HandlerFunc(s.deploy)))
 
 	// Either credential opens the scope, so a caller holding neither cannot map it by its 404s.
-	return httpx.Service(v1, s.ready, s.log, httpx.SharedSecret(s.log, s.fleetSecret, s.callerSecret))
+	scope := append(s.boxAdmits(beatHost), httpx.SecretAdmits(s.callerSecret))
+	return httpx.Service(v1, s.ready, s.log, httpx.Gate(s.log, scope...))
+}
+
+// boxAdmits is what proves a beat comes from the box hostOf names: that box's own key, or the
+// fleet secret itself while an older fleet is still beating under it.
+func (s *Server) boxAdmits(hostOf func(*http.Request) string) []httpx.Admits {
+	admits := []httpx.Admits{httpx.HostKeyAdmits(s.fleetSecret, hostOf)}
+	if s.acceptShared {
+		admits = append(admits, httpx.SecretAdmits(s.fleetSecret))
+	}
+	return admits
+}
+
+// beatHost is the box a heartbeat path names, read before the routes are matched.
+func beatHost(r *http.Request) string {
+	rest, ok := strings.CutPrefix(r.URL.Path, "/v1/hosts/")
+	if !ok {
+		return ""
+	}
+	hostID, ok := strings.CutSuffix(rest, "/heartbeat")
+	if !ok || strings.Contains(hostID, "/") {
+		return ""
+	}
+	return hostID
 }
 
 // nothingToWaitFor is this service's readiness probe, and it never fails: a caller that pulled

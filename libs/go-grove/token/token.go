@@ -87,9 +87,7 @@ func Sign(c Claims, key ed25519.PrivateKey) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encode claims: %w", err)
 	}
-
-	payload := segment.EncodeToString(claims)
-	return payload + "." + segment.EncodeToString(ed25519.Sign(key, []byte(payload))), nil
+	return seal(claims, key), nil
 }
 
 // Verify checks the signature before it parses, so a forged payload never reaches a decoder, and
@@ -98,21 +96,9 @@ func Sign(c Claims, key ed25519.PrivateKey) (string, error) {
 // audience is required rather than defaulted: every caller knows which of the two it is, and a
 // verifier that guessed would accept the other one by omission.
 func Verify(tok string, keys []ed25519.PublicKey, audience string, nowUnix int64) (Claims, error) {
-	// The FIRST dot, so the two segments split where the signer joined them.
-	payload, signature, ok := strings.Cut(tok, ".")
-	if !ok || payload == "" || signature == "" {
-		return Claims{}, ErrMalformed
-	}
-
-	claims, ok := decode(payload)
-	if !ok {
-		return Claims{}, ErrMalformed
-	}
-	// A signature segment that is not base64url is a bad signature, not a bad shape, which is the
-	// verdict the TypeScript and Rust halves reach too.
-	provided, ok := decode(signature)
-	if !ok || len(provided) != ed25519.SignatureSize || !signedByAny(keys, payload, provided) {
-		return Claims{}, ErrBadSignature
+	claims, err := open(tok, keys)
+	if err != nil {
+		return Claims{}, err
 	}
 
 	var c Claims
@@ -141,6 +127,33 @@ func Bearer(r *http.Request) (string, bool) {
 
 	tok := strings.TrimSpace(header[len(scheme):])
 	return tok, tok != ""
+}
+
+// seal is the one spelling of a credential: the claims segment, a dot, and the signature over it.
+func seal(claims []byte, key ed25519.PrivateKey) string {
+	payload := segment.EncodeToString(claims)
+	return payload + "." + segment.EncodeToString(ed25519.Sign(key, []byte(payload)))
+}
+
+// open answers the signed claims of a credential, which nothing may parse before this has checked them.
+func open(tok string, keys []ed25519.PublicKey) ([]byte, error) {
+	// The FIRST dot, so the two segments split where the signer joined them.
+	payload, signature, ok := strings.Cut(tok, ".")
+	if !ok || payload == "" || signature == "" {
+		return nil, ErrMalformed
+	}
+
+	claims, ok := decode(payload)
+	if !ok {
+		return nil, ErrMalformed
+	}
+	// A signature segment that is not base64url is a bad signature, not a bad shape, which is the
+	// verdict the TypeScript and Rust halves reach too.
+	provided, ok := decode(signature)
+	if !ok || len(provided) != ed25519.SignatureSize || !signedByAny(keys, payload, provided) {
+		return nil, ErrBadSignature
+	}
+	return claims, nil
 }
 
 func signedByAny(keys []ed25519.PublicKey, payload string, signature []byte) bool {
@@ -191,7 +204,7 @@ func (c Claims) problem() error {
 }
 
 // The bytes the signature covers: compact JSON, in declaration order, and no trailing newline.
-func encode(c Claims) ([]byte, error) {
+func encode(c any) ([]byte, error) {
 	var buf bytes.Buffer
 
 	enc := json.NewEncoder(&buf)

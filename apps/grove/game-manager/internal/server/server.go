@@ -13,6 +13,7 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
 
+// Per world, since each holds its own bearer: one game's busy world spends no other world's budget.
 const rateLimitPerMinute = 600
 
 type service struct {
@@ -33,10 +34,10 @@ func New(ctx context.Context, st store.Store, keys []ed25519.PublicKey, l *slog.
 	// A memory store always answers; a database-backed one does not while it is still connecting.
 	return httpx.Service(scope, st.Ping, l,
 		verifyGameToken(keys, l),
-		// Inside the gate, and keyed on the game the token was VERIFIED to name. An address key
+		// Inside the gate, and keyed on the world the token was VERIFIED to name. An address key
 		// would be one bucket for the whole fleet network, and a key taken from the header ahead of
 		// the check is one a caller mints per request, which is a fresh bucket per request.
-		httpx.RateLimit(ctx, rateLimitPerMinute, time.Minute, gameID),
+		httpx.RateLimit(ctx, rateLimitPerMinute, time.Minute, world),
 	)
 }
 

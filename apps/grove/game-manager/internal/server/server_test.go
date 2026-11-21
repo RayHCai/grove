@@ -304,11 +304,12 @@ func TestCompareAndSetRefusesAStaleRevision(t *testing.T) {
 			code:   httpx.CodeConflict,
 		},
 		{
+			// Past every revision the game's keys have landed on, so no key ever returns to one.
 			name:     "a first write to a key that does not",
 			key:      "seed",
 			body:     `{"value":true,"ifRevision":0}`,
 			status:   http.StatusOK,
-			revision: 1,
+			revision: 3,
 		},
 		{
 			name:   "a write carrying no value",
@@ -346,7 +347,7 @@ func TestCompareAndSetRefusesAStaleRevision(t *testing.T) {
 	}
 }
 
-func TestAReleasedKeyIsAKeyNeverWritten(t *testing.T) {
+func TestAReleasedKeyIsAbsentAndNeverReturnsToARevisionItHeld(t *testing.T) {
 	memory, handler := newServer(t)
 	seedState(t, memory, gameA, "score", `{"points":1}`)
 	seedState(t, memory, gameB, "score", `{"points":2}`)
@@ -373,12 +374,17 @@ func TestAReleasedKeyIsAKeyNeverWritten(t *testing.T) {
 	}
 	expectCode(t, again, httpx.CodeNotFound)
 
-	// A released key is at revision zero, so `ifRevision: 0` is again the first write of it.
+	// A released key is absent, so `ifRevision: 0` is again the first write of it, and it lands past
+	// the revision it held, so a tick still holding that revision is refused rather than let through.
 	landed := decodeAs[written](t, request(
 		t, handler, http.MethodPut, "/v1/state/score", ticket(t, gameA), `{"value":{"points":3},"ifRevision":0}`,
 	))
-	if landed.Revision != 1 {
-		t.Fatalf("revision: got %d, want 1", landed.Revision)
+	if landed.Revision <= 1 {
+		t.Fatalf("revision: got %d, want past the 1 the key held", landed.Revision)
+	}
+	stale := request(t, handler, http.MethodPut, "/v1/state/score", ticket(t, gameA), `{"value":{"points":4},"ifRevision":1}`)
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("a compare-and-set from before the release: got %d, want 409", stale.Code)
 	}
 
 	untouched := decodeAs[contract.StateRecord](
@@ -405,6 +411,11 @@ func TestAGameAtItsBoundIsToldWhichOneItHit(t *testing.T) {
 			refusal: store.ErrGameFull,
 			message: "game holds as many bytes as it may",
 		},
+		{
+			name:    "as many bytes as the whole store may hold",
+			refusal: store.ErrStoreFull,
+			message: "the store holds as many bytes as it may",
+		},
 	}
 
 	for _, c := range cases {
@@ -413,8 +424,7 @@ func TestAGameAtItsBoundIsToldWhichOneItHit(t *testing.T) {
 
 			res := request(t, handler, http.MethodPut, "/v1/state/score", ticket(t, gameA), `{"value":1}`)
 
-			// Never the 409 a stale write answers, which the game process reads as a lost race and
-			// retries into the store that just refused it.
+			// Never the 409 a stale write answers, which says the race was lost rather than the bound hit.
 			if res.Code != http.StatusRequestEntityTooLarge {
 				t.Fatalf("status: got %d, want %d", res.Code, http.StatusRequestEntityTooLarge)
 			}
@@ -423,6 +433,27 @@ func TestAGameAtItsBoundIsToldWhichOneItHit(t *testing.T) {
 				t.Fatalf("message: got %q, want %q", got, c.message)
 			}
 		})
+	}
+}
+
+// Every world of a game holds its own bearer, so one busy world spends its own budget and never the
+// budget of the game's other worlds; past it, the answer says when to come back.
+func TestTheRateLimitIsPerWorldAndSaysWhenToRetry(t *testing.T) {
+	_, handler := newServer(t)
+	busy := worldTicket(t, gameA, "0a0a0a0a-0a0a-4a0a-8a0a-0a0a0a0a0a0a")
+	quiet := worldTicket(t, gameA, "0b0b0b0b-0b0b-4b0b-8b0b-0b0b0b0b0b0b")
+
+	for i := range rateLimitPerMinute {
+		if res := request(t, handler, http.MethodGet, "/v1/state/score", busy, ""); res.Code == http.StatusTooManyRequests {
+			t.Fatalf("request %d: limited inside the budget", i)
+		}
+	}
+	limited := request(t, handler, http.MethodGet, "/v1/state/score", busy, "")
+	if limited.Code != http.StatusTooManyRequests || limited.Header().Get("Retry-After") == "" {
+		t.Fatalf("past the budget: got %d (retry-after %q), want 429 saying when", limited.Code, limited.Header().Get("Retry-After"))
+	}
+	if res := request(t, handler, http.MethodGet, "/v1/state/score", quiet, ""); res.Code == http.StatusTooManyRequests {
+		t.Fatal("another world of the same game was limited by the busy one")
 	}
 }
 
@@ -484,12 +515,23 @@ func ticket(t *testing.T, game string) string {
 	return signWith(t, game, signer, time.Hour)
 }
 
+// worldTicket is the bearer of one world of the game, which is what a rate limit counts.
+func worldTicket(t *testing.T, game, session string) string {
+	t.Helper()
+	return signFor(t, game, session, signer, time.Hour)
+}
+
 func signWith(t *testing.T, game string, key ed25519.PrivateKey, life time.Duration) string {
+	t.Helper()
+	return signFor(t, game, "1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d", key, life)
+}
+
+func signFor(t *testing.T, game, session string, key ed25519.PrivateKey, life time.Duration) string {
 	t.Helper()
 
 	signed, err := token.Sign(token.Claims{
 		GameID:    game,
-		SessionID: "1a2b3c4d-5e6f-4a8b-9c0d-1e2f3a4b5c6d",
+		SessionID: session,
 		Aud:       token.AudGameManager,
 		Exp:       time.Now().Add(life).Unix(),
 	}, key)

@@ -140,6 +140,29 @@ func (r *Reader) OptionalURL(name string) string {
 	return value
 }
 
+// SecureURL is URL, refused under GROVE_ENV=production unless it is https: every call inside the
+// fleet carries a bearer, and a cleartext one leaks it to anything on the path.
+func (r *Reader) SecureURL(name string) string {
+	value := r.URL(name)
+	r.requireHTTPS(name, value)
+	return value
+}
+
+// OptionalSecureURL is OptionalURL under the same rule as SecureURL.
+func (r *Reader) OptionalSecureURL(name string) string {
+	value := r.OptionalURL(name)
+	r.requireHTTPS(name, value)
+	return value
+}
+
+// requireHTTPS reads GROVE_ENV itself rather than through Environment, which reports a bad one.
+func (r *Reader) requireHTTPS(name, value string) {
+	environment, _ := r.lookup("GROVE_ENV")
+	if environment == "production" && value != "" && !strings.HasPrefix(value, "https://") {
+		r.fail(fmt.Errorf("%s must be https in production, got %q", name, value))
+	}
+}
+
 // OneOf returns the variable when it is one of allowed, or fallback when it is unset.
 func (r *Reader) OneOf(name string, fallback string, allowed ...string) string {
 	value, ok := r.lookup(name)

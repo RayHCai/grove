@@ -8,6 +8,7 @@ package fleet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -94,10 +95,28 @@ func (r *Reporter) Send(ctx context.Context) error {
 	}
 
 	if err := r.post(ctx, report); err != nil {
+		var status *httpx.StatusError
+		if errors.As(err, &status) && refusedForGood(status.Status) {
+			// Put back, a body the receiver refuses rides every later report and is refused with it.
+			r.opts.Log.Error("fleet report refused, its events dropped",
+				"status", status.Status, "events", len(events), "dropped", events)
+			return err
+		}
 		r.opts.Fleet.Restore(events)
 		return err
 	}
 	return nil
+}
+
+// refusedForGood is a 4xx about the report itself. A credential or a route the receiver does not have
+// is this deployment's to fix, and a timeout or a rate limit passes, so the history waits for those.
+func refusedForGood(status int) bool {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound,
+		http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return false
+	}
+	return status >= http.StatusBadRequest && status < http.StatusInternalServerError
 }
 
 func (r *Reporter) post(ctx context.Context, report contract.FleetReport) error {

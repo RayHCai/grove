@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +22,20 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
 )
 
-const fleetSecret = "a-fleet-secret-of-at-least-32-chars"
+// The router's key, whose public half is all a box holds.
+var controlKey = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{5}, ed25519.SeedSize))
+
+// A box that is not this one, which a call signed for it must never command.
+const otherHostID = "0b8e1c2d-3f4a-4b5c-8d6e-7f8091a2b3c4"
+
+// signedFor is the bearer the router puts on one call to hostID.
+func signedFor(hostID, method, target, body string) string {
+	bearer, err := httpx.SignControl(controlKey, hostID, time.Now)(method, target, []byte(body))
+	if err != nil {
+		panic(err)
+	}
+	return bearer
+}
 
 // The id the fleet knows this box by, which is the one every row it answers a redeploy with names.
 const hostID = "5b6c7d8e-9f01-4a2b-8c3d-4e5f60718293"
@@ -144,7 +159,7 @@ func newTestServiceWith(opts supervisor.Options, ready func(context.Context) err
 	opts.Ports = &stubPorts{}
 	opts.Log = log
 
-	return New(supervisor.New(opts), ready, []byte(fleetSecret), hostID, log)
+	return New(supervisor.New(opts), ready, []ed25519.PublicKey{controlKey.Public().(ed25519.PublicKey)}, hostID, log)
 }
 
 // The version and the code every start below carries. The hashes are only ever names here; the
@@ -199,7 +214,7 @@ func call(handler http.Handler, method, path, body string) *httptest.ResponseRec
 	}
 
 	req := httptest.NewRequest(method, path, reader)
-	req.Header.Set("Authorization", "Bearer "+fleetSecret)
+	req.Header.Set("Authorization", "Bearer "+signedFor(hostID, method, path, body))
 
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -346,6 +361,16 @@ func TestABadStartIsRefused(t *testing.T) {
 	}
 }
 
+// strangerSigned is a well-formed call for this box from a key the router does not hold.
+func strangerSigned() string {
+	stranger := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{6}, ed25519.SeedSize))
+	bearer, err := httpx.SignControl(stranger, hostID, time.Now)(http.MethodGet, "/v1/instances", nil)
+	if err != nil {
+		panic(err)
+	}
+	return bearer
+}
+
 func TestTheFleetScopeIsClosed(t *testing.T) {
 	handler := newTestService(2)
 
@@ -354,9 +379,12 @@ func TestTheFleetScopeIsClosed(t *testing.T) {
 		header string
 	}{
 		{name: "no header", header: ""},
-		{name: "not a bearer", header: "Basic " + fleetSecret},
-		{name: "another fleet's secret", header: "Bearer " + strings.Repeat("x", len(fleetSecret))},
-		{name: "a prefix of the secret", header: "Bearer " + fleetSecret[:8]},
+		{name: "not a bearer", header: "Basic " + signedFor(hostID, http.MethodGet, "/v1/instances", "")},
+		{name: "a secret rather than a signature", header: "Bearer " + strings.Repeat("x", 36)},
+		{name: "a call signed for another box", header: "Bearer " + signedFor(otherHostID, http.MethodGet, "/v1/instances", "")},
+		{name: "a call signed for another route", header: "Bearer " + signedFor(hostID, http.MethodGet, "/v1/instances/x", "")},
+		{name: "a call signed for another body", header: "Bearer " + signedFor(hostID, http.MethodGet, "/v1/instances", "{}")},
+		{name: "a call signed by another key", header: "Bearer " + strangerSigned()},
 	}
 
 	for _, tc := range cases {
@@ -520,7 +548,7 @@ func TestStoppingOneAnswers204PastTheWriteDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build the stop: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+fleetSecret)
+	req.Header.Set("Authorization", "Bearer "+signedFor(hostID, http.MethodDelete, "/v1/instances/"+view.InstanceID, ""))
 
 	res, err := srv.Client().Do(req)
 	if err != nil {

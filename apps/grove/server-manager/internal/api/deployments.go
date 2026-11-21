@@ -36,7 +36,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.deployTimeout)
 	defer cancel()
 
-	rows := s.fanOut(ctx, s.registry.Targets(req, s.now()), req.GameID, req.Revision)
+	rows := s.fanOut(ctx, s.registry.Targets(req, s.now()), req)
 
 	// 200 even when every row failed: httpx.WriteError scrubs the body of any 5xx, and a 502 here
 	// would erase the report this route exists to deliver.
@@ -52,7 +52,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 //
 // One goroutine per box and no bound on how many run: each is one short-lived connection, and
 // bounding them would make the wall clock a function of fleet size while a rollout waits.
-func (s *Server) fanOut(ctx context.Context, targets []fleet.Host, gameID string, revision int) []contract.HostDeployment {
+func (s *Server) fanOut(ctx context.Context, targets []fleet.Host, req contract.DeploymentRequest) []contract.HostDeployment {
 	rows := make([]contract.HostDeployment, len(targets))
 
 	var asking sync.WaitGroup
@@ -66,7 +66,7 @@ func (s *Server) fanOut(ctx context.Context, targets []fleet.Host, gameID string
 			hostCtx, cancel := context.WithTimeout(ctx, s.hostTimeout)
 			defer cancel()
 
-			rows[i] = s.agent.Redeploy(hostCtx, host, gameID, revision)
+			rows[i] = s.agent.Redeploy(hostCtx, host, req.GameID, req.Revision, req.Bundles)
 		}()
 	}
 	asking.Wait()

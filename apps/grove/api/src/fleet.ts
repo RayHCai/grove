@@ -30,6 +30,18 @@ export const unattachedFleet: Fleet = {
     deploy: async () => undefined,
 };
 
+/** The router could not answer in time, which the error handler makes a 503 a player retries. */
+export class FleetUnavailable extends Error {
+    readonly statusCode = 503;
+    /** The router's own answer, since a cold box is usually warm a second later. */
+    readonly retryAfterS = 1;
+
+    constructor(status: number) {
+        super(`server-manager answered ${status}`);
+        this.name = 'FleetUnavailable';
+    }
+}
+
 /** Two seconds, because every join waits behind this call. */
 const PLACEMENT_TIMEOUT_MS = 2_000;
 
@@ -57,6 +69,8 @@ export function httpFleet(env: Env): Fleet {
             });
 
             if (response.status === 409) return undefined;
+            // A cold box or a router still warming up: never full, and likely placed on a retry.
+            if (response.status === 503) throw new FleetUnavailable(response.status);
             // Anything else is the fleet failing, which no player should be told is a full fleet.
             if (!response.ok) throw new Error(`server-manager answered ${response.status}`);
 

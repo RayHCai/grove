@@ -223,6 +223,37 @@ func TestARunningWorldStaysJoinableThroughAFarewellAndAMissedBeat(t *testing.T) 
 	}
 }
 
+// A box whose proxy is full refuses the next player at accept, so a joiner is placed as if nothing ran
+// the game rather than sent to a socket it will be refused at.
+func TestAWorldOnABoxWhoseProxyIsFullIsNotJoined(t *testing.T) {
+	const sessionID = "77777777-7777-4777-8777-777777777777"
+	crowded := oneSlot(hostA)
+	crowded.Capacity.MaxInstances = 4
+	crowded.Capacity.RunningInstances = 1
+	crowded.PlayerMaxConnections = 8
+	crowded.Instances = []contract.InstanceReport{{
+		InstanceID: instanceID, GameID: gameID, SessionID: sessionID,
+		State: contract.InstanceHealthy, Players: 8, Revision: 7, Port: gamePort,
+	}}
+	reg := NewRegistry(staleAfter)
+	reg.Beat(crowded, "192.0.2.1", epoch)
+	reg.Beat(oneSlot(hostB), "192.0.2.2", epoch)
+
+	join := request(gameID)
+	join.Revision = 7
+	placed, ok := reg.Place(join, reg.Candidates("", epoch), epoch)
+	if !ok || placed.Host.ID != hostB || !placed.Starts {
+		t.Fatalf("got %+v on %q, want a new world on the box with room", placed, placed.Host.ID)
+	}
+
+	crowded.Instances[0].Players = 7
+	reg.Beat(crowded, "192.0.2.1", epoch.Add(time.Second))
+	placed, ok = reg.Place(join, nil, epoch.Add(time.Second))
+	if !ok || placed.SessionID != sessionID {
+		t.Fatalf("with a socket free: got %+v, want the running world %q", placed, sessionID)
+	}
+}
+
 // A box beats on its own clock, so a beat landing while Agent.Start is still running cannot name the
 // session yet. Read as a refusal, it would free the slot under a world about to exist, and the next
 // joiner would be sent into a second one.
@@ -244,13 +275,40 @@ func TestABeatMidStartKeepsTheReservation(t *testing.T) {
 		t.Fatalf("a join during the start: got %+v, want the reserved session %q", second, first.SessionID)
 	}
 
-	// Once the box has answered the start, a beat that still does not name the session is a box
-	// that has lost the work, and the next join ranks again.
+	// Once the box has answered the start, a second beat that still does not name the session is a
+	// box that has lost the work, and the next join ranks again.
 	reg.Started(gameID, 0, first.SessionID, gamePort)
 	reg.Beat(beat, "192.0.2.1", epoch.Add(2*time.Second))
+	reg.Beat(beat, "192.0.2.1", epoch.Add(3*time.Second))
 
-	third, ok := reg.Place(request(gameID), reg.Candidates("", epoch), epoch.Add(2*time.Second))
+	third, ok := reg.Place(request(gameID), reg.Candidates("", epoch), epoch.Add(3*time.Second))
 	if !ok || third.SessionID == first.SessionID {
 		t.Fatalf("a join after a started session went missing: got %+v, want a fresh session", third)
+	}
+}
+
+// A beat the box built before the spawn can land after Started returned. Read as the box having
+// lost the session, it frees the reservation and the next joiner is started a second world.
+func TestABeatBuiltBeforeTheSpawnButLandingAfterStartedKeepsTheReservation(t *testing.T) {
+	reg := NewRegistry(staleAfter)
+	beat := oneSlot(hostA)
+	beat.Capacity.MaxInstances = 2
+	reg.Beat(beat, "192.0.2.1", epoch)
+
+	first, ok := reg.Place(request(gameID), reg.Candidates("", epoch), epoch)
+	if !ok || !first.Starts {
+		t.Fatalf("first join: got %+v, want a world to start", first)
+	}
+	reg.Started(gameID, 0, first.SessionID, gamePort)
+
+	// The snapshot predates the spawn, so it names nothing.
+	reg.Beat(beat, "192.0.2.1", epoch.Add(time.Second))
+
+	second, ok := reg.Place(request(gameID), reg.Candidates("", epoch), epoch.Add(time.Second))
+	if !ok || second.SessionID != first.SessionID || second.Starts {
+		t.Fatalf("a join after the stale beat: got %+v, want the started session %q", second, first.SessionID)
+	}
+	if second.Port != gamePort {
+		t.Errorf("port: got %d, want the %d Started recorded", second.Port, gamePort)
 	}
 }

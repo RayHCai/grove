@@ -63,12 +63,14 @@ func (s *service) writeState(w http.ResponseWriter, r *http.Request) {
 	// is a bug the caller has to see, not one to paper over.
 	case errors.Is(err, store.ErrStale):
 		httpx.WriteError(w, http.StatusConflict, httpx.CodeConflict, "revision moved")
-	// Never the 409 a stale write answers: @grove/game-instance reads that as a lost race and
-	// re-reads, re-writes and retries into the store that just refused it.
+	// Never the 409 a stale write answers: a bound is not a lost race, and a caller that compares
+	// revisions must not be told to read again and resend a write that can never land.
 	case errors.Is(err, store.ErrTooManyKeys):
 		atBound(w, "game holds as many keys as it may")
 	case errors.Is(err, store.ErrGameFull):
 		atBound(w, "game holds as many bytes as it may")
+	case errors.Is(err, store.ErrStoreFull):
+		atBound(w, "the store holds as many bytes as it may")
 	case err != nil:
 		s.fail(w, r, "write state", err)
 	default:

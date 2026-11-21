@@ -58,7 +58,7 @@ func main() {
 		MemoryMax:  cfg.ChildMemoryMaxBytes,
 		PidsMax:    cfg.ChildPidsMax,
 	}
-	// A child on this agent's own uid could read this agent's environment, which holds the fleet secret.
+	// A child on this agent's own uid could read this agent's environment, which holds the host key.
 	if cfg.GameUID != 0 && cfg.GameUID == os.Getuid() {
 		fmt.Fprintln(os.Stderr, "GAME_UID must not be the uid this agent runs as")
 		os.Exit(1)
@@ -105,19 +105,20 @@ func main() {
 	}
 
 	beater := heartbeat.New(heartbeat.Options{
-		ServerManagerURL: cfg.ServerManagerURL,
-		FleetSecret:      cfg.FleetSecret,
-		HostID:           cfg.HostID,
-		Region:           cfg.Region,
-		AgentPort:        cfg.Port,
-		PublicHost:       cfg.PublicHost,
-		PlayerPort:       cfg.PlayerPort,
-		TLS:              cfg.TLS(),
-		Ready:            ready,
-		Interval:         cfg.HeartbeatInterval,
-		Source:           instances,
-		Box:              box.NewProcSampler(),
-		Log:              log,
+		ServerManagerURL:     cfg.ServerManagerURL,
+		HostKey:              cfg.HostKey,
+		HostID:               cfg.HostID,
+		Region:               cfg.Region,
+		AgentPort:            cfg.Port,
+		PublicHost:           cfg.PublicHost,
+		PlayerPort:           cfg.PlayerPort,
+		PlayerMaxConnections: cfg.PlayerMaxConnections,
+		TLS:                  cfg.TLS(),
+		Ready:                ready,
+		Interval:             cfg.HeartbeatInterval,
+		Source:               instances,
+		Box:                  box.NewProcSampler(),
+		Log:                  log,
 	})
 
 	// Cancelled once the listener has drained, which stops the poller and the beat. The children
@@ -137,7 +138,7 @@ func main() {
 	err = httpx.ServeAll(ctx, log,
 		httpx.Listener{
 			Addr:    cfg.Addr(),
-			Handler: server.New(instances, ready, cfg.FleetSecret, cfg.HostID, log),
+			Handler: server.New(instances, ready, cfg.ControlPublicKeys, cfg.HostID, log),
 			TLS:     certs,
 		},
 		httpx.Listener{

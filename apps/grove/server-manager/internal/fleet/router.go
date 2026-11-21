@@ -50,7 +50,7 @@ type flight struct {
 	done chan struct{}
 	// Written once, before done closes.
 	placed contract.Placement
-	ok     bool
+	err    error
 	// Joins still waiting, so a start that lands after all of them have gone is stopped.
 	waiting atomic.Int32
 }
@@ -61,7 +61,7 @@ func (r *Router) Decide(ctx context.Context, req contract.PlacementRequest) join
 	key := world{gameID: req.GameID, revision: req.Revision}
 
 	if f := r.attach(key); f != nil {
-		return joins.Decision{Finish: func(ctx context.Context) (contract.Placement, bool) {
+		return joins.Decision{Finish: func(ctx context.Context) (contract.Placement, error) {
 			return r.await(ctx, f)
 		}}
 	}
@@ -78,36 +78,41 @@ func (r *Router) Decide(ctx context.Context, req contract.PlacementRequest) join
 	}
 
 	f := r.fly(key)
-	return joins.Decision{Start: true, Finish: func(ctx context.Context) (contract.Placement, bool) {
-		landed, ok := r.start(ctx, req, placed, ordered)
-		return r.land(key, f, landed, ok, ctx.Err() != nil)
+	return joins.Decision{Start: true, Finish: func(ctx context.Context) (contract.Placement, error) {
+		landed, err := r.start(ctx, req, placed, ordered)
+		return r.land(key, f, landed, err, ctx.Err() != nil)
 	}}
 }
 
 // start runs the world on the box the join reserved, and on the next ranked box while the join's
 // budget lasts; a box that failed for any reason but being full is routed around for SuspectFor.
-func (r *Router) start(ctx context.Context, req contract.PlacementRequest, placed Placement, ordered []Host) (Placement, bool) {
+// Only boxes that all answered full are no capacity: one that was slow or failing is a retry.
+func (r *Router) start(ctx context.Context, req contract.PlacementRequest, placed Placement, ordered []Host) (Placement, error) {
 	tried := make(map[string]bool, len(ordered))
+	refused := joins.ErrNoCapacity
 	for {
 		err := r.startOn(ctx, req, &placed)
 		if err == nil {
-			return placed, true
+			return placed, nil
 		}
 		r.Registry.Release(req.GameID, placed.SessionID)
 		tried[placed.Host.ID] = true
 		r.blame(ctx, req, placed.Host, err)
 		if ctx.Err() != nil {
-			return Placement{}, false
+			return Placement{}, joins.ErrUnavailable
+		}
+		if !errors.Is(err, ErrHostFull) {
+			refused = joins.ErrUnavailable
 		}
 
 		next := slices.DeleteFunc(slices.Clone(ordered), func(h Host) bool { return tried[h.ID] })
 		var ok bool
 		if placed, ok = r.Registry.Place(req, next, r.Now()); !ok {
-			return Placement{}, false
+			return Placement{}, refused
 		}
 		// A beat since the failure may have named a running world, which is an answer in itself.
 		if !placed.Starts {
-			return placed, true
+			return placed, nil
 		}
 	}
 }
@@ -167,15 +172,20 @@ func (r *Router) blame(ctx context.Context, req contract.PlacementRequest, h Hos
 }
 
 // land answers everyone waiting on a start, and stops a world that came up after all of them left.
-func (r *Router) land(key world, f *flight, placed Placement, ok, starterGone bool) (contract.Placement, bool) {
+func (r *Router) land(key world, f *flight, placed Placement, err error, starterGone bool) (contract.Placement, error) {
 	// Under the lock a join attaches under, so no waiter can arrive between the count and the stop.
 	r.mu.Lock()
 	delete(r.flights, key)
-	orphan := ok && placed.Starts && starterGone && f.waiting.Load() == 0
+	orphan := err == nil && placed.Starts && starterGone && f.waiting.Load() == 0
 	r.mu.Unlock()
 
-	if ok && !orphan {
-		f.placed, f.ok = r.placement(placed), true
+	switch {
+	case orphan:
+		f.err = joins.ErrUnavailable
+	case err != nil:
+		f.err = err
+	default:
+		f.placed = r.placement(placed)
 	}
 	close(f.done)
 
@@ -183,16 +193,16 @@ func (r *Router) land(key world, f *flight, placed Placement, ok, starterGone bo
 		r.Registry.Release(key.gameID, placed.SessionID)
 		go r.stopOrphan(placed.Host, placed.InstanceID)
 	}
-	return f.placed, f.ok
+	return f.placed, f.err
 }
 
-func (r *Router) await(ctx context.Context, f *flight) (contract.Placement, bool) {
+func (r *Router) await(ctx context.Context, f *flight) (contract.Placement, error) {
 	defer f.waiting.Add(-1)
 	select {
 	case <-f.done:
-		return f.placed, f.ok
+		return f.placed, f.err
 	case <-ctx.Done():
-		return contract.Placement{}, false
+		return contract.Placement{}, joins.ErrUnavailable
 	}
 }
 

@@ -91,6 +91,40 @@ func TestAFailedReportKeepsItsEventsForTheNextOne(t *testing.T) {
 	}
 }
 
+// A report the receiver refuses outright would be refused again on every report after it, so its
+// events go rather than holding the history behind them; a busy or misconfigured receiver keeps them.
+func TestARefusedReportDropsItsEventsAndABusyOneKeepsThem(t *testing.T) {
+	cases := []struct {
+		status int
+		kept   bool
+	}{
+		{http.StatusBadRequest, false},
+		{http.StatusUnprocessableEntity, false},
+		{http.StatusTooManyRequests, true},
+		{http.StatusRequestTimeout, true},
+		{http.StatusUnauthorized, true},
+		{http.StatusServiceUnavailable, true},
+	}
+	for _, tc := range cases {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			reg := NewRegistry(staleAfter)
+			reg.Beat(living(hostA, firstLife), "192.0.2.1", epoch)
+
+			refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			defer refusing.Close()
+
+			if err := reporterFor(reg, refusing.URL).Send(context.Background()); err == nil {
+				t.Fatalf("Send: got no error, want the one the %d makes", tc.status)
+			}
+			if kept := len(reg.Drain()) == 1; kept != tc.kept {
+				t.Fatalf("events kept after a %d: got %t, want %t", tc.status, kept, tc.kept)
+			}
+		})
+	}
+}
+
 // A development box with no @grove/api beside it: the registry still routes, and the reporter must
 // cost nothing rather than log a failure every interval.
 func TestAnUnconfiguredReporterIsNotAttached(t *testing.T) {

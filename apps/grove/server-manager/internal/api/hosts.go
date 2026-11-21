@@ -3,10 +3,12 @@
 package api
 
 import (
+	"crypto/hmac"
 	"net/http"
 
 	"github.com/RayHCai/grove/libs/go-grove/contract"
 	"github.com/RayHCai/grove/libs/go-grove/httpx"
+	"github.com/RayHCai/grove/libs/go-grove/token"
 )
 
 // heartbeat upserts one box. 204: the sender reads nothing and beats every few seconds.
@@ -26,7 +28,13 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.registry.Beat(beat, remoteIP(r), s.now())
+	// The gate already admitted the bearer, so anything but this box's own key is the shared secret.
+	presented, _ := token.Bearer(r)
+	if hmac.Equal([]byte(presented), []byte(httpx.HostKey(s.fleetSecret, hostID))) {
+		s.registry.Beat(beat, remoteIP(r), s.now())
+	} else {
+		s.registry.BeatShared(beat, remoteIP(r), s.now())
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -57,6 +65,9 @@ func checkHeartbeat(beat contract.HostHeartbeat, hostID string, production bool)
 	}
 	if !validPort(beat.AgentPort) || !validPort(beat.PlayerPort) {
 		return "agentPort and playerPort must be ports", false
+	}
+	if beat.PlayerMaxConnections < 0 {
+		return "playerMaxConnections must not be negative", false
 	}
 	if beat.PublicHost != "" && !contract.ValidHost(beat.PublicHost) {
 		return "publicHost must be a hostname or an ip literal", false

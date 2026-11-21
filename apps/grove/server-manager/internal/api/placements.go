@@ -33,6 +33,11 @@ func (s *Server) place(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, joins.ErrNoCapacity):
 		httpx.WriteError(w, http.StatusConflict, httpx.CodeConflict, "no capacity")
 		return
+	// A box slow to start or failing, which the next attempt likely lands: never the full game a 409 says.
+	case errors.Is(err, joins.ErrUnavailable):
+		w.Header().Set("Retry-After", "1")
+		httpx.WriteError(w, http.StatusServiceUnavailable, httpx.CodeInternal, "unavailable")
+		return
 	case err != nil:
 		// 500 and never 409: a line this service could not push onto is this service failing, and
 		// @grove/api reads a 409 as a full fleet, which is the one wrong answer available here.

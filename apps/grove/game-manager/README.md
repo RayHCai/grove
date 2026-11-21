@@ -30,10 +30,13 @@ healthcheck or a platform probe, neither of which holds a token.
 A key is 1 to 256 UTF-16 code units, counted the way the zod bound counts them, and a key that is
 not UTF-8 is refused. A write carrying `ifRevision` is a compare-and-set, and a stale one is a 409 that leaves the value
 where it was: two ticks racing on one key is a bug the caller has to see, not one to paper over. A
-key never written is at revision zero, which is what makes the first compare-and-set of a key
-expressible as `ifRevision: 0` rather than a special case a caller has to know about. A game holds
-at most 10,000 keys and 32 MiB across them, and a write past either bound is a 413 rather than an
-eviction or the 409 a caller retries: which row a game no longer needs is the game's to say, and
+key not held, never written or released, is at revision zero, which is what makes the first
+compare-and-set of a key expressible as `ifRevision: 0` rather than a special case a caller has to
+know about. A write lands past every revision any key of its game has held, so a key released and
+written again never returns to a revision a stale compare-and-set could match. A game holds at most
+10,000 keys and 32 MiB across them, keys counted with values, the whole store 512 MiB, and a write
+past any bound is a 413 rather than an
+eviction or the 409 that says a race was lost: which row a game no longer needs is the game's to say, and
 `DELETE` is how it says so.
 
 ## The store
@@ -46,7 +49,9 @@ from two different sets; the service logs a warning saying so at every start.
 
 ## The rate limit
 
-600 requests a minute, keyed by the game the token was verified to name. Every caller sits behind
+600 requests a minute, keyed by the game and session the token was verified to name, so each world
+spends its own budget and a busy one never another's; past it is a 429 whose `Retry-After` is the
+whole seconds until the window rolls. Every caller sits behind
 the same fleet network, so an address key would be one bucket for the whole host, and a key read
 from the header ahead of the check is one a caller mints per request, which is a fresh bucket per
 request. So the limiter sits inside the scope, behind the token check rather than in front of it.

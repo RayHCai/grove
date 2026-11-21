@@ -2,8 +2,8 @@
 package config
 
 import (
+	"crypto/ed25519"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/RayHCai/grove/libs/go-grove/contract"
@@ -16,10 +16,11 @@ type Config struct {
 	Env  string
 	Host string
 	Port int
-	// Shared with @grove/server-manager in both directions: the bearer on an inbound request, and
-	// the one this agent presents when it beats.
-	FleetSecret      []byte
-	ServerManagerURL string
+	// The bearer this box beats with, derived for this HOST_ID alone, so it names no other box.
+	HostKey []byte
+	// The keys @grove/server-manager signs every call here with; this box holds no half that signs.
+	ControlPublicKeys []ed25519.PublicKey
+	ServerManagerURL  string
 	// Where @grove/game-manager is. Handed to every child, which reaches nothing else.
 	GameManagerURL string
 	// Where this box keeps the build output it has fetched, one file per content hash.
@@ -67,9 +68,9 @@ func Read(r *env.Reader) (Config, error) {
 		// it to the fleet's own blocks.
 		Host:              r.String("INSTANCE_MANAGER_HOST", "0.0.0.0"),
 		Port:              r.Port("INSTANCE_MANAGER_PORT", 4004),
-		FleetSecret:       r.Secret("FLEET_SECRET", env.SecretMinLen),
-		ServerManagerURL:  r.URL("SERVER_MANAGER_URL"),
-		GameManagerURL:    r.URL("GAME_MANAGER_URL"),
+		HostKey:           r.Secret("FLEET_HOST_KEY", env.SecretMinLen),
+		ServerManagerURL:  r.SecureURL("SERVER_MANAGER_URL"),
+		GameManagerURL:    r.SecureURL("GAME_MANAGER_URL"),
 		HostID:            r.Required("HOST_ID"),
 		Region:            r.Required("HOST_REGION"),
 		MaxInstances:      r.Int("MAX_INSTANCES", 8),
@@ -95,6 +96,13 @@ func Read(r *env.Reader) (Config, error) {
 		ReapUnhealthyProbes:  r.Int("REAP_UNHEALTHY_PROBES", 10),
 		ReapTokenMargin:      r.Duration("REAP_TOKEN_MARGIN", 30*time.Minute),
 	}
+	if keys := r.Required("FLEET_CONTROL_PUBLIC_KEYS"); keys != "" {
+		parsed, err := token.ParsePublicKeys(keys)
+		if err != nil {
+			r.Refuse("FLEET_CONTROL_PUBLIC_KEYS", err)
+		}
+		cfg.ControlPublicKeys = parsed
+	}
 	// Checked for shape here and passed on as written, so the child reads the list this box was given.
 	if keys := r.Required("TICKET_PUBLIC_KEYS"); keys != "" {
 		if _, err := token.ParsePublicKeys(keys); err != nil {
@@ -118,10 +126,6 @@ func (c Config) check() error {
 	if !contract.ValidUUID(c.HostID) {
 		return fmt.Errorf("HOST_ID must be a uuid, got %q", c.HostID)
 	}
-	// The fleet secret rides every beat as a bearer, so a cleartext control plane leaks it on a timer.
-	if production && !strings.HasPrefix(c.ServerManagerURL, "https://") {
-		return fmt.Errorf("SERVER_MANAGER_URL must be https in production, got %q", c.ServerManagerURL)
-	}
 	if c.PublicHost != "" && !contract.ValidHost(c.PublicHost) {
 		return fmt.Errorf("PUBLIC_HOST must be a hostname or an ip literal, got %q", c.PublicHost)
 	}
@@ -132,7 +136,7 @@ func (c Config) check() error {
 	if (c.TLSCertFile == "") != (c.TLSKeyFile == "") {
 		return fmt.Errorf("TLS_CERT_FILE and TLS_KEY_FILE are set together or not at all")
 	}
-	// A player's ticket and the fleet secret both cross these listeners, so production encrypts them.
+	// A player's ticket and the router's signed calls both cross these listeners, so production encrypts them.
 	if production && c.TLSCertFile == "" {
 		return fmt.Errorf("TLS_CERT_FILE and TLS_KEY_FILE are required in production")
 	}
@@ -142,7 +146,7 @@ func (c Config) check() error {
 	if c.GameUID < 0 || c.GameGID < 0 || (c.GameUID == 0) != (c.GameGID == 0) {
 		return fmt.Errorf("GAME_UID and GAME_GID are set together, to a non-root user, or not at all")
 	}
-	// Creator code under this agent's own uid could read this agent's environment, the fleet secret in it.
+	// Creator code under this agent's own uid could read this agent's environment, the host key in it.
 	if production && (c.GameUID == 0 || c.CgroupRoot == "") {
 		return fmt.Errorf("GAME_UID, GAME_GID and CGROUP_ROOT are required in production")
 	}

@@ -8,6 +8,9 @@ import (
 	"github.com/RayHCai/grove/libs/go-grove/env"
 )
 
+// The router's control key, as a box holds its public half.
+const controlKeys = "2E8RGLWqov0tQMUO84G41ZUVUufPdmdgX3o_sdGlc4E"
+
 // Two keys, as a box holds them while the api's signer rotates.
 const ticketKeys = "8kjXvyJlDRuF-yVsmSlpkVL2uSDZ1uQqOQpoPHBBJ_0,vZY3qLA8D_ZZUm6txr4Fx6qGZLZx7DHKODR1lKtDuVc"
 
@@ -16,6 +19,7 @@ func production() map[string]string {
 	vars := complete()
 	vars["GROVE_ENV"] = "production"
 	vars["SERVER_MANAGER_URL"] = "https://server-manager.grove.example"
+	vars["GAME_MANAGER_URL"] = "https://game-manager.grove.example"
 	vars["PUBLIC_HOST"] = "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70.fleet.grove.example"
 	vars["TLS_CERT_FILE"] = "/etc/grove/tls/tls.crt"
 	vars["TLS_KEY_FILE"] = "/etc/grove/tls/tls.key"
@@ -27,13 +31,14 @@ func production() map[string]string {
 
 func complete() map[string]string {
 	return map[string]string{
-		"FLEET_SECRET":       strings.Repeat("f", 32),
-		"SERVER_MANAGER_URL": "http://server-manager:4003",
-		"GAME_MANAGER_URL":   "http://game-manager:4001",
-		"HOST_ID":            "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
-		"HOST_REGION":        "us-east-1",
-		"GAME_INSTANCE_BIN":  "/usr/local/bin/grove-game-instance",
-		"TICKET_PUBLIC_KEYS": ticketKeys,
+		"FLEET_HOST_KEY":            strings.Repeat("f", 64),
+		"FLEET_CONTROL_PUBLIC_KEYS": controlKeys,
+		"SERVER_MANAGER_URL":        "http://server-manager:4003",
+		"GAME_MANAGER_URL":          "http://game-manager:4001",
+		"HOST_ID":                   "6f1e5a3c-0b2d-4c8e-9a71-2f3b4c5d6e70",
+		"HOST_REGION":               "us-east-1",
+		"GAME_INSTANCE_BIN":         "/usr/local/bin/grove-game-instance",
+		"TICKET_PUBLIC_KEYS":        ticketKeys,
 	}
 }
 
@@ -78,14 +83,24 @@ func TestReadRefusesAnEnvironmentItCannotRunOn(t *testing.T) {
 		mention string
 	}{
 		{
-			name:    "no fleet secret",
-			change:  func(m map[string]string) { delete(m, "FLEET_SECRET") },
-			mention: "FLEET_SECRET",
+			name:    "no host key",
+			change:  func(m map[string]string) { delete(m, "FLEET_HOST_KEY") },
+			mention: "FLEET_HOST_KEY",
 		},
 		{
-			name:    "a fleet secret a guess would reach",
-			change:  func(m map[string]string) { m["FLEET_SECRET"] = "short" },
-			mention: "FLEET_SECRET",
+			name:    "a host key a guess would reach",
+			change:  func(m map[string]string) { m["FLEET_HOST_KEY"] = "short" },
+			mention: "FLEET_HOST_KEY",
+		},
+		{
+			name:    "no key to check the router's calls with",
+			change:  func(m map[string]string) { delete(m, "FLEET_CONTROL_PUBLIC_KEYS") },
+			mention: "FLEET_CONTROL_PUBLIC_KEYS",
+		},
+		{
+			name:    "a control key that is not one",
+			change:  func(m map[string]string) { m["FLEET_CONTROL_PUBLIC_KEYS"] = "c2hvcnQ" },
+			mention: "FLEET_CONTROL_PUBLIC_KEYS",
 		},
 		{
 			name:    "a drain deadline no world could empty inside",
@@ -194,7 +209,7 @@ func TestReadRefusesAnEnvironmentItCannotRunOn(t *testing.T) {
 // Three unset variables must cost one restart, not three.
 func TestReadReportsEverythingAtOnce(t *testing.T) {
 	vars := complete()
-	delete(vars, "FLEET_SECRET")
+	delete(vars, "FLEET_HOST_KEY")
 	delete(vars, "HOST_REGION")
 	delete(vars, "TICKET_PUBLIC_KEYS")
 
@@ -202,7 +217,7 @@ func TestReadReportsEverythingAtOnce(t *testing.T) {
 	if err == nil {
 		t.Fatal("the environment was accepted")
 	}
-	for _, name := range []string{"FLEET_SECRET", "HOST_REGION", "TICKET_PUBLIC_KEYS"} {
+	for _, name := range []string{"FLEET_HOST_KEY", "HOST_REGION", "TICKET_PUBLIC_KEYS"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("the error never names %s: %v", name, err)
 		}
@@ -212,7 +227,7 @@ func TestReadReportsEverythingAtOnce(t *testing.T) {
 // A secret never reaches a log, and an error is the first place one would.
 func TestAnErrorNeverQuotesASecret(t *testing.T) {
 	vars := complete()
-	vars["FLEET_SECRET"] = "too-short-to-be-a-secret"
+	vars["FLEET_HOST_KEY"] = "too-short-to-be-a-secret"
 
 	_, err := Read(env.FromMap(vars))
 	if err == nil {
@@ -236,6 +251,8 @@ func TestProductionRequiresANamedEncryptedSandboxedBox(t *testing.T) {
 		mention string
 	}{
 		{"a cleartext control plane", func(m map[string]string) { m["SERVER_MANAGER_URL"] = "http://server-manager:4003" }, "SERVER_MANAGER_URL"},
+		// Every child presents its store bearer there, so it is encrypted like the control plane.
+		{"a cleartext game store", func(m map[string]string) { m["GAME_MANAGER_URL"] = "http://game-manager:4001" }, "GAME_MANAGER_URL"},
 		{"no public host", func(m map[string]string) { delete(m, "PUBLIC_HOST") }, "PUBLIC_HOST"},
 		{"no certificate", func(m map[string]string) { delete(m, "TLS_CERT_FILE"); delete(m, "TLS_KEY_FILE") }, "TLS_CERT_FILE"},
 		{"children on this agent's own uid", func(m map[string]string) { delete(m, "GAME_UID"); delete(m, "GAME_GID") }, "GAME_UID"},

@@ -127,7 +127,7 @@ locals {
 # every plan output, so the placeholder is rotated in out of band and ignored here forever after.
 resource "aws_ssm_parameter" "fleet_secret" {
   name        = "${local.secret_path}/FLEET_SECRET"
-  description = "Shared bearer between @grove/server-manager and every agent, 32 bytes up"
+  description = "What each box's heartbeat key is derived from at boot, 32 bytes up; the agent never holds it"
   type        = "SecureString"
   value       = "replace-me"
 
@@ -136,6 +136,19 @@ resource "aws_ssm_parameter" "fleet_secret" {
   }
 
   tags = merge(var.tags, { Name = "${local.name}-fleet-secret" })
+}
+
+resource "aws_ssm_parameter" "fleet_control_public_keys" {
+  name        = "${local.secret_path}/FLEET_CONTROL_PUBLIC_KEYS"
+  description = "@grove/server-manager's control-call public keys, comma-separated; no box holds a key that signs one"
+  type        = "String"
+  value       = "replace-me"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+
+  tags = merge(var.tags, { Name = "${local.name}-fleet-control-public-keys" })
 }
 
 resource "aws_ssm_parameter" "ticket_public_keys" {

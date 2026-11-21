@@ -132,9 +132,20 @@ type Registry struct {
 
 	mu        sync.Mutex
 	instances map[string]*instance
+	// Starts past the cap and not yet in instances, by session: each holds a slot, and a second start
+	// of the same session waits on it rather than forking another world.
+	spawning map[string]*spawning
 
 	fetchMu  sync.Mutex
 	fetching map[string]*fetch
+}
+
+// spawning is one start between its reservation and its commit; view and err are written once,
+// before done closes.
+type spawning struct {
+	done chan struct{}
+	view contract.InstanceReport
+	err  error
 }
 
 // fetch is one shared download; paths and err are written once, before done closes.
@@ -191,13 +202,14 @@ func New(opts Options) *Registry {
 		opts:      opts,
 		state:     store{dir: opts.StateDir},
 		instances: make(map[string]*instance),
+		spawning:  make(map[string]*spawning),
 		fetching:  make(map[string]*fetch),
 	}
 }
 
 // code waits on the version's one download, which runs on its own clock and outlives any caller.
 func (r *Registry) code(ctx context.Context, set contract.BundleSet) (bundles.Paths, error) {
-	key := set.Server.Hash + "/" + set.SimConfig.Hash
+	key := fetchKey(set)
 
 	r.fetchMu.Lock()
 	f, inFlight := r.fetching[key]
@@ -215,6 +227,26 @@ func (r *Registry) code(ctx context.Context, set contract.BundleSet) (bundles.Pa
 	case <-ctx.Done():
 		return bundles.Paths{}, ctx.Err()
 	}
+}
+
+// Prefetch starts the version's one download and waits for none of it, so the first start of a
+// pushed version finds its code already on disk rather than fetching inside a join's deadline.
+func (r *Registry) Prefetch(set contract.BundleSet) {
+	key := fetchKey(set)
+
+	r.fetchMu.Lock()
+	defer r.fetchMu.Unlock()
+	if _, inFlight := r.fetching[key]; inFlight {
+		return
+	}
+	f := &fetch{done: make(chan struct{})}
+	r.fetching[key] = f
+	go r.download(context.Background(), key, set, f)
+}
+
+// fetchKey names a version's download by the two halves a box fetches, so two pushes of one set share it.
+func fetchKey(set contract.BundleSet) string {
+	return set.Server.Hash + "/" + set.SimConfig.Hash
 }
 
 func (r *Registry) download(ctx context.Context, key string, set contract.BundleSet, f *fetch) {
@@ -236,7 +268,8 @@ func (r *Registry) download(ctx context.Context, key string, set contract.Bundle
 	}
 }
 
-// Start spawns one game process and returns what this box will report about it.
+// Start spawns one game process, reserving its slot under the lock and spawning outside it, so a
+// fork never holds up a player's connection asking Port where its world is.
 func (r *Registry) Start(ctx context.Context, req contract.InstanceStart) (contract.InstanceReport, error) {
 	expires, err := contract.ParseTimestamp(req.StoreTokenExpiresAt)
 	if err != nil || !expires.After(time.Now().Add(r.opts.ReapTokenMargin)) {
@@ -250,7 +283,42 @@ func (r *Registry) Start(ctx context.Context, req contract.InstanceStart) (contr
 		return contract.InstanceReport{}, fmt.Errorf("fetch the code for %s: %w", req.SessionID, err)
 	}
 
-	// Held across the spawn so the cap is a real cap: two concurrent starts must not both pass it.
+	sp, first, err := r.reserve(ctx, req.SessionID)
+	if err != nil {
+		return contract.InstanceReport{}, err
+	}
+	if !first {
+		select {
+		case <-sp.done:
+			return sp.view, sp.err
+		case <-ctx.Done():
+			return contract.InstanceReport{}, ctx.Err()
+		}
+	}
+
+	inst, err := r.spawn(ctx, req, code, expires)
+
+	r.mu.Lock()
+	delete(r.spawning, req.SessionID)
+	if err == nil {
+		r.instances[inst.id] = inst
+	}
+	r.mu.Unlock()
+
+	if err == nil {
+		go r.reap(inst)
+		r.opts.Log.Info("instance started",
+			"instanceId", inst.id, "gameId", req.GameID, "sessionId", req.SessionID, "port", inst.port)
+		sp.view = inst.view(time.Now())
+	}
+	sp.err = err
+	close(sp.done)
+	return sp.view, sp.err
+}
+
+// reserve takes a slot for one session, or answers the start already holding it. Cap and session
+// are both checked in the one critical section, so two concurrent starts cannot both pass either.
+func (r *Registry) reserve(ctx context.Context, sessionID string) (*spawning, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -258,24 +326,36 @@ func (r *Registry) Start(ctx context.Context, req contract.InstanceStart) (contr
 	// request) must be handed the process already holding the session, because a second one beside
 	// it is a second world that half the players would be talking to.
 	for _, held := range r.instances {
-		if held.sessionID == req.SessionID && !held.done() {
-			return held.view(time.Now()), nil
+		if held.sessionID == sessionID && !held.done() {
+			sp := &spawning{done: make(chan struct{}), view: held.view(time.Now())}
+			close(sp.done)
+			return sp, false, nil
 		}
 	}
+	if sp, ok := r.spawning[sessionID]; ok {
+		return sp, false, nil
+	}
 
-	if r.running() >= r.opts.MaxInstances {
-		return contract.InstanceReport{}, ErrAtCapacity
+	if r.running()+len(r.spawning) >= r.opts.MaxInstances {
+		return nil, false, ErrAtCapacity
 	}
 	// A caller that gave up while the code came down is owed no world: nobody would ever join it.
 	if err := ctx.Err(); err != nil {
-		return contract.InstanceReport{}, err
+		return nil, false, err
 	}
 
+	sp := &spawning{done: make(chan struct{})}
+	r.spawning[sessionID] = sp
+	return sp, true, nil
+}
+
+// spawn forks the child for a reserved slot and writes it down, holding no lock another route takes.
+func (r *Registry) spawn(ctx context.Context, req contract.InstanceStart, code bundles.Paths, expires time.Time) (*instance, error) {
 	id := req.InstanceID
 
 	port, err := r.opts.Ports.Take()
 	if err != nil {
-		return contract.InstanceReport{}, err
+		return nil, err
 	}
 
 	logs := NewRing(r.opts.LogLines)
@@ -296,7 +376,7 @@ func (r *Registry) Start(ctx context.Context, req contract.InstanceStart) (contr
 	if err != nil {
 		// Nothing else will hand this one back: no process holds it, and no entry names it.
 		r.opts.Ports.Release(port)
-		return contract.InstanceReport{}, fmt.Errorf("spawn a game process: %w", err)
+		return nil, fmt.Errorf("spawn a game process: %w", err)
 	}
 
 	inst := &instance{
@@ -315,10 +395,9 @@ func (r *Registry) Start(ctx context.Context, req contract.InstanceStart) (contr
 		// The world must have ended by then, which is what the reap margin is measured against.
 		storeExpiresAt: expires,
 	}
-	r.instances[id] = inst
 
-	// Written down before anything can reap it, so the record of a child that ends at once is
-	// dropped rather than left naming a pid this box no longer has.
+	// Written down before the entry is visible and before anything can reap it, so a drain finds
+	// the record to mark and a child that ends at once drops it rather than leaving a stale pid.
 	if err := r.state.put(record{
 		InstanceID:          id,
 		GameID:              req.GameID,
@@ -333,11 +412,7 @@ func (r *Registry) Start(ctx context.Context, req contract.InstanceStart) (contr
 		// itself, on its next restart.
 		r.opts.Log.Warn("instance not written down", "instanceId", id, "err", err)
 	}
-	go r.reap(inst)
-
-	r.opts.Log.Info("instance started",
-		"instanceId", id, "gameId", req.GameID, "sessionId", req.SessionID, "port", port)
-	return inst.view(time.Now()), nil
+	return inst, nil
 }
 
 // reap waits for a child to exit and records how it went.
